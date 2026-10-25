@@ -23,24 +23,11 @@ members = [
     "crates/crysirror-asset",
     "crates/crysirror-engine",
     "crates/crysirror-script-js",
-    "crates/crysirror-rfvp",
-    "crates/rfvp",
     "crates/siglus-upstream/siglus_scene_vm",
     "crates/crysirror-ue-import",
     "crates/crysirror-video",
-    "crates/crysirror-bgi",
-    "crates/bgi-upstream/crates/ethornell-core",
-    "crates/bgi-upstream/crates/ethornell-archive",
-    "crates/bgi-upstream/crates/ethornell-image",
-    "crates/bgi-upstream/crates/ethornell-script",
-    "crates/bgi-upstream/crates/ethornell-vm",
-    "crates/bgi-upstream/crates/ethornell-audio",
-    "crates/bgi-upstream/crates/ethornell-render",
-    "crates/bgi-upstream/crates/ethornell-app",
 ]
 exclude = [
-    "crates/bgi-upstream/crates/na_mpeg2_decoder",
-    "crates/bgi-upstream/crates/na_wmv_player",
 ]
 default-members = ["crates/crysirror-desktop"]
 
@@ -71,12 +58,8 @@ crysirror-asset = { path = "crates/crysirror-asset" }
 crysirror-engine = { path = "crates/crysirror-engine" }
 crysirror-script-js = { path = "crates/crysirror-script-js" }
 crysirror-author = { path = "crates/crysirror-author" }
-crysirror-rfvp = { path = "crates/crysirror-rfvp" }
-crysirror-bgi = { path = "crates/crysirror-bgi" }
 # Vendored original Siglus SceneVm (MPL-2.0), headless profile; see crates/siglus-upstream/UPSTREAM.md.
 siglus_scene_vm = { path = "crates/siglus-upstream/siglus_scene_vm", default-features = false }
-# Vendored original RFVP engine (MPL-2.0), headless profile; see crates/rfvp/UPSTREAM.md.
-rfvp = { path = "crates/rfvp", default-features = false, features = ["runtime-core-deps", "soft-render-core", "no-audio", "image-formats", "zlib-flate2", "random"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 anyhow = "1.0"

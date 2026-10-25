@@ -102,18 +102,6 @@ def siglus_config(config: Any) -> dict:
         path(source)
     return config
 
-def bgi_config(config: Any) -> dict:
-    config = obj(config, {"font"}, {"root", "font_face_index", "gbk", "strict", "silent"})
-    require(logical_path(config["font"]) == config["font"], "BGI font path must be canonical")
-    root = config.get("root", "")
-    require(isinstance(root, str), "BGI root must be a string")
-    if root:
-        require(logical_path(root) == root, "BGI root must be canonical")
-    require(integer(config.get("font_face_index", 0), 0, 2**32-1), "BGI font face index")
-    for name in ("gbk", "strict", "silent"):
-        require(type(config.get(name, name == "strict")) is bool, f"BGI {name} must be boolean")
-    require(config.get("strict", True), "BGI requires strict native operation handling")
-    return config
 
 def validate(p: Any) -> dict:
     obj(p, {"schema", "name", "content_revision", "canvas", "assets", "clients"}, {"background", "fonts", "scene3d"})
@@ -126,7 +114,6 @@ def validate(p: Any) -> dict:
     clients = p["clients"]
     require(isinstance(clients, list) and 1 <= len(clients) <= 64, "client count")
     names: set[str] = set()
-    bgi_save_writers: set[str] = set()
     for c in clients:
         obj(c, {"name", "adapter", "game"}, {"asset_prefix", "config", "program", "systems"})
         require(identity(c["name"]) and c["name"] not in names and identity(c["adapter"]) and identity(c["game"]), "client identity")
@@ -140,11 +127,7 @@ def validate(p: Any) -> dict:
         if c["adapter"] == "siglus":
             require(not program, "Siglus uses original bytecode, not data VM actions")
             siglus_config(c.get("config"))
-        if c["adapter"] == "bgi":
-            require(not program, "BGI uses original bytecode, not data VM actions")
-            require(c["game"] not in bgi_save_writers, "BGI does not support simultaneous clients writing the same game's save namespace")
-            bgi_save_writers.add(c["game"])
-            bgi_config(c.get("config"))
+        require(c["adapter"] not in ("bgi", "reallive", "rfvp"), "hosted engine adapter removed; CrySirror API bridge required")
         for a in program:
             action(a)
         if c.get("systems") is not None:
@@ -211,7 +194,7 @@ def asset_inventory(path: Path, p: dict, *, require_fonts: bool = True) -> dict[
     require(assets.is_relative_to(root) and assets.is_dir(), "asset directory escapes project")
     wanted = set(p.get("fonts", {}).values())
     for c in p["clients"]:
-        require(c["adapter"] in ("crysirror-script-v1", "siglus", "bgi"), "native asset enumeration is not implemented")
+        require(c["adapter"] in ("crysirror-script-v1", "siglus"), "native asset enumeration is not implemented")
         if c["adapter"] == "crysirror-script-v1":
             require(c.get("config") is None, "built-in data script does not accept native config")
         prefix = c.get("asset_prefix", "")
@@ -228,13 +211,6 @@ def asset_inventory(path: Path, p: dict, *, require_fonts: bool = True) -> dict[
                 source = (base / file).resolve(strict=True)
                 require(source.is_relative_to(base), "native asset escapes client root")
                 wanted.add("/".join(x for x in (prefix, file) if x))
-        if c["adapter"] == "bgi":
-            config = bgi_config(c.get("config"))
-            native_root = (base / config.get("root", "")).resolve(strict=True)
-            require(native_root.is_relative_to(base) and native_root.is_dir(), "BGI root escapes client root")
-            source = (base / config["font"]).resolve(strict=True)
-            require(source.is_relative_to(base), "BGI font escapes client root")
-            wanted.add("/".join(x for x in (prefix, config["font"]) if x))
         systems = c.get("systems") or {}
         materials=[entity.get("material") for entity in systems.get("entities",[])]
         for widget in systems.get("widgets",[]):

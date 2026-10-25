@@ -4,6 +4,16 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `d233217062201fa1` (2026-10-26): remove hosted engine adapters
+
+- **Breaking:** remove RFVP, BGI and RealLive hosted packages, desktop features,
+  factories and configuration schemas. Their whole-frame hosting approach does
+  not meet the engine capability extraction requirement. Old projects fail
+  visibly rather than silently falling back to a data VM.
+- Preserve standalone shared image, glyph, audio, video and input capabilities.
+  CBG resource decoding now resides in `crysirror-image::cbg` and no longer
+  depends on an embedded BGI engine package.
+
 ## `f49c116e5d278370` (2026-10-25): native image resources through the engine
 
 - `Resources.imageFormats()` reports the installed native image IDs and standard

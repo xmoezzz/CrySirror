@@ -34,61 +34,6 @@
           "rust_type": "BTreeMap<String, String>"
         }
       ]
-    },
-    {
-      "adapter": "rfvp",
-      "config": [
-        {
-          "doc": "Asset directory holding the game's `.hcb`, packs and loose folders.",
-          "name": "root",
-          "rust_type": "String"
-        },
-        {
-          "doc": "Script text encoding: \"sjis\" (default), \"gbk\" or \"utf8\".",
-          "name": "nls",
-          "rust_type": "Option<String>"
-        },
-        {
-          "doc": "Asset path of a host-supplied TrueType/OpenType font used for the original's built-in MS Gothic/Mincho faces. Required; never bundled.",
-          "name": "font",
-          "rust_type": "String"
-        }
-      ]
-    },
-    {
-      "adapter": "bgi",
-      "config": [
-        {
-          "doc": "Relative directory inside this client's asset capability.",
-          "name": "root",
-          "rust_type": "String"
-        },
-        {
-          "doc": "Client-relative font asset supplied by the project owner.",
-          "name": "font",
-          "rust_type": "String"
-        },
-        {
-          "doc": "",
-          "name": "font_face_index",
-          "rust_type": "u32"
-        },
-        {
-          "doc": "",
-          "name": "gbk",
-          "rust_type": "bool"
-        },
-        {
-          "doc": "Unknown native operations must fail visibly.",
-          "name": "strict",
-          "rust_type": "bool"
-        },
-        {
-          "doc": "Explicit diagnostic mode that discards original audio commands.",
-          "name": "silent",
-          "rust_type": "bool"
-        }
-      ]
     }
   ],
   "classes": [
@@ -6265,7 +6210,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "f49c116e5d278370",
+  "fingerprint": "d233217062201fa1",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

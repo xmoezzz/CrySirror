@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 use crate::audio::Audio;
 use anyhow::{bail, ensure, Context, Result};
-use crysirror_core::service::InputFrame;
+use crysirror_core::service::{buttons, InputFrame};
 use crysirror_runtime::{vfs, Runtime};
 use crysirror_wgpu::{geometry::Viewport, Gpu, RenderTarget, Renderer, RenderingPath};
 use std::{
@@ -13,7 +13,7 @@ use std::{
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{ElementState, MouseButton, WindowEvent},
+    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
@@ -141,9 +141,17 @@ pub fn movie_on(
         renderer.set_pbr_scene(rt.render_pbr()?)?;
         renderer.set_engine_frame(rt.host.engine.frame(rt.project.canvas)?)?;
         renderer.set_transition(rt.render_transition()?)?;
-        let image = renderer.capture(&rt.host.scene, &mut rt.assets, rt.project.canvas, rt.project.background)?;
+        let image = renderer.capture(
+            &rt.host.scene,
+            &mut rt.assets,
+            rt.project.canvas,
+            rt.project.background,
+        )?;
         image
-            .save_with_format(dir.join(format!("frame_{i:05}.png")), image::ImageFormat::Png)
+            .save_with_format(
+                dir.join(format!("frame_{i:05}.png")),
+                image::ImageFormat::Png,
+            )
             .context("save movie frame")?;
         last = Some(image);
     }
@@ -501,7 +509,7 @@ impl App {
                         }
                     }
                     let bit = match code {
-                        KeyCode::Enter => Some(1),
+                        KeyCode::Enter | KeyCode::NumpadEnter => Some(1),
                         KeyCode::Space => Some(2),
                         KeyCode::ArrowLeft => Some(4),
                         KeyCode::ArrowRight => Some(8),
@@ -518,10 +526,53 @@ impl App {
                         KeyCode::KeyQ => Some(1 << 14),
                         KeyCode::KeyF => Some(1 << 15),
                         KeyCode::KeyR => Some(1 << 18),
+                        KeyCode::Escape => Some(buttons::ESCAPE),
+                        KeyCode::Backspace => Some(buttons::BACKSPACE),
+                        KeyCode::Home => Some(buttons::HOME),
+                        KeyCode::End => Some(buttons::END),
+                        KeyCode::PageUp => Some(buttons::PAGE_UP),
+                        KeyCode::PageDown => Some(buttons::PAGE_DOWN),
+                        KeyCode::Digit0 | KeyCode::Numpad0 => Some(buttons::KEY_0),
+                        KeyCode::Digit1 | KeyCode::Numpad1 => Some(buttons::KEY_1),
+                        KeyCode::Digit2 | KeyCode::Numpad2 => Some(buttons::KEY_2),
+                        KeyCode::Digit3 | KeyCode::Numpad3 => Some(buttons::KEY_3),
+                        KeyCode::Digit4 | KeyCode::Numpad4 => Some(buttons::KEY_4),
+                        KeyCode::Digit5 | KeyCode::Numpad5 => Some(buttons::KEY_5),
+                        KeyCode::Digit6 | KeyCode::Numpad6 => Some(buttons::KEY_6),
+                        KeyCode::Digit7 | KeyCode::Numpad7 => Some(buttons::KEY_7),
+                        KeyCode::Digit8 | KeyCode::Numpad8 => Some(buttons::KEY_8),
+                        KeyCode::Digit9 | KeyCode::Numpad9 => Some(buttons::KEY_9),
+                        KeyCode::F1 => Some(buttons::F1),
+                        KeyCode::F2 => Some(buttons::F2),
+                        KeyCode::F3 => Some(buttons::F3),
+                        KeyCode::F4 => Some(buttons::F4),
+                        KeyCode::F5 => Some(buttons::F5),
+                        KeyCode::F6 => Some(buttons::F6),
+                        KeyCode::F7 => Some(buttons::F7),
+                        KeyCode::F8 => Some(buttons::F8),
+                        KeyCode::F9 => Some(buttons::F9),
+                        KeyCode::F10 => Some(buttons::F10),
+                        KeyCode::F11 => Some(buttons::F11),
+                        KeyCode::F12 => Some(buttons::F12),
                         _ => None,
                     };
                     if let Some(bit) = bit {
                         self.button(bit, pressed);
+                    }
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                if self.focused {
+                    let y = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y as f64,
+                        MouseScrollDelta::PixelDelta(p) => p.y,
+                    };
+                    if y != 0.0 {
+                        self.input.buttons_pressed |= if y > 0.0 {
+                            buttons::WHEEL_UP
+                        } else {
+                            buttons::WHEEL_DOWN
+                        };
                     }
                 }
             }

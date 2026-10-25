@@ -5,6 +5,7 @@
 //! presentation times. The crate never opens a window, GPU or audio device;
 //! renderers upload frames as textures and audio is handed to the mixer.
 #![forbid(unsafe_code)]
+pub mod mpeg;
 use anyhow::{bail, ensure, Context, Result};
 use std::io::Cursor;
 

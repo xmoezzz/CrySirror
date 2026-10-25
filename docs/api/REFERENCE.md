@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `f49c116e5d278370`
+API fingerprint: `d233217062201fa1`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -1520,22 +1520,3 @@ Variants are tagged by `"op"`.
 | `string_codec` | `String` | Scene string encryption: "xor" (default) or "plain". |
 | `gameexe` | `Option<String>` | Asset path of the decoded UTF-8 Gameexe ini, if any. |
 | `resources` | `BTreeMap<String, String>` | Native resource path → asset path aliases (at most 4096). |
-
-### `rfvp`
-
-| Field | Rust type | Description |
-|---|---|---|
-| `root` | `String` | Asset directory holding the game's `.hcb`, packs and loose folders. |
-| `nls` | `Option<String>` | Script text encoding: "sjis" (default), "gbk" or "utf8". |
-| `font` | `String` | Asset path of a host-supplied TrueType/OpenType font used for the original's built-in MS Gothic/Mincho faces. Required; never bundled. |
-
-### `bgi`
-
-| Field | Rust type | Description |
-|---|---|---|
-| `root` | `String` | Relative directory inside this client's asset capability. |
-| `font` | `String` | Client-relative font asset supplied by the project owner. |
-| `font_face_index` | `u32` | — |
-| `gbk` | `bool` | — |
-| `strict` | `bool` | Unknown native operations must fail visibly. |
-| `silent` | `bool` | Explicit diagnostic mode that discards original audio commands. |

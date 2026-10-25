@@ -44,4 +44,10 @@ pub trait VmAdapter {
     fn import_original_save(&mut self, _bytes: &[u8]) -> Result<()> {
         Err(crate::Error::Unsupported("original save import"))
     }
+    /// Opt in only when native import validates/stages all fallible work before
+    /// committing. On error, logical VM state and queued host requests must be
+    /// unchanged. Lets native savepoints work without claiming runtime snapshots.
+    fn original_save_import_is_transactional(&self) -> bool {
+        false
+    }
 }

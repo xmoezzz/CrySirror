@@ -118,6 +118,12 @@ pub enum AudioRequest {
         pan: f32,
         fade_ms: f32,
     },
+    /// Change loop mode at the current source position; never restart/seek.
+    SetLooped {
+        channel: u32,
+        looping: bool,
+        loop_start: Option<u64>,
+    },
 }
 
 pub trait FileSystem {
@@ -194,8 +200,8 @@ pub trait HostServices: FileSystem {
     fn storage(&mut self, _client: ClientId) -> Result<Arc<dyn ClientStorage>> {
         Err(crate::Error::Unsupported("client storage handle"))
     }
-    /// Replace a client-scoped dynamic RGBA surface (e.g. an original
-    /// engine's own software-rendered frame). Unlike `upload_rgba`, the
+    /// Replace a client-scoped dynamic RGBA resource or engine render target.
+    /// Do not use this to host another engine's composed screen. Unlike `upload_rgba`, the
     /// logical path is stable and its contents may change every frame;
     /// surfaces are render products and are not saved (ADR 0008).
     fn present_surface(
@@ -231,6 +237,36 @@ pub mod buttons {
     pub const MOUSE_LEFT: u64 = 1 << 16;
     pub const MOUSE_RIGHT: u64 = 1 << 17;
     pub const KEY_R: u64 = 1 << 18;
+    pub const ESCAPE: u64 = 1 << 19;
+    pub const BACKSPACE: u64 = 1 << 20;
+    pub const HOME: u64 = 1 << 21;
+    pub const END: u64 = 1 << 22;
+    pub const PAGE_UP: u64 = 1 << 23;
+    pub const PAGE_DOWN: u64 = 1 << 24;
+    pub const KEY_0: u64 = 1 << 25;
+    pub const KEY_1: u64 = 1 << 26;
+    pub const KEY_2: u64 = 1 << 27;
+    pub const KEY_3: u64 = 1 << 28;
+    pub const KEY_4: u64 = 1 << 29;
+    pub const KEY_5: u64 = 1 << 30;
+    pub const KEY_6: u64 = 1 << 31;
+    pub const KEY_7: u64 = 1 << 32;
+    pub const KEY_8: u64 = 1 << 33;
+    pub const KEY_9: u64 = 1 << 34;
+    pub const F1: u64 = 1 << 35;
+    pub const F2: u64 = 1 << 36;
+    pub const F3: u64 = 1 << 37;
+    pub const F4: u64 = 1 << 38;
+    pub const F5: u64 = 1 << 39;
+    pub const F6: u64 = 1 << 40;
+    pub const F7: u64 = 1 << 41;
+    pub const F8: u64 = 1 << 42;
+    pub const F9: u64 = 1 << 43;
+    pub const F10: u64 = 1 << 44;
+    pub const F11: u64 = 1 << 45;
+    pub const F12: u64 = 1 << 46;
+    pub const WHEEL_UP: u64 = 1 << 47;
+    pub const WHEEL_DOWN: u64 = 1 << 48;
     /// Logical names used by action maps, in bit order.
     pub const NAMES: &[(&str, u64)] = &[
         ("enter", ENTER),
@@ -252,6 +288,36 @@ pub mod buttons {
         ("mouse_left", MOUSE_LEFT),
         ("mouse_right", MOUSE_RIGHT),
         ("r", KEY_R),
+        ("escape", ESCAPE),
+        ("backspace", BACKSPACE),
+        ("home", HOME),
+        ("end", END),
+        ("page_up", PAGE_UP),
+        ("page_down", PAGE_DOWN),
+        ("0", KEY_0),
+        ("1", KEY_1),
+        ("2", KEY_2),
+        ("3", KEY_3),
+        ("4", KEY_4),
+        ("5", KEY_5),
+        ("6", KEY_6),
+        ("7", KEY_7),
+        ("8", KEY_8),
+        ("9", KEY_9),
+        ("f1", F1),
+        ("f2", F2),
+        ("f3", F3),
+        ("f4", F4),
+        ("f5", F5),
+        ("f6", F6),
+        ("f7", F7),
+        ("f8", F8),
+        ("f9", F9),
+        ("f10", F10),
+        ("f11", F11),
+        ("f12", F12),
+        ("wheel_up", WHEEL_UP),
+        ("wheel_down", WHEEL_DOWN),
     ];
 }
 

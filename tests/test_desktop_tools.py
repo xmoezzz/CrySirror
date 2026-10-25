@@ -96,10 +96,10 @@ class ProjectTests(unittest.TestCase):
         with self.assertRaises(d.ProjectError):
             d.validate(self.project)
     def test_native_adapter_is_not_packaged_as_demo(self):
-        self.project["clients"][0]["adapter"] = "rfvp"
-        d.validate(self.project)
-        with self.assertRaisesRegex(d.ProjectError, "native"):
-            d.asset_inventory(DEMO, self.project)
+        for adapter in ("rfvp", "bgi", "reallive"):
+            self.project["clients"][0]["adapter"] = adapter
+            with self.subTest(adapter=adapter), self.assertRaisesRegex(d.ProjectError, "hosted engine adapter removed"):
+                d.validate(self.project)
     def test_duplicate_clients(self):
         self.project["clients"].append(copy.deepcopy(self.project["clients"][0]))
         with self.assertRaises(d.ProjectError):
@@ -241,7 +241,7 @@ class McpTests(unittest.TestCase):
         data = json.loads(self.server().call("project_inspect", {})["content"][0]["text"])
         self.assertIsNone(data["registered_native_adapters"])
         self.assertFalse(data["registry_verified"])
-        self.assertEqual(data["source_native_adapters"], ["bgi", "rfvp", "siglus"])
+        self.assertEqual(data["source_native_adapters"], ["siglus"])
         self.assertEqual(len(data["sha256"]), 64)
     def test_validation_calls_actual_inventory(self):
         data = json.loads(self.server().call("project_validate", {})["content"][0]["text"])

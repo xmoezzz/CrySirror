@@ -1,5 +1,10 @@
 # Desktop architecture and data ownership
 
+Engine integrations exist to expand CrySirror capabilities. Native VMs must
+translate their operations into engine APIs and engine-owned logical state.
+Hosting a second engine and uploading its composed screen is prohibited.
+The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
+
 ## Modules
 
 | Crate | Role |
@@ -20,7 +25,6 @@
 | crysirror-audio | Engine voice scheduling/buses and AudioDevice boundary; optional rodio output |
 | crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, reveal and CPU SDF data |
 | crysirror-scene | Safe CPU World/Layer/UI state, migrated input/animation/projection, transactional mutations and frame extraction |
-| crysirror-bgi | Independent original BGI VM adapter; shared image/glyph/channel audio, capability archive streams and original in-game save slots (ADR 0039) |
 | crysirror-siglus-vm | Independent subset port registered as `siglus`; full vendored SceneVm host/factory switch pending (ADR 0009) |
 | crysirror-engine | Unity-style public API: reflective classes/objects, App lifecycle, behaviours, plugins, ScriptHost contract (ADR 0004/0005) |
 | crysirror-script-js | Default JS/TS script host (Boa + Oxc) bound to the class registry; desktop feature `scripting` (ADR 0005) |

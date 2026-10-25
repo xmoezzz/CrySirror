@@ -337,3 +337,40 @@ fn malformed_replacement_preserves_playing_channel_and_restart_false_preserves_c
     assert!(audio.render(2001).is_err());
     assert!(audio.take_output().is_empty());
 }
+#[test]
+fn channel_loop_update_does_not_replay_the_source() {
+    let mut audio = ChannelAudio::default();
+    let samples = (0..128).map(|n| [n * 128; 2]).collect::<Vec<_>>();
+    audio
+        .submit(
+            1,
+            play(
+                7,
+                wav(&samples, 48_000),
+                AudioParameters {
+                    looping: true,
+                    loop_start: 32,
+                    ..Default::default()
+                },
+            ),
+        )
+        .unwrap();
+    for _ in 0..3 {
+        render(&mut audio);
+    }
+    audio
+        .submit(
+            1,
+            AudioRequest::SetLooped {
+                channel: 7,
+                looping: false,
+                loop_start: None,
+            },
+        )
+        .unwrap();
+    let output = render(&mut audio);
+    near(output[0][0], 48. * 128. / 32768.);
+    let output = render(&mut audio);
+    near(output[0][0], 96. * 128. / 32768.);
+    near(output[32][0], 0.);
+}

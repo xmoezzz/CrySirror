@@ -571,7 +571,7 @@
       "source": "src/dec/bgi/cbg_image_decoder.cc",
       "implementation": [
         "src/images.rs",
-        "../bgi-upstream/crates/ethornell-image/src/cbg.rs"
+        "../crysirror-image/src/cbg/cbg.rs"
       ],
       "variants": [
         "Reused safe CPU ethornell-image CBG decoder through shared ImageFormat; original v1/v2 decoder implementation is retained."

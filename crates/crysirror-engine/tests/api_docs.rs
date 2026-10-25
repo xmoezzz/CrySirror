@@ -146,8 +146,6 @@ fn generate() -> api_doc::ApiDocs {
         data,
         adapters: vec![
             ("siglus", config("crates/crysirror-siglus-vm/src/adapter.rs")),
-            ("rfvp", config("crates/crysirror-rfvp/src/lib.rs")),
-            ("bgi", config("crates/crysirror-bgi/src/config.rs")),
         ],
         items,
     })

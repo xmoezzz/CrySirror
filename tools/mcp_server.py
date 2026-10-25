@@ -75,7 +75,7 @@ class Server:
         if name == "project_inspect":
             import hashlib
             value = {"project": p, "sha256": hashlib.sha256(self.project.read_bytes()).hexdigest(),
-                     "registered_native_adapters": None, "registry_verified": False, "source_native_adapters": ["bgi", "rfvp", "siglus"], "builtin_adapter": "crysirror-script-v1"}
+                     "registered_native_adapters": None, "registry_verified": False, "source_native_adapters": ["siglus"], "builtin_adapter": "crysirror-script-v1"}
             if self.executable:
                 run = subprocess.run([str(self.executable), "inspect", str(self.project)], cwd=self.project.parent, capture_output=True, timeout=30, check=False)
                 require(run.returncode == 0, "host inspection failed: " + run.stderr[-16384:].decode(errors="replace"))

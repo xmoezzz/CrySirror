@@ -17,7 +17,9 @@ pub trait ImageFormat: Send + Sync {
     fn priority(&self) -> u8 {
         50
     }
-    fn priority_for(&self,_path:&str,_bytes:&[u8])->u8{self.priority()}
+    fn priority_for(&self, _path: &str, _bytes: &[u8]) -> u8 {
+        self.priority()
+    }
     fn recognize(&self, path: &str, bytes: &[u8]) -> bool;
     fn decode(&self, bytes: &[u8], context: &ImageDecodeContext<'_>) -> Result<ImageSurface>;
 }
@@ -220,8 +222,12 @@ impl DecoderRegistry {
             )
         } else {
             let mut matches = self.probe(context.path, bytes)?;
-            if let Some(priority) = matches.iter().map(|id| self.formats[id].priority_for(context.path,bytes)).max() {
-                matches.retain(|id| self.formats[id].priority_for(context.path,bytes) == priority);
+            if let Some(priority) = matches
+                .iter()
+                .map(|id| self.formats[id].priority_for(context.path, bytes))
+                .max()
+            {
+                matches.retain(|id| self.formats[id].priority_for(context.path, bytes) == priority);
             }
             ensure!(
                 matches.len() <= 1,

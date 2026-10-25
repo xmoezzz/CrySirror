@@ -4,6 +4,7 @@ mod app;
 mod audio;
 #[cfg(feature = "gamepad")]
 mod gamepad;
+mod input_track;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use crysirror_core::service::InputFrame;
@@ -91,6 +92,9 @@ enum Command {
         step_ms: u64,
         #[arg(long)]
         press_at: Vec<u32>,
+        /// JSON input track for warm-up frames (zero-based frame/down/pressed/pointer).
+        #[arg(long)]
+        input_track: Option<PathBuf>,
         #[arg(long)]
         font: Option<PathBuf>,
         #[arg(long)]
@@ -139,6 +143,9 @@ enum Command {
         step_ms: u64,
         #[arg(long)]
         press_at: Vec<u32>,
+        /// JSON input track (zero-based frame/down/pressed/pointer).
+        #[arg(long)]
+        input_track: Option<PathBuf>,
         #[arg(long)]
         data_dir: Option<PathBuf>,
     },
@@ -166,21 +173,16 @@ fn state_dir(project: &Path, explicit: Option<PathBuf>) -> Result<PathBuf> {
     Ok(base.join("CrySirror").join(&fingerprint[..16]))
 }
 fn adapter_registry() -> Result<AdapterRegistry> {
-    #[allow(unused_mut)]
-    let mut registry = AdapterRegistry::default();
-    #[cfg(feature = "rfvp")]
-    crysirror_rfvp::register(&mut registry)?;
-    #[cfg(feature = "bgi")]
-    crysirror_bgi::register(&mut registry)?;
-    Ok(registry)
+    Ok(AdapterRegistry::default())
 }
 fn load_project(path: &Path) -> Result<Project> {
     let project = Project::load(path)?;
-    #[cfg(feature = "bgi")]
-    for client in project.clients.iter().filter(|client| client.adapter == "bgi") {
-        let config: crysirror_bgi::Config = serde_json::from_value(client.config.clone())
-            .context("native BGI config")?;
-        config.validate()?;
+    for client in &project.clients {
+        anyhow::ensure!(
+            !matches!(client.adapter.as_str(), "bgi" | "reallive" | "rfvp"),
+            "hosted engine adapter '{}' has been removed; a CrySirror API bridge is required",
+            client.adapter
+        );
     }
     Ok(project)
 }
@@ -331,6 +333,7 @@ fn run() -> Result<()> {
             frames,
             step_ms,
             press_at,
+            input_track,
             font,
             data_dir,
             renderer,
@@ -340,12 +343,17 @@ fn run() -> Result<()> {
             movie_dir,
         } => {
             anyhow::ensure!(step_ms <= 86400000, "step exceeds one day");
-            anyhow::ensure!((movie_frames == 0) == movie_dir.is_none(), "--movie-frames and --movie-dir go together");
+            anyhow::ensure!(
+                (movie_frames == 0) == movie_dir.is_none(),
+                "--movie-frames and --movie-dir go together"
+            );
             let dir = state_dir(&project, data_dir)?;
             let mut rt = load_runtime(&project, &dir)?;
-            let input = |frame: u32| InputFrame {
-                buttons_pressed: u64::from(press_at.contains(&frame)),
-                ..InputFrame::default()
+            let track = input_track::InputTrack::load(input_track.as_deref())?;
+            let input = |frame: u32| {
+                let mut input = track.at(frame);
+                input.buttons_pressed |= u64::from(press_at.contains(&frame));
+                input
             };
             let instance = wgpu::Instance::default();
             let gpu = Arc::new(pollster::block_on(Gpu::request(&instance, None))?);
@@ -359,7 +367,16 @@ fn run() -> Result<()> {
                     app.frame(if frame == 0 { 0 } else { step_ms }, input(frame))?;
                 }
                 let mut movie = ScriptedMovie(app);
-                let stats = app::movie_on(gpu, &mut movie, font.as_deref(), &output, dir, movie_frames, step_ms, path)?;
+                let stats = app::movie_on(
+                    gpu,
+                    &mut movie,
+                    font.as_deref(),
+                    &output,
+                    dir,
+                    movie_frames,
+                    step_ms,
+                    path,
+                )?;
                 for line in &movie.0.engine()?.log {
                     log::info!("script: {line}");
                 }
@@ -378,7 +395,16 @@ fn run() -> Result<()> {
                 rt = scripted(rt, &script, &script_client, frames, step_ms, input)?;
             }
             let stats = match &movie_dir {
-                Some(dir) => app::movie_on(gpu, &mut rt, font.as_deref(), &output, dir, movie_frames, step_ms, path)?,
+                Some(dir) => app::movie_on(
+                    gpu,
+                    &mut rt,
+                    font.as_deref(),
+                    &output,
+                    dir,
+                    movie_frames,
+                    step_ms,
+                    path,
+                )?,
                 None => app::capture_on(gpu, &mut rt, font.as_deref(), &output, path)?,
             };
             println!(
@@ -436,19 +462,17 @@ fn run() -> Result<()> {
             frames,
             step_ms,
             press_at,
+            input_track,
             data_dir,
         } => {
             anyhow::ensure!(step_ms <= 86400000, "step exceeds one day");
             let dir = state_dir(&project, data_dir)?;
             let mut rt = load_runtime(&project, &dir)?;
+            let track = input_track::InputTrack::load(input_track.as_deref())?;
             for frame in 0..frames {
-                rt.tick(
-                    if frame == 0 { 0 } else { step_ms },
-                    InputFrame {
-                        buttons_pressed: u64::from(press_at.contains(&frame)),
-                        ..InputFrame::default()
-                    },
-                )?;
+                let mut input = track.at(frame);
+                input.buttons_pressed |= u64::from(press_at.contains(&frame));
+                rt.tick(if frame == 0 { 0 } else { step_ms }, input)?;
             }
             println!(
                 "{}",
@@ -459,7 +483,12 @@ fn run() -> Result<()> {
             Ok(())
         }
         #[cfg(feature = "emote-import")]
-        Command::PuppetImport { sources, out, key, samples } => puppet_import(&sources, &out, key, samples),
+        Command::PuppetImport {
+            sources,
+            out,
+            key,
+            samples,
+        } => puppet_import(&sources, &out, key, samples),
         Command::GpuInfo => {
             let instance = wgpu::Instance::default();
             let gpu = pollster::block_on(Gpu::request(&instance, None))?;
@@ -481,8 +510,9 @@ fn run() -> Result<()> {
                 "{}",
                 serde_json::to_string_pretty(
                     &serde_json::json!({"project":p,"registered_adapters":adapters,
-                        "rfvp_native_vm":adapters.contains(&"rfvp"),
-                        "bgi_native_vm":adapters.contains(&"bgi"),
+                        "rfvp_native_vm":false,
+                        "bgi_native_vm":false,
+                        "reallive_native_vm":false,
                         "siglus_native_vm":adapters.contains(&"siglus")})
                 )?
             );
@@ -501,7 +531,12 @@ fn main() -> ExitCode {
 }
 
 #[cfg(feature = "emote-import")]
-fn puppet_import(sources: &[PathBuf], out: &std::path::Path, key: Option<u32>, samples: usize) -> Result<()> {
+fn puppet_import(
+    sources: &[PathBuf],
+    out: &std::path::Path,
+    key: Option<u32>,
+    samples: usize,
+) -> Result<()> {
     use crysirror_puppet::PuppetSource;
     let bytes: Vec<Vec<u8>> = sources
         .iter()
@@ -517,7 +552,10 @@ fn puppet_import(sources: &[PathBuf], out: &std::path::Path, key: Option<u32>, s
     let (rig, textures, report) = crysirror_puppet::bake(&mut source, &options)?;
     std::fs::create_dir_all(out)?;
     for t in &textures {
-        let (w, h, rgba) = t.rgba.clone().with_context(|| format!("texture {} has no pixels", t.source_name))?;
+        let (w, h, rgba) = t
+            .rgba
+            .clone()
+            .with_context(|| format!("texture {} has no pixels", t.source_name))?;
         image::RgbaImage::from_raw(w, h, rgba)
             .context("texture size")?
             .save_with_format(out.join(&t.file), image::ImageFormat::Png)?;
@@ -530,7 +568,10 @@ fn puppet_import(sources: &[PathBuf], out: &std::path::Path, key: Option<u32>, s
         "size": source.size(),
         "output": out.join("puppet.json"),
     });
-    std::fs::write(out.join("import-report.json"), serde_json::to_vec_pretty(&summary)?)?;
+    std::fs::write(
+        out.join("import-report.json"),
+        serde_json::to_vec_pretty(&summary)?,
+    )?;
     println!("{summary}");
     Ok(())
 }

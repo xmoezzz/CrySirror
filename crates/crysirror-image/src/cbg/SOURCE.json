@@ -1,0 +1,12 @@
+{
+  "source": "CrySirror commit 9aac70fc31647f2a704f69c10db2fd9ceea4f855, crates/bgi-upstream/crates/ethornell-image/src",
+  "license": "MPL-2.0",
+  "purpose": "Preserve existing standalone CBG resource decoding while deleting hosted engines",
+  "source_sha256": {
+    "cbg2_encode.rs": "777b2da9d707ff7868517c92ffa98582ad22d46401f024dc29e71f030b6e88ea",
+    "cbg.rs": "9fb5a16896e8e2cba87c08dd1a67a6f4bdab911d345b27a0eac92d4abc968cb6",
+    "lib.rs": "6e213e9a1ae4356662b400f3232dcee6a67ff6eda3b20dd1e83820d2d765d6fd",
+    "cbg_encode.rs": "0d30681b26c0f6f443d40030a7fe67c65e967299b757599241cf958cfd7ba69b",
+    "cbg/bf_movie.rs": "c256281a04edfdaad7da75be80cbfbbd73317671a4a8ed2c8debec19d8239211"
+  }
+}

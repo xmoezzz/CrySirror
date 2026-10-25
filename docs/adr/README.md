@@ -42,6 +42,7 @@ recorded separately, as AGENTS.md requires; STATUS.md links the evidence files.
 | [0041](0041-engine-capability-roadmap.md) | Engine capability roadmap: done/partial/missing matrix and work order | living list |
 | [0043](0043-arcade-vehicles.md) | Arcade vehicle controller: wheel-ray suspension, bicycle steering, grip/drift, swept collision; road centrelines | implemented; state not saved |
 | [0042](0042-nfs-carbon-import.md) | NFS Carbon PC import (canyons): BUN chunks, sections, solids, TPK textures | canyon renders; instances/cars/vehicle pending |
+| [0047](0047-engine-api-capability-extraction.md) | Expand engine APIs; prohibit and remove hosted legacy engines | accepted; hosting removed |
 
 ## Requirement backlog
 

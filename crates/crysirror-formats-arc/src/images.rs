@@ -79,7 +79,7 @@ pub fn register_images(registry: &mut DecoderRegistry) -> Result<()> {
         id: "bgi/cbg",
         probe: |_, _, bytes| bytes.starts_with(b"CompressedBG___\0"),
         decode: |_, bytes, _| {
-            let info = ethornell_image::parse_cbg_metadata(bytes)
+            let info = crysirror_image::cbg::parse_cbg_metadata(bytes)
                 .map_err(|e| anyhow::anyhow!("CBG header: {e}"))?;
             crysirror_image::rgba_len(info.width, info.height)?;
             ensure!(
@@ -91,7 +91,7 @@ pub fn register_images(registry: &mut DecoderRegistry) -> Result<()> {
                 info.encoded_length.unwrap_or(0) as usize <= crysirror_image::MAX_DECODED_BYTES,
                 "CBG encoded byte limit"
             );
-            let image = ethornell_image::decode_cbg(bytes)
+            let image = crysirror_image::cbg::decode_cbg(bytes)
                 .map_err(|e| anyhow::anyhow!("CBG decode: {e}"))?;
             image.validate()?;
             Ok(image)

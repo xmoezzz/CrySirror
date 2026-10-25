@@ -810,6 +810,11 @@ impl Runtime {
             .iter()
             .position(|s| s.id == client)
             .context("native client not registered")?;
+        if self.sessions[i].vm.original_save_import_is_transactional() {
+            core(self.sessions[i].vm.import_original_save(bytes))?;
+            self.sessions[i].yielded = VmYield::BudgetExhausted;
+            return Ok(());
+        }
         let mut vm = self.registry.create(client, &self.project.clients[i])?;
         core(vm.restore(&core(self.sessions[i].vm.snapshot())?))?;
         core(vm.import_original_save(bytes))?;

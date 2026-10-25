@@ -908,3 +908,86 @@ extraction. ADR 0038 records this delivered capability increment.
   AVG32 VMs or claim a commercial level, other GPU/OS or hardware-RT result.
 - Evidence: ADR 0046, docs/arc-image-validation.json, per-group source/hash and
   behavior records, docs/RESOURCES.md and target/verification/arc-image-*.log.
+
+## 2026-10-26 — Original RealLive through shared CPU services
+
+- Implementation: added dormant `crysirror-reallive` and the attributed
+  original `reallive-original` VM from actual siglus_rs commit
+  `5f358ef1360b0439e92aed2b749e8f25d8721954`. Desktop registers `reallive`
+  by default. Original Seen instructions, values, waits, resource metadata,
+  text layout and savepoints remain independent of the data VM.
+- Shared implementation: CPU Surface kernels, PDT10/11, glyph coverage and
+  painting, channel audio, incremental MPEG video/audio, logical input and
+  scoped resource/save services. No native window/GPU/audio device is created.
+  Native loops can update the shared mixer without replaying the sound.
+  Unknown operations, unsupported host requests and worker faults fail visibly.
+- Native savepoints: Runtime now supports explicitly transactional native
+  imports without requiring a whole-VM snapshot. RealLive stages all fallible
+  work once, commits original restore fields, and preserves non-slot global,
+  settings, clock/timer and sound state. Invalid late sections leave the live
+  VM and queued audio unchanged. RLRSSAV1 is the upstream Rust savepoint format;
+  it does not establish Windows binary-save or exact-frame snapshot support.
+- Compilation: workspace check, minimal desktop check, and optimized desktop
+  build completed successfully. The generated API reference and change log
+  agree on fingerprint `22687066e1f5f9c5`.
+- Automated behavior: `cargo test --workspace` exited 0, **551 passed / 0 failed /
+  50 ignored** across 112 reported suites. Python tooling: **162 passed**.
+  Separately executed adapter tests passed all 8 cases, including four normally
+  ignored system-font cases; the explicit glyph differential matched 36 cells.
+  Shared Surface differential covers 1,920 cases. A read-only local MPEG prefix
+  matched 12 video RGBA/PTS frames and two PCM/PTS chunks. Ignored tests remain
+  distinct from these explicit executions; original DLL tests were not run.
+- Actual game/GPU behavior: the owner-supplied Game_RUSUR ran from disclaimer
+  through title/name settings, the opening movie, and the first story pause at
+  scene 6030 line 65. Final optimized run: 10,000 ticks, zero unknown operations
+  and errors, 51 shared glyph rasters, and 7,679,232 offline stereo audio frames
+  with no rejected voices. Both 800×600 title and first-story captures match the
+  pinned original VM's reference pixels exactly. A real winit/Metal window ran
+  180 ticks with a diagnostic scene-10 start override and muted audio; its title
+  capture also matches exactly. The original game's 975 files were rehashed
+  after the final runs: no content/size/mtime changes or added/missing files.
+- Limits: bounded opening profile only; no complete-game, Windows/Linux,
+  hardware-RT or device-audio claim. Committed text/IME and whole-runtime
+  snapshots remain unsupported. Native movie scheduling and some effect
+  policies remain in compatibility code; movie audio still accumulates bounded
+  PCM rather than streaming a long track. Private game/font/captures stay ignored.
+- Evidence: ADR 0047, docs/REALLIVE.md, docs/reallive-validation.json,
+  docs/reallive-source-audit.json and the vendored UPSTREAM/source manifest.
+
+### BGI extraction boundary audit
+
+- Source inspection confirms real shared image/glyph/channel-audio calls;
+  `cpu-embedded` selects embedding.rs rather than the original desktop player.
+- Extraction is still partial: rotation/scaling/tone/concentration/process
+  kernels, perspective rasterization, some effects and codecs remain active
+  inside BGI packages. The earlier claim must not be read as all reusable
+  BGI functionality having moved into CrySirror. These kernels should move
+  behind shared APIs while native opcode/layout/wait/save policies stay native.
+- BGI publishes the composed CPU surface as layer 0; its individual native
+  images/text/effects are not yet separate engine Layer/UI nodes. RealLive's
+  current surface publication has the same retained-scene mapping boundary.
+- This is a call-chain audit, not a new local BGI game run. Details were added
+  to docs/BGI.md and docs/NATIVE_ADAPTERS.md without changing BGI production code.
+
+
+## 2026-10-26 — Hosted engines removed at owner request
+
+- The owner explicitly prohibits engine hosting: integration work exists to
+  expand CrySirror APIs and engine-owned state so different original VMs can
+  use those capabilities through thin semantic/syscall adapters. A running
+  original engine and matching composed screen do not satisfy that goal.
+- Deleted the RFVP/BGI/RealLive hosted adapter packages, dedicated embedded
+  engine source trees, Cargo members/dependencies/features, desktop factories,
+  configuration schemas and hosted integration tests. Old project names fail
+  visibly. Previous hosted-integration completion claims are withdrawn.
+- Kept reusable engine capabilities: shared image/composition/PDT, glyphs,
+  audio/mixer looping, incremental MPEG, input tracks and capability services.
+  Existing standalone CBG resource decoding was moved into crysirror-image::cbg;
+  its optional format plugin no longer depends on any embedded BGI package.
+- Recorded the requirement in AGENTS.md, ARCHITECTURE.md, NATIVE_ADAPTERS.md and
+  ADR 0047. Removed hosted setup instructions and regenerated API documentation:
+  current fingerprint d233217062201fa1.
+- Compilation: cargo check --workspace passed. Behavior: cargo test --workspace
+  passed 474 tests, zero failures, 42 ignored; Python tooling passed 157 tests.
+  Ignored tests were not counted as passes. These results validate the remaining
+  engine and removal, not native game compatibility.

@@ -156,7 +156,7 @@ fn xtx_rgba_tiling_and_bgi_cbg_use_registered_image_services() {
     header[2..4].copy_from_slice(&1u16.to_le_bytes());
     header[4..6].copy_from_slice(&32u16.to_le_bytes());
     header[8..10].copy_from_slice(&2u16.to_le_bytes());
-    let b = ethornell_image::encode_cbg_v1(&header, &[3, 2, 1, 40, 7, 6, 5, 80], 0x12345678);
+    let b = crysirror_image::cbg::encode_cbg_v1(&header, &[3, 2, 1, 40, 7, 6, 5, 80], 0x12345678);
     assert_eq!(
         r.decode("p.cbg", &b).unwrap().rgba,
         [1, 2, 3, 40, 5, 6, 7, 80]

@@ -650,8 +650,17 @@ impl Mixer {
     }
     /// Linear gain ramp in output samples; native timed controls and the
     /// public Audio API use the same device-free implementation.
-    pub fn fade_gain(&mut self, client: u32, h: VoiceHandle, gain: f32, duration_ms: f32) -> Result<()> {
-        ensure!(gain.is_finite() && (0.0..=4.).contains(&gain), "voice gain must be 0..4");
+    pub fn fade_gain(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        gain: f32,
+        duration_ms: f32,
+    ) -> Result<()> {
+        ensure!(
+            gain.is_finite() && (0.0..=4.).contains(&gain),
+            "voice gain must be 0..4"
+        );
         duration(duration_ms)?;
         let count = frames(duration_ms, self.config.sample_rate);
         let voice = self.voice(client, h)?;
@@ -661,11 +670,45 @@ impl Mixer {
     }
     /// Stereo balance: 0 left, 0.5 unchanged, 1 right. The equal-power law
     /// preserves stereo channels rather than converting the source to mono.
-    pub fn set_pan(&mut self, client: u32, h: VoiceHandle, pan: f32, duration_ms: f32) -> Result<()> {
+    pub fn set_pan(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        pan: f32,
+        duration_ms: f32,
+    ) -> Result<()> {
         ensure!(unit(pan), "voice pan must be 0..1");
         duration(duration_ms)?;
         let count = frames(duration_ms, self.config.sample_rate);
         self.voice(client, h)?.pan.to(pan, count);
+        Ok(())
+    }
+    /// Keep the decoder cursor, fractional source position and gain. None
+    /// preserves loop points; Some updates their start without a seek.
+    /// Disabling looping finishes the current source pass.
+    pub fn set_looped(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        looping: bool,
+        loop_start: Option<u64>,
+    ) -> Result<()> {
+        let voice = self.voice(client, h)?;
+        ensure!(
+            !looping || voice.cursor.source.frame_count() != Some(0),
+            "cannot loop empty audio"
+        );
+        if let Some(start) = loop_start {
+            let end = voice
+                .spec
+                .loop_points
+                .map(|p| p.end)
+                .or_else(|| voice.cursor.source.frame_count())
+                .context("loop point update needs known source length")?;
+            ensure!(start < end, "loop start outside source range");
+            voice.spec.loop_points = Some(LoopPoints { start, end });
+        }
+        voice.spec.looping = looping;
         Ok(())
     }
     pub fn set_rate(&mut self, client: u32, h: VoiceHandle, rate: f32, pitch: f32) -> Result<()> {
@@ -697,13 +740,27 @@ impl Mixer {
         self.voice(client, h)?.spec.paused = paused;
         Ok(())
     }
-    pub fn pause_fade(&mut self, client:u32, h:VoiceHandle, paused:bool, duration_ms:f32) -> Result<()> {
+    pub fn pause_fade(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        paused: bool,
+        duration_ms: f32,
+    ) -> Result<()> {
         duration(duration_ms)?;
-        let count=frames(duration_ms,self.config.sample_rate);
-        let voice=self.voice(client,h)?;
-        if paused && count == 0 { voice.spec.paused=true; voice.pause_after_fade=false; }
-        else if paused { voice.pause_after_fade=true; voice.envelope.to(0.,count); }
-        else { voice.spec.paused=false;voice.pause_after_fade=false;voice.envelope.to(1.,count); }
+        let count = frames(duration_ms, self.config.sample_rate);
+        let voice = self.voice(client, h)?;
+        if paused && count == 0 {
+            voice.spec.paused = true;
+            voice.pause_after_fade = false;
+        } else if paused {
+            voice.pause_after_fade = true;
+            voice.envelope.to(0., count);
+        } else {
+            voice.spec.paused = false;
+            voice.pause_after_fade = false;
+            voice.envelope.to(1., count);
+        }
         Ok(())
     }
     pub fn pause_client(&mut self, client: u32, paused: bool) {
@@ -958,8 +1015,8 @@ impl Mixer {
                 sample[1] += s[1] * gain;
                 v.position += step;
                 if v.pause_after_fade && v.envelope.left == 0 {
-                    v.spec.paused=true;
-                    v.pause_after_fade=false;
+                    v.spec.paused = true;
+                    v.pause_after_fade = false;
                 }
                 if (v.stop_after_fade && v.envelope.left == 0 && v.envelope.value == 0.)
                     || (!v.spec.looping

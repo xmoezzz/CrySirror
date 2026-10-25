@@ -1,3 +1,5 @@
+> Superseded by ADR 0047: hosted implementations deleted on 2026-10-26. Historical evidence below is not current integration acceptance.
+
 # ADR 0008: native engine integration: shared seams, original engines kept whole
 
 Status: implemented for RFVP on 2026-10-24; Siglus follows ADR 0009.

@@ -12,3 +12,5 @@ image.workspace = true
 crysirror-core.workspace = true
 crysirror-resource.workspace = true
 serde_json.workspace = true
+
+byteorder = "1"

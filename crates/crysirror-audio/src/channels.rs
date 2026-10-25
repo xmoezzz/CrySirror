@@ -190,6 +190,15 @@ impl ChannelAudio {
                     self.mixer.fade_gain(client, h, gain, fade_ms)?;
                 }
             }
+            AudioRequest::SetLooped {
+                channel,
+                looping,
+                loop_start,
+            } => {
+                if let Some(&h) = self.voices.get(&(client, channel)) {
+                    self.mixer.set_looped(client, h, looping, loop_start)?;
+                }
+            }
             AudioRequest::SetPan {
                 channel,
                 pan,

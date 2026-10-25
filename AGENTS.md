@@ -2,6 +2,16 @@
 
 Read STATUS.md, docs/ARCHITECTURE.md and docs/NATIVE_ADAPTERS.md before editing.
 
+- Engine integrations exist to grow CrySirror's reusable capabilities. A new VM
+  must call CrySirror APIs through a thin semantic/syscall adapter; it must not
+  bring a second general-purpose engine implementation or renderer with it.
+- Do not host a legacy engine and upload its composed screen as an integration.
+  Do not keep reusable image/text/UI/layer/effect/audio algorithms private to a VM
+  merely to get a game running. Add missing capabilities to CrySirror first.
+- Acceptance requires engine-owned resources/operations/state usable without
+  that VM. A running game, matching screenshot or registered factory alone
+  does not establish capability extraction or completed integration.
+
 - Default host: wgpu + winit. Switch and PS Vita are deferred; no other console.
 - RFVP and Siglus remain separate original VMs, never aliases for the data VM.
 - Preserve opcode, value, wait, resource and original-save semantics in adapters.

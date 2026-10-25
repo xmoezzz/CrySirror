@@ -165,3 +165,11 @@ pub fn encode_png(surface: &ImageSurface) -> Result<Vec<u8>> {
     )?;
     Ok(out)
 }
+
+/// CPU surfaces with explicit legacy /255 composition and affine sampling.
+pub mod surface;
+
+/// Shared MPL PDT10/PDT11 image codec; native cut/pattern metadata stays in adapters.
+pub mod pdt;
+
+pub mod cbg;

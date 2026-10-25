@@ -423,11 +423,7 @@ fn random_container_is_reproducible_varied_and_avoids_immediate_repeats() {
         previous = Some(sa.index);
         assert_eq!(render(&mut a, 1), render(&mut b, 1));
     }
-    assert!(
-        indices.contains(&0)
-            && indices.contains(&1)
-            && indices.contains(&2)
-    );
+    assert!(indices.contains(&0) && indices.contains(&1) && indices.contains(&2));
 }
 #[test]
 fn streaming_decoder_reads_bounded_prefix_and_seeks_exact_pcm_frames() {
@@ -594,5 +590,38 @@ fn compressed_music_streams_decode_and_seek_without_whole_song_pcm() {
             total, expected,
             "{extension} duration/encoder delay must agree"
         );
+    }
+}
+
+#[test]
+fn live_loop_changes_keep_source_position_and_parameterize_loop_origin() {
+    fn after_change(looping: bool, start: Option<u64>) -> Vec<[f32; 2]> {
+        let mut m = mixer(1);
+        let h = m
+            .play(
+                7,
+                clip(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]).source(),
+                VoiceSpec {
+                    looping: true,
+                    loop_points: Some(LoopPoints { start: 2, end: 6 }),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        render(&mut m, 7); // First pass six samples, then source frame2.
+        assert!(m.set_looped(8, h, looping, start).is_err());
+        assert!(m.set_looped(7, h, true, Some(6)).is_err());
+        m.set_looped(7, h, looping, start).unwrap();
+        render(&mut m, 4)
+    }
+    for (output, expected) in [
+        (after_change(true, None), [0.4, 0.5, 0.6, 0.3]),
+        (after_change(true, Some(0)), [0.4, 0.5, 0.6, 0.1]),
+        (after_change(false, None), [0.4, 0.5, 0.6, 0.]),
+    ] {
+        for (frame, value) in output.iter().zip(expected) {
+            near(frame[0], value);
+            near(frame[1], value);
+        }
     }
 }
