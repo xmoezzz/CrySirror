@@ -1,6 +1,31 @@
 {
   "adapters": [
     {
+      "adapter": "reallive",
+      "config": [
+        {
+          "doc": "",
+          "name": "root",
+          "rust_type": "String"
+        },
+        {
+          "doc": "",
+          "name": "font_alias",
+          "rust_type": "String"
+        },
+        {
+          "doc": "",
+          "name": "encoding",
+          "rust_type": "Option<String>"
+        },
+        {
+          "doc": "",
+          "name": "start_scene",
+          "rust_type": "Option<i32>"
+        }
+      ]
+    },
+    {
       "adapter": "siglus",
       "config": [
         {
@@ -416,6 +441,36 @@
         }
       ],
       "name": "Bitmap",
+      "properties": []
+    },
+    {
+      "doc": "Client-scoped retained drawing canvases backed by inspectable engine Layer nodes.",
+      "global": "canvases",
+      "methods": [
+        {
+          "doc": "Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs.",
+          "name": "apply",
+          "params": [
+            {
+              "name": "commands",
+              "type": "Record<string, any>[]"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Inspect this client's canvas dimensions and logical draw nodes, or null when absent. No flattened native frame is returned.",
+          "name": "get",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        }
+      ],
+      "name": "Canvases",
       "properties": []
     },
     {
@@ -1428,6 +1483,28 @@
           "returns": "void"
         },
         {
+          "doc": "Engine-owned glyph reveal {visible,total,complete}, or null for an absent/non-glyph layer.",
+          "name": "revealStatus",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Show the complete positioned text run without a VM-private reveal clock.",
+          "name": "completeReveal",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Inherited opacity 0..255.",
           "name": "setOpacity",
           "params": [
@@ -1488,7 +1565,7 @@
           "returns": "void"
         },
         {
-          "doc": "Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}.",
+          "doc": "Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'ordered_dither'{cell:[x,y],diagonal?,steps}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}.",
           "name": "transition",
           "params": [
             {
@@ -1610,6 +1687,55 @@
           "writable": false
         }
       ]
+    },
+    {
+      "doc": "Shared asynchronous media resources; decoding, clocks and errors belong to the engine.",
+      "global": "media",
+      "methods": [
+        {
+          "doc": "Start a scoped media resource; options {loop?:false,audio?:true,gain?:1}. Returns its logical image resource path for Layer/Canvas/Material APIs; inspect status for loading, playback and errors.",
+          "name": "play",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Stop only this client's media resource.",
+          "name": "stop",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Media state, position_ms, frame_pts_ms, published/decoded frames, audio_started, loops_completed and error, or null when absent.",
+          "name": "status",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        }
+      ],
+      "name": "Media",
+      "properties": []
     },
     {
       "doc": "Persistent client-isolated rigid bodies, CCD, collision queries and joints. Simulation runs in every Runtime 16 ms world step, including pure data projects. Snapshots rebuild from saved pose, velocity, forces and joint declarations; solver warm starts are not serialized.",
@@ -2192,7 +2318,7 @@
       "properties": []
     },
     {
-      "doc": "Retained widgets (panel/label/button/toggle/slider) with focus, capture and modal routing.",
+      "doc": "Retained widgets (panel/label/button/toggle/slider/text_field) with focus, capture and modal routing.",
       "global": "ui",
       "methods": [
         {
@@ -2257,6 +2383,61 @@
             },
             {
               "name": "value",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Set engine cursor presentation visibility.",
+          "name": "setCursorVisible",
+          "params": [
+            {
+              "name": "visible",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Set engine presentation title.",
+          "name": "setTitle",
+          "params": [
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Focus an enabled, visible text field owned by this client.",
+          "name": "focusTextField",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Append committed single-line Unicode to the focused text field, up to max_length Unicode scalars.",
+          "name": "insertText",
+          "params": [
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove the final Unicode scalar from a client-owned text field.",
+          "name": "backspace",
+          "params": [
+            {
+              "name": "id",
               "type": "number"
             }
           ],
@@ -2866,6 +3047,11 @@
       "system": "layer"
     },
     {
+      "api": "Layers.completeReveal",
+      "op": "complete_reveal",
+      "system": "layer"
+    },
+    {
       "api": "Layers.setOpacity",
       "op": "set_opacity",
       "system": "layer"
@@ -2901,6 +3087,41 @@
       "system": "layer"
     },
     {
+      "api": "Canvases.apply",
+      "op": "create",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "clear",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "draw",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "set",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "copy",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "present",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "hide",
+      "system": "canvas"
+    },
+    {
       "api": "Ui.put",
       "op": "put",
       "system": "ui"
@@ -2929,6 +3150,46 @@
       "api": "Ui.setText",
       "op": "set_text",
       "system": "ui"
+    },
+    {
+      "api": "Ui.setTitle",
+      "op": "set_title",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.setCursorVisible",
+      "op": "set_cursor_visible",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.insertText",
+      "op": "insert_text",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.backspace",
+      "op": "backspace",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.focusTextField",
+      "op": "focus",
+      "system": "ui"
+    },
+    {
+      "api": "Media.play",
+      "op": "play",
+      "system": "media"
+    },
+    {
+      "api": "Media.stop",
+      "op": "stop",
+      "system": "media"
+    },
+    {
+      "api": "Media.status",
+      "op": "media_status",
+      "system": "service"
     },
     {
       "api": "Audio.play",
@@ -4710,6 +4971,12 @@
         },
         {
           "default": null,
+          "doc": "Retained explicit glyph positions, rendered as independent cached glyph quads. No VM renderer or flattened text/screen image is involved.",
+          "name": "glyph_run",
+          "rust_type": "font: String, size: f32, color: [u8; 4], bold: bool, glyphs: Vec<PositionedGlyph>, reveal: Option<GlyphReveal>"
+        },
+        {
+          "default": null,
           "doc": "2D deformable puppet (ADR 0029): an engine puppet rig JSON asset, fitted into the layer rect (aspect preserved).",
           "name": "puppet",
           "rust_type": "asset: String, tint: [u8; 4]"
@@ -4717,6 +4984,455 @@
       ],
       "name": "Paint",
       "used_by": "`LayerSpec.paint`"
+    },
+    {
+      "doc": "A glyph with an explicit baseline in its containing layer's local pixels. Layout, shaping and reveal policy remain with the producer; rendering is an engine service. Optional styles override the containing run's defaults.",
+      "fields": [
+        {
+          "default": "あ",
+          "doc": "",
+          "name": "character",
+          "rust_type": "char"
+        },
+        {
+          "default": [
+            0.0,
+            20.0
+          ],
+          "doc": "",
+          "name": "baseline",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "Option<f32>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "color",
+          "rust_type": "Option<[u8; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "bold",
+          "rust_type": "Option<bool>"
+        }
+      ],
+      "name": "PositionedGlyph",
+      "used_by": "`Paint.glyph_run.glyphs`"
+    },
+    {
+      "doc": "Unit of an explicitly positioned run. Each item contains one Unicode scalar; this deliberately does not reinterpret native scalar timing as grapheme timing. Other segmentation modes must be added explicitly.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "unicode_scalar",
+          "rust_type": ""
+        }
+      ],
+      "name": "GlyphRevealUnit",
+      "used_by": "`GlyphReveal.unit`"
+    },
+    {
+      "doc": "Engine-owned positioned-text clock. Layout, markup and wait policies are callers' concerns; no VM needs its own generic typewriter timer.",
+      "fields": [
+        {
+          "default": "unicode_scalar",
+          "doc": "",
+          "name": "unit",
+          "rust_type": "GlyphRevealUnit"
+        },
+        {
+          "default": 40,
+          "doc": "Milliseconds per positioned scalar. Zero reveals the run instantly.",
+          "name": "interval_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": 0,
+          "doc": "Prefix already visible when new text is appended to a page.",
+          "name": "initial_visible",
+          "rust_type": "usize"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "elapsed_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": false,
+          "doc": "",
+          "name": "forced_complete",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "",
+          "name": "paused",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "GlyphReveal",
+      "used_by": "`Paint.glyph_run.reveal`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "visible",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "total",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "complete",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "GlyphRevealStatus",
+      "used_by": "Engine glyph reveal query"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 640,
+          "doc": "",
+          "name": "width",
+          "rust_type": "u32"
+        },
+        {
+          "default": 480,
+          "doc": "",
+          "name": "height",
+          "rust_type": "u32"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "nodes",
+          "rust_type": "Vec<CanvasNode>"
+        }
+      ],
+      "name": "CanvasSurface",
+      "used_by": "`Canvases.get`"
+    },
+    {
+      "doc": "Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "draw",
+          "rust_type": "layer: LayerSpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "group",
+          "rust_type": "offset: [f32; 2], clip: [f32; 4], opacity: u8, nodes: Vec<CanvasNode>"
+        }
+      ],
+      "name": "CanvasNode",
+      "used_by": "`CanvasSurface.nodes`"
+    },
+    {
+      "doc": "Variants are tagged by `\"op\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "create",
+          "rust_type": "id: u32, width: u32, height: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "clear",
+          "rust_type": "id: u32, color: [u8; 4]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "draw",
+          "rust_type": "id: u32, layer: LayerSpec"
+        },
+        {
+          "default": null,
+          "doc": "Atomically replace this surface's contents with one logical resource draw.",
+          "name": "set",
+          "rust_type": "id: u32, layer: LayerSpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "copy",
+          "rust_type": "source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "present",
+          "rust_type": "id: u32, layer: u32, order: i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "hide",
+          "rust_type": "layer: u32"
+        }
+      ],
+      "name": "CanvasCommand",
+      "used_by": "`Canvases.apply`, `ServiceBatch.canvases`"
+    },
+    {
+      "doc": "Typed engine operations carried through the dependency-free host contract. The runtime decodes this data at the client boundary; no device handles/code.",
+      "fields": [
+        {
+          "default": [],
+          "doc": "",
+          "name": "canvases",
+          "rust_type": "Vec<canvas::CanvasCommand>"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "world",
+          "rust_type": "Vec<world::WorldCommand>"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "layers",
+          "rust_type": "Vec<layer::LayerCommand>"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "ui",
+          "rust_type": "Vec<ui::UiCommand>"
+        }
+      ],
+      "name": "ServiceBatch",
+      "used_by": "Engine service mutation batch"
+    },
+    {
+      "doc": "Engine media resources, independent of a script VM or a window.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Play",
+          "rust_type": "id: u32, asset: String, looping: bool, audio: bool, gain: f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Stop",
+          "rust_type": "id: u32"
+        }
+      ],
+      "name": "MediaRequest",
+      "used_by": "`HostServices.media_request` (script `Media.play` options use `loop`, `audio`, `gain`)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Loading",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Playing",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ended",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Stopped",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "MediaPhase",
+      "used_by": "`HostServices.media_status`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "phase",
+          "rust_type": "MediaPhase"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "position_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "published_frames",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "MediaInfo",
+      "used_by": "`HostServices.media_status`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": false,
+          "doc": "",
+          "name": "looping",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "",
+          "name": "audio",
+          "rust_type": "bool"
+        },
+        {
+          "default": 1.0,
+          "doc": "",
+          "name": "gain",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1879048192,
+          "doc": "The host reserves this channel within the same client's audio namespace.",
+          "name": "audio_channel",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "MediaOptions",
+      "used_by": "Rust shared media service options (script uses `loop` instead of `looping`)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "loading",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "playing",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "ended",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "stopped",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "MediaState",
+      "used_by": "`MediaStatus.state`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "state",
+          "rust_type": "MediaState"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "position_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "frame_pts_ms",
+          "rust_type": "Option<i64>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "published_frames",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "decoded_frames",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "audio_started",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "loops_completed",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "error",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "MediaStatus",
+      "used_by": "`Media.status`"
     },
     {
       "doc": "Per-layer 2D filter stack with the stage order and parameter meaning of the Siglus/tona3 sprite effect (ADR 0021). Color math runs on 8-bit gamma-encoded values like the original: distortion sampling → tint/alpha → tone curve → invert → mono → bright → dark → color rate → add → mask → gray-as-alpha → alpha test.",
@@ -4912,7 +5628,7 @@
       "used_by": "`LayerFilter.distortion`"
     },
     {
-      "doc": "Full-screen transition from the previously presented frame to the current one (ADR 0022). Effect codes and option meanings are the Siglus `WIPE` table, composed by the same shader arithmetic as siglus_rs `wipe.wgsl`.",
+      "doc": "Full-screen transition from the engine's previously presented scene to the current one. Named engine effects have explicit contracts; the `Siglus` variant separately preserves its native WIPE table (ADR 0022).",
       "fields": [
         {
           "default": null,
@@ -4962,6 +5678,12 @@
           "doc": "Mosaic out of the old scene and into the new one (type 230).",
           "name": "mosaic",
           "rust_type": "size: u32"
+        },
+        {
+          "default": null,
+          "doc": "Ordered Bayer-4 fade in logical canvas pixels. This is a shared engine effect with an independent code, not an alias for a Siglus wipe type.",
+          "name": "ordered_dither",
+          "rust_type": "cell: [u32; 2], diagonal: bool, steps: u32"
         },
         {
           "default": null,
@@ -5102,6 +5824,12 @@
           "rust_type": "String"
         },
         {
+          "default": 1024,
+          "doc": "Maximum Unicode scalar count for TextField committed text.",
+          "name": "max_length",
+          "rust_type": "u32"
+        },
+        {
           "default": null,
           "doc": "Explicit licensed project font alias.",
           "name": "font",
@@ -5160,6 +5888,12 @@
           "default": null,
           "doc": "Horizontal 0..1 value; Left/Right or drag.",
           "name": "slider",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Engine-owned single-line Unicode text, edited at the end.",
+          "name": "text_field",
           "rust_type": ""
         }
       ],
@@ -6122,6 +6856,12 @@
         },
         {
           "default": null,
+          "doc": "Complete a positioned text run through the engine clock/state service.",
+          "name": "complete_reveal",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
           "doc": "",
           "name": "set_opacity",
           "rust_type": "id: u32, opacity: u8"
@@ -6171,6 +6911,36 @@
       "fields": [
         {
           "default": null,
+          "doc": "Append committed Unicode text to this client's focused TextField.",
+          "name": "insert_text",
+          "rust_type": "text: String"
+        },
+        {
+          "default": null,
+          "doc": "Remove the last Unicode scalar from a client-local TextField.",
+          "name": "backspace",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "focus",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_cursor_visible",
+          "rust_type": "visible: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_title",
+          "rust_type": "text: String"
+        },
+        {
+          "default": null,
           "doc": "",
           "name": "put",
           "rust_type": "widget: WidgetSpec"
@@ -6210,7 +6980,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "d233217062201fa1",
+  "fingerprint": "8d83111697a3c377",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {
@@ -6268,6 +7038,14 @@
     {
       "class": "Physics",
       "global": "physics"
+    },
+    {
+      "class": "Canvases",
+      "global": "canvases"
+    },
+    {
+      "class": "Media",
+      "global": "media"
     }
   ]
 }

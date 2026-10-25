@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Float-positioned glyph coverage cells. Native layout and reveal stay with callers.
 use crate::TextSystem;
-use ab_glyph::{point, Font, GlyphId, PxScale, ScaleFont};
-use anyhow::{ensure, Result};
+use ab_glyph::{Font, GlyphId, PxScale, ScaleFont, point};
+use anyhow::{Result, ensure};
 
 #[derive(Clone, Copy, Debug)]
 pub struct GlyphRaster {
@@ -27,6 +27,26 @@ pub struct GlyphMetrics {
     pub advance: f32,
 }
 impl TextSystem {
+    /// Stable identity for a positioned glyph resource. Consumers may subtract
+    /// integer baseline translation to share raster cells across placements.
+    pub fn glyph_cell_key(&self, font: &str, request: GlyphRaster) -> Result<String> {
+        self.glyph_metrics(font, request.glyph_id, request.size)?;
+        ensure!(
+            request
+                .baseline
+                .iter()
+                .all(|v| v.is_finite() && v.abs() <= 1_000_000.),
+            "invalid glyph baseline"
+        );
+        let (_, digest) = self.fonts.get(font).expect("glyph_metrics checked font");
+        Ok(format!(
+            "glyph:{digest}:{}:{:08x}:{:08x}:{:08x}",
+            request.glyph_id,
+            request.size.to_bits(),
+            request.baseline[0].to_bits(),
+            request.baseline[1].to_bits()
+        ))
+    }
     pub fn glyph_id(&self, font: &str, ch: char) -> Result<u32> {
         let id = self.font(font)?.glyph_id(ch);
         ensure!(
@@ -108,8 +128,8 @@ mod tests {
     #[test]
     fn unloaded_font_and_invalid_float_requests_fail_without_allocation() {
         let text = TextSystem::default();
-        assert!(text
-            .rasterize_glyph_cell(
+        assert!(
+            text.rasterize_glyph_cell(
                 "missing",
                 GlyphRaster {
                     glyph_id: 1,
@@ -117,7 +137,8 @@ mod tests {
                     baseline: [0., 0.]
                 }
             )
-            .is_err());
+            .is_err()
+        );
         assert!(text.glyph_metrics("missing", 1, f32::NAN).is_err());
     }
 }

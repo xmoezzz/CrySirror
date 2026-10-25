@@ -1138,6 +1138,7 @@ dependencies = [
  "crysirror-core",
  "rodio",
  "serde",
+ "siglus_assets",
  "symphonia",
 ]
 
@@ -1187,6 +1188,7 @@ dependencies = [
  "crysirror-engine",
  "crysirror-puppet",
  "crysirror-puppet-eluna",
+ "crysirror-reallive",
  "crysirror-runtime",
  "crysirror-script-js",
  "crysirror-siglus",
@@ -1291,6 +1293,20 @@ dependencies = [
  "crysirror-puppet",
  "eluna_rs",
  "siglus_scene_vm",
+]
+
+[[package]]
+name = "crysirror-reallive"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "crysirror-core",
+ "crysirror-runtime",
+ "crysirror-scene",
+ "encoding_rs",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

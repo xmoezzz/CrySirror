@@ -4,6 +4,7 @@
 pub mod ai;
 pub mod animation;
 pub mod animgraph;
+pub mod canvas;
 pub mod components;
 pub mod gameplay;
 pub mod input;
@@ -46,6 +47,8 @@ pub struct SystemsSpec {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EngineSystems {
+    #[serde(default)]
+    pub canvases: canvas::CanvasSystem,
     pub world: World,
     pub layers: LayerSystem,
     pub ui: UiSystem,
@@ -82,8 +85,9 @@ impl EngineSystems {
     }
     pub fn validate_clients(&self, allowed: &std::collections::BTreeSet<u32>) -> Result<()> {
         anyhow::ensure!(
-            self.world
+            self.canvases
                 .client_ids()
+                .chain(self.world.client_ids())
                 .chain(self.layers.client_ids())
                 .chain(self.ui.client_ids())
                 .all(|id| allowed.contains(&id)),
@@ -92,6 +96,7 @@ impl EngineSystems {
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {
+        self.canvases.validate()?;
         self.world.validate()?;
         self.layers.validate()?;
         self.ui.validate()?;
@@ -130,6 +135,8 @@ impl EngineSystems {
 #[serde(deny_unknown_fields)]
 pub struct ServiceBatch {
     #[serde(default)]
+    pub canvases: Vec<canvas::CanvasCommand>,
+    #[serde(default)]
     pub world: Vec<world::WorldCommand>,
     #[serde(default)]
     pub layers: Vec<layer::LayerCommand>,
@@ -139,6 +146,11 @@ pub struct ServiceBatch {
 impl EngineSystems {
     pub fn submit(&mut self, client: ClientId, batch: &ServiceBatch) -> Result<()> {
         let mut staged = self.clone();
+        if !batch.canvases.is_empty() {
+            staged
+                .canvases
+                .apply_batch(client, &batch.canvases, &mut staged.layers)?;
+        }
         if !batch.world.is_empty() {
             staged.world.apply_batch(client, &batch.world)?;
         }

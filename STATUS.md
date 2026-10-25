@@ -991,3 +991,46 @@ extraction. ADR 0038 records this delivered capability increment.
   passed 474 tests, zero failures, 42 ignored; Python tooling passed 157 tests.
   Ignored tests were not counted as passes. These results validate the remaining
   engine and removal, not native game compatibility.
+
+## 2026-10-26 — RealLive VM calls engine-owned APIs
+
+- Implementation: added `crysirror-reallive`, retaining the original Seen
+  parser/interpreter, values/banks, call stack and pure builtins from the audited
+  siglus_rs pin `5f358ef1360b0439e92aed2b749e8f25d8721954`. Engine operations
+  remain pending until CrySirror service calls succeed. No original Engine,
+  System, Graphics, Sound, renderer or framebuffer is linked. The desktop
+  default enables the new factory; the bare Runtime remains host controlled.
+- Shared capabilities: retained Canvas drawing/copy/presentation, positioned
+  GlyphRun and engine-clock reveal, ordered-dither GPU transitions, Unicode UI
+  TextField editing/query, common PDT/NWA/KOEPAC decoding and engine Media
+  resources. Ordinary engine/data/JS clients use the same APIs. Unsupported
+  copying/layout/audio/native variants fail visibly. API documentation was
+  regenerated; fingerprint `8d83111697a3c377` is logged.
+- Compilation: workspace check and minimal desktop check with only the
+  `reallive` feature passed; optimized desktop/native GPU test compiled.
+- Automated behavior: the clean workspace test run exited 0: **561 passed,
+  zero failed, 47 ignored**. Python tooling: **165 passed**. Ignored cases are
+  not counted as successful executions. A first workspace attempt encountered
+  a rustdoc StableCrateId artifact collision; refreshing affected dev artifacts
+  and rerunning the workspace completed successfully.
+- Explicit behavior: shared media tests, including the complete local movie,
+  passed **6/6** without a VM/GPU/device. The separate opt-in native GPU test
+  passed on Apple M5/Metal: title, name input, choice, complete opening movie
+  (2,995 decoded frames), then scene 6030 line 65, with 22 retained glyphs and
+  five engine layers. Removing foreground/shadow text with the VM PC and clock
+  unchanged changed GPU pixels. EOF retired the media overlay. This establishes
+  engine-owned state and rendering, beyond merely starting an original VM.
+- Source integrity: all 975 original game files were rehashed; no content,
+  size, mtime, added-file or missing-file changes. Game assets/fonts/captures
+  remain ignored. Only a self-authored synthetic media fixture is committed.
+- Limits: bounded opening profile, not a full playthrough or pixel-perfect
+  native layout claim. Original save files, VM snapshots, DLLs, unsupported
+  window skins/advanced layout, preserving DC growth, transparent non-mask
+  copies and queued outgoing music replacement remain unsupported. Media audio
+  uses bounded full-track PCM; media resources reject snapshots until a real
+  reconstruction contract exists. No device-audio, Windows/Linux or hardware
+  ray-tracing result is claimed.
+- Evidence: ADR 0048, docs/REALLIVE.md and docs/reallive-source-audit.json;
+  ignored logs in target/verification/reallive-api-{acceptance.log,
+  workspace-tests-final.log,python-final.log}. Private captures and before/after
+  engine inspection are in images/third-party/reallive-api/.

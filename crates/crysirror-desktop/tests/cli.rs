@@ -29,10 +29,14 @@ fn inspection_reports_only_actually_registered_native_vms() {
     let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(v["rfvp_native_vm"], false);
     assert_eq!(v["bgi_native_vm"], false);
-    assert_eq!(v["reallive_native_vm"], false);
+    assert_eq!(v["reallive_native_vm"], cfg!(feature = "reallive"));
     assert_eq!(
         v["registered_adapters"],
-        serde_json::json!(["crysirror-script-v1", "siglus"])
+        if cfg!(feature = "reallive") {
+            serde_json::json!(["crysirror-script-v1", "reallive", "siglus"])
+        } else {
+            serde_json::json!(["crysirror-script-v1", "siglus"])
+        }
     );
 }
 #[test]

@@ -26,6 +26,30 @@ pub struct DecodeStats {
     pub outputs: u64,
     pub cancelled: bool,
 }
+/// Sequence metadata read through the caller's seekable capability. Cursor
+/// position is restored; absence of a header is distinct from a read failure.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SequenceInfo {
+    pub width: u32,
+    pub height: u32,
+    pub frame_ms: f64,
+}
+pub fn sequence_info(reader: &mut (impl Read + Seek)) -> Result<Option<SequenceInfo>> {
+    let start = reader.stream_position()?;
+    let mut head = Vec::new();
+    let read = reader.by_ref().take(64 * 1024).read_to_end(&mut head);
+    let restored = reader.seek(SeekFrom::Start(start));
+    read.context("MPEG sequence read")?;
+    restored.context("restore MPEG sequence cursor")?;
+    Ok(
+        siglus_assets::mpeg2::find_sequence_header(&head).map(|h| SequenceInfo {
+            width: u32::from(h.width),
+            height: u32::from(h.height),
+            frame_ms: siglus_assets::mpeg2::fps_from_frame_rate_code(h.frame_rate_code)
+                .map_or(1000. / 29.97, |fps| 1000. / f64::from(fps)),
+        }),
+    )
+}
 fn video_frame(
     f: &na_mpeg2_decoder::Frame,
     crop: Option<(u32, u32)>,
@@ -77,20 +101,9 @@ pub fn decode_video<R: Read + Seek>(
         stats.cancelled = true;
         return Ok(stats);
     }
-    let start = reader.stream_position()?;
-    let mut head = Vec::new();
-    reader
-        .by_ref()
-        .take(64 * 1024)
-        .read_to_end(&mut head)
-        .context("MPEG sequence read")?;
-    reader.seek(SeekFrom::Start(start))?;
-    let header = siglus_assets::mpeg2::find_sequence_header(&head);
-    let per_frame = header
-        .as_ref()
-        .and_then(|h| siglus_assets::mpeg2::fps_from_frame_rate_code(h.frame_rate_code))
-        .map_or(1000. / 29.97, |fps| 1000. / f64::from(fps));
-    let crop = header.map(|h| (u32::from(h.width), u32::from(h.height)));
+    let header = sequence_info(&mut reader)?;
+    let per_frame = header.map_or(1000. / 29.97, |h| h.frame_ms);
+    let crop = header.map(|h| (h.width, h.height));
     let mut pipe = na_mpeg2_decoder::MpegVideoPipeline::new();
     let mut bytes = vec![0; CHUNK_BYTES];
     let mut alive = true;
@@ -293,6 +306,42 @@ pub fn decode_audio<R: Read>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sequence_metadata_preserves_the_capability_cursor() {
+        let bytes = include_bytes!("../tests/fixtures/red_blue.mpg");
+        let mut reader = std::io::Cursor::new(bytes);
+        let info = sequence_info(&mut reader).unwrap().unwrap();
+        assert!(info.width > 0 && info.height > 0 && info.frame_ms > 0.);
+        assert_eq!(reader.position(), 0);
+        struct PartialFailure {
+            position: u64,
+        }
+        impl Read for PartialFailure {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                if self.position > 0 {
+                    return Err(std::io::Error::other("partial source fault"));
+                }
+                out[0] = 0;
+                self.position += 1;
+                Ok(1)
+            }
+        }
+        impl Seek for PartialFailure {
+            fn seek(&mut self, target: SeekFrom) -> std::io::Result<u64> {
+                match target {
+                    SeekFrom::Current(0) => Ok(self.position),
+                    SeekFrom::Start(p) => {
+                        self.position = p;
+                        Ok(p)
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        let mut reader = PartialFailure { position: 0 };
+        assert!(sequence_info(&mut reader).is_err());
+        assert_eq!(reader.position, 0);
+    }
     #[test]
     fn native_crop_and_pts_keep_top_left_pixels_and_signed_time() {
         let mut frame =

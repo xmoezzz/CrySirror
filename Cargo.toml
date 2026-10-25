@@ -26,6 +26,7 @@ members = [
     "crates/siglus-upstream/siglus_scene_vm",
     "crates/crysirror-ue-import",
     "crates/crysirror-video",
+    "crates/crysirror-reallive",
 ]
 exclude = [
 ]
@@ -57,6 +58,7 @@ crysirror-siglus-vm = { path = "crates/crysirror-siglus-vm" }
 crysirror-asset = { path = "crates/crysirror-asset" }
 crysirror-engine = { path = "crates/crysirror-engine" }
 crysirror-script-js = { path = "crates/crysirror-script-js" }
+crysirror-reallive = { path = "crates/crysirror-reallive" }
 crysirror-author = { path = "crates/crysirror-author" }
 # Vendored original Siglus SceneVm (MPL-2.0), headless profile; see crates/siglus-upstream/UPSTREAM.md.
 siglus_scene_vm = { path = "crates/siglus-upstream/siglus_scene_vm", default-features = false }

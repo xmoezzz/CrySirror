@@ -2,10 +2,10 @@
 //! Engine-owned CPU text service, independent of renderer, window and native VMs.
 //! Basic layout is explicit; native frontends may submit positioned glyphs.
 #![forbid(unsafe_code)]
-use ab_glyph::{point, Font, FontArc, Glyph, GlyphId, PxScale, ScaleFont};
-use anyhow::{ensure, Context, Result};
+use ab_glyph::{Font, FontArc, Glyph, GlyphId, PxScale, ScaleFont, point};
+use anyhow::{Context, Result, ensure};
 use crysirror_core::{
-    service::{Glyph as PositionedGlyph, TextService, SIMPLE_TEXT_LAYOUT},
+    service::{Glyph as PositionedGlyph, SIMPLE_TEXT_LAYOUT, TextService},
     state::TextRun,
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -24,6 +24,25 @@ pub struct TextSystem {
     font_sources: BTreeMap<String, (Arc<[u8]>, u32)>,
 }
 impl TextSystem {
+    /// Metrics from the same engine font resource used by retained glyph runs.
+    pub fn metrics(
+        &self,
+        alias: &str,
+        size: f32,
+        character: char,
+    ) -> Result<crysirror_core::service::FontMetrics> {
+        ensure!(
+            size.is_finite() && (1.0..=512.0).contains(&size),
+            "font metric size"
+        );
+        let face = self.font(alias)?;
+        let scaled = face.as_scaled(PxScale::from(size));
+        Ok(crysirror_core::service::FontMetrics {
+            ascent: scaled.ascent(),
+            descent: scaled.descent(),
+            advance: scaled.h_advance(face.glyph_id(character)),
+        })
+    }
     pub fn add_font(&mut self, alias: &str, bytes: Vec<u8>) -> Result<()> {
         self.add_font_face(alias, bytes, 0)
     }
@@ -67,7 +86,11 @@ impl TextSystem {
             .0)
     }
     pub fn key(&self, text: &TextRun) -> Result<String> {
-        ensure!(text.layout_profile==SIMPLE_TEXT_LAYOUT,"layout '{}' is not implemented; native RFVP/Siglus layout must be provided by its adapter",text.layout_profile);
+        ensure!(
+            text.layout_profile == SIMPLE_TEXT_LAYOUT,
+            "layout '{}' is not implemented; native RFVP/Siglus layout must be provided by its adapter",
+            text.layout_profile
+        );
         let (_, digest) = self.fonts.get(&text.font).with_context(|| {
             format!(
                 "font alias '{}' is not loaded; provide --font or project.fonts",
@@ -234,9 +257,11 @@ mod tests {
     use super::*;
     #[test]
     fn invalid_font_is_an_error() {
-        assert!(TextSystem::default()
-            .add_font("bad", vec![0, 1, 2])
-            .is_err());
+        assert!(
+            TextSystem::default()
+                .add_font("bad", vec![0, 1, 2])
+                .is_err()
+        );
     }
     #[test]
     fn legacy_layout_is_not_silently_approximated() {
@@ -254,11 +279,13 @@ mod tests {
             layout_profile: "siglus-ruby".into(),
         };
         let mut system = TextSystem::default();
-        assert!(system
-            .key(&t)
-            .unwrap_err()
-            .to_string()
-            .contains("not implemented"));
+        assert!(
+            system
+                .key(&t)
+                .unwrap_err()
+                .to_string()
+                .contains("not implemented")
+        );
         assert_eq!(
             TextService::layout(&mut system, &t),
             Err(crysirror_core::Error::Unsupported("text layout profile"))
@@ -266,12 +293,16 @@ mod tests {
     }
     #[test]
     fn explicit_glyph_surface_is_bounded_before_allocation() {
-        assert!(TextSystem::default()
-            .rasterize_glyphs("x", 16, [u32::MAX, u32::MAX], &[])
-            .is_err());
-        assert!(TextSystem::default()
-            .rasterize_glyphs("x", 0, [1, 1], &[])
-            .is_err());
+        assert!(
+            TextSystem::default()
+                .rasterize_glyphs("x", 16, [u32::MAX, u32::MAX], &[])
+                .is_err()
+        );
+        assert!(
+            TextSystem::default()
+                .rasterize_glyphs("x", 0, [1, 1], &[])
+                .is_err()
+        );
     }
     #[test]
     #[ignore = "requires a caller-supplied licensed font via CRYSIRROR_TEST_FONT; none bundled"]
@@ -310,8 +341,10 @@ mod tests {
         }
         let mut invalid = glyphs;
         invalid[0].glyph_id = u32::MAX;
-        assert!(system
-            .rasterize_glyphs("fixture", 24, [128, 96], &invalid)
-            .is_err());
+        assert!(
+            system
+                .rasterize_glyphs("fixture", 24, [128, 96], &invalid)
+                .is_err()
+        );
     }
 }

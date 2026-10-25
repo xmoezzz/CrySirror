@@ -58,6 +58,13 @@ declare class Bitmap {
   /** Release this client's surface slot; return whether it existed. */
   remove(slot: number): boolean;
 }
+/** Client-scoped retained drawing canvases backed by inspectable engine Layer nodes. */
+declare class Canvases {
+  /** Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs. */
+  apply(commands: Record<string, any>[]): void;
+  /** Inspect this client's canvas dimensions and logical draw nodes, or null when absent. No flattened native frame is returned. */
+  get(id: number): Record<string, any> | null;
+}
 /** A project client: a VM peer (data VM, Siglus SceneVm, ...) with its own scheduling, waits and saves. */
 declare class Client {
   /** Project client name. */
@@ -287,6 +294,10 @@ declare class Layers {
   setTransform(id: number, transform: Record<string, any>): void;
   /** Inherited visibility. */
   setVisible(id: number, visible: boolean): void;
+  /** Engine-owned glyph reveal {visible,total,complete}, or null for an absent/non-glyph layer. */
+  revealStatus(id: number): Record<string, any> | null;
+  /** Show the complete positioned text run without a VM-private reveal clock. */
+  completeReveal(id: number): void;
   /** Inherited opacity 0..255. */
   setOpacity(id: number, opacity: number): void;
   /** Explicit [major, minor] draw order. */
@@ -295,7 +306,7 @@ declare class Layers {
   setClip(id: number, clip: number[] | null): void;
   /** Siglus-style 2D filter {mono, invert, bright, dark, color_rate, color, add, tone_curve?:{asset,row,saturation}, mask?:{asset,gray_alpha}, alpha_test, distortion?:{kind:'mosaic'|'raster'|'radial_blur'|'threshold_fade',...}} or null. */
   setFilter(id: number, filter: Record<string, any> | null): void;
-  /** Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}. */
+  /** Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'ordered_dither'{cell:[x,y],diagonal?,steps}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}. */
   transition(transition: Record<string, any>): void;
   /** Finish this client's transition now (skip). */
   endTransition(): void;
@@ -318,6 +329,15 @@ declare class Localization {
   profile(): Record<string, any>;
   /** Validate and atomically restore exported configuration. */
   applyProfile(profile: Record<string, any>): void;
+}
+/** Shared asynchronous media resources; decoding, clocks and errors belong to the engine. */
+declare class Media {
+  /** Start a scoped media resource; options {loop?:false,audio?:true,gain?:1}. Returns its logical image resource path for Layer/Canvas/Material APIs; inspect status for loading, playback and errors. */
+  play(id: number, asset: string, options: Record<string, any> | null): string;
+  /** Stop only this client's media resource. */
+  stop(id: number): void;
+  /** Media state, position_ms, frame_pts_ms, published/decoded frames, audio_started, loops_completed and error, or null when absent. */
+  status(id: number): Record<string, any> | null;
 }
 /** Persistent client-isolated rigid bodies, CCD, collision queries and joints. Simulation runs in every Runtime 16 ms world step, including pure data projects. Snapshots rebuild from saved pose, velocity, forces and joint declarations; solver warm starts are not serialized. */
 declare class Physics {
@@ -421,7 +441,7 @@ declare class Text {
   /** Remove block and release its dynamic surface. */
   remove(name: string): void;
 }
-/** Retained widgets (panel/label/button/toggle/slider) with focus, capture and modal routing. */
+/** Retained widgets (panel/label/button/toggle/slider/text_field) with focus, capture and modal routing. */
 declare class Ui {
   /** Events produced by the last UI tick: {client, id, kind, value}. */
   readonly events: Record<string, any>[];
@@ -437,6 +457,16 @@ declare class Ui {
   setEnabled(id: number, enabled: boolean): void;
   /** Toggle/slider value. */
   setValue(id: number, value: number): void;
+  /** Set engine cursor presentation visibility. */
+  setCursorVisible(visible: boolean): void;
+  /** Set engine presentation title. */
+  setTitle(text: string): void;
+  /** Focus an enabled, visible text field owned by this client. */
+  focusTextField(id: number): void;
+  /** Append committed single-line Unicode to the focused text field, up to max_length Unicode scalars. */
+  insertText(text: string): void;
+  /** Remove the final Unicode scalar from a client-owned text field. */
+  backspace(id: number): void;
   /** Label/button text and font alias. */
   setText(id: number, text: string, font: string | null): void;
 }
@@ -519,3 +549,5 @@ declare const bitmap: Bitmap;
 declare const resources: Resources;
 declare const puppets: Puppets;
 declare const physics: Physics;
+declare const canvases: Canvases;
+declare const media: Media;

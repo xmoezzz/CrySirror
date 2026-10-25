@@ -2,6 +2,7 @@
 //! Real wgpu 0.20 backend, independent of winit and native VM instruction sets.
 #![forbid(unsafe_code)]
 pub mod geometry;
+mod glyph_run;
 pub mod lights;
 pub mod particles;
 pub mod pbr;
@@ -11,19 +12,19 @@ mod raytrace;
 pub mod text;
 mod transition;
 pub mod vsm;
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 pub use crysirror_core::graphics::{GraphicsCapabilities, RenderingPath};
 use crysirror_core::state::{ClientId, Color, Rect, SceneState, TextRun, Visual};
 use crysirror_runtime::{assets::Assets, model::Scene3d};
 use crysirror_scene::{
-    layer::{rectangle, Blend, Paint},
     Primitive,
+    layer::{Blend, Paint, rectangle},
 };
 use geometry::{Vertex2d, Vertex3d, Viewport};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
 };
 use wgpu::util::DeviceExt;
 
@@ -118,18 +119,38 @@ fn filter_gpu(f: &crysirror_scene::layer::LayerFilter) -> FilterGpu {
     let (kind, p) = match f.distortion {
         None => (0., [0.; 5]),
         Some(Distortion::Mosaic { cut, aspect }) => (1., [cut, aspect, 0., 0., 0.]),
-        Some(Distortion::Raster { vertical, fractions, waves, power, progress }) => {
-            (if vertical { 3. } else { 2. }, [fractions, waves, power, progress, 0.])
-        }
-        Some(Distortion::RadialBlur { center, power, coeff }) => (4., [center[0], center[1], power, coeff, 0.]),
-        Some(Distortion::ThresholdFade { fade, threshold, invert }) => (if invert { 6. } else { 5. }, [fade, threshold, 0., 0., 0.]),
+        Some(Distortion::Raster {
+            vertical,
+            fractions,
+            waves,
+            power,
+            progress,
+        }) => (
+            if vertical { 3. } else { 2. },
+            [fractions, waves, power, progress, 0.],
+        ),
+        Some(Distortion::RadialBlur {
+            center,
+            power,
+            coeff,
+        }) => (4., [center[0], center[1], power, coeff, 0.]),
+        Some(Distortion::ThresholdFade {
+            fade,
+            threshold,
+            invert,
+        }) => (if invert { 6. } else { 5. }, [fade, threshold, 0., 0., 0.]),
     };
     let curve = f.tone_curve.as_ref();
     FilterGpu {
         a: [f.mono, f.invert, f.bright, f.dark],
         b: [f.color_rate, f.color[0], f.color[1], f.color[2]],
         c: [f.add[0], f.add[1], f.add[2], flags as f32],
-        d: [curve.map_or(0., |t| t.row), curve.map_or(0., |t| t.saturation), kind, p[0]],
+        d: [
+            curve.map_or(0., |t| t.row),
+            curve.map_or(0., |t| t.saturation),
+            kind,
+            p[0],
+        ],
         e: [p[1], p[2], p[3], p[4]],
     }
 }
@@ -148,6 +169,7 @@ pub struct Renderer {
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     textures: BTreeMap<String, Texture>,
+    glyph_cells: BTreeMap<String, glyph_run::GlyphBitmap>,
     camera_buffer: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
     scene3d: Option<Scene3d>,
@@ -295,7 +317,11 @@ impl Renderer {
             };
             d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("layer compositing"),
-                layout: Some(if filtered { &filtered_layout } else { &quad_layout }),
+                layout: Some(if filtered {
+                    &filtered_layout
+                } else {
+                    &quad_layout
+                }),
                 vertex: wgpu::VertexState {
                     module: &quad_shader,
                     entry_point: "vs_main",
@@ -308,7 +334,8 @@ impl Renderer {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &quad_shader,
-                    entry_point: match (filtered, matches!(blend, Blend::Multiply | Blend::Screen)) {
+                    entry_point: match (filtered, matches!(blend, Blend::Multiply | Blend::Screen))
+                    {
                         (false, true) => "fs_premultiply",
                         (false, false) => "fs_main",
                         (true, true) => "fs_filtered_premultiply",
@@ -414,7 +441,8 @@ impl Renderer {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let puppets = puppet::PuppetRenderer::new(d, &texture_layout, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let puppets =
+            puppet::PuppetRenderer::new(d, &texture_layout, wgpu::TextureFormat::Rgba8UnormSrgb);
         Self {
             puppets,
             format,
@@ -429,6 +457,7 @@ impl Renderer {
             texture_layout,
             sampler,
             textures: BTreeMap::new(),
+            glyph_cells: BTreeMap::new(),
             camera_buffer,
             camera_bind,
             scene3d: None,
@@ -448,18 +477,36 @@ impl Renderer {
         self.pbr.as_ref()
     }
     /// This frame's screen transition (ADR 0022); `None` presents directly.
-    pub fn set_transition(&mut self, transition: Option<crysirror_scene::layer::TransitionFrame>) -> Result<()> {
+    pub fn set_transition(
+        &mut self,
+        transition: Option<crysirror_scene::layer::TransitionFrame>,
+    ) -> Result<()> {
         if let Some(t) = &transition {
             ensure!(
                 crysirror_scene::layer::transition_code_supported(t.code) && t.progress.is_finite(),
                 "unsupported transition"
             );
+            if t.code == crysirror_scene::layer::ORDERED_DITHER_TRANSITION_CODE {
+                ensure!(
+                    (1..=8192).contains(&t.options[0])
+                        && (1..=8192).contains(&t.options[1])
+                        && (0..=1).contains(&t.options[2])
+                        && (1..=65_536).contains(&t.options[3])
+                        && t.mask.is_none()
+                        && !t.generated_mask,
+                    "invalid ordered dither transition parameters"
+                );
+            }
         }
         self.transition = transition;
         Ok(())
     }
     fn sync_transition_mask(&mut self, assets: &mut Assets) -> Result<()> {
-        let Some((owner, asset)) = self.transition.as_ref().and_then(|t| Some((t.owner, t.mask.clone()?))) else {
+        let Some((owner, asset)) = self
+            .transition
+            .as_ref()
+            .and_then(|t| Some((t.owner, t.mask.clone()?)))
+        else {
             return Ok(());
         };
         let key = Self::image_key(assets, owner, &asset)?;
@@ -470,13 +517,17 @@ impl Renderer {
             Some(s) => (s.width, s.height, s.rgba.to_vec()),
             None => {
                 let bytes = assets.read_for(ClientId(owner), &asset)?;
-                let image = assets.decode_image(ClientId(owner),&asset,bytes.as_ref())?;
+                let image = assets.decode_image(ClientId(owner), &asset, bytes.as_ref())?;
                 (image.width, image.height, image.rgba)
             }
         };
         let limit = self.gpu.device.limits().max_texture_dimension_2d;
-        ensure!(w > 0 && h > 0 && w <= limit && h <= limit, "transition mask dimensions");
-        self.transitions.set_mask(&self.gpu.device, &self.gpu.queue, key, w, h, &rgba);
+        ensure!(
+            w > 0 && h > 0 && w <= limit && h <= limit,
+            "transition mask dimensions"
+        );
+        self.transitions
+            .set_mask(&self.gpu.device, &self.gpu.queue, key, w, h, &rgba);
         Ok(())
     }
     /// Select the PBR path with an extracted scene, or the legacy path with `None`.
@@ -530,6 +581,9 @@ impl Renderer {
             p.paint.validate()?;
             ensure!(
                 p.size.iter().all(|v| *v > 0 && *v <= 16384)
+                    && p.extent
+                        .iter()
+                        .all(|v| v.is_finite() && *v > 0. && *v <= 16384.)
                     && p.quad.iter().flatten().all(|v| v.is_finite())
                     && p.quad.iter().all(|v| v[3] > 0.)
                     && p.uv.iter().all(|v| v.is_finite()),
@@ -620,7 +674,10 @@ impl Renderer {
         Ok(())
     }
     fn puppet_size(p: &Primitive) -> [u32; 2] {
-        [p.size[0].clamp(1, puppet::MAX_TARGET), p.size[1].clamp(1, puppet::MAX_TARGET)]
+        [
+            p.size[0].clamp(1, puppet::MAX_TARGET),
+            p.size[1].clamp(1, puppet::MAX_TARGET),
+        ]
     }
     /// An empty sRGB texture the GPU renders into (puppet layers).
     fn render_texture(&mut self, key: String, size: [u32; 2]) -> Result<()> {
@@ -631,7 +688,11 @@ impl Renderer {
         );
         let texture = self.gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some(&key),
-            size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -640,34 +701,64 @@ impl Renderer {
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
-        let bind = self.gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(&key),
-            layout: &self.texture_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
-            ],
-        });
-        self.textures.insert(key, Texture { bind, view, _texture: texture, bytes });
+        let bind = self
+            .gpu
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&key),
+                layout: &self.texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
+        self.textures.insert(
+            key,
+            Texture {
+                bind,
+                view,
+                _texture: texture,
+                bytes,
+            },
+        );
         Ok(())
     }
     /// Texture-cache key of an image asset (dynamic surfaces carry their revision).
     fn image_key(assets: &Assets, owner: u32, asset: &str) -> Result<String> {
         Ok(match assets.surface(ClientId(owner), asset) {
-            Some(s) => format!("surface:{}@{}", assets.key(ClientId(owner), asset)?, s.revision),
+            Some(s) => format!(
+                "surface:{}@{}",
+                assets.key(ClientId(owner), asset)?,
+                s.revision
+            ),
             None => format!("image:{}", assets.key(ClientId(owner), asset)?),
         })
     }
-    fn ensure_image(&mut self, assets: &mut Assets, owner: u32, asset: &str, key: &str) -> Result<()> {
+    fn ensure_image(
+        &mut self,
+        assets: &mut Assets,
+        owner: u32,
+        asset: &str,
+        key: &str,
+    ) -> Result<()> {
         if self.textures.contains_key(key) {
             return Ok(());
         }
         if key.starts_with("surface:") {
-            let s = assets.surface(ClientId(owner), asset).context("surface vanished")?.clone();
+            let s = assets
+                .surface(ClientId(owner), asset)
+                .context("surface vanished")?
+                .clone();
             return self.upload(key.to_owned(), s.width, s.height, &s.rgba);
         }
         let bytes = assets.read_for(ClientId(owner), asset)?;
-        let image = assets.decode_image(ClientId(owner),asset,bytes.as_ref())?;
+        let image = assets.decode_image(ClientId(owner), asset, bytes.as_ref())?;
         self.upload(key.to_owned(), image.width, image.height, &image.rgba)
     }
     fn prepare(
@@ -708,6 +799,9 @@ impl Renderer {
             ));
         }
         frame.sort_by_key(|p| (p.order, p.owner, p.id, p.sub));
+        // Retained runs remain logical engine state; only extraction expands
+        // them to independent reusable glyph resources and transformed quads.
+        let frame = self.expand_glyph_runs(frame, assets)?;
         let text = |p: &Primitive| -> Option<TextRun> {
             if let Paint::Text {
                 text,
@@ -748,6 +842,7 @@ impl Renderer {
                     None => Ok(format!("image:{}", assets.key(ClientId(p.owner), asset)?)),
                 },
                 Paint::Text { .. } => assets.text.key(&text(p).expect("text paint")),
+                Paint::GlyphRun { .. } => glyph_run::key(assets, &p.paint),
                 Paint::Puppet { .. } => {
                     let [w, h] = Self::puppet_size(p);
                     Ok(format!("puppet:{}:{}:{w}x{h}", p.owner, p.id))
@@ -774,18 +869,29 @@ impl Renderer {
         let mut puppet_textures: Vec<Vec<String>> = Vec::new();
         for p in &frame {
             let names = match (&p.paint, &p.puppet) {
-                (Paint::Puppet { .. }, Some(f)) => f.textures.iter().map(|t| Self::image_key(assets, p.owner, t)).collect::<Result<Vec<_>>>()?,
+                (Paint::Puppet { .. }, Some(f)) => f
+                    .textures
+                    .iter()
+                    .map(|t| Self::image_key(assets, p.owner, t))
+                    .collect::<Result<Vec<_>>>()?,
                 _ => Vec::new(),
             };
             used.extend(names.iter().cloned());
             puppet_textures.push(names);
         }
-        self.puppets.retain(&keys.iter().filter(|k| k.starts_with("puppet:")).cloned().collect());
+        self.puppets.retain(
+            &keys
+                .iter()
+                .filter(|k| k.starts_with("puppet:"))
+                .cloned()
+                .collect(),
+        );
         for (m, c) in filter_keys.iter().flatten() {
             used.insert(m.clone());
             used.insert(c.clone());
         }
         self.textures.retain(|key, _| used.contains(key.as_str()));
+        self.glyph_cells.retain(|key, _| used.contains(key));
         if filter_keys.iter().any(Option::is_some) {
             if !self.textures.contains_key("solid:white") {
                 self.upload("solid:white".into(), 1, 1, &[255; 4])?;
@@ -795,7 +901,9 @@ impl Renderer {
                 self.upload("curve:identity".into(), 256, 1, &ramp)?;
             }
             for (p, fk) in frame.iter().zip(&filter_keys) {
-                let (Some(f), Some((mk, ck))) = (&p.filter, fk) else { continue };
+                let (Some(f), Some((mk, ck))) = (&p.filter, fk) else {
+                    continue;
+                };
                 if let Some(m) = &f.mask {
                     self.ensure_image(assets, p.owner, &m.asset, mk)?;
                 }
@@ -804,10 +912,18 @@ impl Renderer {
                 }
             }
         }
-        let mut records = vec![FilterGpu { a: [0.; 4], b: [0.; 4], c: [0.; 4], d: [0.; 4], e: [0.; 4] }];
+        let mut records = vec![FilterGpu {
+            a: [0.; 4],
+            b: [0.; 4],
+            c: [0.; 4],
+            d: [0.; 4],
+            e: [0.; 4],
+        }];
         let mut vertices = Vec::with_capacity(frame.len() * 6);
         let mut draws = Vec::new();
-        for (((p, key), fkeys), tex_keys) in frame.iter().zip(keys).zip(filter_keys).zip(puppet_textures) {
+        for (((p, key), fkeys), tex_keys) in
+            frame.iter().zip(keys).zip(filter_keys).zip(puppet_textures)
+        {
             let color = match &p.paint {
                 Paint::Solid { color } => {
                     if !self.textures.contains_key(&key) {
@@ -825,7 +941,8 @@ impl Renderer {
                     }
                     if !self.textures.contains_key(&key) {
                         let bytes = assets.read_for(ClientId(p.owner), asset)?;
-                        let image = assets.decode_image(ClientId(p.owner),asset,bytes.as_ref())?;
+                        let image =
+                            assets.decode_image(ClientId(p.owner), asset, bytes.as_ref())?;
                         self.upload(key.clone(), image.width, image.height, &image.rgba)?;
                     }
                     *tint
@@ -849,7 +966,12 @@ impl Renderer {
                         &key,
                         size,
                         p.puppet.as_deref(),
-                        &|i| tex_keys.get(i as usize).and_then(|k| textures.get(k)).map(|t| &t.bind),
+                        &|i| {
+                            tex_keys
+                                .get(i as usize)
+                                .and_then(|k| textures.get(k))
+                                .map(|t| &t.bind)
+                        },
                         &textures[&key].view,
                     )?;
                     *tint
@@ -859,6 +981,17 @@ impl Renderer {
                         let run = text(p).expect("text paint");
                         let pixels = assets.text.rasterize(&run)?;
                         self.upload(key.clone(), p.size[0], p.size[1], &pixels)?;
+                    }
+                    *color
+                }
+                Paint::GlyphRun { color, .. } => {
+                    if !self.textures.contains_key(&key) {
+                        let cell = self
+                            .glyph_cells
+                            .get(&key)
+                            .context("glyph resource vanished")?;
+                        let (width, height, rgba) = (cell.width, cell.height, cell.rgba.clone());
+                        self.upload(key.clone(), width, height, &rgba)?;
                     }
                     *color
                 }
@@ -885,7 +1018,11 @@ impl Renderer {
         self.filter_binds.clear();
         if records.len() > 1 {
             let bytes: &[u8] = bytemuck::cast_slice(&records);
-            if self.filter_buffer.as_ref().map_or(true, |b| b.size() < bytes.len() as u64) {
+            if self
+                .filter_buffer
+                .as_ref()
+                .map_or(true, |b| b.size() < bytes.len() as u64)
+            {
                 self.filter_buffer = Some(self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("layer filters"),
                     size: (bytes.len() as u64).next_power_of_two(),
@@ -900,15 +1037,31 @@ impl Renderer {
                 if self.filter_binds.contains_key(&(mk.clone(), ck.clone())) {
                     continue;
                 }
-                let bind = self.gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("layer filter"),
-                    layout: &self.filter_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&self.textures[mk].view) },
-                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.textures[ck].view) },
-                    ],
-                });
+                let bind = self
+                    .gpu
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("layer filter"),
+                        layout: &self.filter_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &self.textures[mk].view,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &self.textures[ck].view,
+                                ),
+                            },
+                        ],
+                    });
                 self.filter_binds.insert((mk.clone(), ck.clone()), bind);
             }
         }
@@ -1167,7 +1320,11 @@ impl Renderer {
                 match &draw.filter {
                     Some(k) => {
                         pass.set_pipeline(&self.filtered_pipelines[blend_index]);
-                        pass.set_bind_group(1, self.filter_binds.get(k).context("filter bind group")?, &[]);
+                        pass.set_bind_group(
+                            1,
+                            self.filter_binds.get(k).context("filter bind group")?,
+                            &[],
+                        );
                     }
                     None => pass.set_pipeline(&self.quad_pipelines[blend_index]),
                 }
@@ -1183,7 +1340,13 @@ impl Renderer {
                 pass.draw(draw.range.clone(), 0..1);
             }
         }
-        self.transitions.finish(&self.gpu.device, &mut encoder, target.view, self.transition.as_ref(), canvas);
+        self.transitions.finish(
+            &self.gpu.device,
+            &mut encoder,
+            target.view,
+            self.transition.as_ref(),
+            canvas,
+        );
         self.gpu.queue.submit(Some(encoder.finish()));
         if let Some(p) = &mut self.pbr {
             p.after_submit();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Bounded packet decoding over caller-owned seekable media sources. No device
 //! or ambient filesystem access. File authority belongs to the host VFS.
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use std::{
     io::{Cursor, Seek, SeekFrom},
     sync::Arc,
@@ -26,6 +26,42 @@ pub trait AudioSource: Send {
     fn read(&mut self, out: &mut [StereoFrame]) -> Result<usize>;
     /// Exact decoded-frame position; packet seeks decode/discard the prefix.
     fn seek(&mut self, frame: u64) -> Result<()>;
+}
+
+/// Unified resident-resource decoder used by channels, data-VM playback and
+/// engine Audio APIs. Native codecs share the same AudioSource/mixer contract.
+pub fn open_memory(bytes: Arc<[u8]>, extension: Option<&str>) -> Result<Box<dyn AudioSource>> {
+    if let Some(source) = crate::native::open_if_native(bytes.clone())? {
+        return Ok(source);
+    }
+    Ok(Box::new(Stream::from_bytes(bytes, extension)?))
+}
+
+/// Unified seekable-provider decoder. Standard streams still decode packets;
+/// NWA reads only a bounded header/table and its current block. Non-seekable
+/// standard sources keep the existing Symphonia path unchanged.
+pub fn open_reader(
+    mut reader: Box<dyn MediaSource>,
+    extension: Option<&str>,
+) -> Result<Box<dyn AudioSource>> {
+    use std::io::Read;
+    if reader.is_seekable() {
+        let start = reader.stream_position()?;
+        let mut prefix = [0u8; 4];
+        let mut count = 0;
+        while count < prefix.len() {
+            let n = reader.read(&mut prefix[count..])?;
+            if n == 0 {
+                break;
+            }
+            count += n;
+        }
+        reader.seek(SeekFrom::Start(start))?;
+        if crate::native::may_be_nwa(&prefix[..count]) {
+            return crate::native::open_reader(reader);
+        }
+    }
+    Ok(Box::new(Stream::open(reader, extension)?))
 }
 
 #[derive(Clone, Debug)]

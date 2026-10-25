@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Narrow host services. Backends implement these; legacy adapters consume them.
 use crate::{
+    Result,
     path::VfsPath,
     state::{ClientId, Command, SceneState, TextRun},
-    Result,
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
 
@@ -132,6 +132,48 @@ pub trait FileSystem {
     fn write_atomic(&mut self, client: ClientId, path: &VfsPath, data: &[u8]) -> Result<()>;
 }
 
+/// Engine media resources, independent of a script VM or a window.
+#[derive(Clone, Debug)]
+pub enum MediaRequest {
+    Play {
+        id: u32,
+        asset: String,
+        looping: bool,
+        audio: bool,
+        gain: f32,
+    },
+    Stop {
+        id: u32,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaPhase {
+    Loading,
+    Playing,
+    Ended,
+    Stopped,
+    Failed,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct MediaInfo {
+    pub phase: MediaPhase,
+    pub position_ms: u64,
+    pub published_frames: u64,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct FontMetrics {
+    pub ascent: f32,
+    pub descent: f32,
+    pub advance: f32,
+}
+#[derive(Clone, Copy, Debug)]
+pub enum EngineQuery {
+    Layer(u32),
+    Canvas(u32),
+    UiWidget(u32),
+    UiEvents,
+}
+
 /// A thread-safe capability handle to one client's namespaces, for engines
 /// that read synchronously from their own threads or stream large packs
 /// (ADR 0008). It carries no authority beyond that client's asset (read-only,
@@ -165,6 +207,28 @@ pub trait ClientStorage: Send + Sync {
 }
 
 pub trait HostServices: FileSystem {
+    fn audio_playing(&self, _client: ClientId, _channel: u32) -> Result<bool> {
+        Err(crate::Error::Unsupported("engine audio status"))
+    }
+    fn query_engine(&mut self, _client: ClientId, _query: EngineQuery) -> Result<Vec<u8>> {
+        Err(crate::Error::Unsupported("engine state query"))
+    }
+    fn image_size(&mut self, _client: ClientId, _asset: &str) -> Result<[u32; 2]> {
+        Err(crate::Error::Unsupported("engine image metadata"))
+    }
+    /// True only when every decoded texel has alpha 255. Uses the shared decoder.
+    fn image_is_opaque(&mut self, _client: ClientId, _asset: &str) -> Result<bool> {
+        Err(crate::Error::Unsupported("engine image alpha metadata"))
+    }
+    fn media_request(&mut self, _client: ClientId, _request: MediaRequest) -> Result<VfsPath> {
+        Err(crate::Error::Unsupported("engine media"))
+    }
+    fn media_info(&self, _client: ClientId, _id: u32) -> Result<MediaInfo> {
+        Err(crate::Error::Unsupported("engine media status"))
+    }
+    fn font_metrics(&self, _font: &str, _size: f32, _character: char) -> Result<FontMetrics> {
+        Err(crate::Error::Unsupported("engine font metrics"))
+    }
     fn submit(&mut self, client: ClientId, commands: &[Command]) -> Result<()>;
     fn now_ms(&self) -> u64;
     fn submit_audio(&mut self, _client: ClientId, _request: AudioRequest) -> Result<()> {

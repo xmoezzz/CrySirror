@@ -4,6 +4,22 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `8d83111697a3c377` (2026-10-26): shared native drawing, text, media and RealLive API adapter
+
+- Add engine-owned `Canvases.apply/get`, logical canvas surface/node/command
+  declarations, positioned `Paint.glyph_run` with `GlyphReveal`, and the named
+  `ordered_dither` transition. These resources work for ordinary data/JS clients.
+- Add shared asynchronous `Media.play/stop/status` and document runtime media
+  state/options separately from the script options `{loop, audio, gain}`.
+- Add `Ui.setTitle/setCursorVisible`, Unicode `text_field` widgets with
+  `max_length`, and `Ui.focusTextField/insertText/backspace` methods. `Ui.focus`
+  remains the existing read-only focused-widget property.
+- Add the native RealLive bytecode adapter configuration `{root, font_alias,
+  encoding, start_scene}`. **Breaking migration from removed hosting:** legacy
+  engine configuration fields remain rejected; register an engine font alias
+  and provide assets through the client capability root. No renderer or legacy
+  sound/text engine is hosted by this configuration.
+
 ## `d233217062201fa1` (2026-10-26): remove hosted engine adapters
 
 - **Breaking:** remove RFVP, BGI and RealLive hosted packages, desktop features,

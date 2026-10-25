@@ -129,7 +129,13 @@ impl NwaReader {
     }
 
     pub fn open_from_bytes(bytes: Vec<u8>) -> Result<Self> {
-        let mut file = Cursor::new(bytes);
+        Self::open_from_reader(Cursor::new(bytes))
+    }
+
+    /// Decode a caller-owned seekable source without ambient filesystem access
+    /// or copying its encoded backing store. All reads remain lazy and seekable.
+    pub fn open_from_reader<R: Read + Seek + Send + 'static>(mut file: R) -> Result<Self> {
+        let base_offset = file.stream_position()?;
         let header = read_header_from_reader(&mut file)?;
 
         let mut unit_offsets = Vec::new();
@@ -152,7 +158,7 @@ impl NwaReader {
 
         Ok(Self {
             file: Box::new(file),
-            base_offset: 0,
+            base_offset,
             header,
             unit_offsets,
             one_sample_byte_size,

@@ -2,9 +2,9 @@
 //! Adapt canonical channel voices to the shared CPU mixer so native PCM and
 //! modern mixer voices can reach one host output device.
 use crate::{
-    decoder::{StereoFrame, Stream},
-    mixer::{Mixer, MixerConfig, VoiceHandle, VoiceSpec},
     AudioDevice, AudioSystem, VoiceStart,
+    decoder::{self, StereoFrame},
+    mixer::{Mixer, MixerConfig, VoiceHandle, VoiceSpec},
 };
 use anyhow::Result;
 use crysirror_core::state::ObjectId;
@@ -34,10 +34,10 @@ impl AudioDevice for MixerDevice {
             .relative()
             .rsplit_once('.')
             .map(|(_, ext)| ext);
-        let source = Stream::from_bytes(request.bytes, extension)?;
+        let source = decoder::open_memory(request.bytes, extension)?;
         let handle = self.mixer.play(
             id.client.0,
-            Box::new(source),
+            source,
             VoiceSpec {
                 gain: f32::from(request.gain_milli) / 1000.,
                 looping: request.voice.looping,
@@ -131,10 +131,12 @@ mod tests {
         audio.sync(&scene, 0, |_, _| Ok(wav())).unwrap();
         let mut output = [[0.; 2]; 4];
         audio.render_pcm(&mut output).unwrap();
-        assert!(output
-            .iter()
-            .flatten()
-            .all(|sample| (*sample - 0.25).abs() < 1e-6));
+        assert!(
+            output
+                .iter()
+                .flatten()
+                .all(|sample| (*sample - 0.25).abs() < 1e-6)
+        );
         scene
             .apply_batch(
                 client,

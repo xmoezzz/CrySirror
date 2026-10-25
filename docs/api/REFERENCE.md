@@ -6,16 +6,16 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `d233217062201fa1`
+API fingerprint: `8d83111697a3c377`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
 ## Contents
 
 - [Globals](#globals)
-- Classes: [Audio](#class-audio), [Bitmap](#class-bitmap), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [World](#class-world)
+- Classes: [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [World](#class-world)
 - [Commands](#commands)
-- Data: [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [LayerSpec](#layerspec), [Paint](#paint), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
+- Data: [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -36,6 +36,8 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 | `resources` | [Resources](#class-resources) |
 | `puppets` | [Puppets](#class-puppets) |
 | `physics` | [Physics](#class-physics) |
+| `canvases` | [Canvases](#class-canvases) |
+| `media` | [Media](#class-media) |
 
 ## Class Audio
 
@@ -86,6 +88,19 @@ Script global: `bitmap`.
 | `info(slot: number)` | `Record<string, any>` | Return client-local width, height, revision, bytes and surface path. |
 | `remove(slot: number)` | `boolean` | Release this client's surface slot; return whether it existed. |
 
+
+## Class Canvases
+
+Client-scoped retained drawing canvases backed by inspectable engine Layer nodes.
+
+Script global: `canvases`.
+
+| Method | Returns | Description |
+|---|---|---|
+| `apply(commands: Record<string, any>[])` | `void` | Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs. |
+| `get(id: number)` | `Record<string, any> \| null` | Inspect this client's canvas dimensions and logical draw nodes, or null when absent. No flattened native frame is returned. |
+
+Commands issued: `apply` → `canvas.create`, `apply` → `canvas.clear`, `apply` → `canvas.draw`, `apply` → `canvas.set`, `apply` → `canvas.copy`, `apply` → `canvas.present`, `apply` → `canvas.hide`.
 
 ## Class Client
 
@@ -260,14 +275,16 @@ Script global: `layers`.
 | `remove(id: number)` | `void` | Remove a layer and its descendants. |
 | `setTransform(id: number, transform: Record<string, any>)` | `void` | Pivot/anchor/rotation/scale/z transform. |
 | `setVisible(id: number, visible: boolean)` | `void` | Inherited visibility. |
+| `revealStatus(id: number)` | `Record<string, any> \| null` | Engine-owned glyph reveal {visible,total,complete}, or null for an absent/non-glyph layer. |
+| `completeReveal(id: number)` | `void` | Show the complete positioned text run without a VM-private reveal clock. |
 | `setOpacity(id: number, opacity: number)` | `void` | Inherited opacity 0..255. |
 | `setOrder(id: number, order: number[])` | `void` | Explicit [major, minor] draw order. |
 | `setClip(id: number, clip: number[] \| null)` | `void` | Clip rectangle [x,y,w,h] or null. |
 | `setFilter(id: number, filter: Record<string, any> \| null)` | `void` | Siglus-style 2D filter {mono, invert, bright, dark, color_rate, color, add, tone_curve?:{asset,row,saturation}, mask?:{asset,gray_alpha}, alpha_test, distortion?:{kind:'mosaic'\|'raster'\|'radial_blur'\|'threshold_fade',...}} or null. |
-| `transition(transition: Record<string, any>)` | `void` | Screen transition from the last presented frame: {effect:{kind:'crossfade'\|'mask'{asset,fade}\|'slide'{direction}\|'mosaic'{size}\|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'\|'ease_in'\|'ease_out'\|'smooth'}. |
+| `transition(transition: Record<string, any>)` | `void` | Screen transition from the last presented frame: {effect:{kind:'crossfade'\|'mask'{asset,fade}\|'slide'{direction}\|'mosaic'{size}\|'ordered_dither'{cell:[x,y],diagonal?,steps}\|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'\|'ease_in'\|'ease_out'\|'smooth'}. |
 | `endTransition(—)` | `void` | Finish this client's transition now (skip). |
 
-Commands issued: `put` → `layer.put`, `remove` → `layer.remove`, `setTransform` → `layer.set_transform`, `setVisible` → `layer.set_visible`, `setOpacity` → `layer.set_opacity`, `setOrder` → `layer.set_order`, `setClip` → `layer.set_clip`, `setFilter` → `layer.set_filter`, `transition` → `layer.transition`, `endTransition` → `layer.end_transition`.
+Commands issued: `put` → `layer.put`, `remove` → `layer.remove`, `setTransform` → `layer.set_transform`, `setVisible` → `layer.set_visible`, `completeReveal` → `layer.complete_reveal`, `setOpacity` → `layer.set_opacity`, `setOrder` → `layer.set_order`, `setClip` → `layer.set_clip`, `setFilter` → `layer.set_filter`, `transition` → `layer.transition`, `endTransition` → `layer.end_transition`.
 
 ## Class Localization
 
@@ -289,6 +306,20 @@ Script global: `localization`.
 | `profile(—)` | `Record<string, any>` | Export locale/catalog configuration for explicit persistence. |
 | `applyProfile(profile: Record<string, any>)` | `void` | Validate and atomically restore exported configuration. |
 
+
+## Class Media
+
+Shared asynchronous media resources; decoding, clocks and errors belong to the engine.
+
+Script global: `media`.
+
+| Method | Returns | Description |
+|---|---|---|
+| `play(id: number, asset: string, options: Record<string, any> \| null)` | `string` | Start a scoped media resource; options {loop?:false,audio?:true,gain?:1}. Returns its logical image resource path for Layer/Canvas/Material APIs; inspect status for loading, playback and errors. |
+| `stop(id: number)` | `void` | Stop only this client's media resource. |
+| `status(id: number)` | `Record<string, any> \| null` | Media state, position_ms, frame_pts_ms, published/decoded frames, audio_started, loops_completed and error, or null when absent. |
+
+Commands issued: `play` → `media.play`, `stop` → `media.stop`, `status` → `service.media_status`.
 
 ## Class Physics
 
@@ -404,7 +435,7 @@ Script global: `text`.
 
 ## Class Ui
 
-Retained widgets (panel/label/button/toggle/slider) with focus, capture and modal routing.
+Retained widgets (panel/label/button/toggle/slider/text_field) with focus, capture and modal routing.
 
 Script global: `ui`.
 
@@ -420,9 +451,14 @@ Script global: `ui`.
 | `setVisible(id: number, visible: boolean)` | `void` | Show/hide. |
 | `setEnabled(id: number, enabled: boolean)` | `void` | Enable/disable input. |
 | `setValue(id: number, value: number)` | `void` | Toggle/slider value. |
+| `setCursorVisible(visible: boolean)` | `void` | Set engine cursor presentation visibility. |
+| `setTitle(text: string)` | `void` | Set engine presentation title. |
+| `focusTextField(id: number)` | `void` | Focus an enabled, visible text field owned by this client. |
+| `insertText(text: string)` | `void` | Append committed single-line Unicode to the focused text field, up to max_length Unicode scalars. |
+| `backspace(id: number)` | `void` | Remove the final Unicode scalar from a client-owned text field. |
 | `setText(id: number, text: string, font: string \| null)` | `void` | Label/button text and font alias. |
 
-Commands issued: `put` → `ui.put`, `remove` → `ui.remove`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setText` → `ui.set_text`.
+Commands issued: `put` → `ui.put`, `remove` → `ui.remove`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setText` → `ui.set_text`, `setTitle` → `ui.set_title`, `setCursorVisible` → `ui.set_cursor_visible`, `insertText` → `ui.insert_text`, `backspace` → `ui.backspace`, `focusTextField` → `ui.focus`.
 
 ## Class World
 
@@ -507,6 +543,7 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | layer | `remove` | `Layers.remove` |
 | layer | `set_transform` | `Layers.setTransform` |
 | layer | `set_visible` | `Layers.setVisible` |
+| layer | `complete_reveal` | `Layers.completeReveal` |
 | layer | `set_opacity` | `Layers.setOpacity` |
 | layer | `set_order` | `Layers.setOrder` |
 | layer | `set_clip` | `Layers.setClip` |
@@ -514,12 +551,27 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | layer | `transition` | `Layers.transition` |
 | layer | `end_transition` | `Layers.endTransition` |
 | layer | `puppet` | `Puppets.setParameter` |
+| canvas | `create` | `Canvases.apply` |
+| canvas | `clear` | `Canvases.apply` |
+| canvas | `draw` | `Canvases.apply` |
+| canvas | `set` | `Canvases.apply` |
+| canvas | `copy` | `Canvases.apply` |
+| canvas | `present` | `Canvases.apply` |
+| canvas | `hide` | `Canvases.apply` |
 | ui | `put` | `Ui.put` |
 | ui | `remove` | `Ui.remove` |
 | ui | `set_visible` | `Ui.setVisible` |
 | ui | `set_enabled` | `Ui.setEnabled` |
 | ui | `set_value` | `Ui.setValue` |
 | ui | `set_text` | `Ui.setText` |
+| ui | `set_title` | `Ui.setTitle` |
+| ui | `set_cursor_visible` | `Ui.setCursorVisible` |
+| ui | `insert_text` | `Ui.insertText` |
+| ui | `backspace` | `Ui.backspace` |
+| ui | `focus` | `Ui.focusTextField` |
+| media | `play` | `Media.play` |
+| media | `stop` | `Media.stop` |
+| service | `media_status` | `Media.status` |
 | service | `play_audio` | `Audio.play` |
 | service | `stop_audio` | `Audio.stop` |
 | runtime | `snapshot` | `Save.save` |
@@ -1036,7 +1088,178 @@ Variants are tagged by `"kind"`.
 | `solid` | `color: [u8; 4]` | Solid RGBA8 fill. |
 | `image` | `asset: String, tint: [u8; 4]` | Image asset with an RGBA8 tint. |
 | `text` | `text: String, font: String, size: u16, color: [u8; 4], layout: String` | Text with an explicit project font alias, pixel size, color and layout. |
+| `glyph_run` | `font: String, size: f32, color: [u8; 4], bold: bool, glyphs: Vec<PositionedGlyph>, reveal: Option<GlyphReveal>` | Retained explicit glyph positions, rendered as independent cached glyph quads. No VM renderer or flattened text/screen image is involved. |
 | `puppet` | `asset: String, tint: [u8; 4]` | 2D deformable puppet (ADR 0029): an engine puppet rig JSON asset, fitted into the layer rect (aspect preserved). |
+
+### PositionedGlyph
+
+Used by: `Paint.glyph_run.glyphs`.
+
+A glyph with an explicit baseline in its containing layer's local pixels. Layout, shaping and reveal policy remain with the producer; rendering is an engine service. Optional styles override the containing run's defaults.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `character` | `char` | `"あ"` | — |
+| `baseline` | `[f32; 2]` | `[0.0,20.0]` | — |
+| `size` | `Option<f32>` | — | — |
+| `color` | `Option<[u8; 4]>` | — | — |
+| `bold` | `Option<bool>` | — | — |
+
+### GlyphRevealUnit
+
+Used by: `GlyphReveal.unit`.
+
+Unit of an explicitly positioned run. Each item contains one Unicode scalar; this deliberately does not reinterpret native scalar timing as grapheme timing. Other segmentation modes must be added explicitly.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `unicode_scalar` | — | — |
+
+### GlyphReveal
+
+Used by: `Paint.glyph_run.reveal`.
+
+Engine-owned positioned-text clock. Layout, markup and wait policies are callers' concerns; no VM needs its own generic typewriter timer.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `unit` | `GlyphRevealUnit` | `"unicode_scalar"` | — |
+| `interval_ms` | `u64` | `40` | Milliseconds per positioned scalar. Zero reveals the run instantly. |
+| `initial_visible` | `usize` | `0` | Prefix already visible when new text is appended to a page. |
+| `elapsed_ms` | `u64` | `0` | — |
+| `forced_complete` | `bool` | `false` | — |
+| `paused` | `bool` | `false` | — |
+
+### GlyphRevealStatus
+
+Used by: Engine glyph reveal query.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `visible` | `usize` | — | — |
+| `total` | `usize` | — | — |
+| `complete` | `bool` | — | — |
+
+### CanvasSurface
+
+Used by: `Canvases.get`.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `width` | `u32` | `640` | — |
+| `height` | `u32` | `480` | — |
+| `nodes` | `Vec<CanvasNode>` | `[]` | — |
+
+### CanvasNode
+
+Used by: `CanvasSurface.nodes`.
+
+Variants are tagged by `"kind"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `draw` | `layer: LayerSpec` | — |
+| `group` | `offset: [f32; 2], clip: [f32; 4], opacity: u8, nodes: Vec<CanvasNode>` | — |
+
+### CanvasCommand
+
+Used by: `Canvases.apply`, `ServiceBatch.canvases`.
+
+Variants are tagged by `"op"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `create` | `id: u32, width: u32, height: u32` | Issued by `Canvases.apply`. |
+| `clear` | `id: u32, color: [u8; 4]` | Issued by `Canvases.apply`. |
+| `draw` | `id: u32, layer: LayerSpec` | Issued by `Canvases.apply`. |
+| `set` | `id: u32, layer: LayerSpec` | Atomically replace this surface's contents with one logical resource draw. |
+| `copy` | `source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool` | Issued by `Canvases.apply`. |
+| `present` | `id: u32, layer: u32, order: i32` | Issued by `Canvases.apply`. |
+| `hide` | `layer: u32` | Issued by `Canvases.apply`. |
+
+### ServiceBatch
+
+Used by: Engine service mutation batch.
+
+Typed engine operations carried through the dependency-free host contract. The runtime decodes this data at the client boundary; no device handles/code.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `canvases` | `Vec<canvas::CanvasCommand>` | `[]` | — |
+| `world` | `Vec<world::WorldCommand>` | `[]` | — |
+| `layers` | `Vec<layer::LayerCommand>` | `[]` | — |
+| `ui` | `Vec<ui::UiCommand>` | `[]` | — |
+
+### MediaRequest
+
+Used by: `HostServices.media_request` (script `Media.play` options use `loop`, `audio`, `gain`).
+
+Engine media resources, independent of a script VM or a window.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Play` | `id: u32, asset: String, looping: bool, audio: bool, gain: f32` | — |
+| `Stop` | `id: u32` | — |
+
+### MediaPhase
+
+Used by: `HostServices.media_status`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Loading` | — | — |
+| `Playing` | — | — |
+| `Ended` | — | — |
+| `Stopped` | — | — |
+| `Failed` | — | — |
+
+### MediaInfo
+
+Used by: `HostServices.media_status`.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `phase` | `MediaPhase` | — | — |
+| `position_ms` | `u64` | — | — |
+| `published_frames` | `u64` | — | — |
+
+### MediaOptions
+
+Used by: Rust shared media service options (script uses `loop` instead of `looping`).
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `looping` | `bool` | `false` | — |
+| `audio` | `bool` | `true` | — |
+| `gain` | `f32` | `1.0` | — |
+| `audio_channel` | `u32` | `1879048192` | The host reserves this channel within the same client's audio namespace. |
+
+### MediaState
+
+Used by: `MediaStatus.state`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `loading` | — | — |
+| `playing` | — | — |
+| `ended` | — | — |
+| `stopped` | — | — |
+| `failed` | — | — |
+
+### MediaStatus
+
+Used by: `Media.status`.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `state` | `MediaState` | — | — |
+| `position_ms` | `u64` | — | — |
+| `frame_pts_ms` | `Option<i64>` | — | — |
+| `published_frames` | `u64` | — | — |
+| `decoded_frames` | `u64` | — | — |
+| `audio_started` | `bool` | — | — |
+| `loops_completed` | `u64` | — | — |
+| `error` | `Option<String>` | — | — |
 
 ### LayerFilter
 
@@ -1108,7 +1331,7 @@ Source-sampling effects (Siglus wipe modes 1–6), in texture UV space. Variants
 
 Used by: `Layers.transition` (ADR 0022).
 
-Full-screen transition from the previously presented frame to the current one (ADR 0022). Effect codes and option meanings are the Siglus `WIPE` table, composed by the same shader arithmetic as siglus_rs `wipe.wgsl`.
+Full-screen transition from the engine's previously presented scene to the current one. Named engine effects have explicit contracts; the `Siglus` variant separately preserves its native WIPE table (ADR 0022).
 
 | Field | Rust type | Default | Description |
 |---|---|---|---|
@@ -1128,6 +1351,7 @@ Variants are tagged by `"kind"`.
 | `mask` | `asset: String, fade: u8` | Grayscale mask image: bright pixels reveal first; `fade` 0..=8 is the Siglus soft-edge step (0 = hard edge). |
 | `slide` | `direction: u8` | direction 0 down, 1 up, 2 right, 3 left (Siglus type 200, both scenes move). |
 | `mosaic` | `size: u32` | Mosaic out of the old scene and into the new one (type 230). |
+| `ordered_dither` | `cell: [u32; 2], diagonal: bool, steps: u32` | Ordered Bayer-4 fade in logical canvas pixels. This is a shared engine effect with an independent code, not an alias for a Siglus wipe type. |
 | `siglus` | `code: i32, options: Vec<i32>, mask: Option<String>` | A raw Siglus wipe type with its option list. Pattern types (5..=199) without `mask` use the original generated masks. |
 
 ### Easing
@@ -1163,6 +1387,7 @@ Used by: `Ui.put`, `ClientSpec.systems.widgets`.
 | `modal` | `bool` | `false` | While visible, the topmost modal subtree receives all input. |
 | `color` | `[u8; 4]` | `[52,66,88,255]` | RGBA8 fill color. |
 | `text` | `String` | `""` | Label or button text. |
+| `max_length` | `u32` | `1024` | Maximum Unicode scalar count for TextField committed text. |
 | `font` | `Option<String>` | `null` | Explicit licensed project font alias. |
 | `text_size` | `u16` | `18` | Text pixel size. |
 | `on_activate` | `Vec<WorldCommand>` | `[]` | World commands run when activated (checked typed data, not script). |
@@ -1179,6 +1404,7 @@ Used by: `WidgetSpec.kind`.
 | `button` | — | Activates on Enter or a matching pointer release. |
 | `toggle` | — | Button that flips `value` between 0 and 1. |
 | `slider` | — | Horizontal 0..1 value; Left/Right or drag. |
+| `text_field` | — | Engine-owned single-line Unicode text, edited at the end. |
 
 ### Flow
 
@@ -1483,6 +1709,7 @@ Variants are tagged by `"op"`.
 | `remove` | `id: u32` | Issued by `Layers.remove`. |
 | `set_transform` | `id: u32, transform: SpriteTransform` | Issued by `Layers.setTransform`. |
 | `set_visible` | `id: u32, visible: bool` | Issued by `Layers.setVisible`. |
+| `complete_reveal` | `id: u32` | Complete a positioned text run through the engine clock/state service. |
 | `set_opacity` | `id: u32, opacity: u8` | Issued by `Layers.setOpacity`. |
 | `set_order` | `id: u32, order: [i32; 2]` | Issued by `Layers.setOrder`. |
 | `set_clip` | `id: u32, clip: Option<[f32; 4]>` | Issued by `Layers.setClip`. |
@@ -1499,6 +1726,11 @@ Variants are tagged by `"op"`.
 
 | Variant | Fields | Description |
 |---|---|---|
+| `insert_text` | `text: String` | Append committed Unicode text to this client's focused TextField. |
+| `backspace` | `id: u32` | Remove the last Unicode scalar from a client-local TextField. |
+| `focus` | `id: u32` | Issued by `Ui.focusTextField`. |
+| `set_cursor_visible` | `visible: bool` | Issued by `Ui.setCursorVisible`. |
+| `set_title` | `text: String` | Issued by `Ui.setTitle`. |
 | `put` | `widget: WidgetSpec` | Issued by `Ui.put`. |
 | `remove` | `id: u32` | Issued by `Ui.remove`. |
 | `set_visible` | `id: u32, visible: bool` | Issued by `Ui.setVisible`. |
@@ -1509,6 +1741,15 @@ Variants are tagged by `"op"`.
 ## Adapter configs
 
 `clients[].config` of each original-VM adapter.
+
+### `reallive`
+
+| Field | Rust type | Description |
+|---|---|---|
+| `root` | `String` | — |
+| `font_alias` | `String` | — |
+| `encoding` | `Option<String>` | — |
+| `start_scene` | `Option<i32>` | — |
 
 ### `siglus`
 

@@ -3,10 +3,10 @@
 //! letterbox mapping are ported from RFVP exit_confirm_ui.rs (see UPSTREAM.md).
 use crate::{
     input::{InputState, VmKey, VmMouseButton},
-    layer::{intersect, rect_valid, rectangle, Paint, Primitive},
+    layer::{Paint, Primitive, intersect, rect_valid, rectangle},
     world::WorldCommand,
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use crysirror_core::{service::InputFrame, state::ClientId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,6 +15,9 @@ fn yes() -> bool {
 }
 fn color() -> [u8; 4] {
     [52, 66, 88, 255]
+}
+fn max_length() -> u32 {
+    1024
 }
 fn size() -> u16 {
     18
@@ -33,6 +36,8 @@ pub enum WidgetKind {
     Toggle,
     /// Horizontal 0..1 value; Left/Right or drag.
     Slider,
+    /// Engine-owned single-line Unicode text, edited at the end.
+    TextField,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,6 +93,9 @@ pub struct WidgetSpec {
     /// Label or button text.
     #[serde(default)]
     pub text: String,
+    /// Maximum Unicode scalar count for TextField committed text.
+    #[serde(default = "max_length")]
+    pub max_length: u32,
     /// Explicit licensed project font alias.
     #[serde(default)]
     pub font: Option<String>,
@@ -124,6 +132,10 @@ pub struct UiEvent {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiSystem {
+    #[serde(default)]
+    pub cursor: Option<(u32, bool)>,
+    #[serde(default)]
+    pub title: Option<(u32, String)>,
     clients: BTreeMap<u32, BTreeMap<u32, Widget>>,
     pub focus: Option<WidgetId>,
     pub events: Vec<UiEvent>,
@@ -148,6 +160,23 @@ struct Layout {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiCommand {
+    /// Append committed Unicode text to this client's focused TextField.
+    InsertText {
+        text: String,
+    },
+    /// Remove the last Unicode scalar from a client-local TextField.
+    Backspace {
+        id: u32,
+    },
+    Focus {
+        id: u32,
+    },
+    SetCursorVisible {
+        visible: bool,
+    },
+    SetTitle {
+        text: String,
+    },
     Put {
         widget: WidgetSpec,
     },
@@ -179,6 +208,47 @@ impl UiSystem {
         let owner = staged.clients.entry(client.0).or_default();
         for command in commands {
             match command {
+                UiCommand::InsertText { text } => {
+                    ensure!(
+                        text.len() <= 1024 * 1024 && !text.chars().any(char::is_control),
+                        "UI committed text must be single-line Unicode"
+                    );
+                    let id = staged.focus.context("no focused text field")?;
+                    ensure!(
+                        id.owner == client.0,
+                        "focused text field belongs to another client"
+                    );
+                    ensure!(editable(owner, id.id), "focused text field is not editable");
+                    let w = owner.get_mut(&id.id).unwrap();
+                    let available =
+                        (w.spec.max_length as usize).saturating_sub(w.spec.text.chars().count());
+                    w.spec.text.extend(text.chars().take(available));
+                }
+                UiCommand::Backspace { id } => {
+                    let w = owner.get_mut(id).context("widget missing")?;
+                    ensure!(
+                        w.spec.kind == WidgetKind::TextField,
+                        "widget is not a text field"
+                    );
+                    w.spec.text.pop();
+                }
+                UiCommand::Focus { id } => {
+                    ensure!(editable(owner, *id), "text field is not editable");
+                    staged.focus = Some(WidgetId {
+                        owner: client.0,
+                        id: *id,
+                    });
+                }
+                UiCommand::SetCursorVisible { visible } => {
+                    staged.cursor = Some((client.0, *visible))
+                }
+                UiCommand::SetTitle { text } => {
+                    ensure!(
+                        text.len() <= 1024 && !text.chars().any(char::is_control),
+                        "UI title"
+                    );
+                    staged.title = Some((client.0, text.clone()));
+                }
                 UiCommand::Put { widget } => {
                     owner.insert(
                         widget.id,
@@ -243,6 +313,17 @@ impl UiSystem {
         *self = staged;
         Ok(())
     }
+    /// Inspect engine-owned state using a client-local handle.
+    pub fn get(&self, client: u32, id: u32) -> Option<&WidgetSpec> {
+        Some(&self.clients.get(&client)?.get(&id)?.spec)
+    }
+    pub fn focused_text_field(&self) -> bool {
+        self.focus.is_some_and(|id| {
+            self.clients
+                .get(&id.owner)
+                .is_some_and(|owner| editable(owner, id.id))
+        })
+    }
     pub fn reset_input_after_restore(&mut self) {
         self.input = InputState::default();
         self.pressed = None;
@@ -251,7 +332,11 @@ impl UiSystem {
     }
 
     pub fn client_ids(&self) -> impl Iterator<Item = u32> + '_ {
-        self.clients.keys().copied()
+        self.clients
+            .keys()
+            .copied()
+            .chain(self.cursor.map(|v| v.0))
+            .chain(self.title.as_ref().map(|v| v.0))
     }
     pub fn install(&mut self, client: ClientId, specs: &[WidgetSpec]) -> Result<()> {
         let mut staged = self.clone();
@@ -301,6 +386,14 @@ impl UiSystem {
                     s.text.is_empty() || s.font.as_ref().is_some_and(|f| !f.is_empty()),
                     "text widget requires font alias"
                 );
+                if s.kind == WidgetKind::TextField {
+                    ensure!(
+                        s.max_length <= 65536
+                            && s.text.chars().count() <= s.max_length as usize
+                            && !s.text.chars().any(char::is_control),
+                        "invalid text field length or committed text"
+                    );
+                }
                 ensure!(s.on_activate.len() <= 128, "UI action count");
                 let mut seen = BTreeSet::from([*id]);
                 let mut p = s.parent;
@@ -454,6 +547,11 @@ impl UiSystem {
             (16, VmKey::ArrowUp),
             (32, VmKey::ArrowDown),
             (64, VmKey::Tab),
+            (crysirror_core::service::buttons::ESCAPE, VmKey::Escape),
+            (
+                crysirror_core::service::buttons::BACKSPACE,
+                VmKey::Backspace,
+            ),
         ] {
             if frame.buttons_pressed & bit != 0
                 || (frame.buttons_down & bit != 0 && !self.input.is_key_down(key))
@@ -475,7 +573,10 @@ impl UiSystem {
             l.enabled
                 && matches!(
                     self.clients[&l.id.owner][&l.id.id].spec.kind,
-                    WidgetKind::Button | WidgetKind::Toggle | WidgetKind::Slider
+                    WidgetKind::Button
+                        | WidgetKind::Toggle
+                        | WidgetKind::Slider
+                        | WidgetKind::TextField
                 )
                 && allowed(l)
         };
@@ -528,6 +629,51 @@ impl UiSystem {
             activate = self.focus;
         }
         let mut actions = Vec::new();
+        if let Some(id) = self.focus.filter(|_| self.focused_text_field()) {
+            let backspace = self.input.vk_down_stock(0x08);
+            let submit = self.input.vk_down_stock(0x0d);
+            let cancel = self.input.vk_down_stock(0x1b);
+            let w = self
+                .clients
+                .get_mut(&id.owner)
+                .unwrap()
+                .get_mut(&id.id)
+                .unwrap();
+            if backspace {
+                w.spec.text.pop();
+            }
+            if submit && !w.spec.text.is_empty() || cancel {
+                if self.events.len() == 256 {
+                    self.events.remove(0);
+                }
+                self.events.push(UiEvent {
+                    widget: id,
+                    kind: if cancel { "cancel" } else { "submit" }.into(),
+                    value: w.value,
+                });
+                if submit && !cancel {
+                    if let Some(next) =
+                        focusable
+                            .iter()
+                            .skip_while(|f| **f != id)
+                            .skip(1)
+                            .find(|f| {
+                                self.clients[&f.owner][&f.id].spec.kind == WidgetKind::TextField
+                                    && f.owner == id.owner
+                            })
+                    {
+                        self.focus = Some(*next);
+                    }
+                }
+            }
+        }
+        // Text fields focus on pointer release; only Enter submits them.
+        if activate
+            .is_some_and(|id| self.clients[&id.owner][&id.id].spec.kind == WidgetKind::TextField)
+        {
+            activate = None;
+        }
+
         if let Some(id) = self.pressed.or(self.focus) {
             if let Some(l) = layouts.iter().find(|l| l.id == id) {
                 if self.clients[&id.owner][&id.id].spec.kind == WidgetKind::Slider
@@ -582,7 +728,12 @@ impl UiSystem {
                 value: w.value,
             });
         }
-        let keyboard = (frame.buttons_pressed & 127 != 0) && self.focus.is_some();
+        let keyboard = (frame.buttons_pressed
+            & (127
+                | crysirror_core::service::buttons::ESCAPE
+                | crysirror_core::service::buttons::BACKSPACE)
+            != 0)
+            && self.focus.is_some();
         Ok((
             actions,
             modal.is_some() || hit_ui || self.pressed.is_some() || keyboard,
@@ -658,7 +809,11 @@ impl UiSystem {
                 r[1] += 4.;
                 r[2] = (r[2] - 12.).max(1.);
                 r[3] = (r[3] - 8.).max(1.);
-                let text = s.text.replace("{value}", &format!("{:.2}", w.value));
+                let text = if s.kind == WidgetKind::TextField {
+                    s.text.clone()
+                } else {
+                    s.text.replace("{value}", &format!("{:.2}", w.value))
+                };
                 out.push(rectangle(
                     l.id.owner,
                     l.id.id,
@@ -671,13 +826,40 @@ impl UiSystem {
                         color: [245, 245, 245, 255],
                         layout: crysirror_core::service::SIMPLE_TEXT_LAYOUT.into(),
                     },
-                    Some(l.clip),
+                    Some(if s.kind == WidgetKind::TextField {
+                        intersect(l.clip, l.rect).unwrap_or([0.; 4])
+                    } else {
+                        l.clip
+                    }),
                     order,
                 ));
             }
         }
         Ok(out)
     }
+}
+fn editable(owner: &BTreeMap<u32, Widget>, id: u32) -> bool {
+    let Some(w) = owner.get(&id) else {
+        return false;
+    };
+    if w.spec.kind != WidgetKind::TextField {
+        return false;
+    }
+    let mut current = Some(id);
+    let mut visited = BTreeSet::new();
+    while let Some(id) = current {
+        if !visited.insert(id) {
+            return false;
+        }
+        let Some(w) = owner.get(&id) else {
+            return false;
+        };
+        if !w.spec.visible || !w.spec.enabled {
+            return false;
+        }
+        current = w.spec.parent;
+    }
+    true
 }
 fn hit(x: i32, y: i32, r: [f32; 4]) -> bool {
     inside_rect(

@@ -10,7 +10,8 @@ name = "crysirror"
 path = "src/main.rs"
 
 [features]
-default = ["audio", "siglus-resources", "scripting", "gamepad", "emote-import"]
+default = ["reallive", "audio", "siglus-resources", "scripting", "gamepad", "emote-import"]
+reallive = ["dep:crysirror-reallive"]
 audio = ["crysirror-audio/rodio-output"]
 gamepad = ["dep:gilrs", "scripting"]
 siglus-resources = ["dep:crysirror-siglus"]
@@ -21,6 +22,7 @@ scripting = ["dep:crysirror-engine", "dep:crysirror-script-js"]
 arc-formats = ["scripting", "crysirror-engine/arc-formats"]
 
 [dependencies]
+crysirror-reallive = {workspace=true,optional=true}
 crysirror-core.workspace = true
 crysirror-runtime.workspace = true
 crysirror-wgpu.workspace = true

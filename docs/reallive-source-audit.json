@@ -1,0 +1,208 @@
+{
+  "schema": 2,
+  "recorded_utc": "2026-10-25T17:35:01.822034+00:00",
+  "purpose": "Audit a pure RealLive VM plus semantic/syscall translation into reusable CrySirror APIs; not a hosted runtime audit",
+  "source": {
+    "repository": "https://github.com/xmoezzz/siglus_rs.git",
+    "pinned_commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+    "license": "MPL-2.0",
+    "vm_source_manifest": "../crates/crysirror-reallive/src/vm/SOURCE.json",
+    "vm_source_manifest_sha256": "61e80bfeb1ea389a9a82e3e533ead2037176add84f079e088bf5ee6d5f6ff5ea",
+    "selected_upstream_source_hashes_verified": 14,
+    "complete_reference_source_hashes_verified": 90,
+    "complete_reference_inventory_is_not_mapping_coverage": true
+  },
+  "audit_scope": [
+    "Pinned source provenance and selected/reference SHA256 verification",
+    "Current crate import/module and forbidden frame publication checks",
+    "Current adapter-to-shared-service call sites",
+    "Independent engine media behavior; native opening validation remains separate"
+  ],
+  "vm_only_ownership": [
+    "bytecode parsing and target offset mapping",
+    "scenario encryption/compression/NLS",
+    "expression and packed banks",
+    "call/return/with parameters",
+    "read flags and VM savepoint banks/call stack",
+    "pure memory and string builtins"
+  ],
+  "excluded_source_engine_modules": [
+    "System",
+    "Graphics",
+    "Sound",
+    "Text",
+    "Engine",
+    "Movie",
+    "surface",
+    "renderers"
+  ],
+  "event_boundary": "All native engine operations are pending Command/Text events until successful CrySirror API acknowledgement; no native rendering/text/audio implementation is linked",
+  "static_checks": {
+    "legacy_frame_publication": {
+      "matches": [],
+      "passed": true
+    },
+    "original_frame_render": {
+      "matches": [],
+      "passed": true
+    },
+    "legacy_engine_modules_imported": {
+      "matches": [],
+      "passed": true
+    },
+    "direct_gpu_or_window_imports": {
+      "matches": [],
+      "passed": true
+    }
+  },
+  "declared_crate_dependencies": [
+    "anyhow",
+    "crysirror-audio",
+    "crysirror-core",
+    "crysirror-image",
+    "crysirror-runtime",
+    "crysirror-scene",
+    "encoding_rs",
+    "serde",
+    "serde_json"
+  ],
+  "shared_api_routes": [
+    {
+      "native_operation": "DC allocation/fill/image/copy/present",
+      "engine_api": "CanvasCommand via HostServices.submit_engine",
+      "state_owner": "crysirror-scene::canvas::CanvasSystem; logical draw-node snapshots become retained Layer nodes",
+      "independent_api": "Canvases.apply / Canvases.get",
+      "source": "../crates/crysirror-scene/src/canvas.rs"
+    },
+    {
+      "native_operation": "Text positions, styling and scalar reveal",
+      "engine_api": "Paint::GlyphRun / GlyphReveal / engine query and complete_reveal",
+      "state_owner": "shared retained layers and text glyph cache; native grid/markup policy stays adapter",
+      "independent_api": "Ordinary Layer paint and shared TextSystem glyph metrics",
+      "source": "../crates/crysirror-scene/src/layer.rs"
+    },
+    {
+      "native_operation": "Choices and name fields",
+      "engine_api": "UiCommand widget creation/events and engine queries",
+      "state_owner": "crysirror-scene::ui::UiSystem",
+      "independent_api": "ordinary UI API",
+      "source": "../crates/crysirror-scene/src/ui.rs"
+    },
+    {
+      "native_operation": "Music, SFX and voice",
+      "engine_api": "AudioRequest and shared native format sources",
+      "state_owner": "crysirror-audio decoder/channel/mixer services",
+      "independent_api": "shared Audio/Channel APIs without RealLive",
+      "source": "../crates/crysirror-audio/src/native.rs"
+    },
+    {
+      "native_operation": "Movie playback and waits",
+      "engine_api": "MediaRequest / MediaInfo; media image resource used by an ordinary Layer",
+      "state_owner": "crysirror-runtime::media::MediaManager; decode by crysirror-video::mpeg",
+      "independent_api": "Media.play / Media.stop / Media.status and direct Rust MediaManager API",
+      "source": "../crates/crysirror-runtime/src/media.rs"
+    },
+    {
+      "native_operation": "Resource lookup and script-visible state queries",
+      "engine_api": "ClientStorage / EngineQuery",
+      "state_owner": "engine capabilities and shared logical state; native naming policy remains adapter",
+      "independent_api": "HostServices / capability resources",
+      "source": "../crates/crysirror-core/src/service.rs"
+    }
+  ],
+  "independent_engine_media_validation": {
+    "recorded_utc": "2026-10-25T17:31:11.821867+00:00",
+    "command": "CRYSIRROR_MEDIA_FIXTURE=<owner-supplied-local-MPEG> cargo test --release -p crysirror-runtime --lib media::tests -- --include-ignored --nocapture",
+    "exit_code": 0,
+    "passed": 6,
+    "failed": 0,
+    "ignored": 0,
+    "source_bytes": 94359556,
+    "source_size_mtime_unchanged": true,
+    "vm_created": false,
+    "gpu_created": false,
+    "audio_device_created": false,
+    "result": {
+      "audio_plays": 1,
+      "mixed_peak": 0.999969482421875,
+      "published_updates": 2985,
+      "real_seconds": 6.998985792,
+      "status": {
+        "audio_started": false,
+        "decoded_frames": 2995,
+        "error": null,
+        "frame_pts_ms": 100192,
+        "loops_completed": 0,
+        "position_ms": 137072,
+        "published_frames": 2985,
+        "state": "ended"
+      },
+      "test": "shared-media-without-vm",
+      "virtual_ms": 139104
+    },
+    "log": "target/verification/api-media-actual-rusur-release.log",
+    "limitations": [
+      "MPEG stream manager; no seek/pause",
+      "Whole-track audio bounded at 16Mi i16 samples; not long-track streaming",
+      "Decoded image/PTS fidelity belongs to existing codec; count is not a source every-frame coverage claim",
+      "Virtual vs real time result is not a frame-rate benchmark"
+    ]
+  },
+  "native_opening_profile": {
+    "state": "root validation in progress; no completion asserted by this source audit",
+    "game": "Game_RUSUR",
+    "not_evidence": "Old hosted runtime screenshots or old hosted save results do not validate this API bridge"
+  },
+  "unsupported_or_unproven": [
+    "Original native save-file import/export through the adapter",
+    "Whole VM/runtime snapshots with this adapter or active media",
+    "DLL emulation and arbitrary native host operations",
+    "All RealLive opcode/module variants, effects, layouts and resource variants",
+    "Complete-game execution and cross-platform device behavior",
+    "Long-track streaming media audio, media seek/pause",
+    "Isolated canvas opacity and partial replacement requiring a genuine engine render-target API"
+  ],
+  "non_claims": [
+    "90 upstream reference source files are hashed, not claimed to be translated or mapped",
+    "No RealLive private screen buffer/painter/old Engine/System/Graphics/Sound/Movie was restored",
+    "Shared services have no dependency on crysirror-reallive; the dependency direction is adapter to engine",
+    "This audit does not certify the entire transitive dependency graph as interpreter-free; existing codecs may share other source libraries without hosting their engines"
+  ],
+  "native_opening_validation": {
+    "status": "passed_bounded_profile",
+    "engine_id": "reallive",
+    "game": "owner-provided Game_RUSUR",
+    "checkpoint": {
+      "scene": 6030,
+      "line": 65,
+      "wait": "Pause",
+      "window": 2
+    },
+    "gpu": {
+      "adapter": "Apple M5",
+      "backend": "Metal",
+      "renderer": "CrySirror shared raster"
+    },
+    "decoded_movie_frames": 2995,
+    "retained_glyphs": 22,
+    "engine_layer_count_at_checkpoint": 5,
+    "native_engine_api_calls_at_checkpoint": 58,
+    "native_owns_framebuffer": false,
+    "independent_engine_edit": {
+      "native_pc_and_clock_unchanged": true,
+      "removed_main_and_shadow_glyph_layers": true,
+      "gpu_pixels_changed": true
+    },
+    "log": "target/verification/reallive-api-acceptance.log",
+    "test": "crates/crysirror-desktop/tests/reallive_engine.rs",
+    "source_files_verified_unchanged": 975,
+    "exclusions": [
+      "complete-game compatibility",
+      "native save-file import/export",
+      "DLL emulation",
+      "Windows/Linux hardware results",
+      "device audio",
+      "hardware ray tracing"
+    ]
+  }
+}

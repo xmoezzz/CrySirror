@@ -2,10 +2,10 @@
 //! Client channel service over the shared streaming decoder and PCM mixer.
 //! Adapters supply decoded container policy, never devices or ambient paths.
 use crate::{
-    decoder::{AudioSource, StereoFrame, Stream},
+    decoder::{AudioSource, StereoFrame},
     mixer::{Bus, Ducking, LoopPoints, Mixer, MixerConfig, VoiceHandle, VoiceSpec},
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use crysirror_core::service::{AudioParameters, AudioRequest, EncodedAudio, PcmBus};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -50,14 +50,14 @@ impl AudioSource for Source {
     }
 }
 fn source(encoded: EncodedAudio, gain: f32) -> Result<Box<dyn AudioSource>> {
-    let stream = Stream::from_bytes(encoded.bytes, None)?;
+    let stream = crate::decoder::open_memory(encoded.bytes, None)?;
     let limit = match (encoded.frame_limit, stream.frame_count()) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     };
     ensure!(limit != Some(0), "empty audio source");
     Ok(Box::new(Source {
-        inner: Box::new(stream),
+        inner: stream,
         limit,
         at: 0,
         gain,
@@ -136,6 +136,13 @@ impl Default for ChannelAudio {
     }
 }
 impl ChannelAudio {
+    /// Authoritative, client-scoped channel state from the shared mixer.
+    pub fn is_playing(&self, client: u32, channel: u32) -> bool {
+        self.voices
+            .get(&(client, channel))
+            .is_some_and(|handle| self.mixer.is_playing(client, *handle))
+    }
+
     pub fn set_ducking(&mut self, client: u32, config: Ducking) -> Result<()> {
         self.mixer.set_ducking(client, config)?;
         self.clients.insert(client);

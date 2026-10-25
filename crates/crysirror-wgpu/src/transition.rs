@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Screen transitions (ADR 0022). Every frame is composed into one of two
-//! retained frame textures and then presented. While a transition is active
-//! the last presented frame stays frozen as the old scene and the vendored
-//! siglus_rs `wipe.wgsl` (unmodified, included from the vendored tree)
-//! composes old → new. As in siglus_rs, wipe inputs are sampled as
-//! gamma-encoded bytes (non-sRGB views), so blends match Siglus arithmetic.
+//! Shared screen transitions over engine-rendered scenes (ADR 0022). Engine
+//! Layer/UI/World draws produce the retained GPU inputs. Named engine effects
+//! have dedicated shaders; Siglus effects use its attributed unmodified shader.
+//! Inputs are raw gamma-encoded bytes, then decoded for sRGB presentation.
 use crysirror_scene::layer::TransitionFrame;
 use wgpu::util::DeviceExt;
 
@@ -30,6 +28,7 @@ pub(crate) struct Transitions {
     decode_pipeline: wgpu::RenderPipeline,
     wipe_layout: wgpu::BindGroupLayout,
     wipe_pipeline: wgpu::RenderPipeline,
+    ordered_dither_pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     frames: Option<Frames>,
     black: wgpu::TextureView,
@@ -70,7 +69,11 @@ fn pixel(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> wgpu::Tex
             queue,
             &wgpu::TextureDescriptor {
                 label: Some("transition constant"),
-                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -85,7 +88,11 @@ fn pixel(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> wgpu::Tex
 }
 
 impl Transitions {
-    pub(crate) fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self {
         let raw_format = format.remove_srgb_suffix();
         let present_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("present layout"),
@@ -123,7 +130,11 @@ impl Transitions {
             })
         };
         let copy_pipeline = present("fs_copy");
-        let decode_pipeline = present(if format.is_srgb() { "fs_decode" } else { "fs_copy" });
+        let decode_pipeline = present(if format.is_srgb() {
+            "fs_decode"
+        } else {
+            "fs_copy"
+        });
         let wipe_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wipe layout"),
             entries: &[
@@ -150,7 +161,8 @@ impl Transitions {
         let wipe_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("siglus wipe"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../siglus-upstream/siglus_scene_vm/src/render/shaders/wipe.wgsl").into(),
+                include_str!("../../siglus-upstream/siglus_scene_vm/src/render/shaders/wipe.wgsl")
+                    .into(),
             ),
         });
         let wipe_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -178,6 +190,31 @@ impl Transitions {
             multisample: Default::default(),
             multiview: None,
         });
+        let dither_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("engine ordered dither"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ordered_dither.wgsl").into()),
+        });
+        let ordered_dither_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("engine ordered dither"),
+                layout: Some(&wipe_pl),
+                vertex: wgpu::VertexState {
+                    module: &dither_shader,
+                    entry_point: "vs_main",
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &dither_shader,
+                    entry_point: "fs_main",
+                    compilation_options: Default::default(),
+                    targets: &[Some(raw_format.into())],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview: None,
+            });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("wipe sampler"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -192,6 +229,7 @@ impl Transitions {
             decode_pipeline,
             wipe_layout,
             wipe_pipeline,
+            ordered_dither_pipeline,
             sampler,
             frames: None,
             black: pixel(device, queue, [0, 0, 0, 255]),
@@ -202,7 +240,11 @@ impl Transitions {
     fn frame_tex(&self, device: &wgpu::Device, size: [u32; 2]) -> FrameTex {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("composed frame"),
-            size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -210,9 +252,19 @@ impl Transitions {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[self.format],
         });
-        let render = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.format), ..Default::default() });
-        let raw = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.raw_format), ..Default::default() });
-        FrameTex { _texture: texture, render, raw }
+        let render = texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.format),
+            ..Default::default()
+        });
+        let raw = texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.raw_format),
+            ..Default::default()
+        });
+        FrameTex {
+            _texture: texture,
+            render,
+            raw,
+        }
     }
     /// The view this frame composes into.
     pub(crate) fn begin(&mut self, device: &wgpu::Device, size: [u32; 2]) -> &wgpu::TextureView {
@@ -232,12 +284,24 @@ impl Transitions {
     pub(crate) fn mask_key(&self) -> Option<&str> {
         self.mask.as_ref().map(|m| m.0.as_str())
     }
-    pub(crate) fn set_mask(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, key: String, width: u32, height: u32, rgba: &[u8]) {
+    pub(crate) fn set_mask(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        key: String,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) {
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
                 label: Some("transition mask"),
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -271,7 +335,12 @@ impl Transitions {
                     *d = s as f32;
                 }
                 let uniform = WipeUniform {
-                    kind_progress: [t.code as f32, t.progress.clamp(0., 1.), canvas[0] as f32, canvas[1] as f32],
+                    kind_progress: [
+                        t.code as f32,
+                        t.progress.clamp(0., 1.),
+                        canvas[0] as f32,
+                        canvas[1] as f32,
+                    ],
                     options,
                 };
                 let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -279,7 +348,11 @@ impl Transitions {
                     contents: bytemuck::bytes_of(&uniform),
                     usage: wgpu::BufferUsages::UNIFORM,
                 });
-                let old = if f.has_last { &f.tex[f.last].raw } else { &self.black };
+                let old = if f.has_last {
+                    &f.tex[f.last].raw
+                } else {
+                    &self.black
+                };
                 let mask = match (&t.mask, &self.mask) {
                     (Some(_), Some(m)) => &m.2,
                     _ => &self.white,
@@ -291,29 +364,65 @@ impl Transitions {
                     layout: &self.wipe_layout,
                     entries: &[
                         // `under`: the whole frame is the wiped range, so nothing lies beneath.
-                        wgpu::BindGroupEntry { binding: 0, resource: v(&self.black) },
-                        wgpu::BindGroupEntry { binding: 1, resource: s.clone() },
-                        wgpu::BindGroupEntry { binding: 2, resource: v(&f.tex[cur].raw) },
-                        wgpu::BindGroupEntry { binding: 3, resource: s.clone() },
-                        wgpu::BindGroupEntry { binding: 4, resource: v(old) },
-                        wgpu::BindGroupEntry { binding: 5, resource: s.clone() },
-                        wgpu::BindGroupEntry { binding: 6, resource: v(mask) },
-                        wgpu::BindGroupEntry { binding: 7, resource: s },
-                        wgpu::BindGroupEntry { binding: 8, resource: buffer.as_entire_binding() },
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: v(&self.black),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: s.clone(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: v(&f.tex[cur].raw),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: s.clone(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: v(old),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: s.clone(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: v(mask),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 7,
+                            resource: s,
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+                            resource: buffer.as_entire_binding(),
+                        },
                     ],
                 });
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("siglus wipe"),
+                    label: Some("engine screen transition"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &f.out.raw,
                         resolve_target: None,
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
                     })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
-                pass.set_pipeline(&self.wipe_pipeline);
+                pass.set_pipeline(
+                    if t.code == crysirror_scene::layer::ORDERED_DITHER_TRANSITION_CODE {
+                        &self.ordered_dither_pipeline
+                    } else {
+                        &self.wipe_pipeline
+                    },
+                );
                 pass.set_bind_group(0, &bind, &[]);
                 pass.draw(0..3, 0..1);
                 drop(pass);
@@ -328,14 +437,20 @@ impl Transitions {
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("present"),
             layout: &self.present_layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(present_src) }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(present_src),
+            }],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("present"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
@@ -350,5 +465,20 @@ impl Transitions {
             f.last = cur;
             f.has_last = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ordered_dither_shader_validates_without_a_gpu() {
+        let source = include_str!("shaders/ordered_dither.wgsl");
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .unwrap();
     }
 }

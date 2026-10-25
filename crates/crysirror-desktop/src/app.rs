@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 use crate::audio::Audio;
-use anyhow::{bail, ensure, Context, Result};
-use crysirror_core::service::{buttons, InputFrame};
-use crysirror_runtime::{vfs, Runtime};
-use crysirror_wgpu::{geometry::Viewport, Gpu, RenderTarget, Renderer, RenderingPath};
+use anyhow::{Context, Result, bail, ensure};
+use crysirror_core::service::{InputFrame, buttons};
+use crysirror_runtime::{Runtime, vfs};
+use crysirror_wgpu::{Gpu, RenderTarget, Renderer, RenderingPath, geometry::Viewport};
 use std::{
     io::Read,
     path::{Path, PathBuf},
@@ -76,6 +76,7 @@ pub struct App {
     gamepad: Option<crate::gamepad::Backend>,
     input: InputFrame,
     focused: bool,
+    ime_composing: bool,
     last_tick: Instant,
     remainder: Duration,
     presented: u64,
@@ -225,6 +226,7 @@ impl App {
             gamepad,
             input: InputFrame::default(),
             focused: true,
+            ime_composing: false,
             last_tick: Instant::now(),
             remainder: Duration::ZERO,
             presented: 0,
@@ -235,6 +237,23 @@ impl App {
             Some(e) => Err(e),
             None => Ok(()),
         }
+    }
+    fn committed_text(&mut self, text: &str) -> Result<()> {
+        let rt = self.core.rt();
+        if let Some(id) = rt.host.engine.ui.focus {
+            if rt.host.engine.ui.focused_text_field() {
+                crysirror_core::service::HostServices::submit_engine(
+                    &mut rt.host,
+                    crysirror_core::state::ClientId(id.owner),
+                    1,
+                    &serde_json::to_vec(
+                        &serde_json::json!({"ui":[{"op":"insert_text","text":text}]}),
+                    )?,
+                )
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            }
+        }
+        Ok(())
     }
     fn init(&mut self, el: &ActiveEventLoop) -> Result<()> {
         if self.window.is_some() {
@@ -248,6 +267,7 @@ impl App {
                     .with_inner_size(LogicalSize::new(canvas[0] as f64, canvas[1] as f64)),
             )?,
         );
+        window.set_ime_allowed(true);
         let surface = self.instance.create_surface(window.clone())?;
         let gpu = Arc::new(pollster::block_on(Gpu::request(
             &self.instance,
@@ -383,6 +403,12 @@ impl App {
         {
             el.exit();
         }
+        if let Some((_, visible)) = self.core.rt().host.engine.ui.cursor {
+            w.window.set_cursor_visible(visible);
+        }
+        if let Some((_, title)) = &self.core.rt().host.engine.ui.title {
+            w.window.set_title(title);
+        }
         self.input.buttons_pressed = 0;
         match &mut self.core {
             #[cfg(feature = "scripting")]
@@ -477,15 +503,34 @@ impl App {
                     actions.cancel_rebind();
                 }
             }
+            WindowEvent::Ime(winit::event::Ime::Preedit(text, _)) => {
+                self.ime_composing = !text.is_empty();
+            }
+            WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
+                self.committed_text(&text)?;
+                self.ime_composing = false;
+            }
+            WindowEvent::Ime(winit::event::Ime::Disabled) => {
+                self.ime_composing = false;
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if !self.focused {
                     return Ok(());
                 }
                 let pressed = event.state == ElementState::Pressed;
+                if pressed && !self.ime_composing {
+                    if let Some(text) = event.text.as_ref() {
+                        self.committed_text(text.as_str())?;
+                    }
+                }
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if pressed && !event.repeat {
                         match code {
-                            KeyCode::Escape => el.exit(),
+                            KeyCode::Escape => {
+                                if !self.core.rt().host.engine.ui.focused_text_field() {
+                                    el.exit();
+                                }
+                            }
                             KeyCode::F5 => self.save()?,
                             KeyCode::F9 => self.load()?,
                             KeyCode::F12 => {

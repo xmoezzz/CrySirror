@@ -2,7 +2,7 @@
 //! Retained layers, parent transforms, clips and painter ordering. Derived from
 //! siglus_rs layer.rs storage/ordering and render_math.rs projection semantics.
 use crate::projection;
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
     path::{Mount, VfsPath},
     state::ClientId,
@@ -301,6 +301,93 @@ impl LayerFilter {
     }
 }
 
+/// A glyph with an explicit baseline in its containing layer's local pixels.
+/// Layout, shaping and reveal policy remain with the producer; rendering is an
+/// engine service. Optional styles override the containing run's defaults.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PositionedGlyph {
+    pub character: char,
+    pub baseline: [f32; 2],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 4]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bold: Option<bool>,
+}
+
+/// Unit of an explicitly positioned run. Each item contains one Unicode
+/// scalar; this deliberately does not reinterpret native scalar timing as
+/// grapheme timing. Other segmentation modes must be added explicitly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GlyphRevealUnit {
+    #[default]
+    UnicodeScalar,
+}
+
+/// Engine-owned positioned-text clock. Layout, markup and wait policies are
+/// callers' concerns; no VM needs its own generic typewriter timer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GlyphReveal {
+    #[serde(default)]
+    pub unit: GlyphRevealUnit,
+    /// Milliseconds per positioned scalar. Zero reveals the run instantly.
+    pub interval_ms: u64,
+    /// Prefix already visible when new text is appended to a page.
+    #[serde(default)]
+    pub initial_visible: usize,
+    #[serde(default)]
+    pub elapsed_ms: u64,
+    #[serde(default)]
+    pub forced_complete: bool,
+    #[serde(default)]
+    pub paused: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GlyphRevealStatus {
+    pub visible: usize,
+    pub total: usize,
+    pub complete: bool,
+}
+impl GlyphReveal {
+    pub fn validate(&self, total: usize) -> Result<()> {
+        ensure!(
+            self.initial_visible <= total && self.interval_ms <= 86_400_000,
+            "invalid glyph reveal prefix/interval"
+        );
+        Ok(())
+    }
+    pub fn visible_count(&self, total: usize) -> usize {
+        if self.forced_complete || self.interval_ms == 0 {
+            return total;
+        }
+        self.initial_visible
+            .saturating_add(
+                usize::try_from(self.elapsed_ms / self.interval_ms).unwrap_or(usize::MAX),
+            )
+            .min(total)
+    }
+    pub fn status(&self, total: usize) -> GlyphRevealStatus {
+        let visible = self.visible_count(total);
+        GlyphRevealStatus {
+            visible,
+            total,
+            complete: visible == total,
+        }
+    }
+    fn advance(&mut self, total: usize, delta_ms: u64) {
+        if !self.paused && !self.status(total).complete {
+            let duration = (total.saturating_sub(self.initial_visible) as u64)
+                .saturating_mul(self.interval_ms);
+            self.elapsed_ms = self.elapsed_ms.saturating_add(delta_ms).min(duration);
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Paint {
@@ -324,6 +411,19 @@ pub enum Paint {
         color: [u8; 4],
         #[serde(default = "layout")]
         layout: String,
+    },
+    /// Retained explicit glyph positions, rendered as independent cached glyph
+    /// quads. No VM renderer or flattened text/screen image is involved.
+    GlyphRun {
+        font: String,
+        size: f32,
+        #[serde(default = "white")]
+        color: [u8; 4],
+        #[serde(default)]
+        bold: bool,
+        glyphs: Vec<PositionedGlyph>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reveal: Option<GlyphReveal>,
     },
     /// 2D deformable puppet (ADR 0029): an engine puppet rig JSON asset,
     /// fitted into the layer rect (aspect preserved).
@@ -362,9 +462,53 @@ impl Paint {
                     && layout == crysirror_core::service::SIMPLE_TEXT_LAYOUT,
                 "unsupported text paint/profile"
             ),
+            Self::GlyphRun {
+                font,
+                size,
+                glyphs,
+                reveal,
+                ..
+            } => {
+                ensure!(
+                    !font.is_empty() && font.len() <= 256 && !font.chars().any(char::is_control),
+                    "invalid glyph-run font alias"
+                );
+                let valid_size = |s: f32| s.is_finite() && (1.0..=512.0).contains(&s);
+                ensure!(
+                    valid_size(*size) && glyphs.len() <= 65_536,
+                    "invalid glyph-run size/budget"
+                );
+                for glyph in glyphs {
+                    ensure!(
+                        !glyph.character.is_control()
+                            && glyph
+                                .baseline
+                                .iter()
+                                .all(|v| v.is_finite() && v.abs() <= 1_000_000.)
+                            && glyph.size.is_none_or(valid_size),
+                        "invalid positioned glyph"
+                    );
+                }
+                if let Some(reveal) = reveal {
+                    reveal.validate(glyphs.len())?;
+                }
+            }
             Self::Solid { .. } => {}
         }
         Ok(())
+    }
+    pub fn glyph_reveal_status(&self) -> Option<GlyphRevealStatus> {
+        match self {
+            Self::GlyphRun { glyphs, reveal, .. } => Some(reveal.as_ref().map_or(
+                GlyphRevealStatus {
+                    visible: glyphs.len(),
+                    total: glyphs.len(),
+                    complete: true,
+                },
+                |r| r.status(glyphs.len()),
+            )),
+            _ => None,
+        }
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -414,6 +558,8 @@ pub struct Primitive {
     pub sub: u8,
     pub order: [i32; 2],
     pub size: [u32; 2],
+    /// Exact local width/height before transform; `size` rounds texture extents.
+    pub extent: [f32; 2],
     pub paint: Paint,
     pub quad: [[f32; 4]; 4],
     pub clip: Option<[f32; 4]>,
@@ -502,9 +648,9 @@ pub struct LayerSystem {
     transition_serial: u64,
 }
 
-/// Full-screen transition from the previously presented frame to the current
-/// one (ADR 0022). Effect codes and option meanings are the Siglus `WIPE`
-/// table, composed by the same shader arithmetic as siglus_rs `wipe.wgsl`.
+/// Full-screen transition from the engine's previously presented scene to the
+/// current one. Named engine effects have explicit contracts; the `Siglus`
+/// variant separately preserves its native WIPE table (ADR 0022).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransitionSpec {
@@ -532,6 +678,14 @@ pub enum TransitionEffect {
     Slide { direction: u8 },
     /// Mosaic out of the old scene and into the new one (type 230).
     Mosaic { size: u32 },
+    /// Ordered Bayer-4 fade in logical canvas pixels. This is a shared engine
+    /// effect with an independent code, not an alias for a Siglus wipe type.
+    OrderedDither {
+        cell: [u32; 2],
+        #[serde(default)]
+        diagonal: bool,
+        steps: u32,
+    },
     /// A raw Siglus wipe type with its option list. Pattern types (5..=199)
     /// without `mask` use the original generated masks.
     Siglus {
@@ -568,10 +722,12 @@ impl Easing {
         }
     }
 }
-/// Siglus wipe types composed by the shader; page curls (300/301) are not.
+/// Transition codes implemented by shared GPU pipelines. Engine-owned effects
+/// use their own range; Siglus page curls (300/301) remain unsupported.
 pub fn transition_code_supported(code: i32) -> bool {
-    matches!(code, 0..=2 | 5..=199 | 200 | 210..=215 | 220 | 221 | 230 | 231 | 240..=243 | 900 | 901)
+    matches!(code, 0..=2 | 5..=199 | 200 | 210..=215 | 220 | 221 | 230 | 231 | 240..=243 | 900 | 901 | ORDERED_DITHER_TRANSITION_CODE)
 }
+pub const ORDERED_DITHER_TRANSITION_CODE: i32 = 1000;
 /// Types whose mask comes from `wipe_mask::generate` when none is given.
 pub fn transition_code_uses_generated_mask(code: i32) -> bool {
     (5..200).contains(&code) && code != 50
@@ -595,6 +751,17 @@ impl TransitionSpec {
             TransitionEffect::Mosaic { size } => {
                 o[0] = *size as i32;
                 (230, o, None)
+            }
+            TransitionEffect::OrderedDither {
+                cell,
+                diagonal,
+                steps,
+            } => {
+                o[0] = cell[0] as i32;
+                o[1] = cell[1] as i32;
+                o[2] = i32::from(*diagonal);
+                o[3] = *steps as i32;
+                (ORDERED_DITHER_TRANSITION_CODE, o, None)
             }
             TransitionEffect::Siglus {
                 code,
@@ -623,13 +790,19 @@ impl TransitionSpec {
             TransitionEffect::Mosaic { size } => {
                 ensure!((1..=1024).contains(size), "mosaic size 1..=1024")
             }
+            TransitionEffect::OrderedDither { cell, steps, .. } => {
+                ensure!(
+                    cell.iter().all(|v| (1..=8192).contains(v)) && (1..=65_536).contains(steps),
+                    "ordered dither cell/step limits"
+                );
+            }
             TransitionEffect::Siglus {
                 code,
                 options,
                 mask,
             } => {
                 ensure!(
-                    transition_code_supported(*code),
+                    transition_code_supported(*code) && *code != ORDERED_DITHER_TRANSITION_CODE,
                     "Siglus wipe type {code} is not supported by the compositor"
                 );
                 ensure!(
@@ -698,6 +871,10 @@ pub enum LayerCommand {
         id: u32,
         visible: bool,
     },
+    /// Complete a positioned text run through the engine clock/state service.
+    CompleteReveal {
+        id: u32,
+    },
     SetOpacity {
         id: u32,
         opacity: u8,
@@ -727,6 +904,10 @@ pub enum LayerCommand {
     EndTransition,
 }
 impl LayerSystem {
+    /// Inspect the same client-scoped logical node used by render extraction.
+    pub fn get(&self, client: ClientId, id: u32) -> Option<&LayerSpec> {
+        self.clients.get(&client.0)?.get(&id)
+    }
     pub fn apply_batch(&mut self, client: ClientId, commands: &[LayerCommand]) -> Result<()> {
         ensure!(commands.len() <= 4096, "layer command limit");
         let mut staged = self.clone();
@@ -813,6 +994,7 @@ impl LayerSystem {
                     let id = match other {
                         LayerCommand::SetTransform { id, .. }
                         | LayerCommand::SetVisible { id, .. }
+                        | LayerCommand::CompleteReveal { id }
                         | LayerCommand::SetOpacity { id, .. }
                         | LayerCommand::SetOrder { id, .. }
                         | LayerCommand::SetClip { id, .. }
@@ -825,6 +1007,14 @@ impl LayerSystem {
                             layer.transform = transform.clone()
                         }
                         LayerCommand::SetVisible { visible, .. } => layer.visible = *visible,
+                        LayerCommand::CompleteReveal { .. } => match &mut layer.paint {
+                            Paint::GlyphRun { reveal, .. } => {
+                                if let Some(reveal) = reveal {
+                                    reveal.forced_complete = true;
+                                }
+                            }
+                            _ => bail!("reveal target is not a positioned glyph run"),
+                        },
                         LayerCommand::SetOpacity { opacity, .. } => layer.opacity = *opacity,
                         LayerCommand::SetOrder { order, .. } => layer.order = *order,
                         LayerCommand::SetClip { clip, .. } => layer.clip = *clip,
@@ -904,8 +1094,30 @@ impl LayerSystem {
     pub fn transition(&self) -> Option<&ActiveTransition> {
         self.transition.as_ref()
     }
-    /// Advance the transition clock; it ends (and is removed) at its duration.
+    /// Inspect the same client-scoped progress the renderer uses.
+    pub fn reveal_status(&self, client: ClientId, id: u32) -> Option<GlyphRevealStatus> {
+        self.clients
+            .get(&client.0)?
+            .get(&id)?
+            .paint
+            .glyph_reveal_status()
+    }
+    /// Advance engine-owned text and transition clocks.
     pub fn tick(&mut self, delta_ms: u64) {
+        for layer in self
+            .clients
+            .values_mut()
+            .flat_map(|owner| owner.values_mut())
+        {
+            if let Paint::GlyphRun {
+                glyphs,
+                reveal: Some(reveal),
+                ..
+            } = &mut layer.paint
+            {
+                reveal.advance(glyphs.len(), delta_ms);
+            }
+        }
         if let Some(t) = &mut self.transition {
             t.elapsed_ms = t.elapsed_ms.saturating_add(delta_ms);
             if t.elapsed_ms >= t.spec.duration_ms {
@@ -980,6 +1192,10 @@ impl LayerSystem {
                     f.validate()?;
                 }
                 if let Some(uv) = s.uv {
+                    ensure!(
+                        !matches!(s.paint, Paint::GlyphRun { .. }),
+                        "glyph runs do not take image UV crops"
+                    );
                     ensure!(
                         uv.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
                             && uv[2] > uv[0]
@@ -1092,6 +1308,7 @@ impl LayerSystem {
                     sub: 0,
                     order: spec.order,
                     size: [spec.rect[2].ceil() as u32, spec.rect[3].ceil() as u32],
+                    extent: [spec.rect[2], spec.rect[3]],
                     paint: spec.paint.clone(),
                     quad,
                     clip: Some(clip),
@@ -1123,6 +1340,7 @@ pub fn rectangle(
         sub,
         order,
         size: [w.ceil().max(1.) as u32, h.ceil().max(1.) as u32],
+        extent: [w, h],
         paint,
         quad: [
             [x, y, 0., 1.],

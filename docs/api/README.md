@@ -17,14 +17,14 @@ and a test keeps it current.
   `ClassInfo` docs, property types and method signatures. The same registry
   generates the JS bindings and the `.d.ts`, so the three cannot disagree.
 - **Commands.** `services::COMMAND_API` maps every typed `WorldCommand`,
-  `LayerCommand` and `UiCommand` to the API member that issues it.
+  `LayerCommand`, `CanvasCommand` and `UiCommand` to the API member that issues it.
   `tests/api_coverage.rs` fails on an unmapped variant.
 - **Data specs.** Field names and Rust types come from the `pub struct` and
-  `pub enum` declarations in `crysirror-scene`. Descriptions come from their
+  `pub enum` declarations in `crysirror-scene`, plus shared media declarations in core/runtime. Descriptions come from their
   `///` comments. Defaults come from serde: a minimal value is parsed and
   then serialized again.
-- **Adapter configs.** The `Config` structs of the Siglus, RFVP and BGI
-  adapters.
+- **Adapter configs.** The `Config` structs of the Siglus and native RealLive
+  adapters. Removed hosted-engine configurations are not accepted.
 
 Rust crate internals are not part of this reference. For those, use
 `cargo doc --workspace --no-deps`.

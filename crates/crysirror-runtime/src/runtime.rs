@@ -5,14 +5,14 @@ use crate::{
     script::ScriptVm,
     vfs::DiskVfs,
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
+    Error,
     path::VfsPath,
     save::{SaveEnvelope, SaveIdentity, SaveLimits},
     service::{FileSystem, HostServices, InputFrame},
     state::{ClientId, Command, Limits, SceneState},
     vm::{VmAdapter, VmYield},
-    Error,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -108,6 +108,10 @@ pub struct SharedHost {
     surfaces: Vec<(ClientId, u32, u32, u32, Vec<u8>)>,
     pcm: BTreeMap<ClientId, Vec<[f32; 2]>>,
     pub channel_audio: crysirror_audio::channels::ChannelAudio,
+    pub media: crate::media::MediaManager,
+    pub text: crysirror_text::TextSystem,
+    decoders: crysirror_image::DecoderRegistry,
+    image_dimensions: BTreeMap<(ClientId, String), ([u32; 2], bool)>,
 }
 impl SharedHost {
     /// Drain all client PCM blocks for one host frame, mixing without clipping.
@@ -115,9 +119,16 @@ impl SharedHost {
     pub fn take_pcm_output(&mut self) -> Vec<[f32; 2]> {
         let blocks = std::mem::take(&mut self.pcm);
         let native = self.channel_audio.take_output();
-        let count = blocks.values().map(Vec::len).max().unwrap_or(0).max(native.len());
+        let count = blocks
+            .values()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0)
+            .max(native.len());
         let mut mixed = vec![[0.; 2]; count];
-        for (out, frame) in mixed.iter_mut().zip(native) { *out=frame; }
+        for (out, frame) in mixed.iter_mut().zip(native) {
+            *out = frame;
+        }
         for block in blocks.values() {
             for (out, frame) in mixed.iter_mut().zip(block) {
                 out[0] += frame[0];
@@ -136,21 +147,202 @@ impl FileSystem for SharedHost {
     }
 }
 impl HostServices for SharedHost {
-    fn submit_audio(&mut self,client:ClientId,request:crysirror_core::service::AudioRequest)->crysirror_core::Result<()> {
-        if !self.clients.contains(&client) {return Err(Error::NotFound);}
-        self.channel_audio.submit(client.0,request).map_err(|e|Error::Io(format!("shared audio: {e:#}")))
+    fn audio_playing(&self, client: ClientId, channel: u32) -> crysirror_core::Result<bool> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        Ok(self.channel_audio.is_playing(client.0, channel))
     }
-    fn submit_pcm(&mut self, client: ClientId, sample_rate: u32, frames: &[[f32; 2]]) -> crysirror_core::Result<()> {
-        if !self.clients.contains(&client) { return Err(Error::NotFound); }
-        if sample_rate != 48_000 { return Err(Error::Unsupported("PCM output sample rate")); }
-        if !frames.iter().flatten().all(|v| v.is_finite() && v.abs() <= 256.) {
+    fn query_engine(
+        &mut self,
+        client: ClientId,
+        query: crysirror_core::service::EngineQuery,
+    ) -> crysirror_core::Result<Vec<u8>> {
+        use crysirror_core::service::EngineQuery as Q;
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        let result = match query {
+            Q::Layer(id) => serde_json::to_value(self.engine.layers.get(client, id)),
+            Q::Canvas(id) => serde_json::to_value(self.engine.canvases.surface(client, id)),
+            Q::UiWidget(id) => serde_json::to_value(self.engine.ui.get(client.0, id)),
+            Q::UiEvents => {
+                let mut selected = Vec::new();
+                self.engine.ui.events.retain(|e| {
+                    if e.widget.owner == client.0 {
+                        selected.push(e.clone());
+                        false
+                    } else {
+                        true
+                    }
+                });
+                serde_json::to_value(selected)
+            }
+        }
+        .map_err(|e| Error::Io(e.to_string()))?;
+        serde_json::to_vec(&result).map_err(|e| Error::Io(e.to_string()))
+    }
+
+    fn image_size(&mut self, client: ClientId, asset: &str) -> crysirror_core::Result<[u32; 2]> {
+        let key = (client, asset.to_owned());
+        if let Some((size, _)) = self.image_dimensions.get(&key) {
+            return Ok(*size);
+        }
+        let path = VfsPath::new(crysirror_core::path::Mount::Asset, asset)?;
+        let storage = self.fs.storage(client)?;
+        let bytes = storage.read(&path)?;
+        let source =
+            |name: &str| storage.read(&VfsPath::new(crysirror_core::path::Mount::Asset, name)?);
+        let image = self
+            .decoders
+            .decode_with(asset, &bytes, Some(&source), None, None)
+            .map_err(|e| Error::Io(e.to_string()))?;
+        let size = [image.width, image.height];
+        if self.image_dimensions.len() >= 4096 {
+            return Err(Error::Limit("image metadata cache"));
+        }
+        self.image_dimensions.insert(
+            key,
+            (
+                size,
+                image.rgba.chunks_exact(4).all(|pixel| pixel[3] == 255),
+            ),
+        );
+        Ok(size)
+    }
+
+    fn image_is_opaque(&mut self, client: ClientId, asset: &str) -> crysirror_core::Result<bool> {
+        self.image_size(client, asset)?;
+        Ok(self.image_dimensions[&(client, asset.to_owned())].1)
+    }
+    fn font_metrics(
+        &self,
+        font: &str,
+        size: f32,
+        character: char,
+    ) -> crysirror_core::Result<crysirror_core::service::FontMetrics> {
+        self.text
+            .metrics(font, size, character)
+            .map_err(|e| Error::Io(e.to_string()))
+    }
+    fn media_request(
+        &mut self,
+        client: ClientId,
+        request: crysirror_core::service::MediaRequest,
+    ) -> crysirror_core::Result<VfsPath> {
+        use crysirror_core::{path::Mount, service::MediaRequest};
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        let id = match &request {
+            MediaRequest::Play { id, .. } | MediaRequest::Stop { id } => *id,
+        };
+        if id >= 1024 {
+            return Err(Error::Limit("media identity"));
+        }
+        let slot = 0x7100_0000 + id;
+        match request {
+            MediaRequest::Play {
+                asset,
+                looping,
+                audio,
+                gain,
+                ..
+            } => {
+                let path = VfsPath::new(Mount::Asset, &asset)?;
+                let storage = self.fs.storage(client)?;
+                self.media
+                    .play(
+                        client,
+                        id,
+                        storage,
+                        &path,
+                        crate::media::MediaOptions {
+                            looping,
+                            audio,
+                            gain,
+                            audio_channel: 0x7000_0000 + id,
+                        },
+                        self.clock_ms,
+                    )
+                    .map_err(|e| Error::Io(e.to_string()))?;
+                self.surfaces.push((client, slot, 1, 1, vec![0, 0, 0, 255]));
+            }
+            MediaRequest::Stop { .. } => self
+                .media
+                .stop(client, id)
+                .map_err(|e| Error::Io(e.to_string()))?,
+        }
+        for audio in self.media.take_audio() {
+            self.channel_audio
+                .submit(audio.client.0, audio.request)
+                .map_err(|e| Error::Io(e.to_string()))?;
+        }
+        VfsPath::new(Mount::Asset, &format!("__surface/{slot}"))
+    }
+    fn media_info(
+        &self,
+        client: ClientId,
+        id: u32,
+    ) -> crysirror_core::Result<crysirror_core::service::MediaInfo> {
+        use crate::media::MediaState as S;
+        use crysirror_core::service::{MediaInfo, MediaPhase as P};
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        let state = self.media.status(client, id).ok_or(Error::NotFound)?;
+        Ok(MediaInfo {
+            phase: match state.state {
+                S::Loading => P::Loading,
+                S::Playing => P::Playing,
+                S::Ended => P::Ended,
+                S::Stopped => P::Stopped,
+                S::Failed => P::Failed,
+            },
+            position_ms: state.position_ms,
+            published_frames: state.published_frames,
+        })
+    }
+
+    fn submit_audio(
+        &mut self,
+        client: ClientId,
+        request: crysirror_core::service::AudioRequest,
+    ) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .submit(client.0, request)
+            .map_err(|e| Error::Io(format!("shared audio: {e:#}")))
+    }
+    fn submit_pcm(
+        &mut self,
+        client: ClientId,
+        sample_rate: u32,
+        frames: &[[f32; 2]],
+    ) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        if sample_rate != 48_000 {
+            return Err(Error::Unsupported("PCM output sample rate"));
+        }
+        if !frames
+            .iter()
+            .flatten()
+            .all(|v| v.is_finite() && v.abs() <= 256.)
+        {
             return Err(Error::Invalid("PCM output samples"));
         }
         let before = self.pcm.get(&client).map_or(0, Vec::len);
         if before.checked_add(frames.len()).is_none_or(|n| n > 96_000) {
             return Err(Error::Limit("PCM output queue; drain between frames"));
         }
-        self.pcm.entry(client).or_default().extend_from_slice(frames);
+        self.pcm
+            .entry(client)
+            .or_default()
+            .extend_from_slice(frames);
         Ok(())
     }
     fn submit(&mut self, client: ClientId, commands: &[Command]) -> crysirror_core::Result<()> {
@@ -432,6 +624,12 @@ impl Runtime {
             assets.register(session.id, &spec.asset_prefix)?;
             assets.refresh_storage(session.id, core(fs.storage(session.id))?)?;
         }
+        let mut text = crysirror_text::TextSystem::default();
+        for (alias, path) in &project.fonts {
+            let bytes = assets.read(path)?.to_vec();
+            text.add_font(alias, bytes.clone())?;
+            assets.text.add_font(alias, bytes)?;
+        }
         let clients = sessions.iter().map(|s| s.id).collect();
         let fingerprint = project.fingerprint()?;
         Ok(Self {
@@ -448,6 +646,10 @@ impl Runtime {
                 surfaces: Vec::new(),
                 pcm: BTreeMap::new(),
                 channel_audio: Default::default(),
+                media: Default::default(),
+                text,
+                decoders: assets.decoders.clone(),
+                image_dimensions: BTreeMap::new(),
             },
             assets,
             restored: 0,
@@ -469,7 +671,8 @@ impl Runtime {
             .videos()
             .map(|(c, n, v)| (c, n.to_owned(), v.clone()))
             .collect();
-        self.videos.retain(|k, _| specs.iter().any(|(c, n, _)| *c == k.0 && *n == k.1));
+        self.videos
+            .retain(|k, _| specs.iter().any(|(c, n, _)| *c == k.0 && *n == k.1));
         for (client, name, spec) in specs {
             let key = (client, name.clone());
             let stale = self.videos.get(&key).map_or(true, |p| {
@@ -477,16 +680,32 @@ impl Runtime {
             });
             if stale {
                 let bytes = self.assets.read_for(ClientId(client), &spec.asset)?;
-                let stream = crysirror_video::open(bytes.to_vec()).with_context(|| format!("video {name}: {}", spec.asset))?;
+                let stream = crysirror_video::open(bytes.to_vec())
+                    .with_context(|| format!("video {name}: {}", spec.asset))?;
                 let player = crysirror_video::Player::new(stream, spec.looping)?;
-                self.videos.insert(key.clone(), VideoPlayback { asset: spec.asset.clone(), looping: spec.looping, player, synced_ms: 0, published: 0 });
+                self.videos.insert(
+                    key.clone(),
+                    VideoPlayback {
+                        asset: spec.asset.clone(),
+                        looping: spec.looping,
+                        player,
+                        synced_ms: 0,
+                        published: 0,
+                    },
+                );
             }
             let p = self.videos.get_mut(&key).expect("video inserted above");
             p.player.advance((spec.time_ms - p.synced_ms) as f64)?;
             p.synced_ms = spec.time_ms;
             if p.player.revision != p.published {
                 if let Some(f) = p.player.frame() {
-                    self.assets.put_surface(ClientId(client), spec.slot, f.width, f.height, f.rgba.clone())?;
+                    self.assets.put_surface(
+                        ClientId(client),
+                        spec.slot,
+                        f.width,
+                        f.height,
+                        f.rgba.clone(),
+                    )?;
                 }
                 p.published = p.player.revision;
             }
@@ -496,7 +715,12 @@ impl Runtime {
     pub fn video_status(&self, client: ClientId, name: &str) -> Option<VideoStatus> {
         let p = self.videos.get(&(client.0, name.to_owned()))?;
         let info = p.player.info();
-        Some(VideoStatus { width: info.width, height: info.height, ended: p.player.ended(), frames_presented: p.player.revision })
+        Some(VideoStatus {
+            width: info.width,
+            height: info.height,
+            ended: p.player.ended(),
+            frames_presented: p.player.revision,
+        })
     }
     pub fn tick(&mut self, delta_ms: u64, input: InputFrame) -> Result<()> {
         // PCM is frame output, like the current render product. A headless
@@ -508,11 +732,16 @@ impl Runtime {
             .checked_add(delta_ms)
             .context("clock overflow")?;
         let consumed = {
-            let physics=&mut self.physics;
-            let SharedHost {engine,fs,..}=&mut self.host;
-            match engine.tick_with(delta_ms,input,self.project.canvas,|world,dt|physics.step(world,fs,dt)) {
-                Ok(consumed)=>consumed,
-                Err(error)=>{physics.invalidate();return Err(error);}
+            let physics = &mut self.physics;
+            let SharedHost { engine, fs, .. } = &mut self.host;
+            match engine.tick_with(delta_ms, input, self.project.canvas, |world, dt| {
+                physics.step(world, fs, dt)
+            }) {
+                Ok(consumed) => consumed,
+                Err(error) => {
+                    physics.invalidate();
+                    return Err(error);
+                }
             }
         };
         self.host.clock_ms = clock;
@@ -525,6 +754,7 @@ impl Runtime {
         } else {
             input
         };
+        self.host.decoders = self.assets.decoders.clone();
         for s in &mut self.sessions {
             if s.yielded == VmYield::Halted {
                 continue;
@@ -538,6 +768,21 @@ impl Runtime {
         for (client, slot, w, h, rgba) in std::mem::take(&mut self.host.surfaces) {
             self.assets.put_surface(client, slot, w, h, rgba)?;
         }
+        let media = self.host.media.tick(self.host.clock_ms)?;
+        for update in media.frames {
+            self.assets.put_surface(
+                update.client,
+                0x7100_0000 + update.id,
+                update.frame.width,
+                update.frame.height,
+                update.frame.rgba,
+            )?;
+        }
+        for update in media.audio {
+            self.host
+                .channel_audio
+                .submit(update.client.0, update.request)?;
+        }
         self.sync_videos()?;
         self.tick_puppets(delta_ms)?;
         self.host.channel_audio.render(delta_ms)?;
@@ -545,14 +790,19 @@ impl Runtime {
         Ok(())
     }
     /// Loads a puppet rig from the client's assets (cached).
-    pub fn puppet_rig(&mut self, client: ClientId, asset: &str) -> Result<Arc<crysirror_puppet::PuppetRig>> {
+    pub fn puppet_rig(
+        &mut self,
+        client: ClientId,
+        asset: &str,
+    ) -> Result<Arc<crysirror_puppet::PuppetRig>> {
         let key = (client.0, asset.to_owned());
         if let Some(r) = self.puppet_rigs.get(&key) {
             return Ok(r.clone());
         }
         let bytes = self.assets.read_for(client, asset)?;
         let rig = Arc::new(
-            crysirror_puppet::PuppetRig::from_json(&bytes).with_context(|| format!("puppet rig {asset}"))?,
+            crysirror_puppet::PuppetRig::from_json(&bytes)
+                .with_context(|| format!("puppet rig {asset}"))?,
         );
         self.puppet_rigs.insert(key, rig.clone());
         Ok(rig)
@@ -563,7 +813,13 @@ impl Runtime {
     fn tick_puppets(&mut self, delta_ms: u64) -> Result<()> {
         for (client, id, asset) in self.host.engine.layers.puppet_layers() {
             let rig = self.puppet_rig(ClientId(client), &asset)?;
-            let slot = self.host.engine.layers.puppet_slot(client, id).context("puppet slot")?.clone();
+            let slot = self
+                .host
+                .engine
+                .layers
+                .puppet_slot(client, id)
+                .context("puppet slot")?
+                .clone();
             let mut p = match slot.state {
                 Some(s) => crysirror_puppet::Puppet::with_state(rig.clone(), s)?,
                 None => crysirror_puppet::Puppet::new(rig.clone())?,
@@ -571,9 +827,17 @@ impl Runtime {
             for c in &slot.pending {
                 use crysirror_scene::layer::PuppetCommand as C;
                 match c {
-                    C::SetParameter { parameter, value, duration_ms } => p.set_parameter(parameter, *value, *duration_ms),
+                    C::SetParameter {
+                        parameter,
+                        value,
+                        duration_ms,
+                    } => p.set_parameter(parameter, *value, *duration_ms),
                     C::ReleaseParameter { parameter } => p.release_parameter(parameter),
-                    C::Play { motion, looping, weight } => p.play(motion, *looping, *weight),
+                    C::Play {
+                        motion,
+                        looping,
+                        weight,
+                    } => p.play(motion, *looping, *weight),
                     C::Stop { motion } => p.stop(motion),
                 }
                 .with_context(|| format!("puppet layer {id} ({asset})"))?;
@@ -586,7 +850,10 @@ impl Runtime {
                     *t = format!("{dir}/{t}");
                 }
             }
-            self.host.engine.layers.set_puppet(client, id, p.state().clone(), Arc::new(frame))?;
+            self.host
+                .engine
+                .layers
+                .set_puppet(client, id, p.state().clone(), Arc::new(frame))?;
         }
         Ok(())
     }
@@ -608,7 +875,8 @@ impl Runtime {
         provider: Arc<dyn crysirror_core::vfs::VfsProvider>,
     ) -> Result<()> {
         core(self.host.fs.mount_provider(client, mount_point, provider))?;
-        self.assets.refresh_storage(client,core(self.host.fs.storage(client))?)?;
+        self.assets
+            .refresh_storage(client, core(self.host.fs.storage(client))?)?;
         self.physics.invalidate_client(client.0);
         Ok(())
     }
@@ -621,7 +889,7 @@ impl Runtime {
     pub fn inspect(&self) -> serde_json::Value {
         serde_json::json!({"name":self.project.name,"frame":self.host.scene.frame(),"time_ms":self.host.clock_ms,
             "visuals":self.host.scene.visuals().len(),"voices":self.host.scene.voices().len(),
-            "channel_audio":self.host.channel_audio.mixer.stats(),
+            "channel_audio":self.host.channel_audio.mixer.stats(),"media":self.host.media.inspect(),
             "engine":self.host.engine,
             "adapters":self.registry.names(),"sessions":self.sessions.iter().map(|s|serde_json::json!({
                 "name":s.name,"client":s.id.0,"engine":s.vm.engine_id(),"yield":format!("{:?}",s.yielded),"native":serde_json::from_slice::<serde_json::Value>(&s.vm.diagnostics()).ok()
@@ -646,6 +914,10 @@ impl Runtime {
         }
     }
     pub fn snapshot(&self) -> Result<Vec<u8>> {
+        ensure!(
+            !self.host.media.has_resources(),
+            "engine media snapshot requires resource reconstruction support (including retained EOF frames)"
+        );
         let mut clients = Vec::new();
         let mut machines = Vec::new();
         for s in &self.sessions {
@@ -832,13 +1104,33 @@ impl Runtime {
         if t.generated_mask {
             if self.transition_mask != Some(t.serial) {
                 let [w, h] = self.project.canvas;
-                let gray = siglus_scene_vm::runtime::wipe_mask::generate(t.code, &t.options, w, h, t.options[15] as u32)
-                    .with_context(|| format!("Siglus wipe type {} has no generated mask; pass a mask asset", t.code))?;
+                let gray = siglus_scene_vm::runtime::wipe_mask::generate(
+                    t.code,
+                    &t.options,
+                    w,
+                    h,
+                    t.options[15] as u32,
+                )
+                .with_context(|| {
+                    format!(
+                        "Siglus wipe type {} has no generated mask; pass a mask asset",
+                        t.code
+                    )
+                })?;
                 let rgba = gray.pixels.iter().flat_map(|&v| [v, v, v, 255]).collect();
-                self.assets.put_surface(ClientId(t.owner), TRANSITION_MASK_SLOT, gray.width, gray.height, rgba)?;
+                self.assets.put_surface(
+                    ClientId(t.owner),
+                    TRANSITION_MASK_SLOT,
+                    gray.width,
+                    gray.height,
+                    rgba,
+                )?;
                 self.transition_mask = Some(t.serial);
             }
-            t.mask = Some(format!("{}{TRANSITION_MASK_SLOT}", crate::assets::SURFACE_PREFIX));
+            t.mask = Some(format!(
+                "{}{TRANSITION_MASK_SLOT}",
+                crate::assets::SURFACE_PREFIX
+            ));
         }
         Ok(Some(t))
     }
@@ -870,18 +1162,20 @@ mod tests {
     fn two_clients_share_services_but_not_ids() {
         let (_t, mut r) = runtime();
         r.tick(0, InputFrame::default()).unwrap();
-        assert!(r
-            .host
-            .scene
-            .visuals()
-            .keys()
-            .any(|id| id.client == ClientId(1) && id.local == 0));
-        assert!(r
-            .host
-            .scene
-            .visuals()
-            .keys()
-            .any(|id| id.client == ClientId(2) && id.local == 0));
+        assert!(
+            r.host
+                .scene
+                .visuals()
+                .keys()
+                .any(|id| id.client == ClientId(1) && id.local == 0)
+        );
+        assert!(
+            r.host
+                .scene
+                .visuals()
+                .keys()
+                .any(|id| id.client == ClientId(2) && id.local == 0)
+        );
     }
     #[test]
     fn roundtrip_rewinds_runtime() {
@@ -1083,11 +1377,12 @@ mod required_engine_save_test {
         data.as_object_mut().unwrap().remove("engine");
         envelope.services = serde_json::to_vec(&data).unwrap();
         let bad = core(envelope.encode(SaveLimits::default())).unwrap();
-        assert!(r
-            .restore(&bad)
-            .unwrap_err()
-            .to_string()
-            .contains("missing engine"));
+        assert!(
+            r.restore(&bad)
+                .unwrap_err()
+                .to_string()
+                .contains("missing engine")
+        );
         assert_eq!(r.snapshot().unwrap(), before);
     }
 }

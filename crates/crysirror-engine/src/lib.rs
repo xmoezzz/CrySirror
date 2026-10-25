@@ -13,23 +13,24 @@
 pub mod ai;
 pub mod api_doc;
 pub mod audio_api;
-pub mod resource_api;
 pub mod bitmap_api;
 pub mod builtin;
+pub mod canvas_api;
 pub mod context;
 pub mod input_api;
-pub mod localization;
-pub mod text_api;
 pub mod lifecycle;
+pub mod localization;
 pub mod object;
 pub mod physics;
 pub mod physics_api;
-pub mod vehicle;
 pub mod puppet_api;
+pub mod resource_api;
 pub mod script;
 pub mod services;
 pub mod systems;
+pub mod text_api;
 pub mod value;
+pub mod vehicle;
 
 pub use context::{EngineContext, EngineState};
 pub use lifecycle::{App, AppState, Lifecycle, Plugin};

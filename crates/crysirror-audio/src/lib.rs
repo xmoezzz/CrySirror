@@ -2,14 +2,15 @@
 //! Engine-owned audio scheduling and buses. The platform device is replaceable.
 //! Canonical asset/voice identity remains in SceneState; SDK objects live here.
 #![forbid(unsafe_code)]
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use crysirror_core::state::{AudioVoice, ObjectId, SceneState};
 use std::{collections::BTreeMap, sync::Arc};
 
-pub mod decoder;
 pub mod channels;
-pub mod mixer;
+pub mod decoder;
 pub mod legacy_pcm;
+pub mod mixer;
+pub mod native;
 
 #[cfg(feature = "rodio-output")]
 pub mod pcm_output;

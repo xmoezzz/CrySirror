@@ -7,13 +7,13 @@ use crate::{
     object::{Class, ClassInfo, ClassRegistry, MethodInfo, ObjectId, PropertyInfo, TypeHint as T},
     value::Value,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::{FileSystem, HostServices},
     state::{AudioVoice, Command},
 };
-use crysirror_scene::{layer::LayerCommand, ui::UiCommand, ServiceBatch};
+use crysirror_scene::{ServiceBatch, layer::LayerCommand, ui::UiCommand};
 use std::sync::{Arc, OnceLock};
 
 /// Every typed engine command and the API method that issues it.
@@ -42,7 +42,11 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("world", "set_particles", "Entity.setParticles"),
     ("world", "set_light", "Entity.setLight"),
     ("world", "set_reflection_probe", "Entity.setReflectionProbe"),
-    ("world", "set_irradiance_volume", "Entity.setIrradianceVolume"),
+    (
+        "world",
+        "set_irradiance_volume",
+        "Entity.setIrradianceVolume",
+    ),
     ("world", "set_streaming", "World.streamLevel"),
     ("world", "set_video", "World.playVideo"),
     ("world", "play_sequence", "World.playSequence"),
@@ -51,6 +55,7 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("layer", "remove", "Layers.remove"),
     ("layer", "set_transform", "Layers.setTransform"),
     ("layer", "set_visible", "Layers.setVisible"),
+    ("layer", "complete_reveal", "Layers.completeReveal"),
     ("layer", "set_opacity", "Layers.setOpacity"),
     ("layer", "set_order", "Layers.setOrder"),
     ("layer", "set_clip", "Layers.setClip"),
@@ -58,12 +63,27 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("layer", "transition", "Layers.transition"),
     ("layer", "end_transition", "Layers.endTransition"),
     ("layer", "puppet", "Puppets.setParameter"),
+    ("canvas", "create", "Canvases.apply"),
+    ("canvas", "clear", "Canvases.apply"),
+    ("canvas", "draw", "Canvases.apply"),
+    ("canvas", "set", "Canvases.apply"),
+    ("canvas", "copy", "Canvases.apply"),
+    ("canvas", "present", "Canvases.apply"),
+    ("canvas", "hide", "Canvases.apply"),
     ("ui", "put", "Ui.put"),
     ("ui", "remove", "Ui.remove"),
     ("ui", "set_visible", "Ui.setVisible"),
     ("ui", "set_enabled", "Ui.setEnabled"),
     ("ui", "set_value", "Ui.setValue"),
     ("ui", "set_text", "Ui.setText"),
+    ("ui", "set_title", "Ui.setTitle"),
+    ("ui", "set_cursor_visible", "Ui.setCursorVisible"),
+    ("ui", "insert_text", "Ui.insertText"),
+    ("ui", "backspace", "Ui.backspace"),
+    ("ui", "focus", "Ui.focusTextField"),
+    ("media", "play", "Media.play"),
+    ("media", "stop", "Media.stop"),
+    ("service", "media_status", "Media.status"),
     ("service", "play_audio", "Audio.play"),
     ("service", "stop_audio", "Audio.stop"),
     ("runtime", "snapshot", "Save.save"),
@@ -129,13 +149,15 @@ fn layers_info() -> &'static ClassInfo {
             m("remove", vec![("id", T::Int)], T::Void, "Remove a layer and its descendants."),
             m("setTransform", vec![("id", T::Int), ("transform", T::Map)], T::Void, "Pivot/anchor/rotation/scale/z transform."),
             m("setVisible", vec![("id", T::Int), ("visible", T::Bool)], T::Void, "Inherited visibility."),
+            m("revealStatus", vec![("id", T::Int)], T::Optional(Box::new(T::Map)), "Engine-owned glyph reveal {visible,total,complete}, or null for an absent/non-glyph layer."),
+            m("completeReveal", vec![("id", T::Int)], T::Void, "Show the complete positioned text run without a VM-private reveal clock."),
             m("setOpacity", vec![("id", T::Int), ("opacity", T::Int)], T::Void, "Inherited opacity 0..255."),
             m("setOrder", vec![("id", T::Int), ("order", T::List(Box::new(T::Int)))], T::Void, "Explicit [major, minor] draw order."),
             m("setClip", vec![("id", T::Int), ("clip", T::Optional(Box::new(T::List(Box::new(T::Number)))))], T::Void, "Clip rectangle [x,y,w,h] or null."),
             m("setFilter", vec![("id", T::Int), ("filter", T::Optional(Box::new(T::Map)))], T::Void,
                 "Siglus-style 2D filter {mono, invert, bright, dark, color_rate, color, add, tone_curve?:{asset,row,saturation}, mask?:{asset,gray_alpha}, alpha_test, distortion?:{kind:'mosaic'|'raster'|'radial_blur'|'threshold_fade',...}} or null."),
             m("transition", vec![("transition", T::Map)], T::Void,
-                "Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}."),
+                "Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'ordered_dither'{cell:[x,y],diagonal?,steps}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}."),
             m("endTransition", vec![], T::Void, "Finish this client's transition now (skip)."),
         ],
     })
@@ -175,6 +197,20 @@ impl Class for LayersClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if method == "revealStatus" {
+            let id = id(args)?;
+            let state = cx.state()?;
+            return Ok(state
+                .runtime
+                .host
+                .engine
+                .layers
+                .reveal_status(state.client, id)
+                .map(|status| {
+                    Value::from_json(serde_json::to_value(status).expect("plain reveal status"))
+                })
+                .unwrap_or(Value::Null));
+        }
         let cmd = match method {
             "put" => LayerCommand::Put {
                 layer: json(arg(args, 0, "layer")?, "layer spec")?,
@@ -188,6 +224,7 @@ impl Class for LayersClass {
                 id: id(args)?,
                 visible: arg(args, 1, "visible")?.as_bool()?,
             },
+            "completeReveal" => LayerCommand::CompleteReveal { id: id(args)? },
             "setOpacity" => LayerCommand::SetOpacity {
                 id: id(args)?,
                 opacity: u8::try_from(arg(args, 1, "opacity")?.as_i64()?)?,
@@ -227,7 +264,7 @@ fn ui_info() -> &'static ClassInfo {
     static I: OnceLock<ClassInfo> = OnceLock::new();
     I.get_or_init(|| ClassInfo {
         name: "Ui",
-        doc: "Retained widgets (panel/label/button/toggle/slider) with focus, capture and modal routing.",
+        doc: "Retained widgets (panel/label/button/toggle/slider/text_field) with focus, capture and modal routing.",
         properties: vec![
             PropertyInfo { name: "events", ty: T::List(Box::new(T::Map)), writable: false, doc: "Events produced by the last UI tick: {client, id, kind, value}." },
             PropertyInfo { name: "focus", ty: T::Any, writable: false, doc: "Focused widget or null." },
@@ -238,6 +275,11 @@ fn ui_info() -> &'static ClassInfo {
             m("setVisible", vec![("id", T::Int), ("visible", T::Bool)], T::Void, "Show/hide."),
             m("setEnabled", vec![("id", T::Int), ("enabled", T::Bool)], T::Void, "Enable/disable input."),
             m("setValue", vec![("id", T::Int), ("value", T::Number)], T::Void, "Toggle/slider value."),
+            m("setCursorVisible",vec![("visible",T::Bool)],T::Void,"Set engine cursor presentation visibility."),
+            m("setTitle",vec![("text",T::String)],T::Void,"Set engine presentation title."),
+            m("focusTextField", vec![("id", T::Int)], T::Void, "Focus an enabled, visible text field owned by this client."),
+            m("insertText", vec![("text", T::String)], T::Void, "Append committed single-line Unicode to the focused text field, up to max_length Unicode scalars."),
+            m("backspace", vec![("id", T::Int)], T::Void, "Remove the final Unicode scalar from a client-owned text field."),
             m("setText", vec![("id", T::Int), ("text", T::String), ("font", T::Optional(Box::new(T::String)))], T::Void, "Label/button text and font alias."),
         ],
     })
@@ -278,6 +320,17 @@ impl Class for UiClass {
                 id: id(args)?,
                 value: arg(args, 1, "value")?.as_f32()?,
             },
+            "setCursorVisible" => UiCommand::SetCursorVisible {
+                visible: arg(args, 0, "visible")?.as_bool()?,
+            },
+            "setTitle" => UiCommand::SetTitle {
+                text: arg(args, 0, "text")?.as_str()?.into(),
+            },
+            "focusTextField" => UiCommand::Focus { id: id(args)? },
+            "insertText" => UiCommand::InsertText {
+                text: arg(args, 0, "text")?.as_str()?.to_owned(),
+            },
+            "backspace" => UiCommand::Backspace { id: id(args)? },
             "setText" => UiCommand::SetText {
                 id: id(args)?,
                 text: arg(args, 1, "text")?.as_str()?.to_owned(),

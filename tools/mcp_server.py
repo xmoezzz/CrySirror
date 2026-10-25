@@ -75,7 +75,7 @@ class Server:
         if name == "project_inspect":
             import hashlib
             value = {"project": p, "sha256": hashlib.sha256(self.project.read_bytes()).hexdigest(),
-                     "registered_native_adapters": None, "registry_verified": False, "source_native_adapters": ["siglus"], "builtin_adapter": "crysirror-script-v1"}
+                     "registered_native_adapters": None, "registry_verified": False, "source_native_adapters": ["reallive", "siglus"], "builtin_adapter": "crysirror-script-v1"}
             if self.executable:
                 run = subprocess.run([str(self.executable), "inspect", str(self.project)], cwd=self.project.parent, capture_output=True, timeout=30, check=False)
                 require(run.returncode == 0, "host inspection failed: " + run.stderr[-16384:].decode(errors="replace"))
@@ -179,7 +179,7 @@ class Server:
             self.initialized = True
             return result({"protocolVersion": PROTOCOL, "capabilities": {"tools": {"listChanged": False}},
                            "serverInfo": {"name": "CrySirror-project-tools", "version": "0.2.0"},
-                           "instructions": "Local project tools, not a live native VM debugger. Inspect sha256 before replacing data. Native RFVP/Siglus adapters are not linked."})
+                           "instructions": "Local project tools, not a live native VM debugger. Inspect sha256 before replacing data. Source adapter availability is separate from the host registry; inspect registry_verified."})
         if not self.ready:
             return error(-32002, "initialize and notifications/initialized are required")
         if method == "tools/list":

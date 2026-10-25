@@ -173,16 +173,24 @@ fn state_dir(project: &Path, explicit: Option<PathBuf>) -> Result<PathBuf> {
     Ok(base.join("CrySirror").join(&fingerprint[..16]))
 }
 fn adapter_registry() -> Result<AdapterRegistry> {
-    Ok(AdapterRegistry::default())
+    #[allow(unused_mut)]
+    let mut registry = AdapterRegistry::default();
+    #[cfg(feature = "reallive")]
+    crysirror_reallive::register(&mut registry)?;
+    Ok(registry)
 }
 fn load_project(path: &Path) -> Result<Project> {
     let project = Project::load(path)?;
     for client in &project.clients {
         anyhow::ensure!(
-            !matches!(client.adapter.as_str(), "bgi" | "reallive" | "rfvp"),
+            !matches!(client.adapter.as_str(), "bgi" | "rfvp"),
             "hosted engine adapter '{}' has been removed; a CrySirror API bridge is required",
             client.adapter
         );
+    }
+    #[cfg(feature = "reallive")]
+    for c in project.clients.iter().filter(|c| c.adapter == "reallive") {
+        serde_json::from_value::<crysirror_reallive::Config>(c.config.clone())?.validate()?;
     }
     Ok(project)
 }
@@ -512,7 +520,7 @@ fn run() -> Result<()> {
                     &serde_json::json!({"project":p,"registered_adapters":adapters,
                         "rfvp_native_vm":false,
                         "bgi_native_vm":false,
-                        "reallive_native_vm":false,
+                        "reallive_native_vm":adapters.contains(&"reallive"),
                         "siglus_native_vm":adapters.contains(&"siglus")})
                 )?
             );

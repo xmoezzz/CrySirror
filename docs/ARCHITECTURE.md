@@ -25,6 +25,7 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-audio | Engine voice scheduling/buses and AudioDevice boundary; optional rodio output |
 | crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, reveal and CPU SDF data |
 | crysirror-scene | Safe CPU World/Layer/UI state, migrated input/animation/projection, transactional mutations and frame extraction |
+| crysirror-reallive | Original RealLive bytecode VM and thin semantic/syscall adapter; retained Canvas/Layer/GlyphRun/UI and engine audio/Media services, no hosted renderer |
 | crysirror-siglus-vm | Independent subset port registered as `siglus`; full vendored SceneVm host/factory switch pending (ADR 0009) |
 | crysirror-engine | Unity-style public API: reflective classes/objects, App lifecycle, behaviours, plugins, ScriptHost contract (ADR 0004/0005) |
 | crysirror-script-js | Default JS/TS script host (Boa + Oxc) bound to the class registry; desktop feature `scripting` (ADR 0005) |
@@ -176,3 +177,34 @@ a new process; they do not inspect a live native VM. There is no shell tool.
 
 An eventual live transport should use the same validated runtime operations,
 not expose arbitrary memory writes or parallel bypasses around the scheduler.
+
+## RealLive VM API bridge (2026-10-26)
+
+The new `crysirror-reallive` dependency direction is VM/semantic adapter to
+shared engine services. It does not restore the removed RealLive hosted engine.
+The source pin and excluded engine modules are in
+[`SOURCE.json`](../crates/crysirror-reallive/src/vm/SOURCE.json). Original
+bytecode/value/call semantics stay in the VM; pending Command/Text events are
+acknowledged only after the corresponding engine calls succeed.
+
+Shared capabilities added for this bridge are usable without RealLive:
+
+- `CanvasSystem` owns logical drawing surfaces and immutable copy-node
+  snapshots. Presentation expands them into ordinary Layer nodes. This does
+  not consume a scene composed by another engine's framebuffer renderer.
+- `Paint::GlyphRun` stores explicit positions and styles; shared `GlyphReveal`
+  and TextSystem own reveal state, glyph metrics and cached glyph rendering.
+- Shared UI widgets/events own choices, editing, title and cursor requests.
+- Shared native audio sources and channel/mixer services own decoding/output.
+- `MediaManager` owns scoped incremental MPEG workers, bounded queues, media
+  clocks and errors. Each decoded picture updates a distinct media texture;
+  a video Layer is one engine scene object, not the entire native scene.
+- Public Canvases/Media classes and existing Layer/UI/audio APIs reach the same
+  services as native syscalls. Client-scoped queries expose the logical state.
+
+The adapter retains native DC numbers, resource naming, grid/markup and
+wait/selection policies, rather than a second general-purpose engine. Unsupported
+operations fail instead of reviving a private engine implementation. Native
+save files/snapshots, DLLs, complete-game behavior and other platform/device
+results remain outside current claims. See [ADR 0048](adr/0048-reallive-vm-engine-apis.md)
+and [REALLIVE.md](REALLIVE.md) for current limits and separated evidence.

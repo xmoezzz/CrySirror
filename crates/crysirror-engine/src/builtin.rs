@@ -9,16 +9,16 @@ use crate::{
     object::{Class, ClassInfo, ClassRegistry, MethodInfo, ObjectId, PropertyInfo, TypeHint as T},
     value::Value,
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::FileSystem,
     state::ClientId,
 };
 use crysirror_scene::{
+    ServiceBatch,
     model::Geometry,
     world::{EntityHandle, EntitySpec, Transform, Tween, WorldCommand},
-    ServiceBatch,
 };
 use std::{collections::BTreeMap, sync::Arc, sync::OnceLock};
 
@@ -38,6 +38,8 @@ pub const GLOBALS: &[(&str, &str)] = &[
     ("resources", "Resources"),
     ("puppets", "Puppets"),
     ("physics", "Physics"),
+    ("canvases", "Canvases"),
+    ("media", "Media"),
 ];
 
 pub fn register(r: &mut ClassRegistry) -> Result<()> {
@@ -48,6 +50,7 @@ pub fn register(r: &mut ClassRegistry) -> Result<()> {
     r.register(Arc::new(ClientClass))?;
     crate::services::register(r)?;
     crate::physics_api::register(r)?;
+    crate::canvas_api::register(r)?;
     Ok(())
 }
 
@@ -92,9 +95,9 @@ pub(crate) fn submit(cx: &mut EngineContext, commands: Vec<WorldCommand>) -> Res
     )
 }
 pub(crate) fn entity_object(cx: &mut EngineContext, id: u32, generation: u32) -> Result<Value> {
-    let client=cx.state()?.client.0;
+    let client = cx.state()?.client.0;
     let payload = Value::Map(BTreeMap::from([
-        ("client".into(),Value::Int(client.into())),
+        ("client".into(), Value::Int(client.into())),
         ("id".into(), Value::Int(id.into())),
         ("generation".into(), Value::Int(generation.into())),
     ]));
@@ -105,7 +108,10 @@ pub(crate) fn entity_object(cx: &mut EngineContext, id: u32, generation: u32) ->
 pub(crate) fn handle(cx: &mut EngineContext, this: ObjectId) -> Result<EntityHandle> {
     let s = cx.state()?;
     let entry = s.objects.get(this)?;
-    ensure!(entry.payload.field("client").and_then(|v|v.as_i64().ok())==Some(i64::from(s.client.0)),"entity belongs to another client");
+    ensure!(
+        entry.payload.field("client").and_then(|v| v.as_i64().ok()) == Some(i64::from(s.client.0)),
+        "entity belongs to another client"
+    );
     ensure!(
         entry.class == "Entity",
         "object is a {}, not an Entity",
@@ -420,7 +426,10 @@ fn parse_spawn(cx: &mut EngineContext, spec: &Value, id: u32) -> Result<EntitySp
             None => None,
         },
         reflection_probe: spec.field("reflectionProbe").map(parse_probe).transpose()?,
-        irradiance_volume: spec.field("irradianceVolume").map(parse_volume).transpose()?,
+        irradiance_volume: spec
+            .field("irradianceVolume")
+            .map(parse_volume)
+            .transpose()?,
     })
 }
 fn parse_volume(v: &Value) -> Result<crysirror_scene::components::IrradianceVolumeSpec> {
@@ -436,7 +445,8 @@ fn parse_probe(v: &Value) -> Result<crysirror_scene::components::ReflectionProbe
     Ok(p)
 }
 fn parse_light(v: &Value) -> Result<crysirror_scene::components::LightSpec> {
-    let l: crysirror_scene::components::LightSpec = serde_json::from_value(v.to_json()).context("light")?;
+    let l: crysirror_scene::components::LightSpec =
+        serde_json::from_value(v.to_json()).context("light")?;
     l.validate()?;
     Ok(l)
 }
@@ -636,7 +646,14 @@ impl Class for WorldClass {
                 let yaw = arg(args, 1, "yawDegrees")?.as_f32()?.to_radians();
                 let half = arg(args, 2, "halfLength")?.as_f32()?;
                 let drop = arg(args, 3, "maxDrop")?.as_f32()?;
-                ensure!(half.is_finite() && half >= 0. && drop.is_finite() && drop > 0. && yaw.is_finite(), "groundPose arguments");
+                ensure!(
+                    half.is_finite()
+                        && half >= 0.
+                        && drop.is_finite()
+                        && drop > 0.
+                        && yaw.is_finite(),
+                    "groundPose arguments"
+                );
                 let ignore = match opt(args, 4) {
                     Some(e) => Some(handle(cx, e.as_object()?)?).map(|h| (h.client, h.id)),
                     None => None,
@@ -646,7 +663,14 @@ impl Class for WorldClass {
                 let fwd = glam::Vec3::new(yaw.sin(), 0., yaw.cos());
                 // Probe from slightly above the body so steps up are found too.
                 let lift = drop * 0.5;
-                let probe = |at: glam::Vec3| physics.raycast(at + glam::Vec3::Y * lift, glam::Vec3::NEG_Y, drop + lift, ignore);
+                let probe = |at: glam::Vec3| {
+                    physics.raycast(
+                        at + glam::Vec3::Y * lift,
+                        glam::Vec3::NEG_Y,
+                        drop + lift,
+                        ignore,
+                    )
+                };
                 let (front, back) = (probe(p + fwd * half), probe(p - fwd * half));
                 let (f, b) = match (front, back) {
                     (None, None) => return Ok(Value::Null),
@@ -655,7 +679,11 @@ impl Class for WorldClass {
                     (Some(f), Some(b)) => (f, b),
                 };
                 let height = (f.point.y + b.point.y) * 0.5;
-                let pitch = if half > 0. { ((f.point.y - b.point.y) / (2. * half)).atan().to_degrees() } else { 0. };
+                let pitch = if half > 0. {
+                    ((f.point.y - b.point.y) / (2. * half)).atan().to_degrees()
+                } else {
+                    0.
+                };
                 let normal = (f.normal + b.normal).normalize_or_zero();
                 return Ok(Value::from_json(serde_json::json!({
                     "height": height, "pitch": pitch, "normal": normal.to_array(),
@@ -666,18 +694,26 @@ impl Class for WorldClass {
                 let origin = arg(args, 0, "origin")?.as_vec3()?;
                 let dir = arg(args, 1, "direction")?.as_vec3()?;
                 let sphere = m == "sphereCast";
-                let radius = if sphere { arg(args, 2, "radius")?.as_f32()? } else { 0. };
+                let radius = if sphere {
+                    arg(args, 2, "radius")?.as_f32()?
+                } else {
+                    0.
+                };
                 let at = usize::from(sphere);
                 let max = arg(args, 2 + at, "maxDistance")?.as_f32()?;
                 let ignore = match opt(args, 3 + at) {
                     Some(e) => Some(handle(cx, e.as_object()?)?),
                     None => None,
                 };
-                ensure!(!sphere || (radius.is_finite() && radius > 0. && radius <= 1000.), "sphereCast radius");
+                ensure!(
+                    !sphere || (radius.is_finite() && radius > 0. && radius <= 1000.),
+                    "sphereCast radius"
+                );
                 let s = cx.state()?;
                 let ignore = ignore.map(|h| (h.client, h.id));
                 let hit = if sphere {
-                    s.physics()?.sphere_cast(origin.into(), dir.into(), radius, max, ignore)
+                    s.physics()?
+                        .sphere_cast(origin.into(), dir.into(), radius, max, ignore)
                 } else {
                     s.physics()?.raycast(origin.into(), dir.into(), max, ignore)
                 };
@@ -725,19 +761,29 @@ impl Class for WorldClass {
                 let name = arg(args, 0, "name")?.as_str()?.to_owned();
                 let (client, current) = {
                     let s = cx.state()?;
-                    (s.client, s.runtime.host.engine.world.video(s.client, &name).cloned())
+                    (
+                        s.client,
+                        s.runtime.host.engine.world.video(s.client, &name).cloned(),
+                    )
                 };
-                let need = |v: Option<crysirror_scene::world::VideoSpec>| v.with_context(|| format!("no video named {name}"));
+                let need = |v: Option<crysirror_scene::world::VideoSpec>| {
+                    v.with_context(|| format!("no video named {name}"))
+                };
                 let spec = match m {
                     "video" => {
-                        let Some(v) = current else { return Ok(Value::Null) };
+                        let Some(v) = current else {
+                            return Ok(Value::Null);
+                        };
                         let status = cx.state()?.runtime.video_status(client, &name);
                         let mut m = BTreeMap::from([
                             ("asset".into(), Value::Str(v.asset.clone())),
                             ("time".into(), Value::Int(v.time_ms as i64)),
                             ("playing".into(), Value::Bool(v.playing)),
                             ("loop".into(), Value::Bool(v.looping)),
-                            ("surface".into(), Value::Str(format!("__surface/{}", v.slot))),
+                            (
+                                "surface".into(),
+                                Value::Str(format!("__surface/{}", v.slot)),
+                            ),
                         ]);
                         if let Some(st) = status {
                             m.insert("width".into(), Value::Int(st.width.into()));
@@ -748,9 +794,12 @@ impl Class for WorldClass {
                     }
                     "playVideo" => {
                         let asset = arg(args, 1, "asset")?.as_str()?.to_owned();
-                        let o = opt(args, 2).map(|v| v.to_json()).unwrap_or(serde_json::json!({}));
+                        let o = opt(args, 2)
+                            .map(|v| v.to_json())
+                            .unwrap_or(serde_json::json!({}));
                         ensure!(
-                            o.as_object().is_some_and(|m| m.keys().all(|k| k == "loop" || k == "paused")),
+                            o.as_object()
+                                .is_some_and(|m| m.keys().all(|k| k == "loop" || k == "paused")),
                             "playVideo options: loop, paused"
                         );
                         Some(crysirror_scene::world::VideoSpec {
@@ -761,21 +810,44 @@ impl Class for WorldClass {
                             slot: 0,
                         })
                     }
-                    "pauseVideo" => Some(crysirror_scene::world::VideoSpec { playing: false, ..need(current)? }),
-                    "resumeVideo" => Some(crysirror_scene::world::VideoSpec { playing: true, ..need(current)? }),
+                    "pauseVideo" => Some(crysirror_scene::world::VideoSpec {
+                        playing: false,
+                        ..need(current)?
+                    }),
+                    "resumeVideo" => Some(crysirror_scene::world::VideoSpec {
+                        playing: true,
+                        ..need(current)?
+                    }),
                     "seekVideo" => {
                         let ms = arg(args, 1, "ms")?.as_f64()?;
                         ensure!(ms.is_finite() && ms >= 0. && ms <= 1e12, "video position");
-                        Some(crysirror_scene::world::VideoSpec { time_ms: ms as u64, ..need(current)? })
+                        Some(crysirror_scene::world::VideoSpec {
+                            time_ms: ms as u64,
+                            ..need(current)?
+                        })
                     }
                     _ => {
                         need(current)?;
                         None
                     }
                 };
-                submit(cx, vec![WorldCommand::SetVideo { name: name.clone(), video: spec }])?;
+                submit(
+                    cx,
+                    vec![WorldCommand::SetVideo {
+                        name: name.clone(),
+                        video: spec,
+                    }],
+                )?;
                 if m == "playVideo" {
-                    let slot = cx.state()?.runtime.host.engine.world.video(client, &name).map(|v| v.slot).context("video")?;
+                    let slot = cx
+                        .state()?
+                        .runtime
+                        .host
+                        .engine
+                        .world
+                        .video(client, &name)
+                        .map(|v| v.slot)
+                        .context("video")?;
                     return Ok(Value::Str(format!("__surface/{slot}")));
                 }
                 Ok(Value::Null)
@@ -783,9 +855,17 @@ impl Class for WorldClass {
             "playSequence" => {
                 let name = arg(args, 0, "name")?.as_str()?.to_owned();
                 let sequence: crysirror_scene::sequence::SequenceSpec =
-                    serde_json::from_value(arg(args, 1, "sequence")?.to_json()).context("sequence spec")?;
+                    serde_json::from_value(arg(args, 1, "sequence")?.to_json())
+                        .context("sequence spec")?;
                 let start_ms = opt(args, 2).map(Value::as_f64).transpose()?.unwrap_or(0.) as f32;
-                submit(cx, vec![WorldCommand::PlaySequence { name, sequence, start_ms }])?;
+                submit(
+                    cx,
+                    vec![WorldCommand::PlaySequence {
+                        name,
+                        sequence,
+                        start_ms,
+                    }],
+                )?;
                 Ok(Value::Null)
             }
             "stopSequence" => {
@@ -796,18 +876,25 @@ impl Class for WorldClass {
             "sequenceStatus" => {
                 let name = arg(args, 0, "name")?.as_str()?;
                 let s = cx.state()?;
-                Ok(match s.runtime.host.engine.world.sequence(s.client.0, name) {
-                    None => Value::Null,
-                    Some(p) => Value::from_json(serde_json::json!({
-                        "time_ms": p.time_ms, "playing": p.playing, "loops": p.loops, "duration_ms": p.spec.duration_ms,
-                    })),
-                })
+                Ok(
+                    match s.runtime.host.engine.world.sequence(s.client.0, name) {
+                        None => Value::Null,
+                        Some(p) => Value::from_json(serde_json::json!({
+                            "time_ms": p.time_ms, "playing": p.playing, "loops": p.loops, "duration_ms": p.spec.duration_ms,
+                        })),
+                    },
+                )
             }
             "sequenceEvents" => {
                 let name = arg(args, 0, "name")?.as_str()?.to_owned();
                 let s = cx.state()?;
                 let client = s.client.0;
-                let events = s.runtime.host.engine.world.take_sequence_events(client, &name)?;
+                let events = s
+                    .runtime
+                    .host
+                    .engine
+                    .world
+                    .take_sequence_events(client, &name)?;
                 Ok(Value::List(events.into_iter().map(Value::Str).collect()))
             }
             "streamLevel" => {
@@ -887,7 +974,9 @@ impl Class for WorldClass {
                 let m = crysirror_asset::pbr::load_geometry(&bytes, |u| {
                     read(fs, &format!("{dir}{u}"))
                 })?;
-                let bounds = m.rest_bounds().map(|(lo, hi)| serde_json::json!({"min": lo, "max": hi}));
+                let bounds = m
+                    .rest_bounds()
+                    .map(|(lo, hi)| serde_json::json!({"min": lo, "max": hi}));
                 Ok(Value::from_json(serde_json::json!({
                     "clips": m.animations.iter().map(|c| serde_json::json!({"name": c.name, "duration": c.duration})).collect::<Vec<_>>(),
                     "nodes": m.nodes.len(), "skins": m.skins.len(), "meshes": m.meshes.len(),
@@ -1036,7 +1125,10 @@ impl Class for EntityClass {
         if p == "alive" {
             return Ok(handle(cx, this).is_ok().into());
         }
-        if p=="physicsState" {let h=handle(cx,this)?;return crate::physics_api::entity_state(cx,h);}
+        if p == "physicsState" {
+            let h = handle(cx, this)?;
+            return crate::physics_api::entity_state(cx, h);
+        }
         let e = spec(cx, this)?;
         Ok(match p {
             "id" => Value::Int(e.id.into()),
@@ -1105,7 +1197,10 @@ impl Class for EntityClass {
                 id,
                 velocity: v.as_vec3()?,
             },
-            "angularVelocity"=>WorldCommand::SetAngularVelocity {id,velocity:v.as_vec3()?},
+            "angularVelocity" => WorldCommand::SetAngularVelocity {
+                id,
+                velocity: v.as_vec3()?,
+            },
             _ => unreachable!(),
         };
         submit(cx, vec![cmd])
@@ -1117,7 +1212,9 @@ impl Class for EntityClass {
         m: &str,
         args: &[Value],
     ) -> Result<Value> {
-        if crate::physics_api::is_entity_method(m){return crate::physics_api::entity_call(cx,this,m,args);}
+        if crate::physics_api::is_entity_method(m) {
+            return crate::physics_api::entity_call(cx, this, m, args);
+        }
         let id = handle(cx, this)?.id;
         match m {
             "destroy" => submit(cx, vec![WorldCommand::Despawn { id }])?,
@@ -1280,26 +1377,48 @@ impl Class for EntityClass {
                     }
                     Some(v) => {
                         ensure!(
-                            collider.is_some_and(|c| c.body == crysirror_scene::components::BodyKind::Character),
+                            collider.is_some_and(
+                                |c| c.body == crysirror_scene::components::BodyKind::Character
+                            ),
                             "setVehicle needs a character collider (body: 'character')"
                         );
-                        let vs: crate::vehicle::VehicleSpec = serde_json::from_value(v.to_json()).context("vehicle spec")?;
+                        let vs: crate::vehicle::VehicleSpec =
+                            serde_json::from_value(v.to_json()).context("vehicle spec")?;
                         vs.validate()?;
                         let yaw = spec_rotation_y(&s.runtime.host.engine.world, key)?;
-                        s.vehicles.insert(key, (vs, crate::vehicle::VehicleState { yaw, ..Default::default() }));
+                        s.vehicles.insert(
+                            key,
+                            (
+                                vs,
+                                crate::vehicle::VehicleState {
+                                    yaw,
+                                    ..Default::default()
+                                },
+                            ),
+                        );
                     }
                 }
                 return Ok(Value::Null);
             }
             "drive" => {
-                let input: crate::vehicle::DriveInput = serde_json::from_value(arg(args, 0, "input")?.to_json()).context("drive input")?;
+                let input: crate::vehicle::DriveInput =
+                    serde_json::from_value(arg(args, 0, "input")?.to_json())
+                        .context("drive input")?;
                 let dt = arg(args, 1, "dt")?.as_f32()?;
                 let h = handle(cx, this)?;
                 let key = (h.client, h.id);
                 let mut t = spec(cx, this)?.transform;
                 let s = cx.state()?;
                 let (vs, state) = *s.vehicles.get(&key).context("call setVehicle first")?;
-                let r = crate::vehicle::step(s.physics()?, key, &vs, state, glam::Vec3::from_array(t.translation), input, dt)?;
+                let r = crate::vehicle::step(
+                    s.physics()?,
+                    key,
+                    &vs,
+                    state,
+                    glam::Vec3::from_array(t.translation),
+                    input,
+                    dt,
+                )?;
                 s.vehicles.insert(key, (vs, r.state));
                 t.translation = r.position.to_array();
                 t.rotation_degrees = crate::vehicle::rotation(&r.state);
@@ -1465,7 +1584,7 @@ fn gameplay_call(
             return Ok(g
                 .value(&defs, &name()?)
                 .map(|v| Value::Float(v as f64))
-                .unwrap_or(Value::Null))
+                .unwrap_or(Value::Null));
         }
         "hasTag" => return Ok(g.has_tag(&defs, &name()?).into()),
         "initAttributes" => {

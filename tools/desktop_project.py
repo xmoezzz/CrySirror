@@ -103,6 +103,21 @@ def siglus_config(config: Any) -> dict:
     return config
 
 
+def reallive_config(config: Any) -> dict:
+    """Native RealLive bytecode adapter; no hosted-engine configuration."""
+    config = obj(config, set(), {"root", "font_alias", "encoding", "start_scene"})
+    root = config.get("root", "")
+    require(isinstance(root, str) and (not root or logical_path(root) == root), "canonical RealLive root required")
+    require(isinstance(config.get("font_alias", "default"), str) and bool(config.get("font_alias", "default")), "font alias required")
+    encoding = config.get("encoding")
+    if encoding is not None:
+        require(isinstance(encoding, str), "RealLive encoding")
+        key = "".join(c.lower() for c in encoding if c.isascii() and c.isalnum())
+        require(key in {"sjis", "shiftjis", "cp932", "ms932", "ja", "gbk", "gb2312", "gb18030", "cp936", "chs", "zhcn", "big5", "cp950", "cht", "zhtw", "utf8", "utf", "unicode", "western", "cp1252", "latin1", "en", "korean", "cp949", "euckr", "ko"}, "unknown RealLive encoding")
+    require(config.get("start_scene") is None or integer(config["start_scene"], -(2**31), 2**31-1), "RealLive start scene")
+    return config
+
+
 def validate(p: Any) -> dict:
     obj(p, {"schema", "name", "content_revision", "canvas", "assets", "clients"}, {"background", "fonts", "scene3d"})
     require(type(p["schema"]) is int and p["schema"] == 2, "expected schema 2")
@@ -127,7 +142,10 @@ def validate(p: Any) -> dict:
         if c["adapter"] == "siglus":
             require(not program, "Siglus uses original bytecode, not data VM actions")
             siglus_config(c.get("config"))
-        require(c["adapter"] not in ("bgi", "reallive", "rfvp"), "hosted engine adapter removed; CrySirror API bridge required")
+        if c["adapter"] == "reallive":
+            require(not program, "RealLive uses original bytecode, not data VM actions")
+            reallive_config(c.get("config"))
+        require(c["adapter"] not in ("bgi", "rfvp"), "hosted engine adapter removed; CrySirror API bridge required")
         for a in program:
             action(a)
         if c.get("systems") is not None:
@@ -194,7 +212,7 @@ def asset_inventory(path: Path, p: dict, *, require_fonts: bool = True) -> dict[
     require(assets.is_relative_to(root) and assets.is_dir(), "asset directory escapes project")
     wanted = set(p.get("fonts", {}).values())
     for c in p["clients"]:
-        require(c["adapter"] in ("crysirror-script-v1", "siglus"), "native asset enumeration is not implemented")
+        require(c["adapter"] in ("crysirror-script-v1", "siglus", "reallive"), "native asset enumeration is not implemented")
         if c["adapter"] == "crysirror-script-v1":
             require(c.get("config") is None, "built-in data script does not accept native config")
         prefix = c.get("asset_prefix", "")
@@ -211,6 +229,23 @@ def asset_inventory(path: Path, p: dict, *, require_fonts: bool = True) -> dict[
                 source = (base / file).resolve(strict=True)
                 require(source.is_relative_to(base), "native asset escapes client root")
                 wanted.add("/".join(x for x in (prefix, file) if x))
+        if c["adapter"] == "reallive":
+            config = reallive_config(c.get("config"))
+            folder = (base / config.get("root", "")).resolve(strict=True)
+            require(folder.is_relative_to(base) and folder.is_dir(), "RealLive root escapes client root")
+            # Bootstrap declarations only: bytecode can request further archives.
+            names = {}
+            for file in folder.iterdir():
+                key = file.name.casefold()
+                require(key not in names, "ambiguous RealLive case-insensitive filename")
+                names[key] = file
+            for name in ("gameexe.ini", "seen.txt"):
+                require(name in names, f"RealLive bootstrap missing: {name}")
+                source = names[name].resolve(strict=True)
+                require(source.is_relative_to(base) and source.is_file(), "RealLive bootstrap escapes client root")
+                wanted.add(source.relative_to(assets).as_posix())
+            if require_fonts:
+                require(config.get("font_alias", "default") in p.get("fonts", {}), "RealLive requires a licensed project font alias")
         systems = c.get("systems") or {}
         materials=[entity.get("material") for entity in systems.get("entities",[])]
         for widget in systems.get("widgets",[]):
@@ -254,7 +289,7 @@ def asset_inventory(path: Path, p: dict, *, require_fonts: bool = True) -> dict[
                     source = (base / logical_path(name)).resolve(strict=True)
                     require(source.is_relative_to(base), "puppet asset escapes client root")
                     wanted.add("/".join(x for x in (prefix, name) if x))
-            if require_fonts and paint["kind"] == "text":
+            if require_fonts and paint["kind"] in ("text", "glyph_run"):
                 require(paint["font"] in p.get("fonts",{}), "packaging layers requires a licensed project font")
         for widget in systems.get("widgets", []):
             if require_fonts and widget.get("text"):

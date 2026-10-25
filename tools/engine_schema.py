@@ -208,6 +208,17 @@ def command(c):
     if op=='set_visible': flags(c,['visible'])
     if op=='tween': tween(c['tween'])
 
+def scalar(c):
+    """Rust Unicode scalar and char::is_control parity, not isprintable()."""
+    n=ord(c)
+    return not (n<32 or 127<=n<160 or 0xd800<=n<=0xdfff)
+
+def glyph_reveal(r,total):
+    obj(r,{'interval_ms'},{'unit','initial_visible','elapsed_ms','forced_complete','paused'})
+    require(r.get('unit','unicode_scalar')=='unicode_scalar' and integer(r['interval_ms'],0,86_400_000), 'glyph reveal interval/unit')
+    require(integer(r.get('initial_visible',0),0,total) and integer(r.get('elapsed_ms',0),0,2**64-1),'glyph reveal progress')
+    flags(r,['forced_complete','paused'])
+
 def paint(p):
     require(isinstance(p,dict),'layer paint')
     kind=p.get('kind')
@@ -215,6 +226,19 @@ def paint(p):
         obj(p,{'kind'},{'color'}); require(color(p.get('color',[255]*4)),'paint color')
     elif kind=='image':
         obj(p,{'kind','asset'},{'tint'}); logical_path(p['asset']); require(color(p.get('tint',[255]*4)),'paint tint')
+    elif kind=='glyph_run':
+        obj(p, {'kind','font','size','glyphs'}, {'color','bold','reveal'})
+        require(isinstance(p['font'],str) and bool(p['font']) and len(p['font'].encode('utf-8', errors='replace'))<=256 and all(scalar(c) for c in p['font']), 'glyph font alias')
+        require(finite(p['size']) and 1<=p['size']<=512 and color(p.get('color',[255]*4)), 'glyph style')
+        flags(p,['bold'])
+        glyphs=p['glyphs']; require(isinstance(glyphs,list) and len(glyphs)<=65536,'glyph count')
+        for g in glyphs:
+            obj(g,{'character','baseline'},{'size','color','bold'})
+            require(isinstance(g['character'],str) and len(g['character'])==1 and scalar(g['character']) and vector(g['baseline'],2),'positioned glyph')
+            if g.get('size') is not None: require(finite(g['size']) and 1<=g['size']<=512,'glyph size')
+            if g.get('color') is not None: require(color(g['color']),'glyph color')
+            if g.get('bold') is not None: flags(g,['bold'])
+        if p.get('reveal') is not None: glyph_reveal(p['reveal'],len(glyphs))
     elif kind=='puppet':
         # Mirror of Paint::Puppet (ADR 0029): an engine rig JSON, never PSB.
         obj(p,{'kind','asset'},{'tint'}); logical_path(p['asset']); require(color(p.get('tint',[255]*4)),'paint tint')
@@ -320,27 +344,33 @@ def layer_filter(f):
         else:ok=False
         require(ok,'invalid layer distortion')
 
+def layer(l):
+    obj(l,{'id','rect','paint'},{'parent','transform','order','clip','opacity','visible','blend','uv','filter'})
+    require(U32(l['id']) and (l.get('parent') is None or U32(l['parent'])), 'layer identity')
+    if l.get('filter')is not None:layer_filter(l['filter'])
+    bounds(l['rect']);paint(l['paint']);sprite_transform(l.get('transform',{}));flags(l,['visible'])
+    require(vector(l.get('order',[0,0]),2,I32) and integer(l.get('opacity',255),0,255) and l.get('blend','normal') in ['normal','add','subtract','multiply','screen'],'layer composition')
+    if l.get('clip') is not None: bounds(l['clip'])
+    if l.get('uv') is not None:
+        uv=l['uv'];require(vector(uv,4,lambda n:finite(n) and 0<=n<=1) and uv[0]<uv[2] and uv[1]<uv[3],'layer UV')
+
+
 def validate(s):
     obj(s,set(),{'entities','layers','widgets','environment'})
     if s.get('environment')is not None:environment(s['environment'])
     entities=s.get('entities',[]);layers=s.get('layers',[]);widgets=s.get('widgets',[])
     for items in (entities,layers,widgets): tree(items)
     require(sum(entity(e) for e in entities)<=1_000_000,'world vertex budget')
-    for l in layers:
-        obj(l,{'id','rect','paint'},{'parent','transform','order','clip','opacity','visible','blend','uv','filter'})
-        if l.get('filter')is not None:layer_filter(l['filter'])
-        bounds(l['rect']);paint(l['paint']);sprite_transform(l.get('transform',{}));flags(l,['visible'])
-        require(vector(l.get('order',[0,0]),2,I32) and integer(l.get('opacity',255),0,255) and l.get('blend','normal') in ['normal','add','subtract','multiply','screen'],'layer composition')
-        if l.get('clip') is not None: bounds(l['clip'])
-        if l.get('uv') is not None:
-            uv=l['uv'];require(vector(uv,4,lambda n:finite(n) and 0<=n<=1) and uv[0]<uv[2] and uv[1]<uv[3],'layer UV')
+    for l in layers: layer(l)
     for w in widgets:
-        obj(w,{'id','rect'},{'parent','kind','flow','padding','gap','z','visible','enabled','clip_children','modal','color','text','font','text_size','on_activate','value'})
+        obj(w,{'id','rect'},{'parent','kind','flow','padding','gap','z','visible','enabled','clip_children','modal','color','text','font','text_size','on_activate','value','max_length'})
         bounds(w['rect']);flags(w,['visible','enabled','clip_children','modal'])
-        require(w.get('kind','panel') in ['panel','label','button','toggle','slider'] and w.get('flow','absolute') in ['absolute','row','column'],'widget type/flow')
+        require(w.get('kind','panel') in ['panel','label','button','toggle','slider','text_field'] and w.get('flow','absolute') in ['absolute','row','column'],'widget type/flow')
         require(integer(w.get('padding',0),0,8192) and integer(w.get('gap',0),0,8192) and I32(w.get('z',0)) and color(w.get('color',[52,66,88,255])),'widget appearance')
-        require(isinstance(w.get('text',''),str) and len(w.get('text','').encode())<=1024*1024 and integer(w.get('text_size',18),1,512),'widget text')
+        require(isinstance(w.get('text',''),str) and all(not 0xd800<=ord(c)<=0xdfff for c in w.get('text','')) and len(w.get('text','').encode())<=1024*1024 and integer(w.get('text_size',18),1,512),'widget text')
         require(w.get('font') is None or isinstance(w['font'],str),'widget font')
+        require(U32(w.get('max_length',1024)), 'widget max length')
+        if w.get('kind')=='text_field': require(w.get('max_length',1024)<=65536 and len(w.get('text',''))<=w.get('max_length',1024) and all(scalar(c) for c in w.get('text','')), 'text field length or committed text')
         require(not w.get('text') or bool(w.get('font')),'widget requires font')
         require(finite(w.get('value',0)) and 0<=w.get('value',0)<=1,'widget value')
         actions=w.get('on_activate',[]);require(isinstance(actions,list) and len(actions)<=128,'widget action count')
@@ -367,3 +397,47 @@ def validate_action_targets(entities,commands):
         elif op=='tween':
             ts=state[c['id']].setdefault('tweens',[]);ts.append(c['tween']);require(len(ts)<=64,'widget target tween limit')
     tree(list(state.values()))
+
+def transition(t):
+    """Shared transition spec. Native raw Siglus codes remain adapter policy."""
+    obj(t,{'duration_ms','effect'},{'easing'})
+    require(integer(t['duration_ms'],1,600000) and t.get('easing','linear') in ('linear','ease_in','ease_out','smooth'),'transition timing')
+    e=t['effect']; require(isinstance(e,dict),'transition effect'); kind=e.get('kind')
+    if kind=='ordered_dither':
+        obj(e,{'kind','cell','steps'},{'diagonal'});flags(e,['diagonal'])
+        require(vector(e['cell'],2,lambda x:integer(x,1,8192)) and integer(e['steps'],1,65536),'ordered dither limits')
+    elif kind=='crossfade':obj(e,{'kind'})
+    elif kind=='mask':
+        obj(e,{'kind','asset'},{'fade'});logical_path(e['asset']);require(integer(e.get('fade',0),0,8),'mask fade')
+    elif kind=='slide':obj(e,{'kind','direction'});require(integer(e['direction'],0,3),'slide direction')
+    elif kind=='mosaic':obj(e,{'kind','size'});require(integer(e['size'],1,1024),'mosaic size')
+    else:require(False,'unsupported authoring transition effect')
+
+def canvas_command(c):
+    require(isinstance(c,dict),'canvas command');op=c.get('op')
+    fields={'create':({'id','width','height'},set()),'clear':({'id','color'},set()),'draw':({'id','layer'},set()),'set':({'id','layer'},set()),'copy':({'source','destination','rect','position','opacity'},{'replace'}),'present':({'id','layer'},{'order'}),'hide':({'layer'},set())}
+    require(op in fields,'canvas operation');required,optional=fields[op];obj(c,required|{'op'},optional)
+    for key in ('id','source','destination'):
+        if key in c:require(U32(c[key]),'canvas id')
+    if op=='create':require(integer(c['width'],1,8192) and integer(c['height'],1,8192),'canvas dimensions')
+    elif op=='clear':require(color(c['color']),'canvas clear color')
+    elif op in ('draw','set'):
+        layer(c['layer']);require(c['layer'].get('parent') is None,'canvas draw cannot have layer parent')
+    elif op=='copy':
+        require(vector(c['rect'],4) and c['rect'][2]>0 and c['rect'][3]>0 and vector(c['position'],2) and c['opacity']==255 and type(c['opacity']) is int,'canvas copy bounds/opacity')
+        flags(c,['replace'])
+    elif op in ('present','hide'):require(U32(c['layer']) and I32(c.get('order',0)),'canvas presentation')
+
+def media_options(options):
+    """Options accepted by the public Media.play script API."""
+    obj(options,set(),{'loop','audio','gain'});flags(options,['loop','audio'])
+    require(finite(options.get('gain',1)) and 0<=options.get('gain',1)<=4,'media gain')
+
+def ui_command(c):
+    require(isinstance(c,dict),'UI command');op=c.get('op')
+    if op in ('set_title','insert_text'):
+        obj(c,{'op','text'});limit=1024 if op=='set_title' else 1024*1024
+        require(isinstance(c['text'],str) and len(c['text'].encode('utf-8', errors='replace'))<=limit and all(scalar(x) for x in c['text']),'UI single-line Unicode text')
+    elif op=='set_cursor_visible':obj(c,{'op','visible'});flags(c,['visible'])
+    elif op in ('backspace','focus'):obj(c,{'op','id'});require(U32(c['id']),'UI widget id')
+    else:require(False,'unsupported authoring UI operation')

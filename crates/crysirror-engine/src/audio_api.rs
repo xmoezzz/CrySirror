@@ -6,9 +6,9 @@ use crate::{
     object::{Class, ClassInfo, MethodInfo, ObjectId, PropertyInfo, TypeHint as T},
     value::Value,
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_audio::{
-    decoder::{self, AudioSource, Clip, StereoFrame, Stream},
+    decoder::{self, AudioSource, Clip, StereoFrame},
     mixer::{
         Bus, Ducking, Listener, Mixer, RandomContainer, Spatial, Variant, VoiceHandle, VoiceSpec,
     },
@@ -96,7 +96,7 @@ fn source(cx: &mut EngineContext, client: u32, path: &str) -> Result<Box<dyn Aud
         .open_asset_file(ClientId(client), &p)
         .map_err(|e| anyhow::anyhow!("audio asset {path}: {e}"))?
     {
-        Some(file) => Stream::open(Box::new(file), extension)?,
+        Some(file) => decoder::open_reader(Box::new(file), extension)?,
         None => {
             let bytes = s
                 .runtime
@@ -104,10 +104,10 @@ fn source(cx: &mut EngineContext, client: u32, path: &str) -> Result<Box<dyn Aud
                 .fs
                 .read(ClientId(client), &p)
                 .map_err(|e| anyhow::anyhow!("audio provider {path}: {e}"))?;
-            Stream::from_bytes(Arc::from(bytes), extension)?
+            decoder::open_memory(Arc::from(bytes), extension)?
         }
     };
-    Ok(Box::new(stream))
+    Ok(stream)
 }
 fn clip(cx: &mut EngineContext, client: u32, path: &str) -> Result<Clip> {
     let k = (client, path.to_owned());
@@ -234,7 +234,8 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
         .collect::<Vec<_>>();
     if attachments.iter().any(|v| v.raycast) {
         let s = cx.state()?;
-        s.runtime.physics
+        s.runtime
+            .physics
             .sync(&s.runtime.host.engine.world, &mut s.runtime.host.fs)?;
     }
     for mut a in attachments {
@@ -277,7 +278,8 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
             let delta = Vec3::from_array(a.spatial.position) - origin;
             let distance = delta.length();
             a.spatial.occlusion = if distance > 0.05
-                && s.runtime.physics
+                && s.runtime
+                    .physics
                     .raycast(
                         origin,
                         delta,
@@ -313,7 +315,9 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
         a.mixer.render(block)?
     }
     let native = s.runtime.host.take_pcm_output();
-    if native.len() > a.output.len() { a.output.resize(native.len(), [0.; 2]); }
+    if native.len() > a.output.len() {
+        a.output.resize(native.len(), [0.; 2]);
+    }
     for (out, pcm) in a.output.iter_mut().zip(native) {
         out[0] += pcm[0];
         out[1] += pcm[1];
@@ -626,8 +630,15 @@ impl Class for AudioClass {
                 }
                 let h = handle(cx, args)?;
                 let opts: Options = parse(arg(args, 1, "voice options")?)?;
-                ensure!(opts.fade_ms.is_finite() && (0.0..=600000.).contains(&opts.fade_ms), "invalid voice fade");
-                ensure!(opts.pan.is_none_or(|p| p.is_finite() && (0.0..=1.).contains(&p)), "invalid voice pan");
+                ensure!(
+                    opts.fade_ms.is_finite() && (0.0..=600000.).contains(&opts.fade_ms),
+                    "invalid voice fade"
+                );
+                ensure!(
+                    opts.pan
+                        .is_none_or(|p| p.is_finite() && (0.0..=1.).contains(&p)),
+                    "invalid voice pan"
+                );
                 let mut spec = cx.state()?.mixer_audio.mixer.spec(client, h)?;
                 if let Some(gain) = opts.gain {
                     spec.gain = gain
@@ -647,7 +658,9 @@ impl Class for AudioClass {
                 if let Some(gain) = opts.gain {
                     a.mixer.fade_gain(client, h, gain, opts.fade_ms)?
                 }
-                if let Some(pan) = opts.pan { a.mixer.set_pan(client, h, pan, opts.fade_ms)?; }
+                if let Some(pan) = opts.pan {
+                    a.mixer.set_pan(client, h, pan, opts.fade_ms)?;
+                }
                 if opts.rate.is_some() || opts.pitch_semitones.is_some() {
                     a.mixer
                         .set_rate(client, h, spec.rate, spec.pitch_semitones)?
@@ -689,7 +702,12 @@ impl Class for AudioClass {
                     settings.muted = muted
                 }
                 cx.state()?.mixer_audio.mixer.set_bus(client, b, settings)?;
-                cx.state()?.runtime.host.channel_audio.mixer.set_bus(client, b, settings)?;
+                cx.state()?
+                    .runtime
+                    .host
+                    .channel_audio
+                    .mixer
+                    .set_bus(client, b, settings)?;
             }
             "bus" => {
                 let b = bus(arg(args, 0, "bus")?)?;
@@ -700,7 +718,11 @@ impl Class for AudioClass {
             "setDucking" => {
                 let config: Ducking = parse(arg(args, 0, "ducking")?)?;
                 cx.state()?.mixer_audio.mixer.set_ducking(client, config)?;
-                cx.state()?.runtime.host.channel_audio.set_ducking(client, config)?;
+                cx.state()?
+                    .runtime
+                    .host
+                    .channel_audio
+                    .set_ducking(client, config)?;
             }
             "setVoiceLimit" => {
                 let limit = usize::try_from(arg(args, 0, "voice limit")?.as_i64()?)?;
@@ -739,7 +761,7 @@ impl Class for AudioClass {
             "stats" => {
                 return Ok(Value::from_json(serde_json::to_value(
                     cx.state()?.mixer_audio.mixer.stats(),
-                )?))
+                )?));
             }
             _ => bail!("Audio has no method {name}"),
         }

@@ -1,0 +1,18 @@
+[package]
+name = "crysirror-reallive"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crysirror-core.workspace = true
+crysirror-runtime.workspace = true
+crysirror-scene.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+encoding_rs = "0.8"
+
+[dev-dependencies]
+tempfile = "3.12"
