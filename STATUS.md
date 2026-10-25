@@ -1150,6 +1150,22 @@ extraction. ADR 0038 records this delivered capability increment.
   encoded-work-report test passed on the recovered Metal device. The existing
   raster PBR sky/lighting/sun-shadow pixel regression also passed. Evidence:
   `hardware-rt-cli-render-final.log` and `hardware-rt-raster-pbr-final.log`.
+- Broad validation: `cargo test --locked --workspace --all-targets` ran 678
+  passing tests, 55 ignored and two failing tests before stopping in vendored
+  `eluna_rs`. Failures were
+  `runtime::reverse_parity_tests::timeline_hold_markers_do_not_pollute_authored_ranges`
+  (0 versus 3) and `vertex::tests::builds_single_cell_strip` (float UV equality).
+  `crates/siglus-upstream/UPSTREAM.md` already records these exact two failures
+  on the unmodified pinned upstream (96 passed / 2 failed). Its source and
+  dependency set were unchanged by this RT commit; its manifest sets
+  `lib.test=false`, which explicit `--all-targets` overrides. This broad command
+  is therefore a failed validation, not a green workspace claim. Evidence:
+  `target/verification/hardware-rt-workspace-tests.log`.
+- Default workspace validation: `cargo test --locked --workspace` passed,
+  with 581 passed, zero failed and 55 ignored, respecting the documented
+  upstream `lib.test=false` settings. Ignored tests are not counted as passes;
+  the explicit Metal runs above provide separate GPU evidence. Evidence:
+  `target/verification/hardware-rt-engine-workspace-tests.log`.
 - Limits: single world-space BLAS geometry/identity TLAS instance, at most
   1,000,000 primitives; no refit/compaction/per-mesh instancing, RT reflections,
   RT GI or denoiser. Masked/transparent casters and custom fragment-discard
