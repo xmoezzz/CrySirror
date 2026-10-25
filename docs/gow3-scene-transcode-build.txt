@@ -1,0 +1,2 @@
+   Compiling crysirror-asset v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-asset)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.47s

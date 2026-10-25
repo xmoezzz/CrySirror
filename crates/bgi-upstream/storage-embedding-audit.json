@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "upstream_head": "4c41dc3a566338d2ea8400635e23b062613e3782",
+  "upstream_dirty": true,
+  "upstream_dirty_patch_sha256": "c81879bd9acf6fa62fc75576e3b15744d24a485ca13a88057142e3186dd501fa",
+  "implementation": {
+    "root_constructor": "FilePolicy::from_client(Arc<dyn ClientStorage>, asset_root)",
+    "archive_stream": "CapabilityStream adapts client-scoped AssetReader into original ArchiveSource (Read+Seek); no ambient path exposed",
+    "session_global_backend_removed": true,
+    "user_persistence_errors_propagated": true,
+    "failed_save_keeps_old_backend_and_private_tree": true,
+    "main_clock": "caller-provided elapsed milliseconds; original run_frame scheduler retained",
+    "input": "FIFO native down/up/move/button/wheel descriptors; native modeless capture preserved",
+    "host_requests": "real VM continuations, explicit completion only, request completion also capability-scoped",
+    "display": "crysirror_frame::capture plan; shared engine composes it, no original whole-frame compositor call",
+    "audio": "original commands preserved for shared engine routing; no AudioSystem",
+    "bootstrap": "same authorized ResourceManager, other roots rejected"
+  },
+  "compilation": {
+    "vendor_cpu_library_compiled": true,
+    "via": "cargo test -p ethornell-app --test capability_policy"
+  },
+  "behavior": {
+    "command": "cargo test -p ethornell-app --test capability_policy",
+    "exit_code": 0,
+    "passed": 5,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/vendor-storage-test.log",
+    "checks": [
+      "Sparse 3 GiB asset stream seeks/reads requested bytes without allocating the full asset",
+      "Separate resource capabilities and private save trees",
+      "Persistence failure does not replace/delete previous save",
+      "Native install UserData aliases write only client Save mount and never import original resource saves",
+      "Escaping, resource writes and ambiguous filenames rejected",
+      "Unreadable initial save fails visibly instead of disappearing"
+    ]
+  },
+  "source_sha256": {
+    "crates/ethornell-app/src/file_policy.rs": "aa9954439a062c8702593ca67e0f7af50a190c34af225c5cecd71c9fc91aa67b",
+    "crates/ethornell-app/src/file_policy/hosted.rs": "24c1ce5da0429ae9410da729671fd3760b297b75dd272ae0771e105e830e4d6a",
+    "crates/ethornell-app/src/embedding.rs": "6d9e8eb0fd3f617757e63e90bf195ecd42394097815f9e71f6bfc2886202d0ee",
+    "crates/ethornell-app/tests/capability_policy.rs": "33ef8d38295f2586762c0049dbc81556ccfc710af6c0375258d99544de238054"
+  },
+  "limits": [
+    "Native MoveFile requires atomic rename support absent from ClientStorage; returns an explicit unsupported backend error without touching the source.",
+    "Empty user directories exist within the current session and are not persisted as independent directory records. Existing unclassifiable unreadable/empty entries fail visibly instead of being mistaken for missing saves.",
+    "Embedding callers must retain an exclusive save writer lease; crysirror-bgi adapter does so before creating HostRuntime.",
+    "Original VM scheduler tick is bounded by its cooperative watchdog and VM memory/count budget; exact Cry instruction_budget accounting is not implemented.",
+    "Original VM contains trusted upstream unsafe code; compatibility adapter itself is safe and device-free.",
+    "Native CPU bitmap syscalls remain original compatibility implementations; this audit does not claim complete service extraction or all BGI operations."
+  ],
+  "host_boundary_audit": "host-boundary-audit.json"
+}

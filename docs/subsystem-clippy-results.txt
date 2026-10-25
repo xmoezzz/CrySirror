@@ -1,0 +1,20 @@
+   Compiling libc v0.2.191
+   Compiling quote v1.0.47
+    Checking bytemuck v1.25.2
+    Checking log v0.4.34
+    Checking crysirror-core v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-core)
+    Checking crysirror-text v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-text)
+    Checking symphonia-core v0.5.5
+    Checking symphonia-metadata v0.5.5
+    Checking mach2 v0.4.3
+   Compiling clang-sys v1.9.1
+   Compiling syn v2.0.119
+    Checking symphonia-bundle-mp3 v0.5.5
+    Checking symphonia v0.5.5
+   Compiling bindgen v0.72.1
+   Compiling coreaudio-sys v0.2.18
+    Checking coreaudio-rs v0.11.3
+    Checking cpal v0.15.3
+    Checking rodio v0.17.3
+    Checking crysirror-audio v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-audio)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.11s

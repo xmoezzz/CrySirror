@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "name": "rfvp-siglus-host-service-contract",
+  "console_targets": ["switch", "psv"],
+  "clients": [
+    {
+      "name": "rfvp-fixture", "engine": "rfvp", "game": "synthetic-rfvp",
+      "layout_profile": "fixture-only-not-rfvp-layout",
+      "commands": [
+        {"op": "sprite.put", "id": 0, "asset": "image\\rfvp-fixture.png", "x": 0, "y": 0, "width": 640, "height": 360, "z": 0, "rgba": [255,255,255,255]},
+        {"op": "text.put", "id": 1, "text": "RFVP boundary fixture", "font": "external-font", "size_px": 24, "x": 20, "y": 300, "width": 600, "height": 40, "z": 10, "rgba": [255,255,255,255]},
+        {"op": "audio.play", "channel": 0, "asset": "audio\\rfvp-fixture.ogg", "looping": true, "gain_milli": 700}
+      ]
+    },
+    {
+      "name": "siglus-fixture", "engine": "siglus", "game": "synthetic-siglus",
+      "layout_profile": "fixture-only-not-siglus-layout",
+      "commands": [
+        {"op": "sprite.put", "id": 0, "asset": "image/siglus-fixture.png", "x": 640, "y": 0, "width": 640, "height": 360, "z": 0, "rgba": [255,255,255,255]},
+        {"op": "text.put", "id": 1, "text": "Siglus boundary fixture", "font": "external-font", "size_px": 24, "x": 660, "y": 300, "width": 600, "height": 40, "z": 10, "rgba": [255,255,255,255]},
+        {"op": "audio.play", "channel": 0, "asset": "audio/siglus-fixture.ogg", "looping": false, "gain_milli": 500}
+      ]
+    }
+  ],
+  "expected": {"visuals": 4, "voices": 2}
+}

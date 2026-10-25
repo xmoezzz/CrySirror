@@ -1,0 +1,294 @@
+   Compiling crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+   Compiling crysirror-wgpu v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-wgpu)
+   Compiling crysirror-author v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-author)
+   Compiling crysirror-desktop v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-desktop)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.08s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/lib.rs (target/debug/deps/crysirror_audio-e03adfe2e9bfd0d8)
+
+running 3 tests
+test tests::paused_start_and_device_errors_are_explicit ... ok
+test tests::bus_changes_gain_without_restarting_or_affecting_other_clients ... ok
+test tests::retrigger_restore_and_client_ids_preserve_voice_semantics ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_author-dfbcfb431fd34e59)
+
+running 6 tests
+test tests::syntax_and_unsupported_source_profiles_fail ... ok
+test tests::no_ambient_node_or_browser_capabilities ... ok
+test tests::typescript_builds_data_that_the_runtime_executes ... ok
+test tests::javascript_and_typescript_share_the_data_contract ... ok
+test tests::invalid_data_and_missing_entrypoint_fail ... ok
+test tests::loops_and_recursion_are_guarded ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running unittests src/main.rs (target/debug/deps/crysirror_author-e34701f14d76dee8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/deps/cli-4261b4c8d01be251)
+
+running 2 tests
+test cli_failure_emits_no_project ... ok
+test cli_emits_a_valid_project ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+
+     Running unittests src/main.rs (target/debug/deps/crysirror_contract-81d2b97b65574ce8)
+
+running 3 tests
+test tests::unknown_commands_fail_instead_of_succeeding_as_noops ... ok
+test tests::rejects_duplicate_client_names ... ok
+test tests::replay_accepts_the_repository_fixture ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_compat-35af59e23a0a5da8)
+
+running 2 tests
+test tests::case_folding_is_opt_in ... ok
+test tests::windows_asset_names_are_normalized_at_adapter_boundary ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_core-0ed2cb33bc24294e)
+
+running 17 tests
+test binary::tests::bounds_and_endianness ... ok
+test save::tests::crc_reference_vector ... ok
+test graphics::tests::required_raytracing_never_silently_falls_back ... ok
+test path::tests::rejects_escape_and_host_paths ... ok
+test path::tests::normalizes_only_harmless_components ... ok
+test save::tests::round_trip ... ok
+test path::tests::preserves_case ... ok
+test save::tests::bounds_are_enforced ... ok
+test save::tests::rejects_cross_engine_saves ... ok
+test save::tests::rejects_every_truncation ... ok
+test state::tests::failed_audio_batch_does_not_advance_generation ... ok
+test state::tests::updates_are_allowed_at_capacity ... ok
+test state::tests::a_bad_batch_does_not_half_apply ... ok
+test state::tests::draw_order_is_stable ... ok
+test state::tests::replaying_the_same_sound_changes_generation ... ok
+test state::tests::client_ids_prevent_legacy_handle_collisions ... ok
+test save::tests::rejects_bit_flips ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/crysirror-c0156ad005e53f09)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/deps/cli-296fdbbdbf658f74)
+
+running 3 tests
+test validation_uses_real_cli ... ok
+test inspection_never_claims_native_vms ... ok
+test trace_is_executed_without_a_display ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_host-89a2e45658559bb1)
+
+running 5 tests
+test tests::time_is_monotonic ... ok
+test tests::unknown_client_is_rejected ... ok
+test tests::assets_are_read_only_to_clients ... ok
+test tests::save_namespace_includes_engine_and_game ... ok
+test tests::two_compatibility_clients_share_services_without_sharing_object_ids ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_image-7754b6caa376f316)
+
+running 2 tests
+test tests::invalid_surfaces_and_unknown_formats_fail ... ok
+test tests::channels_and_registration ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_runtime-ae19bdb1eb9fa751)
+
+running 25 tests
+test model::tests::action_rejects_negative_size ... ok
+test model::tests::paths_are_confined ... ok
+test model::tests::index_validation ... ok
+test model::tests::demo_is_valid ... ok
+test model::tests::duplicate_clients_rejected ... ok
+test model::tests::camera_parallel_up_rejected ... ok
+test model::tests::unknown_native_adapter_is_not_a_demo_vm ... ok
+test model::tests::unknown_fields_rejected ... ok
+test assets::tests::relative_symlink_cannot_cross_client_root_even_if_project_can_read_it ... ok
+test assets::tests::identical_names_use_separate_client_roots ... ok
+test script::tests::changed_program_rejects_save ... ok
+test script::tests::failed_batch_does_not_advance_vm ... ok
+test script::tests::one_press_does_not_skip_two_waits ... ok
+test script::tests::wait_is_driven_by_engine_clock ... ok
+test runtime::tests::two_clients_share_services_but_not_ids ... ok
+test runtime::required_engine_save_test::modern_save_must_not_silently_drop_engine_state ... ok
+test runtime::engine_tests::focused_ui_consumes_enter_and_button_pauses_only_its_world ... ok
+test runtime::tests::roundtrip_rewinds_runtime ... ok
+test runtime::tests::invalid_vm_payload_is_transactional ... ok
+test runtime::engine_tests::invalid_engine_save_is_transactional ... ok
+test runtime::tests::corrupt_save_does_not_mutate_live_state ... ok
+test vfs::tests::symlink_cannot_escape_assets ... ok
+test vfs::tests::asset_mount_is_read_only ... ok
+test runtime::engine_tests::systems_keep_running_after_data_vm_halt_and_restore_exactly ... ok
+test vfs::tests::disk_namespaces_are_separate ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_scene-1308e0f31468690d)
+
+running 10 tests
+test input::joypad_mode_tests::consuming_down_prevents_release_from_becoming_down_up ... ok
+test input::joypad_mode_tests::consuming_up_or_down_up_matches_tona_button_stock_semantics ... ok
+test input::joypad_mode_tests::joypad_keeps_complete_32_button_backend_domain ... ok
+test input::joypad_mode_tests::joypad_key_uses_button_stock_lifecycle ... ok
+test input::joypad_mode_tests::native_ui_resync_consumes_edges_but_keeps_mode ... ok
+test input::joypad_mode_tests::keyboard_activity_leaves_joypad_mode ... ok
+test projection::tests::world_depth_matches_d3d_lh_near_and_far_planes ... ok
+test projection::tests::billboard_texture_top_projects_above_its_bottom ... ok
+test projection::tests::world_view_angle_is_vertical_and_does_not_change_with_window_width ... ok
+test projection::tests::yaw_pitch_roll_matches_d3dx_application_order ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/systems.rs (target/debug/deps/systems-a83033a56f07c745)
+
+running 11 tests
+test layer_text_unsupported_native_layout_fails_visibly ... ok
+test layers_inherit_visibility_opacity_transform_and_rotated_clip ... ok
+test negative_parent_scale_retains_face_orientation ... ok
+test game_pause_keeps_real_time_animation_running ... ok
+test invalid_ui_world_action_rejected_during_install ... ok
+test held_pointer_after_restore_requires_release_before_activation ... ok
+test object_anchor_and_rotated_leaf_clips_follow_sprite_projection ... ok
+test retained_mutations_are_scoped_transactional_and_cascade ... ok
+test world_scoping_generation_hierarchy_and_atomic_rollback ... ok
+test ui_capture_release_focus_modal_and_slider ... ok
+test fixed_step_chunking_and_state_roundtrip ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_siglus-0c18278145c7b991)
+
+running 5 tests
+test g00::lzss_fast_path_tests::type0_literal_is_emitted_as_rgba_before_backreference_reuse ... ok
+test g00::original_g00_layout_tests::type1_expands_palette_indices_like_c_g00_chip_get_data ... ok
+test g00::original_g00_layout_tests::type2_cut_uses_fixed_msvc_headers_and_display_rect_coordinates ... ok
+test g00::lzss_fast_path_tests::overlapping_match_matches_original_forward_byte_copy ... ok
+test tests::type3_preserves_jpeg_pixels_through_shared_decoder ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resources.rs (target/debug/deps/resources-2d18286fb9a4e1c3)
+
+running 3 tests
+test malformed_and_excessive_lengths_fail_before_allocation ... ok
+test literal_and_overlapping_type0_enters_shared_decoder_registry ... ok
+test native_type2_slots_crops_centers_and_reused_cuts_are_preserved ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_text-7a167cc15cfd5a6f)
+
+running 4 tests
+test tests::supplied_font_layout_and_positioned_raster_are_cpu_only ... ignored, requires a caller-supplied licensed font via CRYSIRROR_TEST_FONT; none bundled
+test tests::explicit_glyph_surface_is_bounded_before_allocation ... ok
+test tests::legacy_layout_is_not_silently_approximated ... ok
+test tests::invalid_font_is_an_error ... ok
+
+test result: ok. 3 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_wgpu-8f2eacf21bc00f06)
+
+running 3 tests
+test geometry::tests::aspect_fit_and_pointer_agree ... ok
+test geometry::tests::linear_white_and_black ... ok
+test geometry::tests::quad_uses_top_left_coordinates ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/gpu_smoke.rs (target/debug/deps/gpu_smoke-6b8161ffe6f98b16)
+
+running 3 tests
+test retained_layers_blend_and_clip_match_linear_color_equations ... ignored, requires a real wgpu adapter; execute explicitly
+test shared_scene_reaches_actual_pixels ... ignored, requires a real wgpu adapter or Mesa software Vulkan; CI GPU job runs this explicitly
+test siglus_resource_uses_shared_upload_and_compute_rays_keep_overlays ... ignored, requires a real wgpu adapter; execute explicitly
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_audio
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_author
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_compat
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_host
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_image
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_scene
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_siglus
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_text
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_wgpu
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

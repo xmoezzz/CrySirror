@@ -1,0 +1,11 @@
+   Compiling crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.30s
+     Running unittests src/lib.rs (target/debug/deps/crysirror_siglus_vm-7583041a37aee629)
+
+running 3 tests
+test adapter::verification_tests::native_text_and_name_report_the_missing_message_bridge_instead_of_succeeding ... ok
+test adapter::verification_tests::native_decide_wait_requires_down_up_and_snapshot_repeats_the_edge ... ok
+test adapter::verification_tests::original_savepoint_exports_real_codec_and_failed_import_rolls_back ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.01s
+

@@ -1,0 +1,31 @@
+[package]
+name = "crysirror-wgpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crysirror-core.workspace = true
+crysirror-image.workspace = true
+crysirror-scene.workspace = true
+crysirror-puppet.workspace = true
+crysirror-runtime.workspace = true
+wgpu.workspace = true
+anyhow.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+crysirror-text.workspace = true
+image.workspace = true
+crysirror-asset.workspace = true
+half = { version = "2", features = ["bytemuck"] }
+serde_json.workspace = true
+
+naga = { version = "=0.20.0", features = ["wgsl-in"] }
+pollster.workspace = true
+
+[dev-dependencies]
+tempfile = "3.12"
+crysirror-siglus.workspace = true
+crysirror-siglus-vm.workspace = true
+crysirror-scene.workspace = true

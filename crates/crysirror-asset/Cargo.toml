@@ -1,0 +1,21 @@
+[package]
+name = "crysirror-asset"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Device-free asset importers (glTF 2.0 / Blender exports) into engine world data"
+
+[dependencies]
+crysirror-scene.workspace = true
+crysirror-image.workspace = true
+anyhow.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+# Pure-Rust glTF parser. "import" is off: buffers resolve through the engine VFS.
+gltf = { version = "=1.4.1", default-features = false, features = ["utils", "names", "KHR_materials_emissive_strength", "KHR_materials_unlit", "KHR_lights_punctual", "extras"] }
+
+[dev-dependencies]
+crysirror-image.workspace = true

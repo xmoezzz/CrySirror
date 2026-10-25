@@ -1,0 +1,20 @@
+[package]
+name = "crysirror-resource"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "CPU archive registry, capability streams and scoped resource transforms"
+
+[dependencies]
+crysirror-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+flate2 = "1.0"
+aes = { version = "=0.8.4", features = ["zeroize"] }
+ctr = { version = "=0.9.2", features = ["zeroize"] }
+zeroize = "1.8"
+
+[dev-dependencies]
+tempfile = "3.12"

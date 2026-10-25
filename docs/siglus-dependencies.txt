@@ -1,0 +1,27 @@
+crysirror-siglus v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus)
+├── anyhow v1.0.104
+├── crysirror-compat v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-compat)
+│   └── crysirror-core v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-core)
+├── crysirror-core v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-core)
+└── crysirror-image v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-image)
+    ├── anyhow v1.0.104
+    └── image v0.24.9
+        ├── bytemuck v1.25.2
+        ├── byteorder v1.5.0
+        ├── color_quant v1.1.0
+        ├── jpeg-decoder v0.3.2
+        ├── num-traits v0.2.19
+        └── png v0.17.16
+            ├── bitflags v1.3.2
+            ├── crc32fast v1.5.3
+            │   └── cfg-if v1.0.5
+            ├── fdeflate v0.3.7
+            │   └── simd-adler32 v0.3.10
+            ├── flate2 v1.1.10
+            │   ├── crc32fast v1.5.3 (*)
+            │   └── miniz_oxide v0.9.1
+            │       ├── adler2 v2.0.1
+            │       └── simd-adler32 v0.3.10
+            └── miniz_oxide v0.8.9
+                ├── adler2 v2.0.1
+                └── simd-adler32 v0.3.10

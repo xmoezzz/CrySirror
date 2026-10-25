@@ -1,0 +1,75 @@
+{
+  "started_utc": "2026-10-25T08:26:40.666916+00:00",
+  "scope": "Siglus audit verification in a shared concurrently edited workspace; no implementation edits",
+  "tooling_basis": "tools/verify.py uses unittest discover. This audit invokes checks directly, without its generate-lockfile/fmt mutation steps or GPU reruns.",
+  "runs": [
+    {
+      "name": "python-tests",
+      "command": [
+        "/opt/homebrew/bin/python3.11",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "started_utc": "2026-10-25T08:26:40.673642+00:00",
+      "finished_utc": "2026-10-25T08:26:50.393683+00:00",
+      "seconds": 9.72,
+      "exit_code": 0,
+      "log": "docs/native-audit-python-tests.txt",
+      "ran": 126,
+      "ok": true
+    },
+    {
+      "name": "rust-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "crysirror-siglus-vm",
+        "-p",
+        "crysirror-runtime"
+      ],
+      "started_utc": "2026-10-25T08:26:50.395064+00:00",
+      "finished_utc": "2026-10-25T08:27:24.888608+00:00",
+      "seconds": 34.493,
+      "exit_code": 0,
+      "log": "docs/native-audit-rust-tests.txt",
+      "counts": {
+        "passed": 42,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    {
+      "name": "workspace-check",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--workspace",
+        "--all-targets"
+      ],
+      "started_utc": "2026-10-25T08:27:24.889341+00:00",
+      "finished_utc": "2026-10-25T08:27:38.664476+00:00",
+      "seconds": 13.775,
+      "exit_code": 0,
+      "log": "docs/native-audit-workspace-check.txt"
+    }
+  ],
+  "source_checkpoint": {
+    "crates/crysirror-siglus-vm/src/adapter.rs": "e812762bae270540c4eb87faf62a78ca0a97024f860f143b620c21a17d53ba84",
+    "crates/crysirror-siglus-vm/src/fixture.rs": "3bd156354ae428f112edbda5041d15996106fb0d6cc3e7c5e52faa9370e4a089",
+    "crates/crysirror-siglus-vm/examples/native_fixture.rs": "1d734bdb686e0a4abd04b09058be99912aa337319064b2ecb6fc494bdded3e6e",
+    "tests/test_siglus_native.py": "96572f96c383bb09471c6a4465ce9d0321a37742fc74f1d71342e9f9c3807645",
+    "upstream-lock.json": "0bbf580c6d86381a52d9e8bd99cb0969787e12b247a46fb64f561c220267dc40"
+  },
+  "protected_source_changes_during_run": [],
+  "finished_utc": "2026-10-25T08:27:38.667370+00:00",
+  "all_requested_checks_passed": true,
+  "gpu_rerun": false,
+  "ownership_note": "The commands validate the current shared tree. Changes outside Siglus verification are not attributed to this audit."
+}

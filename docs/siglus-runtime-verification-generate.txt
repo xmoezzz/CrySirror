@@ -1,0 +1,4 @@
+   Compiling crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.92s
+     Running `target/debug/examples/native_fixture /Users/xmoe/.cache/crysirror/siglus-native-audit-20261025-1`
+/Users/xmoe/.cache/crysirror/siglus-native-audit-20261025-1

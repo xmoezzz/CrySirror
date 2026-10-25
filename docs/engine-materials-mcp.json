@@ -1,0 +1,287 @@
+{
+  "date": "2026-10-25",
+  "protocol": "2025-06-18",
+  "project": "examples/materials/project.json",
+  "project_validate": {
+    "schema_valid": true,
+    "asset_files": 1,
+    "asset_scope": "declared",
+    "native_vms_verified": false
+  },
+  "trace": {
+    "tool": "engine_trace",
+    "frame": 2,
+    "time_ms": 16,
+    "pixels_rendered": false,
+    "scoped_client": 1,
+    "material_entity_count": 66,
+    "alpha_modes": [
+      "additive",
+      "blend",
+      "mask",
+      "opaque",
+      "premultiplied"
+    ],
+    "sampled_material_data": [
+      {
+        "id": 1,
+        "name": "backdrop",
+        "material": {
+          "alpha_cutoff": 0.5,
+          "alpha_mode": "opaque",
+          "base_color_factor": [
+            0.012000000104308128,
+            0.017999999225139618,
+            0.02800000086426735,
+            1.0
+          ],
+          "base_color_texture": null,
+          "depth_fade": 0.0,
+          "double_sided": false,
+          "emissive_factor": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "emissive_strength": 1.0,
+          "emissive_texture": null,
+          "metallic_factor": 0.0,
+          "metallic_roughness_texture": null,
+          "normal_scale": 1.0,
+          "normal_texture": null,
+          "occlusion_strength": 1.0,
+          "occlusion_texture": null,
+          "opacity_from_alpha": false,
+          "opacity_texture": null,
+          "roughness_factor": 0.6000000238418579,
+          "unlit": true,
+          "uv_offset": [
+            0.0,
+            0.0
+          ],
+          "uv_scale": [
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": 15,
+        "name": "2-mask-cell-0-0",
+        "material": {
+          "alpha_cutoff": 0.5,
+          "alpha_mode": "mask",
+          "base_color_factor": [
+            1.0,
+            0.6499999761581421,
+            0.05000000074505806,
+            0.10000000149011612
+          ],
+          "base_color_texture": null,
+          "depth_fade": 0.0,
+          "double_sided": false,
+          "emissive_factor": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "emissive_strength": 1.0,
+          "emissive_texture": null,
+          "metallic_factor": 0.0,
+          "metallic_roughness_texture": null,
+          "normal_scale": 1.0,
+          "normal_texture": null,
+          "occlusion_strength": 1.0,
+          "occlusion_texture": null,
+          "opacity_from_alpha": false,
+          "opacity_texture": null,
+          "roughness_factor": 0.6000000238418579,
+          "unlit": true,
+          "uv_offset": [
+            0.0,
+            0.0
+          ],
+          "uv_scale": [
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": 45,
+        "name": "3-blend",
+        "material": {
+          "alpha_cutoff": 0.5,
+          "alpha_mode": "blend",
+          "base_color_factor": [
+            0.029999999329447746,
+            0.6499999761581421,
+            1.0,
+            0.6499999761581421
+          ],
+          "base_color_texture": null,
+          "depth_fade": 0.0,
+          "double_sided": true,
+          "emissive_factor": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "emissive_strength": 1.0,
+          "emissive_texture": null,
+          "metallic_factor": 0.0,
+          "metallic_roughness_texture": null,
+          "normal_scale": 1.0,
+          "normal_texture": null,
+          "occlusion_strength": 1.0,
+          "occlusion_texture": null,
+          "opacity_from_alpha": false,
+          "opacity_texture": null,
+          "roughness_factor": 0.6000000238418579,
+          "unlit": true,
+          "uv_offset": [
+            0.0,
+            0.0
+          ],
+          "uv_scale": [
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": 52,
+        "name": "4-additive",
+        "material": {
+          "alpha_cutoff": 0.5,
+          "alpha_mode": "additive",
+          "base_color_factor": [
+            1.0,
+            0.20000000298023224,
+            0.019999999552965164,
+            0.5
+          ],
+          "base_color_texture": null,
+          "depth_fade": 0.0,
+          "double_sided": true,
+          "emissive_factor": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "emissive_strength": 1.0,
+          "emissive_texture": null,
+          "metallic_factor": 0.0,
+          "metallic_roughness_texture": null,
+          "normal_scale": 1.0,
+          "normal_texture": null,
+          "occlusion_strength": 1.0,
+          "occlusion_texture": null,
+          "opacity_from_alpha": false,
+          "opacity_texture": null,
+          "roughness_factor": 0.6000000238418579,
+          "unlit": true,
+          "uv_offset": [
+            0.0,
+            0.0
+          ],
+          "uv_scale": [
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": 59,
+        "name": "5-premultiplied",
+        "material": {
+          "alpha_cutoff": 0.5,
+          "alpha_mode": "premultiplied",
+          "base_color_factor": [
+            0.800000011920929,
+            0.05000000074505806,
+            0.699999988079071,
+            0.5
+          ],
+          "base_color_texture": null,
+          "depth_fade": 0.0,
+          "double_sided": true,
+          "emissive_factor": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "emissive_strength": 1.0,
+          "emissive_texture": null,
+          "metallic_factor": 0.0,
+          "metallic_roughness_texture": null,
+          "normal_scale": 1.0,
+          "normal_texture": null,
+          "occlusion_strength": 1.0,
+          "occlusion_texture": null,
+          "opacity_from_alpha": false,
+          "opacity_texture": null,
+          "roughness_factor": 0.6000000238418579,
+          "unlit": true,
+          "uv_offset": [
+            0.0,
+            0.0
+          ],
+          "uv_scale": [
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "id": 66,
+        "name": "6-blend-soft-intersection",
+        "material": {
+          "alpha_cutoff": 0.5,
+          "alpha_mode": "blend",
+          "base_color_factor": [
+            0.11999999731779099,
+            0.8999999761581421,
+            0.3499999940395355,
+            1.0
+          ],
+          "base_color_texture": null,
+          "depth_fade": 2.0,
+          "double_sided": true,
+          "emissive_factor": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "emissive_strength": 1.0,
+          "emissive_texture": null,
+          "metallic_factor": 0.0,
+          "metallic_roughness_texture": null,
+          "normal_scale": 1.0,
+          "normal_texture": null,
+          "occlusion_strength": 1.0,
+          "occlusion_texture": null,
+          "opacity_from_alpha": false,
+          "opacity_texture": "half-opacity.png",
+          "roughness_factor": 0.6000000238418579,
+          "unlit": true,
+          "uv_offset": [
+            0.0,
+            0.0
+          ],
+          "uv_scale": [
+            1.0,
+            1.0
+          ]
+        }
+      }
+    ]
+  },
+  "capture": {
+    "tool": "scene_capture",
+    "mime": "image/png",
+    "bytes": 161624,
+    "sha256": "f86c6d0dcbd075f9a25d7174ccf520114bd9696fa1e4e22c5757b8d090413a14",
+    "output": "/Users/xmoe/.cache/crysirror/material-mcp/gallery.png"
+  }
+}

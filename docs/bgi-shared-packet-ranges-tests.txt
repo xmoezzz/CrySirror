@@ -1,0 +1,15 @@
+   Compiling na_mpeg2_decoder v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/na_mpeg2_decoder)
+   Compiling wmv-decoder v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/na_wmv_player)
+   Compiling siglus_assets v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_assets)
+   Compiling siglus_key_recovery v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_key_recovery)
+   Compiling siglus_scene_vm v1.0.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_scene_vm)
+   Compiling crysirror-video v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-video)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.41s
+     Running tests/packet_ranges.rs (target/debug/deps/packet_ranges-977e8aa809b3528f)
+
+running 2 tests
+test packet_ranges_borrow_exact_video_and_audio_payloads_and_reject_truncation ... ok
+test raw_elementary_stream_is_borrowed_without_reinterpretation ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

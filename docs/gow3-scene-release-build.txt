@@ -1,0 +1,13 @@
+   Compiling crysirror-scene v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-scene)
+   Compiling crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+   Compiling crysirror-asset v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-asset)
+   Compiling crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+   Compiling crysirror-engine v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-engine)
+   Compiling crysirror-author v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-author)
+   Compiling crysirror-rfvp v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-rfvp)
+   Compiling crysirror-wgpu v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-wgpu)
+   Compiling crysirror-script-js v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-script-js)
+   Compiling crysirror-desktop v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-desktop)
+    Finished `release` profile [optimized] target(s) in 1m 11s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`

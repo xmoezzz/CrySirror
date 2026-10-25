@@ -1,0 +1,93 @@
+warning: method `remaining` is never used
+   --> crates/bgi-upstream/crates/ethornell-image/src/cbg.rs:830:8
+    |
+821 | impl<'a> Reader<'a> {
+    | ------------------- method in this implementation
+...
+830 |     fn remaining(&self) -> &'a [u8] {
+    |        ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ethornell-image` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running tests/images_b.rs (target/debug/deps/images_b-65aa2a2ad13498b2)
+
+running 3 tests
+exact RGBA twilight-frontier/pak2-gfx twilight_frontier/files/pak2/0000_00.cv2 palette=false
+exact RGBA twilight-frontier/pak2-gfx twilight_frontier/files/pak2/stand000.cv2 palette=false
+exact RGBA twilight-frontier/pak2-gfx twilight_frontier/files/pak2/stand000.cv2 palette=true
+exact RGBA fc01/mcg FC01LOGO
+exact RGBA active-soft/ed8 active_soft/files/ed8/EFFECT15.ed8
+exact RGBA active-soft/edt active_soft/files/edt/nowprit.edt
+exact RGBA fc01/mcg CLE13_06
+exact RGBA fc01/mcg 50
+test external_fc01_keys ... ok
+exact RGBA twilight-frontier/tfbm twilight_frontier/files/tfbm/climaxCutA0000.png palette=false
+exact RGBA twilight-frontier/tfbm twilight_frontier/files/tfbm/unk-02479-4461dee8.dat palette=false
+exact RGBA twilight-frontier/tfbm twilight_frontier/files/tfbm/spellB0000.bmp palette=false
+exact RGBA twilight-frontier/tfbm twilight_frontier/files/tfbm/spellB0000.bmp palette=true
+exact RGBA eagls/gr eagls/files/gr/mask17.gr
+exact RGBA fc01/acd fc01/files/acd/CSD02_35.ACD
+external dependency exact RGBA count=8
+test external_dependency_images ... ok
+exact RGBA french-bread/ex3 french_bread/files/ex3/WIN_HISUI&KOHAKU.EX3
+exact RGBA ism/isg ism/files/isg/MUSICTOP-zlib.ISG
+exact RGBA ism/isg ism/files/isg/3D16_019-zlib.ISG
+exact RGBA ivory/prs ivory/files/prs/BMIK_A16
+exact RGBA pajamas/ep pajamas/files/ep/fin.EPA
+exact RGBA silky/akb silky/files/akb/HINT02.AKB
+exact RGBA silky/akb silky/files/akb/BREATH.AKB
+exact RGBA triangle/yb triangle/files/yb/GA3AXXXX15
+exact RGBA crowd/cwd crowd/files/cwd/306-301-zlib.cwd
+exact RGBA crowd/cwl crowd/files/cwl/OP04_P-zlib.cwl
+exact RGBA crowd/cwp crowd/files/cwp/plogo.cwp
+exact RGBA crowd/zbm crowd/files/zbm/Takuf_26.zbm
+exact RGBA minato-soft/fil minato_soft/files/fil/Rule07-zlib.fil
+exact RGBA riddle-soft/cmp riddle_soft/files/cmp/SLParts.gcp
+exact RGBA rpgmaker/xyz rpgmaker/files/xyz/shallows-room-a.xyz
+exact RGBA sysadv/pga sysadv/files/pga/flower.pga
+exact RGBA west-vision/syg west_vision/files/syg/loadx-zlib.syg
+exact RGBA yuris/ycg yuris/files/ycg/back_0.png
+exact RGBA yumemiru/epf yumemiru/files/epf/IF_cg_bg_minyusyu_c.epf
+exact RGBA kiss/custom-png kiss/files/custom-png/x04n_a_.png
+lossy codec RGBA google/webp google/files/webp/00.webp: differing_channels=9471 max_difference=7
+lossy codec RGBA jpeg/jpeg jpeg/files/NoName.jpeg: differing_channels=672 max_difference=1
+exact RGBA microsoft/bmp microsoft/files/bmp/pal1bg.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal2.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal4.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal8.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal8-0.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal8v4.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal8v5.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgb16.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgb16-565.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgb16-231.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgba16-4444.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgb24.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgb24pal.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgb32.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgba32.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/rgb32fakealpha.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal8w126.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal8w125.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal8w124.bmp
+exact RGBA microsoft/bmp microsoft/files/bmp/pal8topdown.bmp
+exact RGBA microsoft/dds microsoft/files/dds/back0.dds
+exact RGBA microsoft/dds microsoft/files/dds/006_disconnect.dds
+exact RGBA microsoft/dds microsoft/files/dds/reimu1.dds
+exact RGBA microsoft/dds microsoft/files/dds/koishi_7.dds
+exact RGBA truevision/tga truevision/files/tga/compressed-8-bit.tga
+exact RGBA truevision/tga truevision/files/tga/compressed-16-bit.tga
+exact RGBA truevision/tga truevision/files/tga/compressed-24-bit.tga
+exact RGBA truevision/tga truevision/files/tga/compressed-32-bit.tga
+exact RGBA truevision/tga truevision/files/tga/uncompressed-8-bit-palette.tga
+exact RGBA truevision/tga truevision/files/tga/uncompressed-16-bit.tga
+exact RGBA truevision/tga truevision/files/tga/uncompressed-24-bit.tga
+exact RGBA truevision/tga truevision/files/tga/uncompressed-32-bit.tga
+exact RGBA truevision/tga truevision/files/tga/uncompressed-16-bit-flipped.tga
+external fixture comparisons count=59
+test external_upstream_corpus ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 46 filtered out; finished in 2.68s
+

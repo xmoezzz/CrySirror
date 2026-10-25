@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (target/debug/deps/crysirror_siglus_vm-1bb87ba848a0bd54)
+
+running 1 test
+test adapter::verification_tests::native_center_rep_moves_the_scale_origin_without_shifting_unit_scale_xy ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.02s
+

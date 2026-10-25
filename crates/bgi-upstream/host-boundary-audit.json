@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "implementation": {
+    "cpu_feature": "ethornell-vm/cpu-embedded enabled by ethornell-app",
+    "native_user_file_paths": "All System81 std::fs fallback guards call host_filesystem_fallback_allowed; CPU profile refuses even an opting-in SysApi. Capability-aware SysApi operations remain available.",
+    "fallback_selectors": [
+      "81:28",
+      "81:2C",
+      "81:2D",
+      "81:2F",
+      "81:32",
+      "81:35",
+      "81:37",
+      "81:3C",
+      "81:3E"
+    ],
+    "memory_metadata": "macOS sysctlbyname(hw.memsize), host_statistics64, sysconf pagesize; Linux sysinfo; Windows GlobalMemoryStatusEx. No process launch or /proc file fallback in CPU metadata path.",
+    "calendar": "Original local calendar and installed-clock timezone behavior unchanged; real local OS metadata remains trusted and nondeterministic.",
+    "calendar_source_unchanged": true,
+    "calendar_sha256": "4d488456fa2fd8c5ff1a76d9a7b7bca81803ddf908954e89b797d1e4d8f6cb66",
+    "cpu_record_source_unchanged": true,
+    "cpu_record_sha256": "f5b6e24d224be4987643bc8b3d9908dcb407c6a15dfef681098ecdb7a840e332",
+    "cpu_record_scope": "Original CPUID/RDTSC metadata measurement, including x86 one-second sample, remains trusted upstream code. No interpreter hot-loop/value/opcode rewrite.",
+    "diagnostics": "Read-only visible_texts limited to 16 drawable text nodes × 256 Unicode characters, plus native text/render-tree counts."
+  },
+  "compilation": {
+    "command": "cargo check -p ethornell-app",
+    "exit_code": 0,
+    "reported_time": "7.21s",
+    "log": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/vendor-ambient-check.log"
+  },
+  "behavior": {
+    "command": "cargo test -p ethornell-vm --features cpu-embedded --test host_boundary -- --nocapture",
+    "exit_code": 0,
+    "passed": 3,
+    "failed": 0,
+    "ignored": 0,
+    "log": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/vendor-host-boundary-test.log",
+    "checks": [
+      "9 real native System81 file selectors refuse a self-authored ambient sentinel despite SysApi opting in; no outside temporary writable probe created",
+      "Actual kernel metadata query returned nonzero total memory; available <= total",
+      "Real native GetLocalTime opcode writes valid current calendar fields, not zeros"
+    ],
+    "actual_mac_kernel_memory_total_bytes": 34359738368,
+    "actual_mac_kernel_memory_available_bytes_at_sample": 9066627072
+  },
+  "limitations": [
+    "This is a targeted audit of used native-host seams, not a claim that all transitive code is unsafe-free.",
+    "Only macOS metadata behavior was executed; Linux/Windows implementations have no hardware or cross-compilation claim.",
+    "Calendar/local timezone and CPU/parallelism metadata are legitimate host observations, not deterministic VM save data.",
+    "A failed physical-memory OS query retains the original (0,0) native failure representation; the public metadata API exposes the underlying io::Result."
+  ]
+}

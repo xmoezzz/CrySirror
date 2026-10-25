@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-24",
+  "host": "macOS arm64, Apple M5, Metal",
+  "blender": "5.2.2 LTS (fixture export)",
+  "runs": [
+    {
+      "command": "./target/debug/crysirror render examples/engine/project.json --script examples/engine/game.ts --frames 30 --renderer raster --data-dir /var/folders/r5/k8vc2hhj19lf5cxnmhn8_4dr0000gn/T/tmp.f0CFXhu5WS --output dist/engine-api-raster.png",
+      "renderer": "raster",
+      "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "hardware_raytracing": false,
+      "script_log": [
+        "world has 13 entities"
+      ],
+      "world_entities": 13,
+      "time_ms": 464
+    },
+    {
+      "command": "./target/debug/crysirror render examples/engine/project.json --script examples/engine/game.ts --frames 30 --renderer compute-raytrace --data-dir /var/folders/r5/k8vc2hhj19lf5cxnmhn8_4dr0000gn/T/tmp.f0CFXhu5WS --output dist/engine-api-compute-raytrace.png",
+      "renderer": "compute-raytrace",
+      "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "hardware_raytracing": false,
+      "script_log": [
+        "world has 13 entities"
+      ],
+      "world_entities": 13,
+      "time_ms": 464
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+[package]
+name = "crysirror-author"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crysirror-runtime.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+# Rust implementations; isolated from the player and no_std service contracts.
+boa_engine = "=0.20.0"
+oxc = { version = "=0.75.0", default-features = false, features = ["semantic", "transformer", "codegen", "ast_visit"] }
+# Oxc 0.75 expects Version(u32, u32, u32); browserslist 2.3 changed it to u16.
+oxc-browserslist = "=2.0.0"
+
+[dev-dependencies]
+tempfile = "3.12"

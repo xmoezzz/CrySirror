@@ -1,0 +1,31 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {
+        "tools": {
+          "listChanged": false
+        }
+      },
+      "serverInfo": {
+        "name": "CrySirror-project-tools",
+        "version": "0.2.0"
+      },
+      "instructions": "Local project tools, not a live native VM debugger. Inspect sha256 before replacing data. Native RFVP/Siglus adapters are not linked."
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"schema_valid\": true, \"asset_files\": 0, \"native_vms_verified\": false}"
+        }
+      ]
+    }
+  }
+]

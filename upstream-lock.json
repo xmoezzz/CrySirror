@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "fetched_at": "2026-10-24T09:38:46.707536+00:00",
+  "sources": {
+    "rfvp": {
+      "url": "https://github.com/xmoezzz/rfvp.git",
+      "commit": "062fec82033b554b9eb3b5da069518c0c96a354e",
+      "requested_ref": "main"
+    },
+    "siglus_rs": {
+      "url": "https://github.com/xmoezzz/siglus_rs.git",
+      "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+      "requested_ref": "main"
+    }
+  }
+}

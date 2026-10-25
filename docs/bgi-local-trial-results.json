@@ -1,0 +1,305 @@
+{
+  "schema": 1,
+  "tested_on": "2026-10-25",
+  "scope": "Local BGI game baseline, separate from CrySirror adapter integration",
+  "game": {
+    "title": "千の刃濤、桃花染の皇姫 体験版",
+    "engine": "BGI 1.622",
+    "original_root": "/Users/xmoe/Documents/千の刃濤、桃花染の皇姫 体験版/senmomo_trial",
+    "execution_copy": "/Users/xmoe/.cache/crysirror/bgi-trial/game-copy",
+    "isolation": "APFS copy-on-write clone with independent file inodes; original game not executed",
+    "startup_adjustment": "Moved SenNoHatouTsukisomeNoKoukiTV only out of execution copy; original marker preserved",
+    "game_data_committed": false,
+    "font": "Runtime OS Hiragino Sans GB.ttc; not copied into repository"
+  },
+  "source": {
+    "source_root": "/Users/xmoe/Documents/ethornell-rs",
+    "head": "4c41dc3a566338d2ea8400635e23b062613e3782",
+    "dirty": true,
+    "dirty_patch_sha256": "c81879bd9acf6fa62fc75576e3b15744d24a485ca13a88057142e3186dd501fa",
+    "original_binary": "/Users/xmoe/Documents/ethornell-rs/target/release/ethornell",
+    "original_binary_sha256": "56e72ff7c648e2cbdaf891f474fcc8ec9be7a8af92f055097d0a9a242433b49b",
+    "binary_predates_working_tree_changes": true,
+    "game_original": "/Users/xmoe/Documents/千の刃濤、桃花染の皇姫 体験版/senmomo_trial",
+    "game_execution_copy": "/Users/xmoe/.cache/crysirror/bgi-trial/game-copy",
+    "game_copy_method": "APFS copy-on-write clone (cp -cR); separate inodes",
+    "current_run": "current dirty-source rebuilt upstream CLI; not CrySirror integration",
+    "dirty_patch_sha256_after_build": "c81879bd9acf6fa62fc75576e3b15744d24a485ca13a88057142e3186dd501fa",
+    "source_diff_unchanged": true,
+    "rebuilt_binary_sha256": "5cf468f9c7d5d199a40cf56b847aa4eba78c8b61bf95de4a7014fd0551358143",
+    "original_startup_marker_preserved": true
+  },
+  "implementation": {
+    "crysirror_bgi_factory_registered": false,
+    "native_vm_modified": false,
+    "current_tree_bgi_source_modified": false,
+    "standalone_runtime": "ethornell-rs current dirty tree, not a reproducible clean commit",
+    "source_and_game_changes": "No original source or original game edits; target rebuilt with --locked; experiments remain in cache"
+  },
+  "compilation": {
+    "command": [
+      "cargo",
+      "build",
+      "--locked",
+      "--release",
+      "-p",
+      "ethornell-cli"
+    ],
+    "exit_code": 0,
+    "log": "/Users/xmoe/.cache/crysirror/bgi-trial/current-build.log",
+    "warnings": "131 upstream warnings and block 0.1.6 future incompatibility; not a warning-free build"
+  },
+  "behavior": {
+    "pre_existing_binary_title": {
+      "exit_code": 0,
+      "artifact": "/Users/xmoe/.cache/crysirror/bgi-trial/title.png"
+    },
+    "rebuilt_cli": {
+      "rebuilt-story": {
+        "exit_code": 0,
+        "binary_sha256": "5cf468f9c7d5d199a40cf56b847aa4eba78c8b61bf95de4a7014fd0551358143",
+        "frames_requested": 1800
+      },
+      "strict": {
+        "exit_code": 0,
+        "binary_sha256": "5cf468f9c7d5d199a40cf56b847aa4eba78c8b61bf95de4a7014fd0551358143",
+        "frames_requested": 600
+      }
+    },
+    "strict_story": {
+      "exit_code": 0,
+      "requested_frames": 3600,
+      "seconds": 41.461,
+      "input_script": "wait:240,click:85:455,wait:1800,click:650:620,wait:240,click:650:620,wait:240,click:650:620,wait:240,click:650:620,wait:240,click:650:620",
+      "strict": true
+    },
+    "observed": [
+      "Original archive/bootstrap and title UI",
+      "Title Start input enters story",
+      "Native background movement and native message window",
+      "Japanese native text displayed",
+      "Later clicks advance to a different sentence",
+      "Strict run logs actual final frame 3599 and normal completion"
+    ],
+    "not_validated": [
+      "Full trial completion",
+      "Native save/load round trip",
+      "Character name/ruby coverage",
+      "Audio correctness or shared CrySirror mixer",
+      "Movie playback",
+      "GPU native effect equivalence",
+      "BGI execution through CrySirror AdapterRegistry"
+    ],
+    "headless_caveat": "Standalone headless CLI still attempts audio device creation, then mutes it. CPU-frame proof is separate. Native ISESUforSHTK.exe launch attempt failed with Permission denied on macOS; no successful child execution claimed.",
+    "strict_log": "/Users/xmoe/.cache/crysirror/bgi-trial/strict-story.log"
+  },
+  "artifacts": [
+    {
+      "path": "/Users/xmoe/.cache/crysirror/bgi-trial/title.png",
+      "sha256": "6945bb0f84117050faf8fb48de6fd60acebb389ca2204ce09c4a5517591e2390",
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "path": "/Users/xmoe/.cache/crysirror/bgi-trial/rebuilt-story.png",
+      "sha256": "442553f4c1a941dc742d2529508a294a771c233b32a0f548842345518ab604c1",
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "path": "/Users/xmoe/.cache/crysirror/bgi-trial/strict-story.png",
+      "sha256": "2971801975be92dd7061e2d0a42e04d4756ff473e15f3dc161511531be33bd01",
+      "width": 1280,
+      "height": 720
+    }
+  ],
+  "device_free_cpu_proof": {
+    "evidence": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/proof-results.json",
+    "evidence_sha256": "f5bc543b7d50a370ace681915c45158588baa333cb052e560cfc4e1987769064",
+    "implementation": {
+      "files_modified_in_cache": [
+        "crates/ethornell-app/src/host_runtime.rs"
+      ],
+      "files_added_in_cache": [
+        "crates/ethornell-app/examples/crysirror_cpu_proof.rs"
+      ],
+      "wrapper": "cpu_frame_proof(elapsed_ms) -> Result<Option<DecodedImage>>",
+      "output_owned_rgba8": true,
+      "native_vm_preserved": true,
+      "no_gpu_renderer": true,
+      "explicit_silent_audio_none": true,
+      "device_preconditions_enforced_per_tick": true,
+      "file_policy_scope": true,
+      "vm_budget_checks_before_and_after": true,
+      "strict_vm_fatal_and_raster_glyph_error_checks": true,
+      "pending_host_request_refused_without_automatic_answer": true,
+      "last_presented_frame_reused_when_not_due": true,
+      "audio_pcm_decode_or_audible_behavior_validated": false
+    },
+    "compilation": {
+      "exit_code": 0,
+      "command": "cargo build --locked --release -p ethornell-app --example crysirror_cpu_proof --no-default-features --features host-driven",
+      "target_dir": "/Users/xmoe/Documents/ethornell-rs/target",
+      "log": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/build.log",
+      "time_reported": "1m 16s",
+      "warnings_present": true,
+      "copied_binary": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/crysirror_cpu_proof",
+      "binary_sha256": "a4ef15d2eeb7445dbdaeae3087dfe7fe81a002ac9fd8aeaabaca84fc98abade2",
+      "cli_binary_not_replaced_by_example_build": true
+    },
+    "behavior": {
+      "runs": {
+        "strict": {
+          "command": [
+            "/Users/xmoe/Documents/ethornell-rs/target/release/examples/crysirror_cpu_proof",
+            "/Users/xmoe/.cache/crysirror/bgi-trial/game-copy",
+            "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/strict-user",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/strict-output",
+            "600",
+            "",
+            "strict"
+          ],
+          "exit_code": 0,
+          "seconds": 2.171740625,
+          "binary_sha256": "a4ef15d2eeb7445dbdaeae3087dfe7fe81a002ac9fd8aeaabaca84fc98abade2"
+        },
+        "story": {
+          "command": [
+            "/Users/xmoe/Documents/ethornell-rs/target/release/examples/crysirror_cpu_proof",
+            "/Users/xmoe/.cache/crysirror/bgi-trial/game-copy",
+            "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/story-user",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/story-output",
+            "1800",
+            "wait:240,click:85:455,wait:180,key:enter,wait:180,key:enter,wait:180,key:enter,wait:180,key:enter",
+            "strict"
+          ],
+          "exit_code": 0,
+          "seconds": 15.160312915999999
+        },
+        "advance": {
+          "command": [
+            "/Users/xmoe/Documents/ethornell-rs/target/release/examples/crysirror_cpu_proof",
+            "/Users/xmoe/.cache/crysirror/bgi-trial/game-copy",
+            "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/advance-user",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/advance-output",
+            "3600",
+            "wait:240,click:85:455,wait:1800,click:650:620,wait:240,click:650:620,wait:240,click:650:620,wait:240,click:650:620,wait:240,click:650:620",
+            "strict"
+          ],
+          "exit_code": 0,
+          "seconds": 20.713275458
+        }
+      },
+      "strict_enabled_in_all_runs": true,
+      "title_600_frames_exit0": true,
+      "story_1800_frames_exit0": true,
+      "click_advance_3600_frames_exit0": true,
+      "final_engine_time_ms": 57600,
+      "tick_ms": 16,
+      "final_pending_host_requests": 0,
+      "final_vm_count": 17,
+      "final_vm_memory_capacity_bytes": 16777216,
+      "final_cached_image_bytes": 148294604,
+      "visually_inspected": [
+        "strict-output/frame-0599.png",
+        "story-output/frame-1799.png",
+        "advance-output/frame-3599.png"
+      ],
+      "observed_title": true,
+      "observed_background_pan": true,
+      "observed_japanese_dialogue_and_controls": true,
+      "observed_dialogue_changes_after_clicks": true,
+      "game_requested_save_restore_tested": false
+    },
+    "storage": {
+      "resource_root": "/Users/xmoe/.cache/crysirror/bgi-trial/game-copy",
+      "private_user_roots": [
+        "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/strict-user",
+        "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/story-user",
+        "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/advance-user"
+      ],
+      "resource_file_metadata_manifest_unchanged": true,
+      "resource_file_count": 67,
+      "metadata_manifest_fields": [
+        "relative_name",
+        "bytes",
+        "mtime_ns"
+      ],
+      "resource_bytes_not_hashed_before_run": true,
+      "private_user_files": {
+        "strict": [
+          ".ethornell-session.lock"
+        ],
+        "story": [
+          ".ethornell-session.lock"
+        ],
+        "advance": [
+          ".ethornell-session.lock"
+        ]
+      },
+      "source_game_not_opened_by_this_proof": true,
+      "font_system_path": "/System/Library/Fonts/Hiragino Sans GB.ttc",
+      "fonts_or_game_bytes_copied_into_repository": false
+    },
+    "embedding_limits": {
+      "display_route": "HostServices.present_surface(client, slot, w, h, rgba) + submit(PutVisual Sprite) can carry this CPU frame",
+      "dynamic_surface_limits": "8192 per dimension, 16 slots per client, 256 MiB total retained surfaces",
+      "not_registered": true,
+      "limits": [
+        "HostRuntime existing public step/input require renderer; CPU wrapper remains cache-local.",
+        "VmFactory::create must be dormant and side-effect-free; HostRuntime::create immediately opens resources/font and creates a private writer lock. Initialization must be deferred to the first step with authorized HostServices.",
+        "ethornell-app still depends on wgpu, audio and Ruffle with no-default-features: incompatible with device-free compat rule until split or process boundary.",
+        "ethornell-vm contains unsafe code (local_window read_unaligned and native host/time/CPU calls), requiring audit/refactor for unsafe-free compat policy.",
+        "FilePolicy accepts OS root directory descriptors; Cry ClientStorage supplies logical read/write/list and no streaming Read+Seek/file descriptor API. Do not bypass client capabilities with arbitrary OS roots.",
+        "InputFrame is a button snapshot with no ordered releases/wheel/text/focus; native BGI needs FIFO edges and game-space coordinates.",
+        "Host pending confirmation/dialog continuation has no matching generic HostServices request protocol.",
+        "HostRuntime has no public whole-VM snapshot/restore port matching mandatory VmAdapter methods. Original native script saves are not equivalent to runtime snapshot.",
+        "instruction_budget parameter has no direct mapping to HostRuntime whole native tick; cooperative watchdog and VM memory budget are currently separate.",
+        "Shared engine audio/video/text services were not extracted by this proof; native CPU renderer remains upstream."
+      ],
+      "vm_adapter_requires_send": false,
+      "factory_requires_send_sync": true
+    },
+    "source": {
+      "head": "4c41dc3a566338d2ea8400635e23b062613e3782",
+      "dirty": true,
+      "tracked_patch_sha256": "c81879bd9acf6fa62fc75576e3b15744d24a485ca13a88057142e3186dd501fa",
+      "provenance": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/provenance.json",
+      "dependency_manifest": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/dependency-manifest.json",
+      "experimental_patch": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/cpu-proof.patch",
+      "original_rs_files_changed_during_proof": [],
+      "original_tracked_patch_unchanged": true
+    },
+    "limits": [
+      "One local trial bootstrap/title/opening sequence observed; does not establish complete BGI compatibility.",
+      "No rendering hardware result, audible audio, movie decoding or native save roundtrip claimed.",
+      "Source is explicitly dirty local working tree plus cache-only experimental patch, not a clean pinned release."
+    ],
+    "observed_output_comparison": [
+      {
+        "standalone": "/Users/xmoe/.cache/crysirror/bgi-trial/title.png",
+        "cpu_host": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/strict-output/frame-0599.png",
+        "png_bytes_equal": true,
+        "standalone_sha256": "6945bb0f84117050faf8fb48de6fd60acebb389ca2204ce09c4a5517591e2390",
+        "cpu_host_sha256": "6945bb0f84117050faf8fb48de6fd60acebb389ca2204ce09c4a5517591e2390"
+      },
+      {
+        "standalone": "/Users/xmoe/.cache/crysirror/bgi-trial/rebuilt-story.png",
+        "cpu_host": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/story-output/frame-1799.png",
+        "png_bytes_equal": true,
+        "standalone_sha256": "442553f4c1a941dc742d2529508a294a771c233b32a0f548842345518ab604c1",
+        "cpu_host_sha256": "442553f4c1a941dc742d2529508a294a771c233b32a0f548842345518ab604c1"
+      },
+      {
+        "standalone": "/Users/xmoe/.cache/crysirror/bgi-trial/strict-story.png",
+        "cpu_host": "/Users/xmoe/.cache/crysirror/bgi-cpu-proof/advance-output/frame-3599.png",
+        "png_bytes_equal": true,
+        "standalone_sha256": "2971801975be92dd7061e2d0a42e04d4756ff473e15f3dc161511531be33bd01",
+        "cpu_host_sha256": "2971801975be92dd7061e2d0a42e04d4756ff473e15f3dc161511531be33bd01"
+      }
+    ]
+  }
+}

@@ -1,0 +1,1626 @@
+// SPDX-License-Identifier: MPL-2.0
+// Migrated from pinned siglus_rs; see UPSTREAM.md and upstream-files.json.
+use crate::io_fs as fs;
+use anyhow::{Context, Result, anyhow, bail};
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+
+use crate::runtime::globals::SaveSlotState;
+
+pub const SAVE_APPEND_DIR_MAX_LEN: usize = 256;
+pub const SAVE_APPEND_NAME_MAX_LEN: usize = 256;
+pub const SAVE_TITLE_MAX_LEN: usize = 256;
+pub const SAVE_MESSAGE_MAX_LEN: usize = 256;
+pub const SAVE_FULL_MESSAGE_MAX_LEN: usize = 256;
+pub const SAVE_COMMENT_MAX_LEN: usize = 256;
+pub const SAVE_COMMENT2_MAX_LEN: usize = 256;
+pub const SAVE_FLAG_MAX_CNT: usize = 256;
+
+const SAVE_FIXED_STRING_CNT: usize = 7;
+pub const SAVE_HEADER_SIZE: usize =
+    10 * 4 + SAVE_FIXED_STRING_CNT * 256 * 2 + SAVE_FLAG_MAX_CNT * 4 + 4;
+const LEGACY_SAVE_HEADER_SIZE: usize = SAVE_HEADER_SIZE - 3 * 256 * 2;
+const SPLIT_SAVE_HEADER_SIZE: usize = LEGACY_SAVE_HEADER_SIZE + 4;
+pub const GLOBAL_SAVE_HEADER_SIZE: usize = 12;
+pub const CONFIG_SAVE_HEADER_SIZE: usize = 12;
+pub const READ_SAVE_HEADER_SIZE: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SaveKind {
+    Normal,
+    Quick,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+enum LocalSaveLayout {
+    CurrentEnvelope,
+    LegacyEnvelope,
+    LegacySplit { local_ex_data_size: i32 },
+}
+
+impl LocalSaveLayout {
+    fn is_legacy(self) -> bool {
+        !matches!(self, Self::CurrentEnvelope)
+    }
+
+    fn header_size(self) -> usize {
+        match self {
+            Self::CurrentEnvelope => SAVE_HEADER_SIZE,
+            Self::LegacyEnvelope => LEGACY_SAVE_HEADER_SIZE,
+            Self::LegacySplit { .. } => SPLIT_SAVE_HEADER_SIZE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OriginalSaveHeader {
+    layout: LocalSaveLayout,
+    pub major_version: i32,
+    pub minor_version: i32,
+    pub year: i32,
+    pub month: i32,
+    pub day: i32,
+    pub weekday: i32,
+    pub hour: i32,
+    pub minute: i32,
+    pub second: i32,
+    pub millisecond: i32,
+    pub append_dir: String,
+    pub append_name: String,
+    pub title: String,
+    pub message: String,
+    pub full_message: String,
+    pub comment: String,
+    pub comment2: String,
+    #[serde(with = "crate::serde_array")]
+    pub flag: [i32; SAVE_FLAG_MAX_CNT],
+    pub data_size: i32,
+}
+
+impl Default for OriginalSaveHeader {
+    fn default() -> Self {
+        Self {
+            layout: LocalSaveLayout::CurrentEnvelope,
+            major_version: 1,
+            minor_version: 0,
+            year: 0,
+            month: 0,
+            day: 0,
+            weekday: 0,
+            hour: 0,
+            minute: 0,
+            second: 0,
+            millisecond: 0,
+            append_dir: String::new(),
+            append_name: String::new(),
+            title: String::new(),
+            message: String::new(),
+            full_message: String::new(),
+            comment: String::new(),
+            comment2: String::new(),
+            flag: [0; SAVE_FLAG_MAX_CNT],
+            data_size: 0,
+        }
+    }
+}
+
+impl OriginalSaveHeader {
+    pub fn from_slot(slot: &SaveSlotState, packed_size: usize) -> Self {
+        let mut flag = [0i32; SAVE_FLAG_MAX_CNT];
+        for (idx, dst) in flag.iter_mut().enumerate() {
+            *dst = slot.values.get(&(idx as i32)).copied().unwrap_or(0) as i32;
+        }
+        Self {
+            layout: LocalSaveLayout::CurrentEnvelope,
+            major_version: 1,
+            minor_version: 0,
+            year: slot.year as i32,
+            month: slot.month as i32,
+            day: slot.day as i32,
+            weekday: slot.weekday as i32,
+            hour: slot.hour as i32,
+            minute: slot.minute as i32,
+            second: slot.second as i32,
+            millisecond: slot.millisecond as i32,
+            append_dir: slot.append_dir.clone(),
+            append_name: slot.append_name.clone(),
+            title: slot.title.clone(),
+            message: slot.message.clone(),
+            full_message: slot.full_message.clone(),
+            comment: slot.comment.clone(),
+            comment2: slot.comment2.clone(),
+            flag,
+            data_size: packed_size as i32,
+        }
+    }
+
+    pub fn to_slot(&self) -> SaveSlotState {
+        let mut slot = SaveSlotState {
+            header_cache_valid: true,
+            exist: self.major_version == 1 && self.minor_version == 0,
+            year: self.year as i64,
+            month: self.month as i64,
+            day: self.day as i64,
+            weekday: self.weekday as i64,
+            hour: self.hour as i64,
+            minute: self.minute as i64,
+            second: self.second as i64,
+            millisecond: self.millisecond as i64,
+            append_dir: self.append_dir.clone(),
+            append_name: self.append_name.clone(),
+            title: self.title.clone(),
+            message: self.message.clone(),
+            full_message: self.full_message.clone(),
+            comment: self.comment.clone(),
+            comment2: self.comment2.clone(),
+            packed_data_size: self.data_size.max(0) as usize,
+            ..Default::default()
+        };
+
+        for (idx, value) in self.flag.iter().enumerate() {
+            if *value != 0 {
+                slot.values.insert(idx as i32, *value as i64);
+            }
+        }
+        slot
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let header_size = match bytes.len() {
+            LEGACY_SAVE_HEADER_SIZE => LEGACY_SAVE_HEADER_SIZE,
+            SPLIT_SAVE_HEADER_SIZE => SPLIT_SAVE_HEADER_SIZE,
+            _ => SAVE_HEADER_SIZE,
+        };
+        let legacy_header = header_size != SAVE_HEADER_SIZE;
+        if bytes.len() < header_size {
+            bail!("save header too short: {} < {}", bytes.len(), header_size);
+        }
+        let mut rd = Reader::new(bytes);
+        let major_version = rd.i32()?;
+        let minor_version = rd.i32()?;
+        let year = rd.i32()?;
+        let month = rd.i32()?;
+        let day = rd.i32()?;
+        let weekday = rd.i32()?;
+        let hour = rd.i32()?;
+        let minute = rd.i32()?;
+        let second = rd.i32()?;
+        let millisecond = rd.i32()?;
+        let append_dir = if legacy_header {
+            String::new()
+        } else {
+            rd.utf16_fixed(SAVE_APPEND_DIR_MAX_LEN)?
+        };
+        let append_name = if legacy_header {
+            String::new()
+        } else {
+            rd.utf16_fixed(SAVE_APPEND_NAME_MAX_LEN)?
+        };
+        let title = rd.utf16_fixed(SAVE_TITLE_MAX_LEN)?;
+        let message = rd.utf16_fixed(SAVE_MESSAGE_MAX_LEN)?;
+        let full_message = if legacy_header {
+            message.clone()
+        } else {
+            rd.utf16_fixed(SAVE_FULL_MESSAGE_MAX_LEN)?
+        };
+        let comment = rd.utf16_fixed(SAVE_COMMENT_MAX_LEN)?;
+        let comment2 = rd.utf16_fixed(SAVE_COMMENT2_MAX_LEN)?;
+        let mut flag = [0i32; SAVE_FLAG_MAX_CNT];
+        for dst in &mut flag {
+            *dst = rd.i32()?;
+        }
+        let data_size = rd.i32()?;
+        let layout = match header_size {
+            SPLIT_SAVE_HEADER_SIZE => LocalSaveLayout::LegacySplit {
+                local_ex_data_size: rd.i32()?,
+            },
+            LEGACY_SAVE_HEADER_SIZE => LocalSaveLayout::LegacyEnvelope,
+            _ => LocalSaveLayout::CurrentEnvelope,
+        };
+        Ok(Self {
+            layout,
+            major_version,
+            minor_version,
+            year,
+            month,
+            day,
+            weekday,
+            hour,
+            minute,
+            second,
+            millisecond,
+            append_dir,
+            append_name,
+            title,
+            message,
+            full_message,
+            comment,
+            comment2,
+            flag,
+            data_size,
+        })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.header_size());
+        push_i32(&mut out, self.major_version);
+        push_i32(&mut out, self.minor_version);
+        push_i32(&mut out, self.year);
+        push_i32(&mut out, self.month);
+        push_i32(&mut out, self.day);
+        push_i32(&mut out, self.weekday);
+        push_i32(&mut out, self.hour);
+        push_i32(&mut out, self.minute);
+        push_i32(&mut out, self.second);
+        push_i32(&mut out, self.millisecond);
+        if !self.layout.is_legacy() {
+            push_utf16_fixed(&mut out, &self.append_dir, SAVE_APPEND_DIR_MAX_LEN);
+            push_utf16_fixed(&mut out, &self.append_name, SAVE_APPEND_NAME_MAX_LEN);
+        }
+        push_utf16_fixed(&mut out, &self.title, SAVE_TITLE_MAX_LEN);
+        push_utf16_fixed(&mut out, &self.message, SAVE_MESSAGE_MAX_LEN);
+        if !self.layout.is_legacy() {
+            push_utf16_fixed(&mut out, &self.full_message, SAVE_FULL_MESSAGE_MAX_LEN);
+        }
+        push_utf16_fixed(&mut out, &self.comment, SAVE_COMMENT_MAX_LEN);
+        push_utf16_fixed(&mut out, &self.comment2, SAVE_COMMENT2_MAX_LEN);
+        for v in &self.flag {
+            push_i32(&mut out, *v);
+        }
+        push_i32(&mut out, self.data_size);
+        if let LocalSaveLayout::LegacySplit { local_ex_data_size } = self.layout {
+            push_i32(&mut out, local_ex_data_size);
+        }
+        debug_assert_eq!(out.len(), self.header_size());
+        out
+    }
+
+    fn header_size(&self) -> usize {
+        self.layout.header_size()
+    }
+
+    fn from_file_prefix(bytes: &[u8], file_len: usize) -> Result<Self> {
+        // These layouts all use version 1.0. Validate the complete payload
+        // boundary, including both compressed streams in the 3120-byte layout.
+        for size in [
+            SAVE_HEADER_SIZE,
+            LEGACY_SAVE_HEADER_SIZE,
+            SPLIT_SAVE_HEADER_SIZE,
+        ] {
+            if bytes.len() < size {
+                continue;
+            }
+            let header = Self::from_bytes(&bytes[..size])?;
+            let extra = match header.layout {
+                LocalSaveLayout::LegacySplit { local_ex_data_size } => local_ex_data_size,
+                _ => 0,
+            };
+            if header.data_size < 0 || extra < 0 {
+                continue;
+            }
+            let end = size
+                .checked_add(header.data_size as usize)
+                .and_then(|end| end.checked_add(extra as usize));
+            if end == Some(file_len) {
+                return Ok(header);
+            }
+        }
+        bail!("unrecognized or truncated local save layout: file size {file_len}")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OriginalGlobalSaveHeader {
+    pub major_version: i32,
+    pub minor_version: i32,
+    pub global_data_size: i32,
+}
+
+impl OriginalGlobalSaveHeader {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < GLOBAL_SAVE_HEADER_SIZE {
+            bail!(
+                "global save header too short: {} < {}",
+                bytes.len(),
+                GLOBAL_SAVE_HEADER_SIZE
+            );
+        }
+        let mut rd = Reader::new(bytes);
+        Ok(Self {
+            major_version: rd.i32()?,
+            minor_version: rd.i32()?,
+            global_data_size: rd.i32()?,
+        })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(GLOBAL_SAVE_HEADER_SIZE);
+        push_i32(&mut out, self.major_version);
+        push_i32(&mut out, self.minor_version);
+        push_i32(&mut out, self.global_data_size);
+        out
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OriginalConfigSaveHeader {
+    pub major_version: i32,
+    pub minor_version: i32,
+    pub config_data_size: i32,
+}
+
+impl OriginalConfigSaveHeader {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < CONFIG_SAVE_HEADER_SIZE {
+            bail!(
+                "config save header too short: {} < {}",
+                bytes.len(),
+                CONFIG_SAVE_HEADER_SIZE
+            );
+        }
+        let mut rd = Reader::new(bytes);
+        Ok(Self {
+            major_version: rd.i32()?,
+            minor_version: rd.i32()?,
+            config_data_size: rd.i32()?,
+        })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(CONFIG_SAVE_HEADER_SIZE);
+        push_i32(&mut out, self.major_version);
+        push_i32(&mut out, self.minor_version);
+        push_i32(&mut out, self.config_data_size);
+        out
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OriginalLocalSaveEnvelope {
+    pub save_id: [u16; 7],
+    pub append_dir: String,
+    pub append_name: String,
+    pub title: String,
+    pub message: String,
+    pub full_message: String,
+    pub local_stream: Vec<u8>,
+    pub local_ex_stream: Vec<u8>,
+    pub sel_saves: Vec<OriginalLocalSaveEnvelope>,
+}
+
+impl OriginalLocalSaveEnvelope {
+    pub fn from_slot_with_streams(
+        slot: &SaveSlotState,
+        local_stream: Vec<u8>,
+        local_ex_stream: Vec<u8>,
+    ) -> Self {
+        Self {
+            save_id: save_id_from_slot(slot),
+            append_dir: slot.append_dir.clone(),
+            append_name: slot.append_name.clone(),
+            title: slot.title.clone(),
+            message: slot.message.clone(),
+            full_message: slot.full_message.clone(),
+            local_stream,
+            local_ex_stream,
+            sel_saves: Vec::new(),
+        }
+    }
+
+    pub fn empty_from_slot(slot: &SaveSlotState) -> Self {
+        Self::from_slot_with_streams(slot, Vec::new(), Vec::new())
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        write_envelope(&mut out, self, true);
+        out
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let mut rd = Reader::new(bytes);
+        read_envelope(&mut rd, true, false)
+    }
+}
+
+fn save_id_from_slot(slot: &SaveSlotState) -> [u16; 7] {
+    fn w(v: i64) -> u16 {
+        v.clamp(0, u16::MAX as i64) as u16
+    }
+    [
+        w(slot.year),
+        w(slot.month),
+        w(slot.day),
+        w(slot.hour),
+        w(slot.minute),
+        w(slot.second),
+        w(slot.millisecond),
+    ]
+}
+
+fn write_envelope(out: &mut Vec<u8>, env: &OriginalLocalSaveEnvelope, include_sel_saves: bool) {
+    for v in env.save_id {
+        push_u16(out, v);
+    }
+    push_str_len(out, &env.append_dir);
+    push_str_len(out, &env.append_name);
+    push_str_len(out, &env.title);
+    push_str_len(out, &env.message);
+    push_str_len(out, &env.full_message);
+    push_i32(out, env.local_stream.len() as i32);
+    out.extend_from_slice(&env.local_stream);
+    push_i32(out, env.local_ex_stream.len() as i32);
+    out.extend_from_slice(&env.local_ex_stream);
+    if include_sel_saves {
+        push_i32(out, env.sel_saves.len() as i32);
+        for child in &env.sel_saves {
+            write_envelope(out, child, false);
+        }
+    }
+}
+
+fn read_envelope(
+    rd: &mut Reader<'_>,
+    include_sel_saves: bool,
+    legacy: bool,
+) -> Result<OriginalLocalSaveEnvelope> {
+    let mut save_id = [0u16; 7];
+    for dst in &mut save_id {
+        *dst = rd.u16()?;
+    }
+    let (append_dir, append_name, title, message, full_message) = if legacy {
+        Default::default()
+    } else {
+        (
+            rd.str_len()?,
+            rd.str_len()?,
+            rd.str_len()?,
+            rd.str_len()?,
+            rd.str_len()?,
+        )
+    };
+    let local_size = rd.i32()?.max(0) as usize;
+    let local_stream = rd.take(local_size)?.to_vec();
+    let local_ex_size = rd.i32()?.max(0) as usize;
+    let local_ex_stream = rd.take(local_ex_size)?.to_vec();
+    let mut sel_saves = Vec::new();
+    if include_sel_saves {
+        let sel_save_cnt = rd.i32()?.max(0) as usize;
+        for _ in 0..sel_save_cnt {
+            sel_saves.push(read_envelope(rd, false, legacy)?);
+        }
+    }
+    Ok(OriginalLocalSaveEnvelope {
+        save_id,
+        append_dir,
+        append_name,
+        title,
+        message,
+        full_message,
+        local_stream,
+        local_ex_stream,
+        sel_saves,
+    })
+}
+
+pub struct OriginalStreamWriter {
+    data: Vec<u8>,
+}
+
+impl Default for OriginalStreamWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OriginalStreamWriter {
+    pub fn new() -> Self {
+        Self { data: Vec::new() }
+    }
+
+    pub fn into_inner(self) -> Vec<u8> {
+        self.data
+    }
+
+    pub fn push_i32(&mut self, v: i32) {
+        push_i32(&mut self.data, v);
+    }
+
+    pub fn push_i64(&mut self, v: i64) {
+        push_i64(&mut self.data, v);
+    }
+
+    pub fn push_u32(&mut self, v: u32) {
+        push_u32(&mut self.data, v);
+    }
+
+    pub fn push_u16(&mut self, v: u16) {
+        push_u16(&mut self.data, v);
+    }
+
+    pub fn push_raw(&mut self, bytes: &[u8]) {
+        self.data.extend_from_slice(bytes);
+    }
+
+    pub fn position(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn push_bool(&mut self, v: bool) {
+        self.data.push(if v { 1 } else { 0 });
+    }
+
+    pub fn push_padding(&mut self, n: usize) {
+        self.data.resize(self.data.len() + n, 0);
+    }
+
+    pub fn push_element(&mut self, codes: &[i32]) {
+        for idx in 0..31 {
+            push_i32(&mut self.data, codes.get(idx).copied().unwrap_or(0));
+        }
+        push_i32(&mut self.data, codes.len().min(31) as i32);
+    }
+
+    pub fn push_empty_element(&mut self) {
+        self.push_element(&[]);
+    }
+
+    pub fn push_empty_proc(&mut self) {
+        self.push_i32(0);
+        self.push_empty_element();
+        self.push_i32(0);
+        self.push_i32(0);
+        self.push_bool(false);
+        self.push_bool(false);
+        self.push_bool(false);
+        self.push_i32(0);
+    }
+
+    pub fn push_len_bytes(&mut self, bytes: &[u8]) {
+        push_i32(&mut self.data, bytes.len() as i32);
+        self.data.extend_from_slice(bytes);
+    }
+
+    pub fn push_str(&mut self, s: &str) {
+        push_str_len(&mut self.data, s);
+    }
+
+    pub fn push_fixed_i32_list(&mut self, values: &[i64], fixed_len: usize) {
+        let jump_pos = self.data.len();
+        push_i32(&mut self.data, 0);
+        push_i32(&mut self.data, fixed_len as i32);
+        for idx in 0..fixed_len {
+            push_i32(&mut self.data, values.get(idx).copied().unwrap_or(0) as i32);
+        }
+        let end = self.data.len() as i32;
+        patch_i32(&mut self.data, jump_pos, end);
+    }
+
+    pub fn push_fixed_str_list(&mut self, values: &[String], fixed_len: usize) {
+        let jump_pos = self.data.len();
+        push_i32(&mut self.data, 0);
+        push_i32(&mut self.data, fixed_len as i32);
+        for idx in 0..fixed_len {
+            push_str_len(
+                &mut self.data,
+                values.get(idx).map(String::as_str).unwrap_or(""),
+            );
+        }
+        let end = self.data.len() as i32;
+        patch_i32(&mut self.data, jump_pos, end);
+    }
+
+    pub fn push_extend_i32_list(&mut self, values: &[i64]) {
+        push_i32(&mut self.data, values.len() as i32);
+        for v in values {
+            push_i32(&mut self.data, *v as i32);
+        }
+    }
+
+    pub fn push_extend_str_list(&mut self, values: &[String]) {
+        push_i32(&mut self.data, values.len() as i32);
+        for v in values {
+            push_str_len(&mut self.data, v);
+        }
+    }
+
+    pub fn push_tid(&mut self, tid: &[u16; 7]) {
+        for v in tid {
+            push_u16(&mut self.data, *v);
+        }
+    }
+
+    pub fn push_empty_fixed_array(&mut self) {
+        let jump_pos = self.data.len();
+        push_i32(&mut self.data, 0);
+        push_i32(&mut self.data, 0);
+        let end = self.data.len() as i32;
+        patch_i32(&mut self.data, jump_pos, end);
+    }
+
+    pub fn push_fixed_items<T, F>(&mut self, values: &[T], mut write_one: F)
+    where
+        F: FnMut(&mut OriginalStreamWriter, &T),
+    {
+        let jump_pos = self.data.len();
+        push_i32(&mut self.data, 0);
+        push_i32(&mut self.data, values.len() as i32);
+        for value in values {
+            write_one(self, value);
+        }
+        let end = self.data.len() as i32;
+        patch_i32(&mut self.data, jump_pos, end);
+    }
+
+    pub fn push_extend_items<T, F>(&mut self, values: &[T], mut write_one: F)
+    where
+        F: FnMut(&mut OriginalStreamWriter, &T),
+    {
+        push_i32(&mut self.data, values.len() as i32);
+        for value in values {
+            write_one(self, value);
+        }
+    }
+
+    pub fn push_tid_zero(&mut self) {
+        self.push_padding(14);
+    }
+}
+
+/// Mutually exclusive native local-stream generations. File header sizes alone
+/// do not identify these layouts; the VM probes record and array boundaries.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum NativeLocalLayout {
+    #[default]
+    Current,
+    Legacy,
+    Early,
+    Indexed,
+    ShortElements,
+}
+
+impl NativeLocalLayout {
+    pub(crate) fn is_indexed(self) -> bool {
+        matches!(self, Self::Indexed | Self::ShortElements)
+    }
+
+    pub(crate) fn uses_early_records(self) -> bool {
+        matches!(self, Self::Early | Self::Indexed | Self::ShortElements)
+    }
+
+    pub(crate) fn proc_trailer_bytes(self) -> usize {
+        match self {
+            Self::ShortElements => 6,
+            _ => 7,
+        }
+    }
+
+    pub(crate) fn indexed_settings_bytes(self) -> usize {
+        match self {
+            Self::ShortElements => 283,
+            Self::Indexed => 303,
+            _ => unreachable!("indexed settings require a split-file layout"),
+        }
+    }
+
+    pub(crate) fn element_capacity(self) -> usize {
+        match self {
+            Self::ShortElements => 15,
+            _ => 31,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct OriginalStreamReader<'a> {
+    rd: Reader<'a>,
+    pub(crate) layout: NativeLocalLayout,
+}
+
+impl<'a> OriginalStreamReader<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self {
+            rd: Reader::new(data),
+            layout: NativeLocalLayout::Current,
+        }
+    }
+
+    pub fn i32(&mut self) -> Result<i32> {
+        self.rd.i32()
+    }
+
+    pub fn i64(&mut self) -> Result<i64> {
+        self.rd.i64()
+    }
+
+    pub fn u16(&mut self) -> Result<u16> {
+        self.rd.u16()
+    }
+
+    pub fn bool(&mut self) -> Result<bool> {
+        Ok(self.rd.u8()? != 0)
+    }
+
+    pub fn skip(&mut self, n: usize) -> Result<()> {
+        self.rd.take(n).map(|_| ())
+    }
+
+    pub fn element(&mut self) -> Result<Vec<i32>> {
+        let mut codes = [0i32; 31];
+        let capacity = self.layout.element_capacity();
+        for dst in &mut codes[..capacity] {
+            *dst = self.rd.i32()?;
+        }
+        let cnt = self.rd.i32()?.clamp(0, capacity as i32) as usize;
+        Ok(codes[..cnt].to_vec())
+    }
+
+    pub fn skip_element(&mut self) -> Result<()> {
+        self.skip((self.layout.element_capacity() + 1) * 4)
+    }
+
+    pub fn skip_empty_proc(&mut self) -> Result<()> {
+        self.skip(4)?;
+        self.skip_element()?;
+        self.skip(8)?;
+        self.skip(self.layout.proc_trailer_bytes())
+    }
+
+    pub fn tid(&mut self) -> Result<[u16; 7]> {
+        let mut out = [0u16; 7];
+        for v in &mut out {
+            *v = self.rd.u16()?;
+        }
+        Ok(out)
+    }
+
+    pub fn take_raw(&mut self, n: usize) -> Result<&'a [u8]> {
+        self.rd.take(n)
+    }
+
+    pub fn len_bytes(&mut self) -> Result<Vec<u8>> {
+        let n = self.rd.i32()?;
+        if n < 0 {
+            bail!("negative byte length {}", n);
+        }
+        Ok(self.rd.take(n as usize)?.to_vec())
+    }
+
+    pub fn remaining(&self) -> &'a [u8] {
+        &self.rd.data[self.rd.pos..]
+    }
+
+    /// Called immediately after the window-button disable bytes. Save headers
+    /// do not distinguish these layouts. Validate the stack and absolute flag
+    /// array boundaries: a voice number can also look like a string length.
+    pub(crate) fn detect_local_layout(&mut self) -> Result<()> {
+        if self.layout.uses_early_records() {
+            return Ok(());
+        }
+        for legacy in [false, true] {
+            if self
+                .check_local_layout(legacy, if legacy { 344 } else { 356 })
+                .is_ok()
+            {
+                self.layout = if legacy {
+                    NativeLocalLayout::Legacy
+                } else {
+                    NativeLocalLayout::Current
+                };
+                return Ok(());
+            }
+        }
+        bail!(
+            "unsupported or corrupt local save layout at byte {}",
+            self.rd.pos
+        )
+    }
+
+    /// Probe before the optional full-message string and window buttons.
+    /// Early saves omit that string as well as the later font fields.
+    pub(crate) fn detect_early_local_layout(&mut self, button_count: usize) {
+        let mut probe = self.clone();
+        if probe.skip(button_count).is_ok() && probe.check_local_layout(true, 332).is_ok() {
+            self.layout = NativeLocalLayout::Early;
+        }
+    }
+
+    pub(crate) fn check_local_layout(&self, legacy: bool, pod_size: usize) -> Result<()> {
+        let mut probe = self.clone();
+        if !legacy {
+            probe.string()?;
+        }
+        probe.skip(pod_size)?;
+        // Integer stack, string stack, and element-point stack. Bound counts
+        // before iterating; this probe must not allocate from untrusted counts.
+        for string_stack in [false, true, false] {
+            let count = probe.i32()?;
+            if count < 0 || count as usize > probe.remaining().len() / 4 {
+                bail!("invalid local stack count {count}");
+            }
+            if string_stack {
+                for _ in 0..count {
+                    probe.string()?;
+                }
+            } else {
+                probe.skip(count as usize * 4)?;
+            }
+        }
+        probe.skip(12 + 76)?; // Local clocks and system menu POD.
+        if probe.layout != NativeLocalLayout::ShortElements {
+            probe.string()?; // Fog texture name.
+            probe.skip(44 + 8)?; // Fog event and near/far planes.
+        }
+        for _ in 0..if probe.layout == NativeLocalLayout::ShortElements {
+            6
+        } else {
+            7
+        } {
+            let jump = probe.i32()?;
+            let count = probe.i32()?;
+            if count < 0 || count as usize > probe.remaining().len() / 4 {
+                bail!("invalid local flag count {count}");
+            }
+            probe.skip(count as usize * 4)?;
+            if jump < 0 || jump as usize != probe.rd.pos {
+                bail!("invalid local flag boundary {jump}");
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn count(&mut self, min_record_bytes: usize) -> Result<usize> {
+        let pos = self.rd.pos;
+        let count = self.i32()?;
+        anyhow::ensure!(
+            count >= 0 && count as usize <= self.remaining().len() / min_record_bytes,
+            "invalid record count {count} at byte {pos}"
+        );
+        Ok(count as usize)
+    }
+
+    pub fn string(&mut self) -> Result<String> {
+        let pos = self.rd.pos;
+        self.rd
+            .str_len()
+            .with_context(|| format!("string at byte {pos}"))
+    }
+
+    fn finish_fixed_array(&mut self, jump: i32) -> Result<()> {
+        if jump < 0 {
+            bail!("negative fixed-array jump {}", jump);
+        }
+        let jump = jump as usize;
+        if jump > self.rd.data.len() {
+            bail!(
+                "fixed-array jump out of bounds: jump {}, stream {}",
+                jump,
+                self.rd.data.len()
+            );
+        }
+        if self.rd.pos > jump {
+            bail!(
+                "fixed-array reader overran jump: pos {}, jump {}",
+                self.rd.pos,
+                jump
+            );
+        }
+        self.rd.pos = jump;
+        Ok(())
+    }
+
+    pub fn fixed_i32_list(&mut self) -> Result<Vec<i64>> {
+        let jump = self.rd.i32()?;
+        let cnt = self.count(1)?;
+        let mut out = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            out.push(self.rd.i32()? as i64);
+        }
+        self.finish_fixed_array(jump)?;
+        Ok(out)
+    }
+
+    pub fn fixed_str_list(&mut self) -> Result<Vec<String>> {
+        let jump = self.rd.i32()?;
+        let cnt = self.count(1)?;
+        let mut out = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            out.push(self.rd.str_len()?);
+        }
+        self.finish_fixed_array(jump)?;
+        Ok(out)
+    }
+
+    pub fn extend_i32_list(&mut self) -> Result<Vec<i64>> {
+        let cnt = self.count(1)?;
+        let mut out = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            out.push(self.rd.i32()? as i64);
+        }
+        Ok(out)
+    }
+
+    pub fn fixed_items<T, F>(&mut self, mut read_one: F) -> Result<Vec<T>>
+    where
+        F: FnMut(&mut OriginalStreamReader<'a>) -> Result<T>,
+    {
+        let jump = self.rd.i32()?;
+        let cnt = self.count(1)?;
+        let mut out = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            out.push(read_one(self)?);
+        }
+        self.finish_fixed_array(jump)?;
+        Ok(out)
+    }
+
+    pub fn extend_items<T, F>(&mut self, mut read_one: F) -> Result<Vec<T>>
+    where
+        F: FnMut(&mut OriginalStreamReader<'a>) -> Result<T>,
+    {
+        let cnt = self.count(1)?;
+        let mut out = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            out.push(read_one(self)?);
+        }
+        Ok(out)
+    }
+
+    pub fn skip_fixed_items<F>(&mut self, mut skip_one: F) -> Result<()>
+    where
+        F: FnMut(&mut OriginalStreamReader<'a>) -> Result<()>,
+    {
+        let jump = self.rd.i32()?;
+        let cnt = self.count(1)?;
+        for _ in 0..cnt {
+            skip_one(self)?;
+        }
+        self.finish_fixed_array(jump)
+    }
+}
+
+pub fn save_dir(project_dir: &Path) -> PathBuf {
+    {
+        let _ = project_dir;
+        PathBuf::from("save")
+    }
+}
+
+pub fn original_save_no(
+    save_cnt: usize,
+    quick_save_cnt: usize,
+    kind: SaveKind,
+    idx: usize,
+) -> usize {
+    match kind {
+        SaveKind::Normal => idx,
+        SaveKind::Quick => save_cnt + idx,
+        SaveKind::End => save_cnt + quick_save_cnt + idx,
+    }
+}
+
+pub fn save_file_path_for_no(project_dir: &Path, save_no: usize) -> PathBuf {
+    save_dir(project_dir).join(format!("{save_no:04}.sav"))
+}
+
+pub fn save_file_path_with_counts(
+    project_dir: &Path,
+    save_cnt: usize,
+    quick_save_cnt: usize,
+    kind: SaveKind,
+    idx: usize,
+) -> PathBuf {
+    save_file_path_for_no(
+        project_dir,
+        original_save_no(save_cnt, quick_save_cnt, kind, idx),
+    )
+}
+
+pub fn slot_save_no(project_dir: &Path, kind: SaveKind, idx: usize) -> usize {
+    let save_cnt = configured_count(project_dir, false);
+    let quick_save_cnt = configured_count(project_dir, true);
+    original_save_no(save_cnt, quick_save_cnt, kind, idx)
+}
+
+pub fn save_file_path(project_dir: &Path, kind: SaveKind, idx: usize) -> PathBuf {
+    save_file_path_for_no(project_dir, slot_save_no(project_dir, kind, idx))
+}
+
+pub fn thumb_candidate_paths_for_no(project_dir: &Path, save_no: usize) -> [PathBuf; 2] {
+    let stem = format!("{save_no:04}");
+    let dir = save_dir(project_dir);
+    [
+        dir.join(format!("{stem}.png")),
+        dir.join(format!("{stem}.bmp")),
+    ]
+}
+
+pub fn thumb_candidate_paths_with_counts(
+    project_dir: &Path,
+    save_cnt: usize,
+    quick_save_cnt: usize,
+    kind: SaveKind,
+    idx: usize,
+) -> [PathBuf; 2] {
+    thumb_candidate_paths_for_no(
+        project_dir,
+        original_save_no(save_cnt, quick_save_cnt, kind, idx),
+    )
+}
+
+pub fn read_header_from_path(path: &Path) -> Result<OriginalSaveHeader> {
+    // Native C_tnm_save_cache::load_cache() reads only
+    // sizeof(S_tnm_save_header). Do not pull the packed local-save payload
+    // into memory just to answer LOAD_SCENE metadata queries.
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    {
+        let mut file = crate::resource::open_game_file(path)
+            .with_context(|| format!("open save header {}", path.display()))?;
+        let file_len = file.metadata()?.len() as usize;
+        let mut data = vec![0u8; file_len.min(SAVE_HEADER_SIZE)];
+        file.read_exact(&mut data)
+            .with_context(|| format!("read save header {}", path.display()))?;
+        OriginalSaveHeader::from_file_prefix(&data, file_len)
+    }
+
+    // The browser VFS currently exposes whole-file reads only. Preserve that
+    // backend while keeping the native path faithful to C_file::read(header).
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    {
+        let data = crate::resource::read_file_bytes(path)
+            .with_context(|| format!("read save header {}", path.display()))?;
+        OriginalSaveHeader::from_file_prefix(&data[..data.len().min(SAVE_HEADER_SIZE)], data.len())
+    }
+}
+
+pub fn read_header(project_dir: &Path, kind: SaveKind, idx: usize) -> Option<OriginalSaveHeader> {
+    let path = save_file_path(project_dir, kind, idx);
+    read_header_from_path(&path).ok()
+}
+
+pub fn read_slot(project_dir: &Path, kind: SaveKind, idx: usize) -> Option<SaveSlotState> {
+    read_header(project_dir, kind, idx).map(|h| h.to_slot())
+}
+
+pub fn read_slot_from_path(path: &Path) -> Option<SaveSlotState> {
+    read_header_from_path(path).ok().map(|h| h.to_slot())
+}
+
+pub fn write_header_in_place(path: &Path, header: &OriginalSaveHeader) -> Result<()> {
+    // Callers rebuild metadata from SaveSlotState, which does not carry the
+    // on-disk layout. Retain the existing boundary and payload length.
+    let existing = read_header_from_path(path)?;
+    let mut header = header.clone();
+    header.layout = existing.layout;
+    header.data_size = existing.data_size;
+    // C_tnm_save_cache::save_cache() opens the existing file as rb+ and
+    // overwrites only S_tnm_save_header. Keep the packed payload untouched.
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .with_context(|| format!("open save header for update {}", path.display()))?;
+        file.write_all(&header.to_bytes())
+            .with_context(|| format!("write save header {}", path.display()))?;
+        Ok(())
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    {
+        let mut data = crate::resource::read_file_bytes(path)
+            .with_context(|| format!("read save file {}", path.display()))?;
+        if data.len() < header.header_size() {
+            bail!("save file too short for header update: {}", path.display());
+        }
+        data[..header.header_size()].copy_from_slice(&header.to_bytes());
+        fs::write(path, data).with_context(|| format!("write save file {}", path.display()))?;
+        crate::resource::invalidate_game_path_cache(path);
+        Ok(())
+    }
+}
+
+pub fn write_local_save_file(
+    path: &Path,
+    slot: &SaveSlotState,
+    env: &OriginalLocalSaveEnvelope,
+) -> Result<()> {
+    let payload = env.to_bytes();
+    let packed = pack_buffer(&payload);
+    let header = OriginalSaveHeader::from_slot(slot, packed.len());
+    let mut out = header.to_bytes();
+    out.extend_from_slice(&packed);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create save dir {}", parent.display()))?;
+    }
+    fs::write(path, out).with_context(|| format!("write save file {}", path.display()))?;
+    crate::resource::invalidate_game_path_cache(path);
+    Ok(())
+}
+
+pub fn write_slot_file(path: &Path, slot: &SaveSlotState) -> Result<()> {
+    let env = OriginalLocalSaveEnvelope::empty_from_slot(slot);
+    write_local_save_file(path, slot, &env)
+}
+
+pub fn read_local_save_file(
+    path: &Path,
+) -> Result<(OriginalSaveHeader, OriginalLocalSaveEnvelope)> {
+    let data = crate::resource::read_file_bytes(path)
+        .with_context(|| format!("read save file {}", path.display()))?;
+    if data.len() < LEGACY_SAVE_HEADER_SIZE {
+        bail!("save file too short: {}", path.display());
+    }
+    let header = OriginalSaveHeader::from_file_prefix(&data, data.len())?;
+    let env = match header.layout {
+        LocalSaveLayout::LegacySplit { local_ex_data_size } => {
+            read_split_local_save(&data, &header, local_ex_data_size)
+        }
+        LocalSaveLayout::CurrentEnvelope | LocalSaveLayout::LegacyEnvelope => {
+            read_enveloped_local_save(&data, &header)
+        }
+    }
+    .with_context(|| format!("decode local save {} ({:?})", path.display(), header.layout))?;
+    Ok((header, env))
+}
+
+fn unpack_local_save_part(data: &[u8], start: usize, size: i32) -> Result<(Vec<u8>, usize)> {
+    anyhow::ensure!(size >= 0, "negative local save payload size: {size}");
+    let end = start
+        .checked_add(size as usize)
+        .ok_or_else(|| anyhow!("save data size overflow"))?;
+    if end > data.len() {
+        bail!("save payload truncated: need {}, have {}", end, data.len());
+    }
+    Ok((unpack_buffer(&data[start..end])?, end))
+}
+
+fn read_enveloped_local_save(
+    data: &[u8],
+    header: &OriginalSaveHeader,
+) -> Result<OriginalLocalSaveEnvelope> {
+    let (payload, _) = unpack_local_save_part(data, header.header_size(), header.data_size)?;
+    let mut env = read_envelope(&mut Reader::new(&payload), true, header.layout.is_legacy())?;
+    if header.layout.is_legacy() {
+        env.title = header.title.clone();
+        env.message = header.message.clone();
+        env.full_message = header.full_message.clone();
+    }
+    Ok(env)
+}
+
+fn read_split_local_save(
+    data: &[u8],
+    header: &OriginalSaveHeader,
+    local_ex_data_size: i32,
+) -> Result<OriginalLocalSaveEnvelope> {
+    // This generation stores the raw VM and extra streams in separate LZSS
+    // blocks, without an envelope or selection snapshots. Metadata is in the header.
+    let (local_stream, end) = unpack_local_save_part(data, header.header_size(), header.data_size)
+        .context("unpack local stream")?;
+    let (local_ex_stream, _) = unpack_local_save_part(data, end, local_ex_data_size)
+        .context("unpack local extra stream")?;
+    Ok(OriginalLocalSaveEnvelope::from_slot_with_streams(
+        &header.to_slot(),
+        local_stream,
+        local_ex_stream,
+    ))
+}
+
+pub fn write_global_save_file(project_dir: &Path, global_stream: &[u8]) -> Result<()> {
+    let packed = pack_buffer(global_stream);
+    let header = OriginalGlobalSaveHeader {
+        major_version: 2,
+        minor_version: 0,
+        global_data_size: packed.len() as i32,
+    };
+    let path = save_dir(project_dir).join("global.sav");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create save dir {}", parent.display()))?;
+    }
+    let mut out = header.to_bytes();
+    out.extend_from_slice(&packed);
+    fs::write(&path, out).with_context(|| format!("write global save file {}", path.display()))?;
+    crate::resource::invalidate_game_path_cache(&path);
+    Ok(())
+}
+
+pub fn read_global_save_file(project_dir: &Path) -> Result<(OriginalGlobalSaveHeader, Vec<u8>)> {
+    let path = save_dir(project_dir).join("global.sav");
+    let data = crate::resource::read_file_bytes(&path)
+        .with_context(|| format!("read global save file {}", path.display()))?;
+    if data.len() < GLOBAL_SAVE_HEADER_SIZE {
+        bail!("global save file too short: {}", path.display());
+    }
+    let header = OriginalGlobalSaveHeader::from_bytes(&data[..GLOBAL_SAVE_HEADER_SIZE])?;
+    let size = header.global_data_size.max(0) as usize;
+    let end = GLOBAL_SAVE_HEADER_SIZE
+        .checked_add(size)
+        .ok_or_else(|| anyhow!("global save data size overflow"))?;
+    if end > data.len() {
+        bail!(
+            "global save payload truncated: need {}, have {}",
+            end,
+            data.len()
+        );
+    }
+    let payload = unpack_buffer(&data[GLOBAL_SAVE_HEADER_SIZE..end])?;
+    Ok((header, payload))
+}
+
+/// Write the original per-scene read-flag file (`savedata/read.sav`).
+///
+/// C++ stores every scene row by scene name, followed by the exact byte count
+/// and one byte per read flag.  Keeping the scene name is important because
+/// scene indices can move when scripts are rebuilt.
+pub fn write_read_save_file(project_dir: &Path, scene_rows: &[(String, Vec<u8>)]) -> Result<()> {
+    let mut stream = OriginalStreamWriter::new();
+    for (scene_name, flags) in scene_rows {
+        stream.push_str(scene_name);
+        stream.push_i32(flags.len().min(i32::MAX as usize) as i32);
+        stream.push_raw(flags);
+    }
+    let packed = pack_buffer(&stream.into_inner());
+    let path = save_dir(project_dir).join("read.sav");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create save dir {}", parent.display()))?;
+    }
+    let mut out = Vec::with_capacity(16 + packed.len());
+    push_i32(&mut out, 1);
+    push_i32(&mut out, 0);
+    push_i32(&mut out, packed.len().min(i32::MAX as usize) as i32);
+    push_i32(&mut out, scene_rows.len().min(i32::MAX as usize) as i32);
+    out.extend_from_slice(&packed);
+    fs::write(&path, out).with_context(|| format!("write read save file {}", path.display()))?;
+    crate::resource::invalidate_game_path_cache(&path);
+    Ok(())
+}
+
+/// Read `savedata/read.sav` without assigning rows to current scene indices.
+/// The caller performs the original name lookup and exact flag-count check.
+pub fn read_read_save_file(project_dir: &Path) -> Result<Vec<(String, Vec<u8>)>> {
+    let path = save_dir(project_dir).join("read.sav");
+    let data = crate::resource::read_file_bytes(&path)
+        .with_context(|| format!("read read save file {}", path.display()))?;
+    if data.len() < 16 {
+        bail!("read save header too short: {}", data.len());
+    }
+    let mut header = Reader::new(&data[..16]);
+    let major = header.i32()?;
+    let minor = header.i32()?;
+    let packed_size = header.i32()?;
+    let scene_count = header.i32()?;
+    if major != 1 || minor != 0 {
+        bail!("unsupported read save version {}.{}", major, minor);
+    }
+    if packed_size < 0 || scene_count < 0 {
+        bail!(
+            "invalid read save header: packed_size={} scene_count={}",
+            packed_size,
+            scene_count
+        );
+    }
+    let end = 16usize
+        .checked_add(packed_size as usize)
+        .ok_or_else(|| anyhow!("read save size overflow"))?;
+    if end > data.len() {
+        bail!(
+            "read save payload truncated: need {}, have {}",
+            end,
+            data.len()
+        );
+    }
+    let payload = unpack_buffer(&data[16..end])?;
+    let mut rd = OriginalStreamReader::new(&payload);
+    let mut rows = Vec::with_capacity(scene_count as usize);
+    for _ in 0..scene_count as usize {
+        let scene_name = rd.string()?;
+        let count = rd.i32()?;
+        if count < 0 {
+            bail!(
+                "negative read flag count {} for scene {}",
+                count,
+                scene_name
+            );
+        }
+        let flags = rd.take_raw(count as usize)?.to_vec();
+        rows.push((scene_name, flags));
+    }
+    Ok(rows)
+}
+
+pub fn write_config_save_file(project_dir: &Path, config_stream: &[u8]) -> Result<()> {
+    let packed = pack_buffer(config_stream);
+    let header = OriginalConfigSaveHeader {
+        major_version: 1,
+        minor_version: 4,
+        config_data_size: packed.len() as i32,
+    };
+    let path = save_dir(project_dir).join("config.sav");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create save dir {}", parent.display()))?;
+    }
+    let mut out = header.to_bytes();
+    out.extend_from_slice(&packed);
+    fs::write(&path, out).with_context(|| format!("write config save file {}", path.display()))?;
+    crate::resource::invalidate_game_path_cache(&path);
+    Ok(())
+}
+
+pub fn read_config_save_file(project_dir: &Path) -> Result<(OriginalConfigSaveHeader, Vec<u8>)> {
+    let path = save_dir(project_dir).join("config.sav");
+    let data = crate::resource::read_file_bytes(&path)
+        .with_context(|| format!("read config save file {}", path.display()))?;
+    if data.len() < CONFIG_SAVE_HEADER_SIZE {
+        bail!("config save file too short: {}", path.display());
+    }
+    let header = OriginalConfigSaveHeader::from_bytes(&data[..CONFIG_SAVE_HEADER_SIZE])?;
+    if header.major_version != 1 || header.minor_version < 0 {
+        bail!(
+            "unsupported config save version {}.{}",
+            header.major_version,
+            header.minor_version
+        );
+    }
+    let size = header.config_data_size.max(0) as usize;
+    let end = CONFIG_SAVE_HEADER_SIZE
+        .checked_add(size)
+        .ok_or_else(|| anyhow!("config save data size overflow"))?;
+    if end > data.len() {
+        bail!(
+            "config save payload truncated: need {}, have {}",
+            end,
+            data.len()
+        );
+    }
+    let payload = unpack_buffer(&data[CONFIG_SAVE_HEADER_SIZE..end])?;
+    Ok((header, payload))
+}
+
+pub fn pack_buffer(src: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + src.len() + src.len().div_ceil(8));
+    push_u32(&mut out, 0);
+    push_u32(&mut out, src.len() as u32);
+    for chunk in src.chunks(8) {
+        let mut flag = 0u8;
+        for i in 0..chunk.len() {
+            flag |= 1u8 << i;
+        }
+        out.push(flag);
+        out.extend_from_slice(chunk);
+    }
+    let arc_size = out.len() as u32;
+    out[0..4].copy_from_slice(&arc_size.to_le_bytes());
+    tpc_xor(&mut out);
+    out
+}
+
+pub fn unpack_buffer(src: &[u8]) -> Result<Vec<u8>> {
+    let mut data = src.to_vec();
+    tpc_xor(&mut data);
+    if data.len() < 8 {
+        bail!("lzss payload too short");
+    }
+    let arc_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
+    let org_size = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
+    if arc_size > data.len() {
+        bail!("lzss arc_size out of bounds: {} > {}", arc_size, data.len());
+    }
+    let mut out = Vec::with_capacity(org_size);
+    let mut p = 8usize;
+    while out.len() < org_size {
+        if p >= arc_size {
+            bail!("lzss payload ended before output was complete");
+        }
+        let mut flags = data[p];
+        p += 1;
+        for _ in 0..8 {
+            if out.len() >= org_size {
+                break;
+            }
+            if flags & 1 != 0 {
+                if p >= arc_size {
+                    bail!("lzss literal out of bounds");
+                }
+                out.push(data[p]);
+                p += 1;
+            } else {
+                if p + 2 > arc_size {
+                    bail!("lzss backref out of bounds");
+                }
+                let token = u16::from_le_bytes([data[p], data[p + 1]]);
+                p += 2;
+                let offset = (token >> 4) as usize;
+                let len = ((token & 0x0f) as usize) + 2;
+                if offset == 0 || offset > out.len() {
+                    bail!(
+                        "lzss invalid backref offset {} at out {}",
+                        offset,
+                        out.len()
+                    );
+                }
+                let base = out.len() - offset;
+                for i in 0..len {
+                    let b = out[base + i];
+                    out.push(b);
+                    if out.len() >= org_size {
+                        break;
+                    }
+                }
+            }
+            flags >>= 1;
+        }
+    }
+    Ok(out)
+}
+
+pub fn configured_count(project_dir: &Path, quick: bool) -> usize {
+    let keys: [&str; 2] = if quick {
+        ["#QUICK_SAVE.CNT", "QUICK_SAVE.CNT"]
+    } else {
+        ["#SAVE.CNT", "SAVE.CNT"]
+    };
+    configured_usize_any(project_dir, &keys, if quick { 3 } else { 10 }).min(10000)
+}
+
+pub fn configured_flag_count(project_dir: &Path) -> usize {
+    configured_usize_any(project_dir, &["#FLAG.CNT", "FLAG.CNT"], 1000).min(10000)
+}
+
+pub fn configured_mwnd_waku_btn_count(project_dir: &Path) -> usize {
+    configured_usize_any(project_dir, &["#WAKU.BTN.CNT", "WAKU.BTN.CNT"], 8).min(256)
+}
+
+fn configured_usize_any(_project_dir: &Path, _keys: &[&str], default_value: usize) -> usize {
+    default_value
+}
+
+fn patch_i32(out: &mut [u8], off: usize, v: i32) {
+    out[off..off + 4].copy_from_slice(&v.to_le_bytes());
+}
+
+fn push_i32(out: &mut Vec<u8>, v: i32) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn push_i64(out: &mut Vec<u8>, v: i64) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn push_u16(out: &mut Vec<u8>, v: u16) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn push_u32(out: &mut Vec<u8>, v: u32) {
+    out.extend_from_slice(&v.to_le_bytes());
+}
+
+fn push_str_len(out: &mut Vec<u8>, s: &str) {
+    let utf16: Vec<u16> = s.encode_utf16().collect();
+    push_i32(out, utf16.len().min(i32::MAX as usize) as i32);
+    for ch in utf16 {
+        out.extend_from_slice(&ch.to_le_bytes());
+    }
+}
+
+fn push_utf16_fixed(out: &mut Vec<u8>, s: &str, units: usize) {
+    let mut written = 0usize;
+    for ch in s.encode_utf16().take(units.saturating_sub(1)) {
+        out.extend_from_slice(&ch.to_le_bytes());
+        written += 1;
+    }
+    while written < units {
+        out.extend_from_slice(&0u16.to_le_bytes());
+        written += 1;
+    }
+}
+
+#[derive(Clone)]
+struct Reader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn take(&mut self, n: usize) -> Result<&'a [u8]> {
+        let end = self
+            .pos
+            .checked_add(n)
+            .ok_or_else(|| anyhow!("reader overflow"))?;
+        if end > self.data.len() {
+            bail!(
+                "reader out of bounds: need {}, have {}",
+                end,
+                self.data.len()
+            );
+        }
+        let out = &self.data[self.pos..end];
+        self.pos = end;
+        Ok(out)
+    }
+
+    fn i32(&mut self) -> Result<i32> {
+        let b = self.take(4)?;
+        Ok(i32::from_le_bytes(b.try_into().unwrap()))
+    }
+
+    fn u8(&mut self) -> Result<u8> {
+        let b = self.take(1)?;
+        Ok(b[0])
+    }
+
+    fn u16(&mut self) -> Result<u16> {
+        let b = self.take(2)?;
+        Ok(u16::from_le_bytes(b.try_into().unwrap()))
+    }
+
+    fn i64(&mut self) -> Result<i64> {
+        let b = self.take(8)?;
+        Ok(i64::from_le_bytes(b.try_into().unwrap()))
+    }
+
+    fn utf16_fixed(&mut self, units: usize) -> Result<String> {
+        let bytes = self.take(units * 2)?;
+        let mut u16s = Vec::new();
+        for i in 0..units {
+            let p = i * 2;
+            let w = u16::from_le_bytes([bytes[p], bytes[p + 1]]);
+            if w == 0 {
+                break;
+            }
+            u16s.push(w);
+        }
+        Ok(String::from_utf16_lossy(&u16s))
+    }
+
+    fn str_len(&mut self) -> Result<String> {
+        let offset = self.pos;
+        let len = self.i32()?;
+        if len < 0 {
+            bail!("negative string length {} at byte offset {}", len, offset);
+        }
+        let len = len as usize;
+        let bytes = self.take(len * 2)?;
+        let mut u16s = Vec::with_capacity(len);
+        for i in 0..len {
+            let p = i * 2;
+            u16s.push(u16::from_le_bytes([bytes[p], bytes[p + 1]]));
+        }
+        Ok(String::from_utf16_lossy(&u16s))
+    }
+}
+
+fn tpc_xor(data: &mut [u8]) {
+    for (i, b) in data.iter_mut().enumerate() {
+        *b ^= TPC_ANGOU_TABLE[i & 0xff];
+    }
+}
+
+const TPC_ANGOU_TABLE: [u8; 256] = [
+    0x8b, 0xe5, 0x5d, 0xc3, 0xa1, 0xe0, 0x30, 0x44, 0x00, 0x85, 0xc0, 0x74, 0x09, 0x5f, 0x5e, 0x33,
+    0xc0, 0x5b, 0x8b, 0xe5, 0x5d, 0xc3, 0x8b, 0x45, 0x0c, 0x85, 0xc0, 0x75, 0x14, 0x8b, 0x55, 0xec,
+    0x83, 0xc2, 0x20, 0x52, 0x6a, 0x00, 0xe8, 0xf5, 0x28, 0x01, 0x00, 0x83, 0xc4, 0x08, 0x89, 0x45,
+    0x0c, 0x8b, 0x45, 0xe4, 0x6a, 0x00, 0x6a, 0x00, 0x50, 0x53, 0xff, 0x15, 0x34, 0xb1, 0x43, 0x00,
+    0x8b, 0x45, 0x10, 0x85, 0xc0, 0x74, 0x05, 0x8b, 0x4d, 0xec, 0x89, 0x08, 0x8a, 0x45, 0xf0, 0x84,
+    0xc0, 0x75, 0x78, 0xa1, 0xe0, 0x30, 0x44, 0x00, 0x8b, 0x7d, 0xe8, 0x8b, 0x75, 0x0c, 0x85, 0xc0,
+    0x75, 0x44, 0x8b, 0x1d, 0xd0, 0xb0, 0x43, 0x00, 0x85, 0xff, 0x76, 0x37, 0x81, 0xff, 0x00, 0x00,
+    0x04, 0x00, 0x6a, 0x00, 0x76, 0x43, 0x8b, 0x45, 0xf8, 0x8d, 0x55, 0xfc, 0x52, 0x68, 0x00, 0x00,
+    0x04, 0x00, 0x56, 0x50, 0xff, 0x15, 0x2c, 0xb1, 0x43, 0x00, 0x6a, 0x05, 0xff, 0xd3, 0xa1, 0xe0,
+    0x30, 0x44, 0x00, 0x81, 0xef, 0x00, 0x00, 0x04, 0x00, 0x81, 0xc6, 0x00, 0x00, 0x04, 0x00, 0x85,
+    0xc0, 0x74, 0xc5, 0x8b, 0x5d, 0xf8, 0x53, 0xe8, 0xf4, 0xfb, 0xff, 0xff, 0x8b, 0x45, 0x0c, 0x83,
+    0xc4, 0x04, 0x5f, 0x5e, 0x5b, 0x8b, 0xe5, 0x5d, 0xc3, 0x8b, 0x55, 0xf8, 0x8d, 0x4d, 0xfc, 0x51,
+    0x57, 0x56, 0x52, 0xff, 0x15, 0x2c, 0xb1, 0x43, 0x00, 0xeb, 0xd8, 0x8b, 0x45, 0xe8, 0x83, 0xc0,
+    0x20, 0x50, 0x6a, 0x00, 0xe8, 0x47, 0x28, 0x01, 0x00, 0x8b, 0x7d, 0xe8, 0x89, 0x45, 0xf4, 0x8b,
+    0xf0, 0xa1, 0xe0, 0x30, 0x44, 0x00, 0x83, 0xc4, 0x08, 0x85, 0xc0, 0x75, 0x56, 0x8b, 0x1d, 0xd0,
+    0xb0, 0x43, 0x00, 0x85, 0xff, 0x76, 0x49, 0x81, 0xff, 0x00, 0x00, 0x04, 0x00, 0x6a, 0x00, 0x76,
+];

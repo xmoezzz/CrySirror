@@ -1,0 +1,10 @@
+    Checking crysirror-image v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-image)
+    Checking siglus_scene_vm v1.0.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_scene_vm)
+    Checking getrandom v0.4.3
+    Checking once_cell v1.21.4
+    Checking tempfile v3.27.0
+    Checking crysirror-siglus v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus)
+    Checking crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+    Checking crysirror-video v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-video)
+    Checking crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.53s

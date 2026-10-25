@@ -1,0 +1,13 @@
+[package]
+name = "crysirror-puppet-eluna"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bridge: the eluna E-mote player as a crysirror-puppet PuppetSource (import/bake tooling; never shipped as PSB)"
+
+[dependencies]
+crysirror-puppet.workspace = true
+siglus_scene_vm = { path = "../siglus-upstream/siglus_scene_vm", default-features = false }
+eluna = { package = "eluna_rs", path = "../siglus-upstream/eluna_rs" }
+anyhow.workspace = true

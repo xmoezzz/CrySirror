@@ -1,0 +1,2083 @@
+{
+  "schema": 2,
+  "name": "CrySirror shared material gallery",
+  "content_revision": "engine-materials-1",
+  "canvas": [
+    1280,
+    720
+  ],
+  "assets": "assets",
+  "background": [
+    4,
+    6,
+    10,
+    255
+  ],
+  "scene3d": {
+    "camera": {
+      "eye": [
+        0,
+        0,
+        12
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "up": [
+        0,
+        1,
+        0
+      ],
+      "fov_y_degrees": 38,
+      "near": 0.1,
+      "far": 100
+    },
+    "meshes": []
+  },
+  "clients": [
+    {
+      "name": "game",
+      "adapter": "crysirror-script-v1",
+      "game": "engine-materials",
+      "systems": {
+        "entities": [
+          {
+            "id": 1,
+            "name": "backdrop",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0,
+                0,
+                -3
+              ],
+              "scale": [
+                14,
+                8,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.012,
+                0.018,
+                0.028,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 2,
+            "name": "1-backplate",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -4,
+                1.8,
+                -1.5
+              ],
+              "scale": [
+                3.4,
+                2.8,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.04,
+                0.07,
+                0.1,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 3,
+            "name": "1-background-bar-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -5.2,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 4,
+            "name": "1-background-bar-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -4.6,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 5,
+            "name": "1-background-bar-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -4.0,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 6,
+            "name": "1-background-bar-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -3.4,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 7,
+            "name": "1-background-bar-4",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -2.8,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 8,
+            "name": "1-opaque",
+            "geometry": {
+              "kind": "triangles",
+              "vertices": [
+                [
+                  -1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  1.2,
+                  0
+                ],
+                [
+                  -1.5,
+                  1.2,
+                  0
+                ]
+              ],
+              "indices": [
+                0,
+                1,
+                2,
+                0,
+                2,
+                3
+              ]
+            },
+            "transform": {
+              "translation": [
+                -4,
+                1.8,
+                0
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.7,
+                0.08,
+                0.04,
+                1
+              ],
+              "unlit": true,
+              "double_sided": true,
+              "alpha_mode": "opaque"
+            }
+          },
+          {
+            "id": 9,
+            "name": "2-backplate",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0,
+                1.8,
+                -1.5
+              ],
+              "scale": [
+                3.4,
+                2.8,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.04,
+                0.07,
+                0.1,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 10,
+            "name": "2-background-bar-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -1.2,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 11,
+            "name": "2-background-bar-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.6,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 12,
+            "name": "2-background-bar-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.0,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 13,
+            "name": "2-background-bar-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.6,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 14,
+            "name": "2-background-bar-4",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                1.2,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 15,
+            "name": "2-mask-cell-0-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -1.25,
+                0.9000000000000001,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 16,
+            "name": "2-mask-cell-0-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -1.25,
+                1.5,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 17,
+            "name": "2-mask-cell-0-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -1.25,
+                2.1,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 18,
+            "name": "2-mask-cell-0-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -1.25,
+                2.7,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 19,
+            "name": "2-mask-cell-1-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.75,
+                0.9000000000000001,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 20,
+            "name": "2-mask-cell-1-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.75,
+                1.5,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 21,
+            "name": "2-mask-cell-1-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.75,
+                2.1,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 22,
+            "name": "2-mask-cell-1-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.75,
+                2.7,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 23,
+            "name": "2-mask-cell-2-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.25,
+                0.9000000000000001,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 24,
+            "name": "2-mask-cell-2-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.25,
+                1.5,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 25,
+            "name": "2-mask-cell-2-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.25,
+                2.1,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 26,
+            "name": "2-mask-cell-2-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.25,
+                2.7,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 27,
+            "name": "2-mask-cell-3-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.25,
+                0.9000000000000001,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 28,
+            "name": "2-mask-cell-3-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.25,
+                1.5,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 29,
+            "name": "2-mask-cell-3-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.25,
+                2.1,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 30,
+            "name": "2-mask-cell-3-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.25,
+                2.7,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 31,
+            "name": "2-mask-cell-4-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.75,
+                0.9000000000000001,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 32,
+            "name": "2-mask-cell-4-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.75,
+                1.5,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 33,
+            "name": "2-mask-cell-4-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.75,
+                2.1,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 34,
+            "name": "2-mask-cell-4-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.75,
+                2.7,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 35,
+            "name": "2-mask-cell-5-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                1.25,
+                0.9000000000000001,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 36,
+            "name": "2-mask-cell-5-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                1.25,
+                1.5,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 37,
+            "name": "2-mask-cell-5-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                1.25,
+                2.1,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 38,
+            "name": "2-mask-cell-5-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                1.25,
+                2.7,
+                0
+              ],
+              "scale": [
+                0.5,
+                0.6,
+                0.02
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.65,
+                0.05,
+                0.1
+              ],
+              "unlit": true,
+              "alpha_mode": "mask",
+              "alpha_cutoff": 0.5
+            }
+          },
+          {
+            "id": 39,
+            "name": "3-backplate",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                4,
+                1.8,
+                -1.5
+              ],
+              "scale": [
+                3.4,
+                2.8,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.04,
+                0.07,
+                0.1,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 40,
+            "name": "3-background-bar-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                2.8,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 41,
+            "name": "3-background-bar-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                3.4,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 42,
+            "name": "3-background-bar-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                4.0,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 43,
+            "name": "3-background-bar-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                4.6,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 44,
+            "name": "3-background-bar-4",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                5.2,
+                1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 45,
+            "name": "3-blend",
+            "geometry": {
+              "kind": "triangles",
+              "vertices": [
+                [
+                  -1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  1.2,
+                  0
+                ],
+                [
+                  -1.5,
+                  1.2,
+                  0
+                ]
+              ],
+              "indices": [
+                0,
+                1,
+                2,
+                0,
+                2,
+                3
+              ]
+            },
+            "transform": {
+              "translation": [
+                4,
+                1.8,
+                0
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.03,
+                0.65,
+                1,
+                0.65
+              ],
+              "unlit": true,
+              "double_sided": true,
+              "alpha_mode": "blend"
+            }
+          },
+          {
+            "id": 46,
+            "name": "4-backplate",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -4,
+                -1.8,
+                -1.5
+              ],
+              "scale": [
+                3.4,
+                2.8,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.04,
+                0.07,
+                0.1,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 47,
+            "name": "4-background-bar-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -5.2,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 48,
+            "name": "4-background-bar-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -4.6,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 49,
+            "name": "4-background-bar-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -4.0,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 50,
+            "name": "4-background-bar-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -3.4,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 51,
+            "name": "4-background-bar-4",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -2.8,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 52,
+            "name": "4-additive",
+            "geometry": {
+              "kind": "triangles",
+              "vertices": [
+                [
+                  -1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  1.2,
+                  0
+                ],
+                [
+                  -1.5,
+                  1.2,
+                  0
+                ]
+              ],
+              "indices": [
+                0,
+                1,
+                2,
+                0,
+                2,
+                3
+              ]
+            },
+            "transform": {
+              "translation": [
+                -4,
+                -1.8,
+                0
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                1,
+                0.2,
+                0.02,
+                0.5
+              ],
+              "unlit": true,
+              "double_sided": true,
+              "alpha_mode": "additive"
+            }
+          },
+          {
+            "id": 53,
+            "name": "5-backplate",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0,
+                -1.8,
+                -1.5
+              ],
+              "scale": [
+                3.4,
+                2.8,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.04,
+                0.07,
+                0.1,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 54,
+            "name": "5-background-bar-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -1.2,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 55,
+            "name": "5-background-bar-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                -0.6,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 56,
+            "name": "5-background-bar-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.0,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 57,
+            "name": "5-background-bar-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0.6,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 58,
+            "name": "5-background-bar-4",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                1.2,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 59,
+            "name": "5-premultiplied",
+            "geometry": {
+              "kind": "triangles",
+              "vertices": [
+                [
+                  -1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  1.2,
+                  0
+                ],
+                [
+                  -1.5,
+                  1.2,
+                  0
+                ]
+              ],
+              "indices": [
+                0,
+                1,
+                2,
+                0,
+                2,
+                3
+              ]
+            },
+            "transform": {
+              "translation": [
+                0,
+                -1.8,
+                0
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.8,
+                0.05,
+                0.7,
+                0.5
+              ],
+              "unlit": true,
+              "double_sided": true,
+              "alpha_mode": "premultiplied"
+            }
+          },
+          {
+            "id": 60,
+            "name": "6-backplate",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                4,
+                -1.8,
+                -1.5
+              ],
+              "scale": [
+                3.4,
+                2.8,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.04,
+                0.07,
+                0.1,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 61,
+            "name": "6-background-bar-0",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                2.8,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 62,
+            "name": "6-background-bar-1",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                3.4,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 63,
+            "name": "6-background-bar-2",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                4.0,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 64,
+            "name": "6-background-bar-3",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                4.6,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 65,
+            "name": "6-background-bar-4",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                5.2,
+                -1.8,
+                -0.9
+              ],
+              "scale": [
+                0.18,
+                2.2,
+                0.1
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.65,
+                0.75,
+                0.9,
+                1
+              ],
+              "unlit": true
+            }
+          },
+          {
+            "id": 66,
+            "name": "6-blend-soft-intersection",
+            "geometry": {
+              "kind": "triangles",
+              "vertices": [
+                [
+                  -1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  -1.2,
+                  0
+                ],
+                [
+                  1.5,
+                  1.2,
+                  0
+                ],
+                [
+                  -1.5,
+                  1.2,
+                  0
+                ]
+              ],
+              "indices": [
+                0,
+                1,
+                2,
+                0,
+                2,
+                3
+              ]
+            },
+            "transform": {
+              "translation": [
+                4,
+                -1.8,
+                0
+              ]
+            },
+            "material": {
+              "base_color_factor": [
+                0.12,
+                0.9,
+                0.35,
+                1
+              ],
+              "unlit": true,
+              "double_sided": true,
+              "alpha_mode": "blend",
+              "opacity_texture": "half-opacity.png",
+              "depth_fade": 2
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

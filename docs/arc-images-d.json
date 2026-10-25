@@ -1,0 +1,260 @@
+{
+  "schema_version": 1,
+  "group": "images-d",
+  "upstream": {
+    "repository": "https://github.com/vn-tools/arc_unpacker",
+    "commit": "456834ecf2e5686813802c37efd829310485c57d",
+    "license": "GPL-3.0-or-later",
+    "source_files": [
+      {
+        "path": "src/dec/cri/xtx_image_decoder.cc",
+        "sha256": "8bc1d9b5f5503863bc223b4d0ad1a7ee4db16575de32e1fcbf2a03b512207d6a"
+      },
+      {
+        "path": "src/dec/cri/xtx_image_decoder.h",
+        "sha256": "c4984b182c4183479e64a5804e71c5056ddf1d1552def2f8107cece9c775e395"
+      },
+      {
+        "path": "src/dec/glib/custom_lzss.cc",
+        "sha256": "6e5d8193842d4a597fd2230c74abd6089d91447abb1740fb6ecd8b3287d116b3"
+      },
+      {
+        "path": "src/dec/glib/custom_lzss.h",
+        "sha256": "01f64be9eb661ee3f59d38c46743b7f51ecd8fad35c6d8355faa41fcaf5b3b94"
+      },
+      {
+        "path": "src/dec/glib/jpeg_pgx_image_decoder.cc",
+        "sha256": "2afcf12a3e0f7ccf4d47a445bc5fccb5cc853019f8c9de2048610c30dc412351"
+      },
+      {
+        "path": "src/dec/glib/jpeg_pgx_image_decoder.h",
+        "sha256": "656d76716ab27f4eee077a33a9fa2f94c16fb6cb59e944566d47cebfa95fab7e"
+      },
+      {
+        "path": "src/dec/glib/pgx_image_decoder.cc",
+        "sha256": "7454844e429605b0a11a6a62a4ca0256a5e1fc08f7cfe4df127e348c09492ae1"
+      },
+      {
+        "path": "src/dec/glib/pgx_image_decoder.h",
+        "sha256": "d2a4609ae7f34026e01c2c0c3c5fcdddfecc00c3b002aaaa92b8240ad866ca00"
+      },
+      {
+        "path": "src/dec/microsoft/dxt/dxt_decoders.cc",
+        "sha256": "56a6efeebd86ef456910ab9c3955728b2ce40f697aa42b679dab66f7c45e8285"
+      },
+      {
+        "path": "src/dec/microsoft/dxt/dxt_decoders.h",
+        "sha256": "2f49e4dbee4513a54c1395fa9061fa5a43eeabc25687c27857824202564e1323"
+      },
+      {
+        "path": "src/dec/playstation/gim_image_decoder.cc",
+        "sha256": "c9c19b3d6d1ae4e900600fe0b621a2e0e096ca7f484d7b596a1efcba39862146"
+      },
+      {
+        "path": "src/dec/playstation/gim_image_decoder.h",
+        "sha256": "4d8dc402c005a3bb7a65bef35c7a274eabf39c74f22d80193b73ac7d2f497fcf"
+      },
+      {
+        "path": "src/dec/playstation/gtf_image_decoder.cc",
+        "sha256": "e8dfb7ea0ea5c4e48818b753499f0a91424ad391a9dba7fcbe04b80677720186"
+      },
+      {
+        "path": "src/dec/playstation/gtf_image_decoder.h",
+        "sha256": "76b24c9c9970111e1c2f6a1b5f3bbad2676c0093dde1dc3c683135e4fde00e34"
+      },
+      {
+        "path": "src/res/pixel_format.cc",
+        "sha256": "eabf12ce785da1816936ecbf07257c4c0f6d8a708ea6576d0c8556ba2a89d3e3"
+      },
+      {
+        "path": "src/res/pixel_format.h",
+        "sha256": "57efc35ed4e0ca16df1e037aaf0a6cb9e6ae4f5c5ddc2be7c0f3688d2daffd35"
+      }
+    ]
+  },
+  "implementation": {
+    "files": [
+      "crates/crysirror-formats-arc/src/images_d.rs",
+      "crates/crysirror-formats-arc/tests/images_d.rs"
+    ],
+    "registered_format_ids": [
+      "glib/pgx",
+      "glib/jpeg-pgx",
+      "playstation/gim",
+      "playstation/gtf",
+      "cri/xtx"
+    ],
+    "output": "Owned top-left crysirror_image::ImageSurface RGBA8",
+    "devices": "none; console texture formats are CPU parsers, not console-host support",
+    "native_vms": "unmodified and separate; no VM opcode reinterpretation",
+    "limits": "Encoded/intermediate individual bytes <=64MiB; dimensions1..8192 and RGBA<=64MiB; shared context additionally bounds recursive/cumulative work.",
+    "dxt_reuse": "Uses existing images_b microsoft/dds native-compatible DXT block decoder; does not introduce a GPU dependency."
+  },
+  "compilation": {
+    "command": "cargo check -p crysirror-formats-arc",
+    "exit_code": 0,
+    "log": "target/verification/arc-images-d-check.log"
+  },
+  "ordinary_validation": {
+    "command": "cargo test -p crysirror-formats-arc --test images_d",
+    "exit_code": 0,
+    "passed": 5,
+    "failed": 0,
+    "ignored": 1,
+    "log": "target/verification/arc-images-d-tests.log",
+    "fixtures": "All ordinary binary data constructed in Rust memory; expected RGBA is explicit. No encoded fixture file committed.",
+    "original_tests": 4,
+    "additional_malformed_test": 1,
+    "coverage": [
+      "PGX opaque/alpha behavior and JPEG APP3 embedded PGX.",
+      "GTF native DXT1 block through shared native-compatible decoder.",
+      "GIM RGBA8888 linear/swizzled, exact low-bit RGB565/RGBA5551/RGBA4444 conversion and unsupported indexed16 rejection.",
+      "XTX format0 ARGB tile conversion, format1 big-endian BGR565 full tile and half-tile opaque-black padding, plus existing registered BGI CBG integration smoke.",
+      "Malformed signatures, truncated PGX header-overlapping source range, unknown XTX format and multi-texture GTF rejection."
+    ]
+  },
+  "external_validation": {
+    "command": "ARC_UNPACKER_SOURCE=<absolute pinned source checkout> cargo test -p crysirror-formats-arc --test images_d -- --ignored --nocapture",
+    "exit_code": 0,
+    "passed": 1,
+    "failed": 0,
+    "ignored_when_explicitly_run": 0,
+    "pixel_exact_inputs": 13,
+    "log": "target/verification/arc-images-d-external.log",
+    "cases": [
+      {
+        "id": "glib/pgx",
+        "input": "glib/files/pgx/CFG_PAGEBTN.PGX",
+        "expected": "glib/files/pgx/CFG_PAGEBTN-out.png",
+        "zlib_fixture_wrapper": false,
+        "width": 652,
+        "height": 124,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "glib/pgx",
+        "input": "glib/files/pgx/BG010A.PGX",
+        "expected": "glib/files/pgx/BG010A-out.png",
+        "zlib_fixture_wrapper": false,
+        "width": 800,
+        "height": 600,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "glib/jpeg-pgx",
+        "input": "glib/files/jpeg_pgx/BG110D.PGX.JPG",
+        "expected": "glib/files/jpeg_pgx/BG110D.PGX-out.png",
+        "zlib_fixture_wrapper": false,
+        "width": 800,
+        "height": 600,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "playstation/gim",
+        "input": "playstation/files/gim/fl_info.gim",
+        "expected": "playstation/files/gim/fl_info-out.png",
+        "zlib_fixture_wrapper": false,
+        "width": 256,
+        "height": 136,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "playstation/gim",
+        "input": "playstation/files/gim/fl_icons.gim",
+        "expected": "playstation/files/gim/fl_icons-out.png",
+        "zlib_fixture_wrapper": false,
+        "width": 32,
+        "height": 160,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "playstation/gim",
+        "input": "playstation/files/gim/sg_hint_good.gim",
+        "expected": "playstation/files/gim/sg_hint_good-out.png",
+        "zlib_fixture_wrapper": false,
+        "width": 64,
+        "height": 32,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "playstation/gim",
+        "input": "playstation/files/gim/bd_smenu.gim",
+        "expected": "playstation/files/gim/bd_smenu-out.png",
+        "zlib_fixture_wrapper": false,
+        "width": 128,
+        "height": 192,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "playstation/gim",
+        "input": "playstation/files/gim/AY_6C_3.gim",
+        "expected": "playstation/files/gim/AY_6C_3-out.png",
+        "zlib_fixture_wrapper": false,
+        "width": 128,
+        "height": 288,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "playstation/gtf",
+        "input": "playstation/files/gtf/DATA03-zlib.GTF",
+        "expected": "playstation/files/gtf/DATA03-out.png",
+        "zlib_fixture_wrapper": true,
+        "width": 344,
+        "height": 344,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "cri/xtx",
+        "input": "cri/files/xtx/unk_1186-zlib.xtx",
+        "expected": "cri/files/xtx/unk_1186-out.png",
+        "zlib_fixture_wrapper": true,
+        "width": 320,
+        "height": 180,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "cri/xtx",
+        "input": "cri/files/xtx/unk_3398-zlib.xtx",
+        "expected": "cri/files/xtx/unk_3398-out.png",
+        "zlib_fixture_wrapper": true,
+        "width": 1280,
+        "height": 720,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "cri/xtx",
+        "input": "cri/files/xtx/unk_1237-zlib.xtx",
+        "expected": "cri/files/xtx/unk_1237-out.png",
+        "zlib_fixture_wrapper": true,
+        "width": 1280,
+        "height": 720,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      },
+      {
+        "id": "cri/xtx",
+        "input": "cri/files/xtx/unk_4140-zlib.xtx",
+        "expected": "cri/files/xtx/unk_4140-out.png",
+        "zlib_fixture_wrapper": true,
+        "width": 1360,
+        "height": 800,
+        "result": "all dimensions and RGBA bytes exactly equal independent upstream PNG"
+      }
+    ],
+    "fixture_policy": "Inputs and expected PNG remain in external pinned checkout, with no game/texture fixture bytes copied into the repository. Hashing/reading upstream fixtures does not establish redistribution rights."
+  },
+  "review_fixes": [
+    "The public decode entry checks encoded-byte limit, recognition and final surface validity.",
+    "PGX stored payload may not overlap its own header; a truncated source previously decoded header bytes as spurious pixels.",
+    "XTX format1 starts from native zero BGR565, whose alpha is255 even when a half tile leaves texels unfilled. The direct RGBA output now initializes this variant to opaque black."
+  ],
+  "boundaries": [
+    "GIM supports direct formats0..3 and indexed4/8-bit formats4/5, with native 16x8 dimension rounding and swizzle. Indexed16/32 formats6/7 are explicitly rejected because their pinned upstream branches do not produce a working image.",
+    "GIM compressed chunks fail explicitly. Generic output retains native padded dimensions rather than inventing an unpadded crop.",
+    "GTF supports one 2D depth1 DXT1/3/5 texture, preserving native block-padded dimensions; multi-texture, 3D and non-DXT layouts fail.",
+    "XTX supports formats0/1/2, with optional small prefix, native tiling/endian conversion and crop; format2 uses DXT5. Offset/pivot fields are ignored as in the pinned image decoder, not interpreted as scene transforms.",
+    "JPEG-PGX extracts and decodes APP3 PGX payloads; it does not infer a JPEG-rendered fallback when native PGX data is malformed.",
+    "External XTX corpus covers formats0 and2. Format1 and GIM low-bit direct formats have explicit synthetic tests rather than external corpus evidence.",
+    "BGI CBG registration and implementation are separate from these five ports; the ordinary CBG smoke does not claim CBG was newly ported by this module.",
+    "No SDK, console hardware, GPU rendering, commercial-game execution or complete texture-container coverage is claimed."
+  ]
+}

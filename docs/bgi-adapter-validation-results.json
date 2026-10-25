@@ -1,0 +1,62 @@
+{
+  "runs": [
+    {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "crysirror-bgi",
+        "-p",
+        "crysirror-runtime",
+        "-p",
+        "crysirror-audio",
+        "-p",
+        "crysirror-desktop"
+      ],
+      "returncode": 0,
+      "start": "2026-10-25T09:06:52.894066+00:00",
+      "end": "2026-10-25T09:07:39.777378+00:00",
+      "log": "docs/bgi-adapter-rust-tests.txt",
+      "passed": 62,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "command": [
+        "/opt/homebrew/bin/python3.11",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "returncode": 0,
+      "start": "2026-10-25T09:07:39.777624+00:00",
+      "end": "2026-10-25T09:07:51.911314+00:00",
+      "log": "docs/bgi-adapter-python-tests.txt",
+      "tests_run": 137
+    }
+  ],
+  "compilation": {
+    "command": [
+      "cargo",
+      "check",
+      "-p",
+      "crysirror-bgi",
+      "-p",
+      "crysirror-desktop",
+      "--all-targets"
+    ],
+    "returncode": 0,
+    "reported_duration_seconds": 5.72,
+    "log": "docs/bgi-adapter-check.txt",
+    "scope": "Before the native audio bridge implementation; original-source dead-code warnings remain."
+  },
+  "limitations": [
+    "No complete-game claim from adapter boundary tests.",
+    "No GPU or audio output device opened by the recorded CPU tests.",
+    "Native game and fonts remain outside the repository."
+  ]
+}

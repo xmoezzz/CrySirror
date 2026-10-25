@@ -1,0 +1,11 @@
+{
+  "schema": 2,
+  "name": "CrySirror engine API demo",
+  "content_revision": "engine-1",
+  "canvas": [960, 540],
+  "background": [18, 22, 34, 255],
+  "assets": "assets",
+  "clients": [
+    { "name": "game", "adapter": "crysirror-script-v1", "game": "engine-demo" }
+  ]
+}

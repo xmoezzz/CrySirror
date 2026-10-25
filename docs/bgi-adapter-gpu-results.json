@@ -1,0 +1,90 @@
+{
+  "execution": {
+    "runs": [
+      {
+        "command": [
+          "/Users/xmoe/Documents/CrySirror/target/debug/crysirror",
+          "inspect",
+          "/Users/xmoe/.cache/crysirror/bgi-integration/project.json"
+        ],
+        "returncode": 0,
+        "start": "2026-10-25T09:14:23.275709+00:00",
+        "end": "2026-10-25T09:14:25.096121+00:00",
+        "stdout": "/Users/xmoe/.cache/crysirror/bgi-integration/agent-inspect.stdout",
+        "stderr": "/Users/xmoe/.cache/crysirror/bgi-integration/agent-inspect.stderr"
+      },
+      {
+        "command": [
+          "/Users/xmoe/Documents/CrySirror/target/debug/crysirror",
+          "gpu-info"
+        ],
+        "returncode": 0,
+        "start": "2026-10-25T09:14:25.182044+00:00",
+        "end": "2026-10-25T09:14:25.206011+00:00",
+        "stdout": "/Users/xmoe/.cache/crysirror/bgi-integration/agent-gpu-info.stdout",
+        "stderr": "/Users/xmoe/.cache/crysirror/bgi-integration/agent-gpu-info.stderr"
+      },
+      {
+        "command": [
+          "/Users/xmoe/Documents/CrySirror/target/debug/crysirror",
+          "render",
+          "/Users/xmoe/.cache/crysirror/bgi-integration/project.json",
+          "--output",
+          "/Users/xmoe/.cache/crysirror/bgi-integration/agent-title-wgpu.png",
+          "--frames",
+          "600",
+          "--step-ms",
+          "16",
+          "--data-dir",
+          "/Users/xmoe/.cache/crysirror/bgi-integration/state-agent-gpu"
+        ],
+        "returncode": 0,
+        "start": "2026-10-25T09:14:25.292127+00:00",
+        "end": "2026-10-25T09:15:55.612673+00:00",
+        "stdout": "/Users/xmoe/.cache/crysirror/bgi-integration/agent-title-render.stdout",
+        "stderr": "/Users/xmoe/.cache/crysirror/bgi-integration/agent-title-render.stderr",
+        "sha256": "6945bb0f84117050faf8fb48de6fd60acebb389ca2204ce09c4a5517591e2390",
+        "png": "/Users/xmoe/.cache/crysirror/bgi-integration/agent-title-wgpu.png"
+      }
+    ],
+    "native_audio": "explicit config.silent=true; no device audio fidelity claim",
+    "binary_file_sha256_after_runs": "770e43ceb79065dc81837eb7f96bcd79f44838969fe281369f66e3b27b714b0f",
+    "binary_hash_scope": "Path contents read after the final command; shared workspace builds may replace binaries."
+  },
+  "comparison": {
+    "first": "/Users/xmoe/.cache/crysirror/bgi-integration/agent-title-wgpu.png",
+    "second": "/Users/xmoe/.cache/crysirror/bgi-integration/title-shared-frame.png",
+    "size": [
+      1280,
+      720
+    ],
+    "rgba_identical": true,
+    "different_channels": 0,
+    "max_channel_difference": 0,
+    "first_sha256": "6945bb0f84117050faf8fb48de6fd60acebb389ca2204ce09c4a5517591e2390",
+    "second_sha256": "6945bb0f84117050faf8fb48de6fd60acebb389ca2204ce09c4a5517591e2390"
+  },
+  "inspection": {
+    "bgi_native_vm": true,
+    "registered_adapters": [
+      "bgi",
+      "crysirror-script-v1",
+      "rfvp",
+      "siglus"
+    ],
+    "rfvp_native_vm": true,
+    "siglus_native_vm": true
+  },
+  "gpu": {
+    "adapter": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "adapter_advertises": {
+      "acceleration_structures": false,
+      "ray_query": false
+    },
+    "implemented": {
+      "compute_raytrace": true,
+      "hardware_raytrace": false,
+      "raster": true
+    }
+  }
+}

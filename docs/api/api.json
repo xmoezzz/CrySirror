@@ -1,0 +1,6328 @@
+{
+  "adapters": [
+    {
+      "adapter": "siglus",
+      "config": [
+        {
+          "doc": "Asset path of the compiled scene: a `Scene.pck` or a single `.scn`.",
+          "name": "scene",
+          "rust_type": "String"
+        },
+        {
+          "doc": "\"pck\" (scene pack, default) or \"scn\" (one scene stream).",
+          "name": "format",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Entry scene; default \"entry\" for scn, the pack's scene 0 for pck.",
+          "name": "scene_name",
+          "rust_type": "Option<String>"
+        },
+        {
+          "doc": "Scene string encryption: \"xor\" (default) or \"plain\".",
+          "name": "string_codec",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Asset path of the decoded UTF-8 Gameexe ini, if any.",
+          "name": "gameexe",
+          "rust_type": "Option<String>"
+        },
+        {
+          "doc": "Native resource path → asset path aliases (at most 4096).",
+          "name": "resources",
+          "rust_type": "BTreeMap<String, String>"
+        }
+      ]
+    },
+    {
+      "adapter": "rfvp",
+      "config": [
+        {
+          "doc": "Asset directory holding the game's `.hcb`, packs and loose folders.",
+          "name": "root",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Script text encoding: \"sjis\" (default), \"gbk\" or \"utf8\".",
+          "name": "nls",
+          "rust_type": "Option<String>"
+        },
+        {
+          "doc": "Asset path of a host-supplied TrueType/OpenType font used for the original's built-in MS Gothic/Mincho faces. Required; never bundled.",
+          "name": "font",
+          "rust_type": "String"
+        }
+      ]
+    },
+    {
+      "adapter": "bgi",
+      "config": [
+        {
+          "doc": "Relative directory inside this client's asset capability.",
+          "name": "root",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Client-relative font asset supplied by the project owner.",
+          "name": "font",
+          "rust_type": "String"
+        },
+        {
+          "doc": "",
+          "name": "font_face_index",
+          "rust_type": "u32"
+        },
+        {
+          "doc": "",
+          "name": "gbk",
+          "rust_type": "bool"
+        },
+        {
+          "doc": "Unknown native operations must fail visibly.",
+          "name": "strict",
+          "rust_type": "bool"
+        },
+        {
+          "doc": "Explicit diagnostic mode that discards original audio commands.",
+          "name": "silent",
+          "rust_type": "bool"
+        }
+      ]
+    }
+  ],
+  "classes": [
+    {
+      "doc": "Scoped voice pool, streaming music and deterministic CPU mixing; classic channels share this output.",
+      "global": "audio",
+      "methods": [
+        {
+          "doc": "Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics.",
+          "name": "play",
+          "params": [
+            {
+              "name": "channel",
+              "type": "number"
+            },
+            {
+              "name": "voice",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Stop a classic channel.",
+          "name": "stop",
+          "params": [
+            {
+              "name": "channel",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion.",
+          "name": "playAt",
+          "params": [
+            {
+              "name": "channel",
+              "type": "number"
+            },
+            {
+              "name": "voice",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "where",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?}; returns scoped generation handle.",
+          "name": "playSfx",
+          "params": [
+            {
+              "name": "voice",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec.",
+          "name": "playRandom",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "container",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "voice",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true.",
+          "name": "playMusic",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "voice",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "crossfade_ms",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Stop immediately or sample-accurate fade out.",
+          "name": "stopVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "fade_ms",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Pause without advancing the source or fade clock.",
+          "name": "pauseVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "paused",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Seek exactly to a decoded source frame.",
+          "name": "seekVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "frame",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed.",
+          "name": "setVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "{playing,position_seconds?}; stale/stolen/ended handles are inactive.",
+          "name": "voice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}.",
+          "name": "setBus",
+          "params": [
+            {
+              "name": "bus",
+              "type": "string"
+            },
+            {
+              "name": "settings",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Read this client's bus settings.",
+          "name": "bus",
+          "params": [
+            {
+              "name": "bus",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Dialogue-driven music ducking {gain,attack_ms,release_ms}.",
+          "name": "setDucking",
+          "params": [
+            {
+              "name": "config",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Set this client's pool limit within the host's global budget; stop voices before lowering below the active count.",
+          "name": "setVoiceLimit",
+          "params": [
+            {
+              "name": "limit",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Reset this client's deterministic variant generator and repeat history.",
+          "name": "setSeed",
+          "params": [
+            {
+              "name": "seed",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "{position,forward,up}; null restores automatic camera listener.",
+          "name": "setListener",
+          "params": [
+            {
+              "name": "listener",
+              "type": "any"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Mixer active/stolen/rejected voices, rendered frames and unclipped peak.",
+          "name": "stats",
+          "params": [],
+          "returns": "Record<string, any>"
+        }
+      ],
+      "name": "Audio",
+      "properties": [
+        {
+          "doc": "Mixer output frames per second.",
+          "name": "sampleRate",
+          "type": "number",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "Client-scoped CPU RGBA bitmaps; paths feed Layers and share its surface limits. Transient pixels are not runtime snapshots.",
+      "global": "bitmap",
+      "methods": [
+        {
+          "doc": "Create/replace a slot with uniform RGBA (default transparent). Returns __surface/<slot>.",
+          "name": "create",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "width",
+              "type": "number"
+            },
+            {
+              "name": "height",
+              "type": "number"
+            },
+            {
+              "name": "rgba",
+              "type": "number[] | null"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Decode a client asset or copy an existing client surface into a mutable slot.",
+          "name": "load",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "source",
+              "type": "string"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Replace pixels inside clipped {x,y,width,height}; signed positions are allowed.",
+          "name": "fill",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "rect",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "rgba",
+              "type": "number[]"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Copy/blend source_rect into destination:[x,y]. Explicit mode and opacity; self-copy reads the original pixels.",
+          "name": "blit",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "source",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Nearest-neighbor source_rect to destination rectangle with original mapping preserved after clipping. Explicit pixel math.",
+          "name": "stretch",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "source",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Return client-local width, height, revision, bytes and surface path.",
+          "name": "info",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Release this client's surface slot; return whether it existed.",
+          "name": "remove",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            }
+          ],
+          "returns": "boolean"
+        }
+      ],
+      "name": "Bitmap",
+      "properties": []
+    },
+    {
+      "doc": "A project client: a VM peer (data VM, Siglus SceneVm, ...) with its own scheduling, waits and saves.",
+      "global": null,
+      "methods": [],
+      "name": "Client",
+      "properties": [
+        {
+          "doc": "Project client name.",
+          "name": "name",
+          "type": "string",
+          "writable": false
+        },
+        {
+          "doc": "Adapter id, e.g. 'siglus'.",
+          "name": "engine",
+          "type": "string",
+          "writable": false
+        },
+        {
+          "doc": "Last VM yield: BudgetExhausted, WaitUntil(..), WaitForInput, Halted.",
+          "name": "state",
+          "type": "string",
+          "writable": false
+        },
+        {
+          "doc": "Bounded adapter diagnostics (read-only).",
+          "name": "diagnostics",
+          "type": "any",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "Application-wide services: time, input, logging, lifecycle requests.",
+      "global": "engine",
+      "methods": [
+        {
+          "doc": "Append a line to the bounded engine log.",
+          "name": "log",
+          "params": [
+            {
+              "name": "message",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Ask the host to stop after this frame.",
+          "name": "quit",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Project clients, including native VMs.",
+          "name": "clients",
+          "params": [],
+          "returns": "Client[]"
+        }
+      ],
+      "name": "Engine",
+      "properties": [
+        {
+          "doc": "Completed App frames.",
+          "name": "frame",
+          "type": "number",
+          "writable": false
+        },
+        {
+          "doc": "Runtime clock in milliseconds.",
+          "name": "timeMs",
+          "type": "number",
+          "writable": false
+        },
+        {
+          "doc": "Fixed update step in milliseconds.",
+          "name": "fixedStepMs",
+          "type": "number",
+          "writable": false
+        },
+        {
+          "doc": "This frame's input: buttonsDown, buttonsPressed, pointer.",
+          "name": "input",
+          "type": "Record<string, any>",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "A generational handle to a world entity. Using it after destroy() fails.",
+      "global": null,
+      "methods": [
+        {
+          "doc": "Despawn this entity and its descendants.",
+          "name": "destroy",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Re-parent; cycles are rejected.",
+          "name": "setParent",
+          "params": [
+            {
+              "name": "parent",
+              "type": "Entity | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Direct children.",
+          "name": "children",
+          "params": [],
+          "returns": "Entity[]"
+        },
+        {
+          "doc": "Cross-fade skeletal animation: options {speed?: 1, fade?: seconds (0.2), loop?: true}.",
+          "name": "play",
+          "params": [
+            {
+              "name": "clip",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Clear animation (rest pose).",
+          "name": "stopAnimation",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Collider {shape:{kind:'box'|'sphere'|'capsule'|'mesh'|'convex_hull',...}, body?:'static'|'dynamic'|'kinematic'|'kinematic_position'|'character',mass?,density?,friction?,restitution?,ccd?,sensor?,groups?,gravity_scale?,linear_damping?,angular_damping?,locked_translation?,locked_rotation?,offset?} or null.",
+          "name": "setCollider",
+          "params": [
+            {
+              "name": "collider",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Apply a world-space impulse (N·s), optionally at a world-space point; saves the resulting velocity immediately.",
+          "name": "applyImpulse",
+          "params": [
+            {
+              "name": "impulse",
+              "type": "Vec3"
+            },
+            {
+              "name": "point",
+              "type": "Vec3 | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Apply a world-space angular impulse to a dynamic body.",
+          "name": "applyTorqueImpulse",
+          "params": [
+            {
+              "name": "impulse",
+              "type": "Vec3"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Accumulate a persistent world-space force (N); saved until clearForces().",
+          "name": "addForce",
+          "params": [
+            {
+              "name": "force",
+              "type": "Vec3"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Accumulate persistent world-space torque (N·m).",
+          "name": "addTorque",
+          "params": [
+            {
+              "name": "torque",
+              "type": "Vec3"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Clear persistent force and torque.",
+          "name": "clearForces",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Wake a physics body.",
+          "name": "wake",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Sleep a physics body when can_sleep is enabled.",
+          "name": "sleep",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "World-space target for a kinematic_position body at the next fixed step; rotation is XYZ degrees.",
+          "name": "setKinematicTarget",
+          "params": [
+            {
+              "name": "position",
+              "type": "Vec3"
+            },
+            {
+              "name": "rotation",
+              "type": "Vec3 | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Make this character-collider entity an arcade vehicle (ADR 0043): {wheelbase, track, ride_height, suspension, max_speed, acceleration, braking, drag, steer_degrees, steer_falloff, grip, handbrake_grip, gravity, step, max_slope} (all optional); null removes it. Vehicle state is not saved yet.",
+          "name": "setVehicle",
+          "params": [
+            {
+              "name": "spec",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Advance the vehicle by dt seconds with {throttle -1..1, steer -1..1 (positive toward +X of the heading), brake 0..1, handbrake}; moves and orients the entity. Returns {speed, lateral, grounded, wheels, blocked, yaw}.",
+          "name": "drive",
+          "params": [
+            {
+              "name": "input",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "dt",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Move a character capsule with sliding, autostep and slope limits; returns {translation, grounded}. options {step?: 0.3, maxSlope?: 45}.",
+          "name": "moveCharacter",
+          "params": [
+            {
+              "name": "desired",
+              "type": "Vec3"
+            },
+            {
+              "name": "dt",
+              "type": "number"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Replace the engine material; null restores imported materials. Alpha modes: opaque, mask, blend, additive, premultiplied.",
+          "name": "setMaterial",
+          "params": [
+            {
+              "name": "material",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Dynamic diffuse GI volume {extent:[hx,hy,hz], counts?:[nx,ny,nz], intensity?, probes_per_frame?, revision?} centred on this entity, or null.",
+          "name": "setIrradianceVolume",
+          "params": [
+            {
+              "name": "volume",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Box reflection capture {extent:[hx,hy,hz], intensity?, blend_distance?, revision?} at this entity, or null. Bump revision to recapture.",
+          "name": "setReflectionProbe",
+          "params": [
+            {
+              "name": "probe",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Attach/replace a local light (spot and rect emit along local -Z) or null to remove. Intensity is candela unless units:'lumens'.",
+          "name": "setLight",
+          "params": [
+            {
+              "name": "light",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Particle emitter {rate, burst, lifetime, speed, direction, spread_degrees, gravity, drag, size, color_start, color_end, max, additive, enabled, seed} or null.",
+          "name": "setParticles",
+          "params": [
+            {
+              "name": "emitter",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Run a defined behaviour tree every fixed step (null stops).",
+          "name": "runBehaviorTree",
+          "params": [
+            {
+              "name": "tree",
+              "type": "string | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Write a blackboard value (bool, number, [x,y,z], string, Entity, or null to clear).",
+          "name": "setBlackboard",
+          "params": [
+            {
+              "name": "key",
+              "type": "string"
+            },
+            {
+              "name": "value",
+              "type": "any"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Drive animation from a defined state machine (null clears).",
+          "name": "setStateMachine",
+          "params": [
+            {
+              "name": "machine",
+              "type": "string | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Set a state machine parameter (number or bool).",
+          "name": "setAnimParam",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "value",
+              "type": "any"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Play a montage over the state machine, optionally from a section.",
+          "name": "playMontage",
+          "params": [
+            {
+              "name": "montage",
+              "type": "string"
+            },
+            {
+              "name": "section",
+              "type": "string | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Blend the current montage out.",
+          "name": "stopMontage",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Take notifies/state changes {kind, name}.",
+          "name": "drainAnimEvents",
+          "params": [],
+          "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Set attributes {Name: {base, min?, max?, max_attribute?}} (keeps effects/tags).",
+          "name": "initAttributes",
+          "params": [
+            {
+              "name": "attributes",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Current value after active effects, or null.",
+          "name": "attribute",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "number | null"
+        },
+        {
+          "doc": "Set an attribute's base value.",
+          "name": "setAttribute",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "base",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Apply a gameplay effect; false if blocked by tags.",
+          "name": "applyEffect",
+          "params": [
+            {
+              "name": "effect",
+              "type": "string"
+            },
+            {
+              "name": "source",
+              "type": "Entity | null"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "doc": "Remove an active effect.",
+          "name": "removeEffect",
+          "params": [
+            {
+              "name": "effect",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "doc": "Owns the tag or a descendant (loose, effect or ability tags).",
+          "name": "hasTag",
+          "params": [
+            {
+              "name": "tag",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "doc": "Add a loose tag (reference counted).",
+          "name": "addTag",
+          "params": [
+            {
+              "name": "tag",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove one loose tag reference.",
+          "name": "removeTag",
+          "params": [
+            {
+              "name": "tag",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Grant an ability.",
+          "name": "grantAbility",
+          "params": [
+            {
+              "name": "ability",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Try to activate: {ok, reason}.",
+          "name": "activate",
+          "params": [
+            {
+              "name": "ability",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "End an active ability.",
+          "name": "endAbility",
+          "params": [
+            {
+              "name": "ability",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "doc": "Take queued gameplay events {kind, name, value, source}.",
+          "name": "drainEvents",
+          "params": [],
+          "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Integer tween {property:'x'|'y'|'z'|'rotation_x'|..., from, to, duration_ms, delay_ms?, mode?, easing?, real_time?}.",
+          "name": "tween",
+          "params": [
+            {
+              "name": "spec",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        }
+      ],
+      "name": "Entity",
+      "properties": [
+        {
+          "doc": "Client-local entity id.",
+          "name": "id",
+          "type": "number",
+          "writable": false
+        },
+        {
+          "doc": "Entity name.",
+          "name": "name",
+          "type": "string",
+          "writable": false
+        },
+        {
+          "doc": "False after destroy() or cascading parent removal.",
+          "name": "alive",
+          "type": "boolean",
+          "writable": false
+        },
+        {
+          "doc": "Local translation.",
+          "name": "position",
+          "type": "Vec3",
+          "writable": true
+        },
+        {
+          "doc": "Local XYZ Euler rotation in degrees.",
+          "name": "rotation",
+          "type": "Vec3",
+          "writable": true
+        },
+        {
+          "doc": "Local non-zero scale.",
+          "name": "scale",
+          "type": "Vec3",
+          "writable": true
+        },
+        {
+          "doc": "Local visibility (inherited by children).",
+          "name": "visible",
+          "type": "boolean",
+          "writable": true
+        },
+        {
+          "doc": "Units per second, integrated at the world fixed step.",
+          "name": "velocity",
+          "type": "Vec3",
+          "writable": true
+        },
+        {
+          "doc": "World angular velocity in degrees per second. Rigid bodies are integrated once by physics.",
+          "name": "angularVelocity",
+          "type": "Vec3",
+          "writable": true
+        },
+        {
+          "doc": "World position, rotation quaternion [x,y,z,w], velocity, angularVelocity in degrees/s and sleeping state, or null.",
+          "name": "physicsState",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Base color [r,g,b,a] of untextured geometry.",
+          "name": "color",
+          "type": "number[]",
+          "writable": false
+        },
+        {
+          "doc": "Geometry: cube, triangles or {kind:'model', asset, mesh}.",
+          "name": "geometry",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Parent entity or null.",
+          "name": "parent",
+          "type": "Entity | null",
+          "writable": false
+        },
+        {
+          "doc": "Engine material override or null; paths stay client-scoped.",
+          "name": "material",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Animation state {layers:[{clip,time,speed,weight,...}]} or null.",
+          "name": "animation",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Collider spec or null.",
+          "name": "collider",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Gameplay component (attributes, effects, tags, abilities) or null.",
+          "name": "gameplay",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "All owned gameplay tags.",
+          "name": "tags",
+          "type": "string[]",
+          "writable": false
+        },
+        {
+          "doc": "Particle emitter spec or null.",
+          "name": "particles",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Box reflection capture or null.",
+          "name": "reflectionProbe",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Dynamic diffuse GI volume or null.",
+          "name": "irradianceVolume",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Local light {shape:{kind:'point'|'spot'|'rect',...}, color, intensity, units:'candela'|'lumens', range, shadows, enabled} or null.",
+          "name": "light",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Behaviour tree state {tree, blackboard, status, active_leaf} or null.",
+          "name": "ai",
+          "type": "any",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "This client's capability filesystem: read-only assets (incl. mounted providers) and atomic saves.",
+      "global": "fs",
+      "methods": [
+        {
+          "doc": "Read a UTF-8 asset.",
+          "name": "readText",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Whether an asset is readable.",
+          "name": "exists",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "doc": "Read a UTF-8 save file, or null.",
+          "name": "readSave",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "string | null"
+        },
+        {
+          "doc": "Atomically replace a save file.",
+          "name": "writeSave",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            },
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        }
+      ],
+      "name": "Fs",
+      "properties": []
+    },
+    {
+      "doc": "Session-scoped keyboard/mouse/gamepad actions with runtime rebinding and semantic prompt tokens.",
+      "global": "input",
+      "methods": [
+        {
+          "doc": "Replace keyboard bindings.",
+          "name": "bind",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            },
+            {
+              "name": "keys",
+              "type": "string[]"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Replace {bindings:[{kind:'key'|'button'|'axis',...}],threshold?:0.5}. Validated atomically.",
+          "name": "rebind",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            },
+            {
+              "name": "spec",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Read action bindings.",
+          "name": "bindings",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Action magnitude exceeds threshold.",
+          "name": "isDown",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "doc": "Action crossed threshold or bound button pressed this frame.",
+          "name": "pressed",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "doc": "Action released this frame.",
+          "name": "released",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        },
+        {
+          "doc": "Combined analog/digital signed value in -1..1.",
+          "name": "value",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Positive action magnitude minus negative action magnitude.",
+          "name": "axis",
+          "params": [
+            {
+              "name": "negative",
+              "type": "string"
+            },
+            {
+              "name": "positive",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Preferred binding {device,family,control,label,icon}; icon is a semantic asset token.",
+          "name": "prompt",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Override generic/xbox/playstation/nintendo labels; null restores detection.",
+          "name": "setPromptFamily",
+          "params": [
+            {
+              "name": "family",
+              "type": "string | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Return schema-1 profile for fs.writeSave.",
+          "name": "exportBindings",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Validate and replace complete logical profile; raw hardware state is not restored.",
+          "name": "importBindings",
+          "params": [
+            {
+              "name": "profile",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Capture next pressed key/button or large axis motion.",
+          "name": "startRebind",
+          "params": [
+            {
+              "name": "action",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Cancel pending capture.",
+          "name": "cancelRebind",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Drain the completed capture result.",
+          "name": "takeRebind",
+          "params": [],
+          "returns": "Record<string, any> | null"
+        }
+      ],
+      "name": "Input",
+      "properties": [
+        {
+          "doc": "Canvas pointer position.",
+          "name": "pointer",
+          "type": "number[]",
+          "writable": false
+        },
+        {
+          "doc": "Pointer delta this frame.",
+          "name": "pointerDelta",
+          "type": "number[]",
+          "writable": false
+        },
+        {
+          "doc": "Supported physical key names.",
+          "name": "keys",
+          "type": "string[]",
+          "writable": false
+        },
+        {
+          "doc": "keyboard_mouse or gamepad, based on meaningful activity.",
+          "name": "lastDevice",
+          "type": "string",
+          "writable": false
+        },
+        {
+          "doc": "Action waiting for a new physical binding.",
+          "name": "pendingRebind",
+          "type": "string | null",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "Retained 2D layer hierarchy (sprites, text, solid fills) composited over 3D.",
+      "global": "layers",
+      "methods": [
+        {
+          "doc": "Insert/replace {id, parent?, rect, paint, transform?, order?, clip?, opacity?, visible?, blend?, uv?}.",
+          "name": "put",
+          "params": [
+            {
+              "name": "layer",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove a layer and its descendants.",
+          "name": "remove",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Pivot/anchor/rotation/scale/z transform.",
+          "name": "setTransform",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "transform",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Inherited visibility.",
+          "name": "setVisible",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "visible",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Inherited opacity 0..255.",
+          "name": "setOpacity",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "opacity",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Explicit [major, minor] draw order.",
+          "name": "setOrder",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "order",
+              "type": "number[]"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Clip rectangle [x,y,w,h] or null.",
+          "name": "setClip",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "clip",
+              "type": "number[] | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Siglus-style 2D filter {mono, invert, bright, dark, color_rate, color, add, tone_curve?:{asset,row,saturation}, mask?:{asset,gray_alpha}, alpha_test, distortion?:{kind:'mosaic'|'raster'|'radial_blur'|'threshold_fade',...}} or null.",
+          "name": "setFilter",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "filter",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}.",
+          "name": "transition",
+          "params": [
+            {
+              "name": "transition",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Finish this client's transition now (skip).",
+          "name": "endTransition",
+          "params": [],
+          "returns": "void"
+        }
+      ],
+      "name": "Layers",
+      "properties": [
+        {
+          "doc": "Layers owned by this client.",
+          "name": "count",
+          "type": "number",
+          "writable": false
+        },
+        {
+          "doc": "Active screen transition {code, progress, elapsed_ms, duration_ms, mine} or null.",
+          "name": "activeTransition",
+          "type": "any",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "Client-scoped string catalogs, CLDR plurals and locale font aliases; no filesystem or GPU ownership.",
+      "global": "localization",
+      "methods": [
+        {
+          "doc": "Define {strings:{key:string|{forms:{one?,other,...},ordinal?}},fonts?:string[]}.",
+          "name": "define",
+          "params": [
+            {
+              "name": "locale",
+              "type": "string"
+            },
+            {
+              "name": "catalog",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Select locale, falling back by variant/region/script/language then fallback locale.",
+          "name": "setLocale",
+          "params": [
+            {
+              "name": "locale",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Choose final fallback language.",
+          "name": "setFallbackLocale",
+          "params": [
+            {
+              "name": "locale",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Substitute {name}; plural messages select by count. Decimal strings preserve visible fraction digits.",
+          "name": "translate",
+          "params": [
+            {
+              "name": "key",
+              "type": "string"
+            },
+            {
+              "name": "params",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Export locale/catalog configuration for explicit persistence.",
+          "name": "profile",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Validate and atomically restore exported configuration.",
+          "name": "applyProfile",
+          "params": [
+            {
+              "name": "profile",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        }
+      ],
+      "name": "Localization",
+      "properties": [
+        {
+          "doc": "Current canonical language identifier.",
+          "name": "locale",
+          "type": "string",
+          "writable": false
+        },
+        {
+          "doc": "Resolved fallback font aliases for current and fallback locale.",
+          "name": "fonts",
+          "type": "string[]",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "Persistent client-isolated rigid bodies, CCD, collision queries and joints. Simulation runs in every Runtime 16 ms world step, including pure data projects. Snapshots rebuild from saved pose, velocity, forces and joint declarations; solver warm starts are not serialized.",
+      "global": "physics",
+      "methods": [
+        {
+          "doc": "Closest hit {entity,point,normal,distance} or null. Options {ignore?:Entity,groups?:{memberships,filter},sensors?:false,staticOnly?:false}; never queries another client.",
+          "name": "raycast",
+          "params": [
+            {
+              "name": "origin",
+              "type": "Vec3"
+            },
+            {
+              "name": "direction",
+              "type": "Vec3"
+            },
+            {
+              "name": "maxDistance",
+              "type": "number"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "Sweep a sphere. Returns its center at impact as point, surface normal, travel distance and a scoped entity or null.",
+          "name": "sphereCast",
+          "params": [
+            {
+              "name": "origin",
+              "type": "Vec3"
+            },
+            {
+              "name": "direction",
+              "type": "Vec3"
+            },
+            {
+              "name": "radius",
+              "type": "number"
+            },
+            {
+              "name": "maxDistance",
+              "type": "number"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "Sweep box/sphere/capsule/convex_hull. Pose {translation?:Vec3,rotation_degrees?:Vec3}; dimensions are world units. Hit point is the moving shape origin at impact.",
+          "name": "castShape",
+          "params": [
+            {
+              "name": "shape",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "pose",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "direction",
+              "type": "Vec3"
+            },
+            {
+              "name": "maxDistance",
+              "type": "number"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "All scoped bodies intersecting the supplied world-space shape; sensors are opt-in.",
+          "name": "overlapShape",
+          "params": [
+            {
+              "name": "shape",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "pose",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Entity[]"
+        },
+        {
+          "doc": "Create fixed/spherical/revolute/prismatic joint. Local anchors/frames, axes, optional limits and motor; revolute motor/limits use radians, prismatic meters. Saved with generational body identities.",
+          "name": "createJoint",
+          "params": [
+            {
+              "name": "a",
+              "type": "Entity"
+            },
+            {
+              "name": "b",
+              "type": "Entity"
+            },
+            {
+              "name": "spec",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "PhysicsJoint"
+        },
+        {
+          "doc": "Drain this client's contact/sensor/force/sleep events {kind,entity,other,force,forceMagnitude}. Bounded queue; counters report dropped events.",
+          "name": "events",
+          "params": [],
+          "returns": "Record<string, any>[]"
+        }
+      ],
+      "name": "Physics",
+      "properties": [
+        {
+          "doc": "Client gravity in world units/s².",
+          "name": "gravity",
+          "type": "Vec3",
+          "writable": true
+        },
+        {
+          "doc": "Bodies/colliders/joints, sleeping counts, stable-handle updates, shape-cache and fixed-step counters for this client.",
+          "name": "stats",
+          "type": "Record<string, any>",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "Client-scoped generational joint declaration; native solver handles remain private.",
+      "global": null,
+      "methods": [
+        {
+          "doc": "Update limits/motor/anchors while retaining the solver joint handle.",
+          "name": "setSpec",
+          "params": [
+            {
+              "name": "spec",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove this joint; stale calls fail.",
+          "name": "destroy",
+          "params": [],
+          "returns": "void"
+        }
+      ],
+      "name": "PhysicsJoint",
+      "properties": [
+        {
+          "doc": "Client-local joint id.",
+          "name": "id",
+          "type": "number",
+          "writable": false
+        },
+        {
+          "doc": "False after removal or body destruction.",
+          "name": "alive",
+          "type": "boolean",
+          "writable": false
+        },
+        {
+          "doc": "Saved joint configuration.",
+          "name": "spec",
+          "type": "Record<string, any>",
+          "writable": false
+        },
+        {
+          "doc": "First body.",
+          "name": "bodyA",
+          "type": "Entity",
+          "writable": false
+        },
+        {
+          "doc": "Second body.",
+          "name": "bodyB",
+          "type": "Entity",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "2D deformable puppets on layers whose paint is {kind:'puppet', asset} (engine rig JSON; import E-mote with `crysirror puppet-import`).",
+      "global": "puppets",
+      "methods": [
+        {
+          "doc": "Ease a parameter to value (clamped to its range) and hold it, overriding motions and physics.",
+          "name": "setParameter",
+          "params": [
+            {
+              "name": "layer",
+              "type": "number"
+            },
+            {
+              "name": "parameter",
+              "type": "string"
+            },
+            {
+              "name": "value",
+              "type": "number"
+            },
+            {
+              "name": "durationMs",
+              "type": "number | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Return a parameter to motion/physics control.",
+          "name": "releaseParameter",
+          "params": [
+            {
+              "name": "layer",
+              "type": "number"
+            },
+            {
+              "name": "parameter",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Start (or restart) a motion; options {looping?: boolean, weight?: 0..1}.",
+          "name": "play",
+          "params": [
+            {
+              "name": "layer",
+              "type": "number"
+            },
+            {
+              "name": "motion",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Fade a motion out; no name stops all motions.",
+          "name": "stop",
+          "params": [
+            {
+              "name": "layer",
+              "type": "number"
+            },
+            {
+              "name": "motion",
+              "type": "string | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Rig parameters [{id, min, max, default, value}].",
+          "name": "parameters",
+          "params": [
+            {
+              "name": "layer",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Rig motions [{id, duration_ms, looping, playing}].",
+          "name": "motions",
+          "params": [
+            {
+              "name": "layer",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Current evaluated value of a parameter.",
+          "name": "value",
+          "params": [
+            {
+              "name": "layer",
+              "type": "number"
+            },
+            {
+              "name": "parameter",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        }
+      ],
+      "name": "Puppets",
+      "properties": [
+        {
+          "doc": "Puppet layers owned by this client.",
+          "name": "count",
+          "type": "number",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "Client-scoped archive and native image formats, transform/key profiles, dependency reads and decoded image surfaces. Enable the host's arc-formats feature for migrated plugins.",
+      "global": "resources",
+      "methods": [
+        {
+          "doc": "List installed archive decoder IDs; unavailable formats are never reported as supported.",
+          "name": "formats",
+          "params": [],
+          "returns": "string[]"
+        },
+        {
+          "doc": "List installed byte transform IDs; profiles refer to keys supplied by the Rust host.",
+          "name": "transforms",
+          "params": [],
+          "returns": "string[]"
+        },
+        {
+          "doc": "List installed native image format IDs and standard image extensions; the runtime, Bitmap, text icons and renderer use this same registry.",
+          "name": "imageFormats",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Return recognized native image IDs from bounded client asset bytes. Specific wrappers outrank their generic embedded codec during automatic decode.",
+          "name": "probeImage",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            }
+          ],
+          "returns": "string[]"
+        },
+        {
+          "doc": "Decode a client image into __surface/<slot> for Bitmap/Layer/UI/3D use. Options {format?,profile?}; external bases/masks use the same scoped VFS and keys remain in the host provider.",
+          "name": "decodeImage",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Define an immutable client profile {limits?,rules:[{format,path?,transforms:[{algorithm,key_id?,parameters?,expected_size?}]}]}. No raw keys. Up to 32 profiles; default is created lazily.",
+          "name": "defineProfile",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "profile",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Probe an asset using installed formats with bounded reads. Ambiguous signatures require an explicit format when opening.",
+          "name": "probe",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Inspect archive metadata. Options {format?,profile?,offset?,limit?}; default 128 and at most 1024 entries per page.",
+          "name": "list",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Mount archive entries in this client's asset VFS, then use normal bitmap, audio and model APIs. Options {format?,profile?}. Native paths are validated; keys and decoded bytes are not saved.",
+          "name": "mount",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "mountPoint",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Record<string, any>"
+        }
+      ],
+      "name": "Resources",
+      "properties": []
+    },
+    {
+      "doc": "Whole-runtime snapshots (world, layers, UI, clocks, every VM) in the client's save mount.",
+      "global": "save",
+      "methods": [
+        {
+          "doc": "Write a validated snapshot; returns its size in bytes.",
+          "name": "save",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Transactionally restore a snapshot (all-or-nothing). Entity objects from before are revalidated by generation.",
+          "name": "load",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Whether a snapshot file exists.",
+          "name": "exists",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "boolean"
+        }
+      ],
+      "name": "Save",
+      "properties": []
+    },
+    {
+      "doc": "CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed.",
+      "global": "text",
+      "methods": [
+        {
+          "doc": "Shape and rasterize rich text; returns __surface path for a layer. Optional typewriter rate advances with App frames.",
+          "name": "draw",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "markup",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Read content/options/reveal state for explicit persistence.",
+          "name": "state",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Rebuild saved markup/options and restore reveal clock. Pending event queues are not replayed.",
+          "name": "restore",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "state",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Pause/resume this block's reveal clock.",
+          "name": "pause",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "paused",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Reveal remaining text and emit marker/finished events.",
+          "name": "finish",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Drain grapheme, authored marker and finished events.",
+          "name": "drainEvents",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Remove block and release its dynamic surface.",
+          "name": "remove",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        }
+      ],
+      "name": "Text",
+      "properties": []
+    },
+    {
+      "doc": "Retained widgets (panel/label/button/toggle/slider) with focus, capture and modal routing.",
+      "global": "ui",
+      "methods": [
+        {
+          "doc": "Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}.",
+          "name": "put",
+          "params": [
+            {
+              "name": "widget",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove a widget and its children.",
+          "name": "remove",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Show/hide.",
+          "name": "setVisible",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "visible",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Enable/disable input.",
+          "name": "setEnabled",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "enabled",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Toggle/slider value.",
+          "name": "setValue",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "value",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Label/button text and font alias.",
+          "name": "setText",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "text",
+              "type": "string"
+            },
+            {
+              "name": "font",
+              "type": "string | null"
+            }
+          ],
+          "returns": "void"
+        }
+      ],
+      "name": "Ui",
+      "properties": [
+        {
+          "doc": "Events produced by the last UI tick: {client, id, kind, value}.",
+          "name": "events",
+          "type": "Record<string, any>[]",
+          "writable": false
+        },
+        {
+          "doc": "Focused widget or null.",
+          "name": "focus",
+          "type": "any",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "doc": "The shared dynamic 3D world, scoped to this App's client.",
+      "global": "world",
+      "methods": [
+        {
+          "doc": "Spawn {name, parent?, position?, rotation?, scale?, geometry?: 'cube'|{vertices,indices}, color?, visible?, velocity?}.",
+          "name": "spawn",
+          "params": [
+            {
+              "name": "spec",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Entity"
+        },
+        {
+          "doc": "First entity with this name.",
+          "name": "find",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "Entity | null"
+        },
+        {
+          "doc": "All entities of this client.",
+          "name": "entities",
+          "params": [],
+          "returns": "Entity[]"
+        },
+        {
+          "doc": "Import a glTF/GLB asset (Blender export) as entities; returns {roots, report}. options: {parent?, prefix?, pbr?: true for textured PBR materials, asScene?: true for one animated/skinned entity}.",
+          "name": "importModel",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Camera {eye, target, up?, fov?, near?, far?} (degrees, world units).",
+          "name": "setCamera",
+          "params": [
+            {
+              "name": "camera",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Select the PBR renderer: {hdr?, intensity?, rotation_degrees?, exposure?, tonemap?: 'pbr_neutral'|'aces'|'none', show_sky?, bloom?, sun?: {direction, color, intensity, shadows}}.",
+          "name": "setEnvironment",
+          "params": [
+            {
+              "name": "environment",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Pause/resume this client's world simulation.",
+          "name": "pause",
+          "params": [
+            {
+              "name": "paused",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Ground under a body's front and back (along yaw, +Z forward): {height (mean ground y), pitch (degrees, nose up positive), normal, front, back} or null when neither end has ground within maxDrop below position.",
+          "name": "groundPose",
+          "params": [
+            {
+              "name": "position",
+              "type": "Vec3"
+            },
+            {
+              "name": "yawDegrees",
+              "type": "number"
+            },
+            {
+              "name": "halfLength",
+              "type": "number"
+            },
+            {
+              "name": "maxDrop",
+              "type": "number"
+            },
+            {
+              "name": "ignore",
+              "type": "Entity | null"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Sweep a sphere: {entity, point (sphere centre at impact), normal, distance} or null. Use for cameras and probes that must not clip into geometry.",
+          "name": "sphereCast",
+          "params": [
+            {
+              "name": "origin",
+              "type": "Vec3"
+            },
+            {
+              "name": "direction",
+              "type": "Vec3"
+            },
+            {
+              "name": "radius",
+              "type": "number"
+            },
+            {
+              "name": "maxDistance",
+              "type": "number"
+            },
+            {
+              "name": "ignore",
+              "type": "Entity | null"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Closest collider hit {entity, point, normal, distance} or null.",
+          "name": "raycast",
+          "params": [
+            {
+              "name": "origin",
+              "type": "Vec3"
+            },
+            {
+              "name": "direction",
+              "type": "Vec3"
+            },
+            {
+              "name": "maxDistance",
+              "type": "number"
+            },
+            {
+              "name": "ignore",
+              "type": "Entity | null"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Define a behaviour tree: nodes {kind: selector|sequence|invert|cooldown|check|has_tag|near|wait|move_to|face|ability|set|perceive|succeed|fail, ...}.",
+          "name": "defineBehaviorTree",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "root",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Bake the navigation grid from level collision {min, max, cell?, agent_radius?, agent_height?, max_step?, max_slope?}; returns {width, height, walkable}.",
+          "name": "buildNavigation",
+          "params": [
+            {
+              "name": "settings",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Register a streaming volume {source, center, load_radius, unload_radius, transform?, pbr?, collide?} (null removes and unloads).",
+          "name": "streamLevel",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "level",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Start a level sequence {duration_ms, looping?, speed?, camera?:{keys:[{time_ms, eye, target, fov_y_degrees?}], interpolation?, shake?}, tracks:[{entity, property:'translation'|'rotation'|'scale'|'light_intensity'|'light_color'|'light_range'|'visible', keys:[{time_ms, value:[..]}], interpolation?:'linear'|'step'|'smooth'|'spline', noise?:{amplitude, frequency_hz, seed?}}], events:[{time_ms, name}]}.",
+          "name": "playSequence",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "sequence",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "startMs",
+              "type": "number | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove a sequence; animated properties keep their last values.",
+          "name": "stopSequence",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "{time_ms, playing, loops, duration_ms} or null.",
+          "name": "sequenceStatus",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "Event names fired since the last call (consumed).",
+          "name": "sequenceEvents",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "string[]"
+        },
+        {
+          "doc": "Play an OMV/Ogg-Theora/MPEG-1/2/WMV asset from the start; options {loop?: false, paused?: false}. Returns the surface path to use as a layer image or material texture.",
+          "name": "playVideo",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Pause a video (the frame stays).",
+          "name": "pauseVideo",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Resume a paused video.",
+          "name": "resumeVideo",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Set the playback position in milliseconds.",
+          "name": "seekVideo",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "ms",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove a video and its decoder.",
+          "name": "stopVideo",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "{asset, time, playing, loop, surface, width?, height?, ended?} or null.",
+          "name": "video",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Smoothed navigation path or null.",
+          "name": "findPath",
+          "params": [
+            {
+              "name": "from",
+              "type": "Vec3"
+            },
+            {
+              "name": "to",
+              "type": "Vec3"
+            }
+          ],
+          "returns": "Vec3[] | null"
+        },
+        {
+          "doc": "Merge animation definitions {machines: {Name: {entry, states, transitions, parameters}}, montages: {Name: {clip, length, sections, notifies}}}.",
+          "name": "defineAnimation",
+          "params": [
+            {
+              "name": "defs",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Merge gameplay definitions {effects: {Name: EffectDef}, abilities: {Name: AbilityDef}}.",
+          "name": "defineGameplay",
+          "params": [
+            {
+              "name": "defs",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "glTF summary {clips:[{name,duration}], nodes, skins, meshes, bounds:{min,max} (rest pose, model units) or null} without spawning.",
+          "name": "modelInfo",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>"
+        }
+      ],
+      "name": "World",
+      "properties": [
+        {
+          "doc": "Entities owned by this client.",
+          "name": "count",
+          "type": "number",
+          "writable": false
+        },
+        {
+          "doc": "Committed world mutation revision.",
+          "name": "revision",
+          "type": "number",
+          "writable": false
+        },
+        {
+          "doc": "Current camera or null (project camera applies).",
+          "name": "camera",
+          "type": "Record<string, any> | null",
+          "writable": false
+        },
+        {
+          "doc": "Current PBR environment or null (legacy renderer).",
+          "name": "environment",
+          "type": "Record<string, any> | null",
+          "writable": false
+        }
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "api": "World.spawn",
+      "op": "spawn",
+      "system": "world"
+    },
+    {
+      "api": "Entity.destroy",
+      "op": "despawn",
+      "system": "world"
+    },
+    {
+      "api": "Entity.position",
+      "op": "set_transform",
+      "system": "world"
+    },
+    {
+      "api": "Entity.velocity",
+      "op": "set_velocity",
+      "system": "world"
+    },
+    {
+      "api": "Entity.angularVelocity",
+      "op": "set_angular_velocity",
+      "system": "world"
+    },
+    {
+      "api": "Physics.gravity",
+      "op": "set_physics",
+      "system": "world"
+    },
+    {
+      "api": "Entity.setParent",
+      "op": "set_parent",
+      "system": "world"
+    },
+    {
+      "api": "Entity.visible",
+      "op": "set_visible",
+      "system": "world"
+    },
+    {
+      "api": "Entity.tween",
+      "op": "tween",
+      "system": "world"
+    },
+    {
+      "api": "World.pause",
+      "op": "pause",
+      "system": "world"
+    },
+    {
+      "api": "World.setCamera",
+      "op": "set_camera",
+      "system": "world"
+    },
+    {
+      "api": "World.setEnvironment",
+      "op": "set_environment",
+      "system": "world"
+    },
+    {
+      "api": "Entity.setMaterial",
+      "op": "set_material",
+      "system": "world"
+    },
+    {
+      "api": "Entity.play",
+      "op": "set_animation",
+      "system": "world"
+    },
+    {
+      "api": "Entity.setCollider",
+      "op": "set_collider",
+      "system": "world"
+    },
+    {
+      "api": "Entity.applyEffect",
+      "op": "set_gameplay",
+      "system": "world"
+    },
+    {
+      "api": "World.defineGameplay",
+      "op": "define_gameplay",
+      "system": "world"
+    },
+    {
+      "api": "World.defineAnimation",
+      "op": "define_animation",
+      "system": "world"
+    },
+    {
+      "api": "World.defineBehaviorTree",
+      "op": "define_ai",
+      "system": "world"
+    },
+    {
+      "api": "Entity.runBehaviorTree",
+      "op": "set_ai",
+      "system": "world"
+    },
+    {
+      "api": "Entity.setParticles",
+      "op": "set_particles",
+      "system": "world"
+    },
+    {
+      "api": "Entity.setLight",
+      "op": "set_light",
+      "system": "world"
+    },
+    {
+      "api": "Entity.setReflectionProbe",
+      "op": "set_reflection_probe",
+      "system": "world"
+    },
+    {
+      "api": "Entity.setIrradianceVolume",
+      "op": "set_irradiance_volume",
+      "system": "world"
+    },
+    {
+      "api": "World.streamLevel",
+      "op": "set_streaming",
+      "system": "world"
+    },
+    {
+      "api": "World.playVideo",
+      "op": "set_video",
+      "system": "world"
+    },
+    {
+      "api": "World.playSequence",
+      "op": "play_sequence",
+      "system": "world"
+    },
+    {
+      "api": "World.stopSequence",
+      "op": "stop_sequence",
+      "system": "world"
+    },
+    {
+      "api": "Layers.put",
+      "op": "put",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.remove",
+      "op": "remove",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.setTransform",
+      "op": "set_transform",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.setVisible",
+      "op": "set_visible",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.setOpacity",
+      "op": "set_opacity",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.setOrder",
+      "op": "set_order",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.setClip",
+      "op": "set_clip",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.setFilter",
+      "op": "set_filter",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.transition",
+      "op": "transition",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.endTransition",
+      "op": "end_transition",
+      "system": "layer"
+    },
+    {
+      "api": "Puppets.setParameter",
+      "op": "puppet",
+      "system": "layer"
+    },
+    {
+      "api": "Ui.put",
+      "op": "put",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.remove",
+      "op": "remove",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.setVisible",
+      "op": "set_visible",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.setEnabled",
+      "op": "set_enabled",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.setValue",
+      "op": "set_value",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.setText",
+      "op": "set_text",
+      "system": "ui"
+    },
+    {
+      "api": "Audio.play",
+      "op": "play_audio",
+      "system": "service"
+    },
+    {
+      "api": "Audio.stop",
+      "op": "stop_audio",
+      "system": "service"
+    },
+    {
+      "api": "Save.save",
+      "op": "snapshot",
+      "system": "runtime"
+    },
+    {
+      "api": "Save.load",
+      "op": "restore",
+      "system": "runtime"
+    }
+  ],
+  "data": [
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Equirectangular Radiance `.hdr` asset for image-based lighting and the sky. `None` uses a procedural gradient sky.",
+          "name": "hdr",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": 1.0,
+          "doc": "Multiplier of the environment light (sky, IBL, GI fallback).",
+          "name": "intensity",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Rotation of the environment around +Y, degrees.",
+          "name": "rotation_degrees",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Exposure in EV stops added before tonemapping.",
+          "name": "exposure",
+          "rust_type": "f32"
+        },
+        {
+          "default": "pbr_neutral",
+          "doc": "HDR to display mapping.",
+          "name": "tonemap",
+          "rust_type": "Tonemap"
+        },
+        {
+          "default": true,
+          "doc": "Draw the environment as the background (false: black).",
+          "name": "show_sky",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Directional sun light; `null` for none.",
+          "name": "sun",
+          "rust_type": "Option<Sun>"
+        },
+        {
+          "default": 0.04,
+          "doc": "Bloom mix strength (0 disables).",
+          "name": "bloom",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Screen-space ambient occlusion strength (0 disables).",
+          "name": "ambient_occlusion",
+          "rust_type": "f32"
+        },
+        {
+          "default": true,
+          "doc": "Temporal anti-aliasing (jittered projection + reprojection).",
+          "name": "temporal_aa",
+          "rust_type": "bool"
+        },
+        {
+          "default": 60.0,
+          "doc": "Maximum distance covered by the cascaded sun shadows.",
+          "name": "shadow_distance",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Exponential height fog (ADR 0019).",
+          "name": "fog",
+          "rust_type": "Option<Fog>"
+        },
+        {
+          "default": null,
+          "doc": "Eye adaptation (ADR 0019); `null` keeps a fixed exposure.",
+          "name": "auto_exposure",
+          "rust_type": "Option<AutoExposure>"
+        },
+        {
+          "default": null,
+          "doc": "Screen-space reflections (ADR 0023).",
+          "name": "reflections",
+          "rust_type": "Option<ScreenSpaceReflections>"
+        },
+        {
+          "default": null,
+          "doc": "Cluster-LOD virtualized geometry (ADR 0026).",
+          "name": "geometry_lod",
+          "rust_type": "Option<GeometryLod>"
+        },
+        {
+          "default": null,
+          "doc": "Virtual shadow maps for the sun, replacing cascades (ADR 0027).",
+          "name": "virtual_shadows",
+          "rust_type": "Option<VirtualShadows>"
+        }
+      ],
+      "name": "Environment",
+      "used_by": "`World.setEnvironment`, `world.set_environment`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": [
+            -0.4,
+            -1.0,
+            -0.3
+          ],
+          "doc": "Direction the light travels (world space).",
+          "name": "direction",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "doc": "Linear RGB color.",
+          "name": "color",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 3.0,
+          "doc": "Illuminance (lux-like renderer units).",
+          "name": "intensity",
+          "rust_type": "f32"
+        },
+        {
+          "default": true,
+          "doc": "Cast shadows (cascades or virtual shadow maps).",
+          "name": "shadows",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "Sun",
+      "used_by": "`Environment.sun`"
+    },
+    {
+      "doc": "Exponential height fog (the UE \"ExponentialHeightFog\" model): density decays with height above `base_height`; the line integral along each view ray gives the opacity, with directional inscattering toward the sun.",
+      "fields": [
+        {
+          "default": [
+            0.45,
+            0.5,
+            0.6
+          ],
+          "doc": "Linear inscattered color.",
+          "name": "color",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 0.02,
+          "doc": "Extinction per world unit at `base_height`.",
+          "name": "density",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.2,
+          "doc": "Exponential decay per world unit of height (0 = uniform fog).",
+          "name": "height_falloff",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "World height where `density` applies.",
+          "name": "base_height",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Distance from the camera before fog starts.",
+          "name": "start_distance",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Opacity cap (keeps distant geometry and sky partly visible).",
+          "name": "max_opacity",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Extra inscattering toward the sun (color × sun color × strength).",
+          "name": "sun_scattering",
+          "rust_type": "f32"
+        },
+        {
+          "default": 8.0,
+          "doc": "Sharpness of the inscattering lobe toward the sun (1..256).",
+          "name": "sun_exponent",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "Fog",
+      "used_by": "`Environment.fog`"
+    },
+    {
+      "doc": "Eye adaptation: exposure maps the metered average luminance to middle gray (0.18), clamped to a luminance range and adapted over time.",
+      "fields": [
+        {
+          "default": -8.0,
+          "doc": "Darkest/brightest average luminance (log2) the camera adapts to.",
+          "name": "min_log2",
+          "rust_type": "f32"
+        },
+        {
+          "default": 8.0,
+          "doc": "Brightest average luminance (log2) the camera adapts to.",
+          "name": "max_log2",
+          "rust_type": "f32"
+        },
+        {
+          "default": 3.0,
+          "doc": "Adaptation rates (1/s) toward brighter and darker scenes.",
+          "name": "speed_up",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Adaptation rate (1/s) toward darker scenes.",
+          "name": "speed_down",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Exposure compensation in stops, added to `Environment.exposure`.",
+          "name": "compensation",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "AutoExposure",
+      "used_by": "`Environment.auto_exposure`"
+    },
+    {
+      "doc": "Screen-space reflections (ADR 0023): rays marched against the depth prepass, radiance reprojected from the previous HDR frame, blended over the prefiltered environment specular by hit confidence and roughness.",
+      "fields": [
+        {
+          "default": 1.0,
+          "doc": "Strength of the screen-space contribution (0..4).",
+          "name": "intensity",
+          "rust_type": "f32"
+        },
+        {
+          "default": 30.0,
+          "doc": "World-space ray length (m).",
+          "name": "max_distance",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.3,
+          "doc": "Depth tolerance (m) for counting a ray as behind a surface.",
+          "name": "thickness",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.6,
+          "doc": "Roughness at which reflections have fully faded to the environment.",
+          "name": "max_roughness",
+          "rust_type": "f32"
+        },
+        {
+          "default": 48,
+          "doc": "Linear march steps (refined by a binary search).",
+          "name": "steps",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "ScreenSpaceReflections",
+      "used_by": "`Environment.reflections` (ADR 0023)"
+    },
+    {
+      "doc": "Cluster-LOD virtualized geometry (ADR 0026): static model primitives get a crack-free cluster DAG at load and draw the cut whose geometric error projects to at most `pixel_error` pixels.",
+      "fields": [
+        {
+          "default": 1.0,
+          "doc": "Allowed projected geometric error in pixels (0 = full detail).",
+          "name": "pixel_error",
+          "rust_type": "f32"
+        },
+        {
+          "default": true,
+          "doc": "Select and frustum-cull clusters on the GPU (compute + indirect draws); false keeps the CPU reference path.",
+          "name": "gpu",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "GeometryLod",
+      "used_by": "`Environment.geometry_lod` (ADR 0026)"
+    },
+    {
+      "doc": "Virtual shadow maps for the sun (ADR 0027): camera-centred clipmap of 8192² virtual levels; level 0 has `texel_size` meters per shadow texel. Replaces the cascades when set.",
+      "fields": [
+        {
+          "default": 0.02,
+          "doc": "Meters per shadow texel at level 0.",
+          "name": "texel_size",
+          "rust_type": "f32"
+        },
+        {
+          "default": 10,
+          "doc": "Clipmap levels (1..16); level l has texel `texel_size·2^l`.",
+          "name": "levels",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "VirtualShadows",
+      "used_by": "`Environment.virtual_shadows` (ADR 0027)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Khronos PBR Neutral: hue-preserving, matches glTF sample viewers.",
+          "name": "pbr_neutral",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "ACES filmic approximation (Narkowicz).",
+          "name": "aces",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Clamp only, for debugging linear output.",
+          "name": "none",
+          "rust_type": ""
+        }
+      ],
+      "name": "Tonemap",
+      "used_by": "`Environment.tonemap`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "Client-local entity id.",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": "e",
+          "doc": "Display/debug name.",
+          "name": "name",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Parent entity id (same client); transforms are relative to it.",
+          "name": "parent",
+          "rust_type": "Option<u32>"
+        },
+        {
+          "default": {
+            "rotation_degrees": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "doc": "Local transform.",
+          "name": "transform",
+          "rust_type": "Transform"
+        },
+        {
+          "default": null,
+          "doc": "Cube, triangles, model or scene geometry; `null` for an empty node.",
+          "name": "geometry",
+          "rust_type": "Option<Geometry>"
+        },
+        {
+          "default": null,
+          "doc": "Material override of the geometry's own materials.",
+          "name": "material",
+          "rust_type": "Option<crate::material::MaterialSpec>"
+        },
+        {
+          "default": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "doc": "RGBA8 tint for simple geometry.",
+          "name": "color",
+          "rust_type": "[u8; 4]"
+        },
+        {
+          "default": true,
+          "doc": "Inherited visibility.",
+          "name": "visible",
+          "rust_type": "bool"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Linear velocity (units/s) integrated on the fixed step.",
+          "name": "velocity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Angular velocity (degrees/s per axis).",
+          "name": "angular_velocity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [],
+          "doc": "Active property tweens.",
+          "name": "tweens",
+          "rust_type": "Vec<Tween>"
+        },
+        {
+          "default": null,
+          "doc": "Skeletal animation state for `Geometry::Scene` entities.",
+          "name": "animation",
+          "rust_type": "Option<crate::components::AnimationState>"
+        },
+        {
+          "default": null,
+          "doc": "Physics collider/body (ADR 0012).",
+          "name": "collider",
+          "rust_type": "Option<crate::components::ColliderSpec>"
+        },
+        {
+          "default": null,
+          "doc": "Attributes, active effects, tags and abilities (ADR 0014).",
+          "name": "gameplay",
+          "rust_type": "Option<crate::gameplay::GameplayState>"
+        },
+        {
+          "default": null,
+          "doc": "Behaviour tree instance and blackboard (ADR 0014).",
+          "name": "ai",
+          "rust_type": "Option<crate::ai::AiState>"
+        },
+        {
+          "default": null,
+          "doc": "Particle emitter (visual; ADR 0014).",
+          "name": "particles",
+          "rust_type": "Option<crate::components::EmitterSpec>"
+        },
+        {
+          "default": null,
+          "doc": "Local light (ADR 0018).",
+          "name": "light",
+          "rust_type": "Option<crate::components::LightSpec>"
+        },
+        {
+          "default": null,
+          "doc": "Box reflection capture (ADR 0024).",
+          "name": "reflection_probe",
+          "rust_type": "Option<crate::components::ReflectionProbeSpec>"
+        },
+        {
+          "default": null,
+          "doc": "Dynamic diffuse GI volume (ADR 0028).",
+          "name": "irradiance_volume",
+          "rust_type": "Option<crate::components::IrradianceVolumeSpec>"
+        }
+      ],
+      "name": "EntitySpec",
+      "used_by": "`World.spawn`, `ClientSpec.systems.entities`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Position (world units).",
+          "name": "translation",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Euler rotation, XYZ order, degrees.",
+          "name": "rotation_degrees",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "doc": "Per-axis scale (non-zero).",
+          "name": "scale",
+          "rust_type": "[f32; 3]"
+        }
+      ],
+      "name": "Transform",
+      "used_by": "`EntitySpec.transform`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "doc": "Linear RGBA multiplier of the base color.",
+          "name": "base_color_factor",
+          "rust_type": "[f32; 4]"
+        },
+        {
+          "default": 0.0,
+          "doc": "Metalness 0..1.",
+          "name": "metallic_factor",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.6,
+          "doc": "Perceptual roughness 0..1.",
+          "name": "roughness_factor",
+          "rust_type": "f32"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Linear emissive color.",
+          "name": "emissive_factor",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 1.0,
+          "doc": "Emissive multiplier (KHR_materials_emissive_strength).",
+          "name": "emissive_strength",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Tangent-space normal XY scale.",
+          "name": "normal_scale",
+          "rust_type": "f32"
+        },
+        {
+          "default": "rgb",
+          "doc": "How the normal texture stores its vector.",
+          "name": "normal_encoding",
+          "rust_type": "NormalEncoding"
+        },
+        {
+          "default": 1.0,
+          "doc": "Ambient occlusion texture strength 0..1.",
+          "name": "occlusion_strength",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Dielectric specular strength (KHR_materials_specular `specularFactor`).",
+          "name": "specular_factor",
+          "rust_type": "f32"
+        },
+        {
+          "default": "opaque",
+          "doc": "Opaque, mask (cutout) or one of the transparent blend modes.",
+          "name": "alpha_mode",
+          "rust_type": "AlphaMode"
+        },
+        {
+          "default": 0.5,
+          "doc": "Alpha threshold for `mask`.",
+          "name": "alpha_cutoff",
+          "rust_type": "f32"
+        },
+        {
+          "default": false,
+          "doc": "Disable back-face culling.",
+          "name": "double_sided",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "Skip lighting; output base color.",
+          "name": "unlit",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "sRGB base color (+ alpha) texture asset.",
+          "name": "base_color_texture",
+          "rust_type": "Option<T>"
+        },
+        {
+          "default": null,
+          "doc": "glTF packed texture: roughness in G, metalness in B.",
+          "name": "metallic_roughness_texture",
+          "rust_type": "Option<T>"
+        },
+        {
+          "default": null,
+          "doc": "Tangent-space normal texture asset.",
+          "name": "normal_texture",
+          "rust_type": "Option<T>"
+        },
+        {
+          "default": null,
+          "doc": "Ambient occlusion texture (R).",
+          "name": "occlusion_texture",
+          "rust_type": "Option<T>"
+        },
+        {
+          "default": null,
+          "doc": "sRGB emissive texture asset.",
+          "name": "emissive_texture",
+          "rust_type": "Option<T>"
+        },
+        {
+          "default": null,
+          "doc": "Optional independent opacity texture, multiplied into base-color alpha.",
+          "name": "opacity_texture",
+          "rust_type": "Option<T>"
+        },
+        {
+          "default": false,
+          "doc": "Select alpha rather than red from the independent opacity texture.",
+          "name": "opacity_from_alpha",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Linear-light specular color multiplier of dielectric F0, sRGB encoded (KHR_materials_specular `specularColorTexture`); grayscale maps work.",
+          "name": "specular_texture",
+          "rust_type": "Option<T>"
+        },
+        {
+          "default": [
+            1.0,
+            1.0
+          ],
+          "doc": "Shared UV0 scale/offset, before all texture lookups (not a shader program).",
+          "name": "uv_scale",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0
+          ],
+          "doc": "UV0 offset after `uv_scale`.",
+          "name": "uv_offset",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": 0.0,
+          "doc": "Soft intersection distance in world units against opaque scene depth.",
+          "name": "depth_fade",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Built-in shader effect or custom WGSL surface hook (ADR 0016).",
+          "name": "effect",
+          "rust_type": "Option<crate::effect::ShaderEffect>"
+        }
+      ],
+      "name": "Material",
+      "used_by": "`EntitySpec.material`, `Entity.setMaterial`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Alpha ignored.",
+          "name": "opaque",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Cutout at `alpha_cutoff`, drawn opaque.",
+          "name": "mask",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Sorted alpha blending.",
+          "name": "blend",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Sorted additive blending.",
+          "name": "additive",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Sorted premultiplied-alpha blending.",
+          "name": "premultiplied",
+          "rust_type": ""
+        }
+      ],
+      "name": "AlphaMode",
+      "used_by": "`Material.alpha_mode`"
+    },
+    {
+      "doc": "How a tangent-space normal texture stores its vector.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "XYZ in RGB (glTF).",
+          "name": "rgb",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "XY in RG, Z reconstructed (BC5 / two-channel maps).",
+          "name": "rg",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "X in alpha, Y in green, Z reconstructed (DXT5nm).",
+          "name": "ag",
+          "rust_type": ""
+        }
+      ],
+      "name": "NormalEncoding",
+      "used_by": "`Material.normal_encoding`"
+    },
+    {
+      "doc": "A local light on an entity (ADR 0018). Position and direction come from the entity's world transform; spot and rect lights emit along local -Z.",
+      "fields": [
+        {
+          "default": {
+            "kind": "point"
+          },
+          "doc": "Point, spot, rect, directional volume or ambient volume.",
+          "name": "shape",
+          "rust_type": "LightShape"
+        },
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "doc": "Linear RGB color.",
+          "name": "color",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 10.0,
+          "doc": "Brightness in `units` (illuminance for directional/ambient).",
+          "name": "intensity",
+          "rust_type": "f32"
+        },
+        {
+          "default": "candela",
+          "doc": "Photometric unit of `intensity`.",
+          "name": "units",
+          "rust_type": "LightUnits"
+        },
+        {
+          "default": {
+            "kind": "inverse_square"
+          },
+          "doc": "Distance attenuation inside `range`.",
+          "name": "falloff",
+          "rust_type": "Falloff"
+        },
+        {
+          "default": 10.0,
+          "doc": "Attenuation radius (world units); influence ends smoothly here.",
+          "name": "range",
+          "rust_type": "f32"
+        },
+        {
+          "default": false,
+          "doc": "Cast shadows (budgeted by the renderer).",
+          "name": "shadows",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "Turn the light off without removing it.",
+          "name": "enabled",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "LightSpec",
+      "used_by": "`EntitySpec.light`, `Entity.setLight` (ADR 0018)"
+    },
+    {
+      "doc": "Local light shape. Point and spot lights are punctual; a rect light is a one-sided area emitter facing the entity's -Z (spot axis convention). Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Omnidirectional punctual light (candela).",
+          "name": "point",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Cone along local -Z with inner/outer half angles (degrees).",
+          "name": "spot",
+          "rust_type": "inner_degrees: f32, outer_degrees: f32"
+        },
+        {
+          "default": null,
+          "doc": "One-sided area light of `size` [w, h], facing local -Z.",
+          "name": "rect",
+          "rust_type": "size: [f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Parallel light along local -Z confined to the range sphere (a local \"light volume\"); intensity is illuminance (lux), not candela.",
+          "name": "directional",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Uniform diffuse irradiance inside the range sphere (an ambient volume); intensity is illuminance (lux).",
+          "name": "ambient",
+          "rust_type": ""
+        }
+      ],
+      "name": "LightShape",
+      "used_by": "`LightSpec.shape`"
+    },
+    {
+      "doc": "Photometric unit of [`LightSpec::intensity`].",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Luminous intensity (lm/sr), the renderer's native unit.",
+          "name": "candela",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Total luminous flux. Point and spot lights use lm / 4π (as UE does, so narrowing a cone does not brighten it); rect lights use lm / π.",
+          "name": "lumens",
+          "rust_type": ""
+        }
+      ],
+      "name": "LightUnits",
+      "used_by": "`LightSpec.units`"
+    },
+    {
+      "doc": "Distance attenuation inside [`LightSpec::range`]. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Physical 1/d² with a smooth window ending at the range.",
+          "name": "inverse_square",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "`(1 − d²/r²)^exponent` with no 1/d² term (UE's non-inverse-squared lights, and artist-tuned lights of older engines). Intensity is then the illuminance at the light's position.",
+          "name": "exponent",
+          "rust_type": "exponent: f32"
+        }
+      ],
+      "name": "Falloff",
+      "used_by": "`LightSpec.falloff`"
+    },
+    {
+      "doc": "Box-projected reflection capture (ADR 0024). The renderer captures the scene around the entity's world position into a prefiltered radiance map and uses it, parallax-corrected against the box, for glossy reflections of points inside the box (UE-style box reflection capture).",
+      "fields": [
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "doc": "Half size of the influence/projection box (world axes, meters).",
+          "name": "extent",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 1.0,
+          "doc": "Multiplier of the captured radiance (0..16).",
+          "name": "intensity",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.5,
+          "doc": "Distance inside the box faces over which the probe fades in.",
+          "name": "blend_distance",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0,
+          "doc": "Bump to request a recapture of an unchanged probe (e.g. after moving lights).",
+          "name": "revision",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Authored equirect Radiance `.hdr` radiance instead of an engine capture (e.g. converted legacy cubemaps; ADR 0025).",
+          "name": "source",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": true,
+          "doc": "Box-projected (true) or infinitely distant (false) reflections.",
+          "name": "parallax",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "ReflectionProbeSpec",
+      "used_by": "`EntitySpec.reflection_probe`, `Entity.setReflectionProbe` (ADR 0024/0025)"
+    },
+    {
+      "doc": "Dynamic diffuse global illumination volume (ADR 0028): a grid of irradiance probes centred on the entity, refreshed a few per frame by rendering the lit scene around each probe. Each refresh sees the previous result, so bounces accumulate over updates.",
+      "fields": [
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "doc": "Half size of the volume (world axes, meters).",
+          "name": "extent",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            8,
+            4,
+            8
+          ],
+          "doc": "Probes per axis (≥ 2 each, ≤ 4096 in total).",
+          "name": "counts",
+          "rust_type": "[u32; 3]"
+        },
+        {
+          "default": 1.0,
+          "doc": "Multiplier of the indirect diffuse light (0..16).",
+          "name": "intensity",
+          "rust_type": "f32"
+        },
+        {
+          "default": 8,
+          "doc": "Probes refreshed per frame, round-robin (1..256); each costs six capture renders.",
+          "name": "probes_per_frame",
+          "rust_type": "u32"
+        },
+        {
+          "default": 0,
+          "doc": "Probes refreshed per frame once every probe has been refreshed three times and no light, static object, material override, sun or environment changed (0 = stop refreshing until something changes).",
+          "name": "idle_probes_per_frame",
+          "rust_type": "u32"
+        },
+        {
+          "default": true,
+          "doc": "Chebyshev visibility from per-probe distance moments against light leaking through walls (false: interpolate without occlusion).",
+          "name": "visibility",
+          "rust_type": "bool"
+        },
+        {
+          "default": 0,
+          "doc": "Bump to restart accumulation.",
+          "name": "revision",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "IrradianceVolumeSpec",
+      "used_by": "`EntitySpec.irradiance_volume`, `Entity.setIrradianceVolume` (ADR 0028)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": {
+            "kind": "sphere",
+            "radius": 1.0
+          },
+          "doc": "Collision shape.",
+          "name": "shape",
+          "rust_type": "ColliderShape"
+        },
+        {
+          "default": "static",
+          "doc": "Static, dynamic, kinematic or character body.",
+          "name": "body",
+          "rust_type": "BodyKind"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Collider center relative to the entity origin.",
+          "name": "offset",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Optional total body mass in kilograms. Otherwise derived from density.",
+          "name": "mass",
+          "rust_type": "Option<f32>"
+        },
+        {
+          "default": 1.0,
+          "doc": "Collider density in kg/m³ when total mass is not specified.",
+          "name": "density",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.5,
+          "doc": "Nonnegative Coulomb friction coefficient. Default 0.5.",
+          "name": "friction",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Restitution coefficient in 0..1.",
+          "name": "restitution",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Multiplier of client gravity. Default 1.",
+          "name": "gravity_scale",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Nonnegative linear drag rate in 1/s.",
+          "name": "linear_damping",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Nonnegative angular drag rate in 1/s.",
+          "name": "angular_damping",
+          "rust_type": "f32"
+        },
+        {
+          "default": false,
+          "doc": "Enable continuous collision detection for this body.",
+          "name": "ccd",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "Permit automatic and explicit sleeping.",
+          "name": "can_sleep",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "Enable this rigid body and its collider.",
+          "name": "enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "Detect overlaps/events without a solid contact response.",
+          "name": "sensor",
+          "rust_type": "bool"
+        },
+        {
+          "default": {
+            "filter": 4294967295,
+            "memberships": 4294967295
+          },
+          "doc": "Collision/query membership and filter masks; all bits by default.",
+          "name": "groups",
+          "rust_type": "CollisionGroups"
+        },
+        {
+          "default": [
+            false,
+            false,
+            false
+          ],
+          "doc": "Lock world X/Y/Z translation axes.",
+          "name": "locked_translation",
+          "rust_type": "[bool; 3]"
+        },
+        {
+          "default": [
+            false,
+            false,
+            false
+          ],
+          "doc": "Lock world X/Y/Z rotation axes.",
+          "name": "locked_rotation",
+          "rust_type": "[bool; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Optional minimum contact-force event magnitude in newtons.",
+          "name": "contact_force_threshold",
+          "rust_type": "Option<f32>"
+        }
+      ],
+      "name": "ColliderSpec",
+      "used_by": "`EntitySpec.collider`, `Entity.setCollider` (ADR 0012)"
+    },
+    {
+      "doc": "Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Axis-aligned box in entity space.",
+          "name": "box",
+          "rust_type": "half_extents: [f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Sphere.",
+          "name": "sphere",
+          "rust_type": "radius: f32"
+        },
+        {
+          "default": null,
+          "doc": "Y-up capsule: total height = 2 * (half_height + radius).",
+          "name": "capsule",
+          "rust_type": "radius: f32, half_height: f32"
+        },
+        {
+          "default": null,
+          "doc": "Triangle mesh of the entity's own geometry (cube, triangles, model, scene).",
+          "name": "mesh",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Convex hull of explicit entity-local points.",
+          "name": "convex_hull",
+          "rust_type": "points: Vec<[f32; 3]>"
+        }
+      ],
+      "name": "ColliderShape",
+      "used_by": "`ColliderSpec.shape`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Immovable level geometry.",
+          "name": "static",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Simulated rigid body. Physics owns its transform and velocity.",
+          "name": "dynamic",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Velocity-driven kinematic body; pushes dynamic bodies without gravity.",
+          "name": "kinematic",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Position-driven kinematic body, moved to explicit targets by physics.",
+          "name": "kinematic_position",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Kinematic capsule driven by the character controller.",
+          "name": "character",
+          "rust_type": ""
+        }
+      ],
+      "name": "BodyKind",
+      "used_by": "`ColliderSpec.body`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 4294967295,
+          "doc": "Membership bit mask, applied only inside this client's physics world.",
+          "name": "memberships",
+          "rust_type": "u32"
+        },
+        {
+          "default": 4294967295,
+          "doc": "Membership bits this collider may collide/query against.",
+          "name": "filter",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "CollisionGroups",
+      "used_by": "`ColliderSpec.groups`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Initial client-owned lighting. Installed through the same validated command path as the Rust/JS API; later clients explicitly take ownership.",
+          "name": "environment",
+          "rust_type": "Option<view::Environment>"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "entities",
+          "rust_type": "Vec<EntitySpec>"
+        },
+        {
+          "default": null,
+          "doc": "Saved native-independent rigid-body settings, forces and joints.",
+          "name": "physics",
+          "rust_type": "Option<physics::ClientPhysicsScene>"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "layers",
+          "rust_type": "Vec<LayerSpec>"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "widgets",
+          "rust_type": "Vec<WidgetSpec>"
+        }
+      ],
+      "name": "SystemsSpec",
+      "used_by": "`ClientSpec.systems`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": {},
+          "doc": "Per-client simulation declarations; each client has an isolated solver.",
+          "name": "clients",
+          "rust_type": "BTreeMap<u32, ClientPhysicsScene>"
+        }
+      ],
+      "name": "PhysicsScene",
+      "used_by": "World snapshot physics declarations (ADR 0045)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": [
+            0.0,
+            -9.81,
+            0.0
+          ],
+          "doc": "World-space gravity in meters/s². Default [0,-9.81,0].",
+          "name": "gravity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": {},
+          "doc": "Persistent forces keyed by this client's entity id.",
+          "name": "forces",
+          "rust_type": "BTreeMap<u32, BodyForces>"
+        },
+        {
+          "default": {},
+          "doc": "Saved, not-yet-consumed position-kinematic targets by entity id.",
+          "name": "kinematic_targets",
+          "rust_type": "BTreeMap<u32, KinematicTarget>"
+        },
+        {
+          "default": {},
+          "doc": "Saved joint declarations keyed by this client's joint id.",
+          "name": "joints",
+          "rust_type": "BTreeMap<u32, JointState>"
+        },
+        {
+          "default": 0,
+          "doc": "Last minted joint id; ids are not reused within the saved scene.",
+          "name": "next_joint",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "ClientPhysicsScene",
+      "used_by": "`ClientSpec.systems.physics`, `Physics.gravity`, `WorldCommand.set_physics`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "Generation of the dynamic entity receiving these forces.",
+          "name": "generation",
+          "rust_type": "u32"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Persistent force in world-space newtons, until explicitly cleared.",
+          "name": "force",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Persistent torque in world-space N·m, until explicitly cleared.",
+          "name": "torque",
+          "rust_type": "[f32; 3]"
+        }
+      ],
+      "name": "BodyForces",
+      "used_by": "`ClientPhysicsScene.forces`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "Generation of the position-driven kinematic entity.",
+          "name": "generation",
+          "rust_type": "u32"
+        },
+        {
+          "default": {
+            "rotation_degrees": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "doc": "World-space pose to reach at the next fixed step; consumed afterward.",
+          "name": "pose",
+          "rust_type": "JointFrame"
+        }
+      ],
+      "name": "KinematicTarget",
+      "used_by": "`ClientPhysicsScene.kinematic_targets`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Position in body-local meters for a joint, or world meters for a target.",
+          "name": "translation",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "XYZ Euler rotation in degrees, in the same frame as translation.",
+          "name": "rotation_degrees",
+          "rust_type": "[f32; 3]"
+        }
+      ],
+      "name": "JointFrame",
+      "used_by": "`JointSpec` local frames and `KinematicTarget.pose`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 0.0,
+          "doc": "Radians for a revolute joint; meters for a prismatic joint.",
+          "name": "target_position",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Radians/s for a revolute joint; meters/s for a prismatic joint.",
+          "name": "target_velocity",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Nonnegative motor position stiffness.",
+          "name": "stiffness",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Nonnegative motor velocity damping.",
+          "name": "damping",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1000.0,
+          "doc": "Maximum motor force (N), or torque (N·m) for a revolute joint.",
+          "name": "max_force",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "JointMotor",
+      "used_by": "`JointSpec.motor`"
+    },
+    {
+      "doc": "Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "fixed",
+          "rust_type": "local_frame1: JointFrame, local_frame2: JointFrame, contacts_enabled: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "spherical",
+          "rust_type": "local_anchor1: [f32; 3], local_anchor2: [f32; 3], contacts_enabled: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "revolute",
+          "rust_type": "local_anchor1: [f32; 3], local_anchor2: [f32; 3], axis1: [f32; 3], axis2: [f32; 3], limits: Option<[f32; 2]>, motor: Option<JointMotor>, contacts_enabled: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "prismatic",
+          "rust_type": "local_anchor1: [f32; 3], local_anchor2: [f32; 3], axis1: [f32; 3], axis2: [f32; 3], limits: Option<[f32; 2]>, motor: Option<JointMotor>, contacts_enabled: bool"
+        }
+      ],
+      "name": "JointSpec",
+      "used_by": "`Physics.createJoint`, `PhysicsJoint.setSpec`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Owning registered client; joints never connect different clients.",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Monotonic client-local joint identifier.",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Logical generation; stale saved/script handles are rejected.",
+          "name": "generation",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "JointHandle",
+      "used_by": "Client-scoped generational physics joint identity"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Generation corresponding to the logical joint handle.",
+          "name": "generation",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "First client-scoped entity/body and its generation.",
+          "name": "a",
+          "rust_type": "EntityHandle"
+        },
+        {
+          "default": null,
+          "doc": "Second distinct entity/body in the same client.",
+          "name": "b",
+          "rust_type": "EntityHandle"
+        },
+        {
+          "default": null,
+          "doc": "Saved constraint, anchors, limits and optional motor configuration.",
+          "name": "joint",
+          "rust_type": "JointSpec"
+        }
+      ],
+      "name": "JointState",
+      "used_by": "`ClientPhysicsScene.joints`"
+    },
+    {
+      "doc": "A CPU particle emitter (ADR 0014). The spec is saved; particle state is a visual simulation rebuilt by the renderer and never saved.",
+      "fields": [
+        {
+          "default": 20.0,
+          "doc": "Particles per second.",
+          "name": "rate",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0,
+          "doc": "Particles emitted once when the emitter appears.",
+          "name": "burst",
+          "rust_type": "u32"
+        },
+        {
+          "default": [
+            1.0,
+            1.5
+          ],
+          "doc": "Random lifetime range [min, max] (s).",
+          "name": "lifetime",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": [
+            1.0,
+            2.0
+          ],
+          "doc": "Random initial speed range [min, max] (units/s).",
+          "name": "speed",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "doc": "Emission axis in entity space.",
+          "name": "direction",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 0.0,
+          "doc": "Cone half angle around `direction`.",
+          "name": "spread_degrees",
+          "rust_type": "f32"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Constant acceleration (world units/s²).",
+          "name": "gravity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 0.0,
+          "doc": "Linear velocity damping (1/s).",
+          "name": "drag",
+          "rust_type": "f32"
+        },
+        {
+          "default": [
+            0.1,
+            0.02
+          ],
+          "doc": "Start/end size (world units).",
+          "name": "size",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": [
+            4.0,
+            2.0,
+            0.6,
+            1.0
+          ],
+          "doc": "Linear HDR color + alpha at birth and death.",
+          "name": "color_start",
+          "rust_type": "[f32; 4]"
+        },
+        {
+          "default": [
+            1.0,
+            0.2,
+            0.05,
+            0.0
+          ],
+          "doc": "Linear HDR color + alpha at death.",
+          "name": "color_end",
+          "rust_type": "[f32; 4]"
+        },
+        {
+          "default": 512,
+          "doc": "Maximum live particles.",
+          "name": "max",
+          "rust_type": "u32"
+        },
+        {
+          "default": true,
+          "doc": "Additive blending (false: alpha blending).",
+          "name": "additive",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "Emit new particles (live ones finish).",
+          "name": "enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": 0,
+          "doc": "Random seed, for reproducible emission.",
+          "name": "seed",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "EmitterSpec",
+      "used_by": "`EntitySpec.particles`, `Entity.setParticles` (ADR 0014)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Client-local layer id.",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Parent layer id; transform, visibility, opacity and clip are inherited.",
+          "name": "parent",
+          "rust_type": "Option<u32>"
+        },
+        {
+          "default": null,
+          "doc": "Rectangle [x, y, w, h] in canvas pixels.",
+          "name": "rect",
+          "rust_type": "[f32; 4]"
+        },
+        {
+          "default": null,
+          "doc": "Solid fill, image or text.",
+          "name": "paint",
+          "rust_type": "Paint"
+        },
+        {
+          "default": null,
+          "doc": "Pivot, anchor, rotation, scale and z.",
+          "name": "transform",
+          "rust_type": "SpriteTransform"
+        },
+        {
+          "default": null,
+          "doc": "Explicit [major, minor] draw order.",
+          "name": "order",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Clip rectangle [x, y, w, h], or `null`.",
+          "name": "clip",
+          "rust_type": "Option<[f32; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "Opacity 0..255, multiplied down the tree.",
+          "name": "opacity",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "Inherited visibility.",
+          "name": "visible",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Blend mode.",
+          "name": "blend",
+          "rust_type": "Blend"
+        },
+        {
+          "default": null,
+          "doc": "Source UV rectangle [u0, v0, u1, v1] of an image paint.",
+          "name": "uv",
+          "rust_type": "Option<[f32; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "Siglus-style 2D filter stack (ADR 0021).",
+          "name": "filter",
+          "rust_type": "Option<LayerFilter>"
+        }
+      ],
+      "name": "LayerSpec",
+      "used_by": "`Layers.put`, `ClientSpec.systems.layers`"
+    },
+    {
+      "doc": "Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Solid RGBA8 fill.",
+          "name": "solid",
+          "rust_type": "color: [u8; 4]"
+        },
+        {
+          "default": null,
+          "doc": "Image asset with an RGBA8 tint.",
+          "name": "image",
+          "rust_type": "asset: String, tint: [u8; 4]"
+        },
+        {
+          "default": null,
+          "doc": "Text with an explicit project font alias, pixel size, color and layout.",
+          "name": "text",
+          "rust_type": "text: String, font: String, size: u16, color: [u8; 4], layout: String"
+        },
+        {
+          "default": null,
+          "doc": "2D deformable puppet (ADR 0029): an engine puppet rig JSON asset, fitted into the layer rect (aspect preserved).",
+          "name": "puppet",
+          "rust_type": "asset: String, tint: [u8; 4]"
+        }
+      ],
+      "name": "Paint",
+      "used_by": "`LayerSpec.paint`"
+    },
+    {
+      "doc": "Per-layer 2D filter stack with the stage order and parameter meaning of the Siglus/tona3 sprite effect (ADR 0021). Color math runs on 8-bit gamma-encoded values like the original: distortion sampling → tint/alpha → tone curve → invert → mono → bright → dark → color rate → add → mask → gray-as-alpha → alpha test.",
+      "fields": [
+        {
+          "default": 0.0,
+          "doc": "Mix toward grayscale (0..1).",
+          "name": "mono",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Mix toward the inverted color (0..1).",
+          "name": "invert",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Mix toward white (0..1).",
+          "name": "bright",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Mix toward black (0..1).",
+          "name": "dark",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Mix toward `color` (0..1).",
+          "name": "color_rate",
+          "rust_type": "f32"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Target color of `color_rate` (0..1 per channel).",
+          "name": "color",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Signed per-channel addition (-1..1).",
+          "name": "add",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Tone-curve LUT lookup, or `null`.",
+          "name": "tone_curve",
+          "rust_type": "Option<ToneCurve>"
+        },
+        {
+          "default": null,
+          "doc": "Grayscale mask image multiplied into alpha, or `null`.",
+          "name": "mask",
+          "rust_type": "Option<LayerMask>"
+        },
+        {
+          "default": false,
+          "doc": "Discard pixels whose alpha is below 1/255.",
+          "name": "alpha_test",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Source-sampling distortion, or `null`.",
+          "name": "distortion",
+          "rust_type": "Option<Distortion>"
+        }
+      ],
+      "name": "LayerFilter",
+      "used_by": "`Layers.setFilter` (ADR 0021)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Source-over alpha blending.",
+          "name": "normal",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Additive.",
+          "name": "add",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Subtractive.",
+          "name": "subtract",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Multiply.",
+          "name": "multiply",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Screen.",
+          "name": "screen",
+          "rust_type": ""
+        }
+      ],
+      "name": "Blend",
+      "used_by": "`LayerSpec.blend`"
+    },
+    {
+      "doc": "Tone-curve lookup: each channel indexes column `value` of `row` in a LUT image (e.g. 256×N), after mixing `saturation` toward mono.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "LUT image asset.",
+          "name": "asset",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "LUT row to sample.",
+          "name": "row",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Mix toward mono before the lookup (0..1).",
+          "name": "saturation",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "ToneCurve",
+      "used_by": "`LayerFilter.tone_curve`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Grayscale mask image asset.",
+          "name": "asset",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Replace alpha with the final gray level (Siglus mask mode 1).",
+          "name": "gray_alpha",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "LayerMask",
+      "used_by": "`LayerFilter.mask`"
+    },
+    {
+      "doc": "Source-sampling effects (Siglus wipe modes 1–6), in texture UV space. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Cells of `cut` UV width; height = cut × `aspect`.",
+          "name": "mosaic",
+          "rust_type": "cut: f32, aspect: f32"
+        },
+        {
+          "default": null,
+          "doc": "Sinusoidal row (`vertical: false`) or column offset driven by `progress`.",
+          "name": "raster",
+          "rust_type": "vertical: bool, fractions: f32, waves: f32, power: f32, progress: f32"
+        },
+        {
+          "default": null,
+          "doc": "Radial blur toward `center` (UV), 10 weighted taps.",
+          "name": "radial_blur",
+          "rust_type": "center: [f32; 2], power: f32, coeff: f32"
+        },
+        {
+          "default": null,
+          "doc": "Multiply alpha by `fade` where luminance ≤ `threshold` (or ≥ when `invert`).",
+          "name": "threshold_fade",
+          "rust_type": "fade: f32, threshold: f32, invert: bool"
+        }
+      ],
+      "name": "Distortion",
+      "used_by": "`LayerFilter.distortion`"
+    },
+    {
+      "doc": "Full-screen transition from the previously presented frame to the current one (ADR 0022). Effect codes and option meanings are the Siglus `WIPE` table, composed by the same shader arithmetic as siglus_rs `wipe.wgsl`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Transition effect.",
+          "name": "effect",
+          "rust_type": "TransitionEffect"
+        },
+        {
+          "default": null,
+          "doc": "Duration in milliseconds.",
+          "name": "duration_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Progress curve (Siglus speed modes 0-3).",
+          "name": "easing",
+          "rust_type": "Easing"
+        }
+      ],
+      "name": "TransitionSpec",
+      "used_by": "`Layers.transition` (ADR 0022)"
+    },
+    {
+      "doc": "Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Plain cross-dissolve.",
+          "name": "crossfade",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Grayscale mask image: bright pixels reveal first; `fade` 0..=8 is the Siglus soft-edge step (0 = hard edge).",
+          "name": "mask",
+          "rust_type": "asset: String, fade: u8"
+        },
+        {
+          "default": null,
+          "doc": "direction 0 down, 1 up, 2 right, 3 left (Siglus type 200, both scenes move).",
+          "name": "slide",
+          "rust_type": "direction: u8"
+        },
+        {
+          "default": null,
+          "doc": "Mosaic out of the old scene and into the new one (type 230).",
+          "name": "mosaic",
+          "rust_type": "size: u32"
+        },
+        {
+          "default": null,
+          "doc": "A raw Siglus wipe type with its option list. Pattern types (5..=199) without `mask` use the original generated masks.",
+          "name": "siglus",
+          "rust_type": "code: i32, options: Vec<i32>, mask: Option<String>"
+        }
+      ],
+      "name": "TransitionEffect",
+      "used_by": "`TransitionSpec.effect`"
+    },
+    {
+      "doc": "Siglus wipe speed modes 0-3.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Siglus speed mode 0.",
+          "name": "linear",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Mode 1: p².",
+          "name": "ease_in",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Mode 2: 1 − (1 − p)².",
+          "name": "ease_out",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Mode 3: smoothstep.",
+          "name": "smooth",
+          "rust_type": ""
+        }
+      ],
+      "name": "Easing",
+      "used_by": "`TransitionSpec.easing`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "Client-local widget id.",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Parent widget id.",
+          "name": "parent",
+          "rust_type": "Option<u32>"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            1.0,
+            1.0
+          ],
+          "doc": "Rectangle [x, y, w, h], relative to the parent content box.",
+          "name": "rect",
+          "rust_type": "[f32; 4]"
+        },
+        {
+          "default": "panel",
+          "doc": "Panel, label, button, toggle or slider.",
+          "name": "kind",
+          "rust_type": "WidgetKind"
+        },
+        {
+          "default": "absolute",
+          "doc": "Layout of children: absolute, row or column.",
+          "name": "flow",
+          "rust_type": "Flow"
+        },
+        {
+          "default": 0,
+          "doc": "Inner padding (px).",
+          "name": "padding",
+          "rust_type": "u16"
+        },
+        {
+          "default": 0,
+          "doc": "Spacing between flowed children (px).",
+          "name": "gap",
+          "rust_type": "u16"
+        },
+        {
+          "default": 0,
+          "doc": "Draw order among siblings.",
+          "name": "z",
+          "rust_type": "i32"
+        },
+        {
+          "default": true,
+          "doc": "Inherited visibility.",
+          "name": "visible",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "Accepts focus and input.",
+          "name": "enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "Clip children to this widget.",
+          "name": "clip_children",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "While visible, the topmost modal subtree receives all input.",
+          "name": "modal",
+          "rust_type": "bool"
+        },
+        {
+          "default": [
+            52,
+            66,
+            88,
+            255
+          ],
+          "doc": "RGBA8 fill color.",
+          "name": "color",
+          "rust_type": "[u8; 4]"
+        },
+        {
+          "default": "",
+          "doc": "Label or button text.",
+          "name": "text",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Explicit licensed project font alias.",
+          "name": "font",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": 18,
+          "doc": "Text pixel size.",
+          "name": "text_size",
+          "rust_type": "u16"
+        },
+        {
+          "default": [],
+          "doc": "World commands run when activated (checked typed data, not script).",
+          "name": "on_activate",
+          "rust_type": "Vec<WorldCommand>"
+        },
+        {
+          "default": 0.0,
+          "doc": "Slider value 0..1, or toggle state (on above 0.5).",
+          "name": "value",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "WidgetSpec",
+      "used_by": "`Ui.put`, `ClientSpec.systems.widgets`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Container with a fill.",
+          "name": "panel",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Text, not focusable.",
+          "name": "label",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Activates on Enter or a matching pointer release.",
+          "name": "button",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Button that flips `value` between 0 and 1.",
+          "name": "toggle",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Horizontal 0..1 value; Left/Right or drag.",
+          "name": "slider",
+          "rust_type": ""
+        }
+      ],
+      "name": "WidgetKind",
+      "used_by": "`WidgetSpec.kind`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Children use their own rects.",
+          "name": "absolute",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Children laid out left to right.",
+          "name": "row",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Children laid out top to bottom.",
+          "name": "column",
+          "rust_type": ""
+        }
+      ],
+      "name": "Flow",
+      "used_by": "`WidgetSpec.flow`"
+    },
+    {
+      "doc": "Commands to a puppet layer; parameter and motion names are checked against the rig when the runtime applies them. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Ease a parameter to `value` and hold it (overrides motions).",
+          "name": "set_parameter",
+          "rust_type": "parameter: String, value: f32, duration_ms: f32"
+        },
+        {
+          "default": null,
+          "doc": "Return a parameter to motion/physics control.",
+          "name": "release_parameter",
+          "rust_type": "parameter: String"
+        },
+        {
+          "default": null,
+          "doc": "Start a motion (restarts it if playing).",
+          "name": "play",
+          "rust_type": "motion: String, looping: Option<bool>, weight: f32"
+        },
+        {
+          "default": null,
+          "doc": "Fade a motion out; an empty name stops all motions.",
+          "name": "stop",
+          "rust_type": "motion: String"
+        }
+      ],
+      "name": "PuppetCommand",
+      "used_by": "`Puppets.*`, `layer.puppet`"
+    },
+    {
+      "doc": "A complete puppet: everything the evaluator needs except texture pixels.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Always `\"crysirror-puppet\"`.",
+          "name": "format",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Format version (1).",
+          "name": "version",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Canvas size [w, h] in puppet pixels; frames are expressed in it.",
+          "name": "size",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Texture images, relative to the rig file.",
+          "name": "textures",
+          "rust_type": "Vec<String>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "parameters",
+          "rust_type": "Vec<Parameter>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "deformers",
+          "rust_type": "Vec<Deformer>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "parts",
+          "rust_type": "Vec<Part>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "motions",
+          "rust_type": "Vec<Motion>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "physics",
+          "rust_type": "Vec<Pendulum>"
+        },
+        {
+          "default": null,
+          "doc": "Where the rig came from (tool, source kind); informational only.",
+          "name": "provenance",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "PuppetRig",
+      "used_by": "`Paint.puppet.asset` (engine rig JSON, ADR 0029)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "min",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "max",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "default",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "Parameter",
+      "used_by": "`PuppetRig.parameters`"
+    },
+    {
+      "doc": "Rotation/translation/scale about a pivot, driven by keyforms and applied to its parts and child deformers.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "parent",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": null,
+          "doc": "Pivot in the parent's (rest) space.",
+          "name": "pivot",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "keyforms",
+          "rust_type": "Vec<DeformerKeyform>"
+        }
+      ],
+      "name": "Deformer",
+      "used_by": "`PuppetRig.deformers`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "value",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Degrees, counter-clockwise on screen (y down).",
+          "name": "rotation",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "translation",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "scale",
+          "rust_type": "[f32; 2]"
+        }
+      ],
+      "name": "DeformerKey",
+      "used_by": "`Deformer.keyforms[].keys`"
+    },
+    {
+      "doc": "A textured triangle mesh.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Index into `textures`.",
+          "name": "texture",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Rest positions in puppet pixels.",
+          "name": "positions",
+          "rust_type": "Vec<[f32; 2]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "uvs",
+          "rust_type": "Vec<[f32; 2]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "indices",
+          "rust_type": "Vec<u32>"
+        },
+        {
+          "default": null,
+          "doc": "Per-vertex linear RGBA multipliers; empty means white.",
+          "name": "colors",
+          "rust_type": "Vec<[f32; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "opacity",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "order",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "blend",
+          "rust_type": "PartBlend"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "deformer",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": null,
+          "doc": "Parts whose coverage clips this part (union); empty for none.",
+          "name": "masks",
+          "rust_type": "Vec<String>"
+        },
+        {
+          "default": null,
+          "doc": "Draw outside the masks instead of inside.",
+          "name": "invert_mask",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "visible",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "keyforms",
+          "rust_type": "Vec<PartKeyform>"
+        }
+      ],
+      "name": "Part",
+      "used_by": "`PuppetRig.parts`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "value",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Per-vertex offsets from the rest positions; empty for none.",
+          "name": "offsets",
+          "rust_type": "Vec<[f32; 2]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "opacity",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "order",
+          "rust_type": "i32"
+        }
+      ],
+      "name": "PartKey",
+      "used_by": "`Part.keyforms[].keys`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "normal",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "add",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Destination minus source (reverse subtract).",
+          "name": "subtract",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "multiply",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "screen",
+          "rust_type": ""
+        }
+      ],
+      "name": "PartBlend",
+      "used_by": "`Part.blend`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "duration_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "looping",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "blend",
+          "rust_type": "MotionBlend"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "fade_in_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "fade_out_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "curves",
+          "rust_type": "Vec<Curve>"
+        }
+      ],
+      "name": "Motion",
+      "used_by": "`PuppetRig.motions`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "parameter",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "[time ms, value], sorted by time.",
+          "name": "keys",
+          "rust_type": "Vec<[f32; 2]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "interpolation",
+          "rust_type": "Interpolation"
+        }
+      ],
+      "name": "Curve",
+      "used_by": "`Motion.curves`"
+    },
+    {
+      "doc": "A damped pendulum: weighted input parameters swing it, its angle drives an output parameter (hair, accessories, breathing sway).",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "inputs",
+          "rust_type": "Vec<PendulumInput>"
+        },
+        {
+          "default": null,
+          "doc": "Output parameter, set to `angle / max_angle` mapped onto its range.",
+          "name": "output",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Angle (degrees) reached for a fully saturated input.",
+          "name": "max_angle",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Spring stiffness (1/s²) and damping (1/s).",
+          "name": "stiffness",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "damping",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "Pendulum",
+      "used_by": "`PuppetRig.physics`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "duration_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "looping",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Playback rate (1 = real time, 0 = hold).",
+          "name": "speed",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "camera",
+          "rust_type": "Option<CameraTrack>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "tracks",
+          "rust_type": "Vec<Track>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "events",
+          "rust_type": "Vec<SequenceEvent>"
+        }
+      ],
+      "name": "SequenceSpec",
+      "used_by": "`World.playSequence` (ADR 0040)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Client-local entity id.",
+          "name": "entity",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "property",
+          "rust_type": "TrackProperty"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "keys",
+          "rust_type": "Vec<SequenceKey>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "interpolation",
+          "rust_type": "KeyInterpolation"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "noise",
+          "rust_type": "Option<TrackNoise>"
+        }
+      ],
+      "name": "Track",
+      "used_by": "`SequenceSpec.tracks`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "[x, y, z] world units (local to the parent).",
+          "name": "translation",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "[x, y, z] Euler degrees (XYZ order).",
+          "name": "rotation",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "[x, y, z].",
+          "name": "scale",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "[value] in the light's units.",
+          "name": "light_intensity",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "[r, g, b] linear.",
+          "name": "light_color",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "[value] attenuation radius.",
+          "name": "light_range",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "[value]; > 0.5 is visible.",
+          "name": "visible",
+          "rust_type": ""
+        }
+      ],
+      "name": "TrackProperty",
+      "used_by": "`Track.property`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Piecewise linear.",
+          "name": "linear",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "step",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Smoothstep between keys (ease in/out at every key).",
+          "name": "smooth",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Catmull-Rom spline through the keys (non-uniform key times).",
+          "name": "spline",
+          "rust_type": ""
+        }
+      ],
+      "name": "KeyInterpolation",
+      "used_by": "`Track.interpolation`, `CameraTrack.interpolation`"
+    },
+    {
+      "doc": "Smooth value noise added to a track (fire flicker, sway, shake).",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Peak offset added to every component.",
+          "name": "amplitude",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Changes per second.",
+          "name": "frequency_hz",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "seed",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "TrackNoise",
+      "used_by": "`Track.noise`, `CameraTrack.shake`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "keys",
+          "rust_type": "Vec<CameraKey>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "interpolation",
+          "rust_type": "KeyInterpolation"
+        },
+        {
+          "default": null,
+          "doc": "Camera shake added to eye and target.",
+          "name": "shake",
+          "rust_type": "Option<TrackNoise>"
+        }
+      ],
+      "name": "CameraTrack",
+      "used_by": "`SequenceSpec.camera`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "time_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "eye",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "target",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Default: the camera's current field of view.",
+          "name": "fov_y_degrees",
+          "rust_type": "Option<f32>"
+        }
+      ],
+      "name": "CameraKey",
+      "used_by": "`CameraTrack.keys`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "time_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "name",
+          "rust_type": "String"
+        }
+      ],
+      "name": "SequenceEvent",
+      "used_by": "`SequenceSpec.events`"
+    },
+    {
+      "doc": "Variants are tagged by `\"op\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "spawn",
+          "rust_type": "entity: EntitySpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "despawn",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_transform",
+          "rust_type": "id: u32, transform: Transform"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_velocity",
+          "rust_type": "id: u32, velocity: [f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_angular_velocity",
+          "rust_type": "id: u32, velocity: [f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_physics",
+          "rust_type": "physics: crate::physics::ClientPhysicsScene"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_parent",
+          "rust_type": "id: u32, parent: Option<u32>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_visible",
+          "rust_type": "id: u32, visible: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "tween",
+          "rust_type": "id: u32, tween: Tween"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "pause",
+          "rust_type": "paused: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_camera",
+          "rust_type": "camera: Camera"
+        },
+        {
+          "default": null,
+          "doc": "Start (or restart) a named level sequence owned by this client.",
+          "name": "play_sequence",
+          "rust_type": "name: String, sequence: crate::sequence::SequenceSpec, start_ms: f32"
+        },
+        {
+          "default": null,
+          "doc": "Remove a named sequence; tracks keep their last applied values.",
+          "name": "stop_sequence",
+          "rust_type": "name: String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_material",
+          "rust_type": "id: u32, material: Option<crate::material::MaterialSpec>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_animation",
+          "rust_type": "id: u32, animation: Option<crate::components::AnimationState>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_collider",
+          "rust_type": "id: u32, collider: Option<crate::components::ColliderSpec>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_gameplay",
+          "rust_type": "id: u32, gameplay: Option<crate::gameplay::GameplayState>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "define_gameplay",
+          "rust_type": "defs: crate::gameplay::GameplayDefs"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "define_animation",
+          "rust_type": "defs: crate::animgraph::AnimDefs"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "define_ai",
+          "rust_type": "defs: crate::ai::AiDefs"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_ai",
+          "rust_type": "id: u32, ai: Option<crate::ai::AiState>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_particles",
+          "rust_type": "id: u32, particles: Option<crate::components::EmitterSpec>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_light",
+          "rust_type": "id: u32, light: Option<crate::components::LightSpec>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_reflection_probe",
+          "rust_type": "id: u32, probe: Option<crate::components::ReflectionProbeSpec>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_irradiance_volume",
+          "rust_type": "id: u32, volume: Option<crate::components::IrradianceVolumeSpec>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_streaming",
+          "rust_type": "name: String, level: Option<StreamingLevel>"
+        },
+        {
+          "default": null,
+          "doc": "Create, replace (keeping its surface slot) or remove a named video.",
+          "name": "set_video",
+          "rust_type": "name: String, video: Option<VideoSpec>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_environment",
+          "rust_type": "environment: crate::view::Environment"
+        }
+      ],
+      "name": "WorldCommand",
+      "used_by": "World mutation batches (`ServiceBatch.world`)"
+    },
+    {
+      "doc": "Variants are tagged by `\"op\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "put",
+          "rust_type": "layer: LayerSpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "remove",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_transform",
+          "rust_type": "id: u32, transform: SpriteTransform"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_visible",
+          "rust_type": "id: u32, visible: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_opacity",
+          "rust_type": "id: u32, opacity: u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_order",
+          "rust_type": "id: u32, order: [i32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_clip",
+          "rust_type": "id: u32, clip: Option<[f32; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_filter",
+          "rust_type": "id: u32, filter: Option<LayerFilter>"
+        },
+        {
+          "default": null,
+          "doc": "Drive a puppet layer (ADR 0029).",
+          "name": "puppet",
+          "rust_type": "id: u32, command: PuppetCommand"
+        },
+        {
+          "default": null,
+          "doc": "Start a screen transition owned by this client.",
+          "name": "transition",
+          "rust_type": "transition: TransitionSpec"
+        },
+        {
+          "default": null,
+          "doc": "Finish this client's transition immediately (skip).",
+          "name": "end_transition",
+          "rust_type": ""
+        }
+      ],
+      "name": "LayerCommand",
+      "used_by": "Layer mutation batches (`ServiceBatch.layers`)"
+    },
+    {
+      "doc": "Variants are tagged by `\"op\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "put",
+          "rust_type": "widget: WidgetSpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "remove",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_visible",
+          "rust_type": "id: u32, visible: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_enabled",
+          "rust_type": "id: u32, enabled: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_value",
+          "rust_type": "id: u32, value: f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_text",
+          "rust_type": "id: u32, text: String, font: Option<String>"
+        }
+      ],
+      "name": "UiCommand",
+      "used_by": "UI mutation batches (`ServiceBatch.ui`)"
+    }
+  ],
+  "fingerprint": "f49c116e5d278370",
+  "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
+  "globals": [
+    {
+      "class": "Engine",
+      "global": "engine"
+    },
+    {
+      "class": "World",
+      "global": "world"
+    },
+    {
+      "class": "Fs",
+      "global": "fs"
+    },
+    {
+      "class": "Layers",
+      "global": "layers"
+    },
+    {
+      "class": "Ui",
+      "global": "ui"
+    },
+    {
+      "class": "Audio",
+      "global": "audio"
+    },
+    {
+      "class": "Save",
+      "global": "save"
+    },
+    {
+      "class": "Input",
+      "global": "input"
+    },
+    {
+      "class": "Localization",
+      "global": "localization"
+    },
+    {
+      "class": "Text",
+      "global": "text"
+    },
+    {
+      "class": "Bitmap",
+      "global": "bitmap"
+    },
+    {
+      "class": "Resources",
+      "global": "resources"
+    },
+    {
+      "class": "Puppets",
+      "global": "puppets"
+    },
+    {
+      "class": "Physics",
+      "global": "physics"
+    }
+  ]
+}

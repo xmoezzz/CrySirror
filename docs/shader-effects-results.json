@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-25",
+  "implementation": "ShaderEffect CPU data; built-in fog/fresnel/dissolve and client-scoped WGSL surface ABI v1",
+  "compilation": {
+    "workspace_all_targets": "passed",
+    "desktop_no_default_features": "passed, existing unused_mut warning",
+    "desktop_release": "passed"
+  },
+  "behavior": {
+    "workspace": {
+      "passed": 166,
+      "failed": 0,
+      "ignored": 13
+    },
+    "explicit_metal_gpu": {
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0
+    },
+    "python_3_11": {
+      "passed": 110,
+      "failed": 0
+    },
+    "mcp": "Actual project_validate/shader_validate/escape rejection/engine_trace/scene_capture; shader-effects-mcp.json",
+    "wrong_signature_cli": {
+      "exit_code": 1,
+      "gpu_created": false,
+      "diagnostic": "custom ABI requires fn crysirror_surface(SurfaceInput) -> SurfaceOutput"
+    }
+  },
+  "gallery": {
+    "project": "examples/shader-effects/project.json",
+    "screenshot": "/Users/xmoe/Documents/CrySirror/dist/shader-effects.png",
+    "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "script_required": false,
+    "all_assets_self_authored": true,
+    "effects": [
+      "fog",
+      "fresnel",
+      "dissolve",
+      "custom waves"
+    ]
+  },
+  "castle": {
+    "screenshot": "/Users/xmoe/.cache/crysirror/ashen/castle-shader-presets/castle.png",
+    "screenshot_sha256": "328a0b43b0e6aafbfb200bd56b3b3357e3d6712d76f17c64ac8a2cd4b5a7f165",
+    "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "renderer": "raster",
+    "hardware_raytracing": false,
+    "retained_fog_instances": 42,
+    "gltf_nodes": 7709,
+    "scene_triangles": 13426500,
+    "base_color_maps": 31,
+    "external_opacity_maps": 0,
+    "engine_materials": 42,
+    "omitted": [
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_Sky_Sphere_2.SkySphereMesh",
+        "reason": "sky-sized geometry >5 km; engine sky used"
+      }
+    ],
+    "approximation": "CrySirror Fog preset with source color/max opacity/depth intersection, procedural UV noise/flow/edges; not original UE graph",
+    "original_materials": false,
+    "original_lighting": false,
+    "gameplay": false,
+    "gpu_frame_time_measured": false
+  },
+  "limits": [
+    "surface functions only, not vertex/fullscreen/compute replacement",
+    "no custom resource bindings or shader graph",
+    "no hot reload; host-session source/pipeline cache",
+    "no global or volumetric fog",
+    "PBR remains raster; no hardware RT claim"
+  ],
+  "content_policy": "User game content, source-specific profiles and castle captures remain external. Only self-authored demo GLB/WGSL are included."
+}

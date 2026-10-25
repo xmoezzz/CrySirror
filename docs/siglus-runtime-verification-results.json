@@ -1,0 +1,117 @@
+{
+  "date": "2026-10-25",
+  "source_commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "factory": "crysirror_siglus_vm::adapter::SiglusVm",
+  "full_vendored_vm_factory_connected": false,
+  "scope": "self-authored original ABI fixtures; no actual user game or font",
+  "compilation": {
+    "fixture_example": "passed",
+    "siglus_all_targets": "passed"
+  },
+  "behavior": {
+    "new_adapter_tests": {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    },
+    "existing_runtime_tests": {
+      "passed": 8,
+      "failed": 0,
+      "ignored": 0
+    },
+    "python_native_boundary_tests": {
+      "passed": 6,
+      "failed": 0
+    },
+    "cli": {
+      "rect_initial": {
+        "exit": 0,
+        "error": "",
+        "yield": "WaitUntil(100)",
+        "int_stack": [
+          42
+        ],
+        "gpu": null,
+        "renderer": null
+      },
+      "rect_moved": {
+        "exit": 0,
+        "error": "",
+        "yield": "Halted",
+        "int_stack": [
+          42
+        ],
+        "gpu": null,
+        "renderer": null
+      },
+      "input_waiting": {
+        "exit": 0,
+        "error": "",
+        "yield": "WaitUntil(5000)",
+        "int_stack": [
+          0
+        ],
+        "gpu": null,
+        "renderer": null
+      },
+      "input_decide": {
+        "exit": 0,
+        "error": "",
+        "yield": "Halted",
+        "int_stack": [
+          0,
+          1,
+          123
+        ],
+        "gpu": null,
+        "renderer": null
+      },
+      "message_rejection": {
+        "exit": 1,
+        "error": "CrySirror: VM siglus: I/O: native message layout must be implemented before CD_TEXT/CD_NAME can render",
+        "yield": null,
+        "int_stack": null,
+        "gpu": null,
+        "renderer": null
+      },
+      "native_image_raster": {
+        "exit": 0,
+        "error": "",
+        "yield": "WaitUntil(100)",
+        "int_stack": [],
+        "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+        "renderer": "raster"
+      },
+      "native_image_compute_needs_3d": {
+        "exit": 1,
+        "error": "CrySirror: compute raytrace requires a 3D scene",
+        "yield": null,
+        "int_stack": null,
+        "gpu": null,
+        "renderer": null
+      },
+      "native_image_compute_hybrid": {
+        "exit": 0,
+        "error": "",
+        "yield": "WaitUntil(100)",
+        "int_stack": [],
+        "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+        "renderer": "compute-raytrace"
+      }
+    },
+    "captures": [
+      {
+        "path": "/Users/xmoe/.cache/crysirror/siglus-native-audit-20261025-1/image/raster.png",
+        "sha256": "db17bf816337924b11cb954ace93317ddfeff404cac87b33350736ca0a741b42"
+      },
+      {
+        "path": "/Users/xmoe/.cache/crysirror/siglus-native-audit-20261025-1/image-compute/compute.png",
+        "sha256": "91c7f27f310de8a1e714ac87294f942b4546794c981764c25d26cc27cc0cea2f"
+      }
+    ]
+  },
+  "complete_game_compatibility": false,
+  "native_message_bridge": false,
+  "original_host_differential_executed": false,
+  "native_vm_semantics_modified": false
+}

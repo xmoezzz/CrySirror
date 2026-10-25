@@ -1,0 +1,6 @@
+{
+  "requested": "hardware-raytrace",
+  "exit_code": 1,
+  "fallback_output_created": false,
+  "diagnostic": "CrySirror: unsupported: hardware-raytrace; hardware ray tracing is not wired in this backend"
+}

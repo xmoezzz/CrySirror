@@ -1,0 +1,51 @@
+[package]
+name = "crysirror-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "crysirror"
+path = "src/main.rs"
+
+[features]
+default = ["audio", "siglus-resources", "scripting", "rfvp", "bgi", "gamepad", "emote-import"]
+audio = ["crysirror-audio/rodio-output"]
+gamepad = ["dep:gilrs", "scripting"]
+siglus-resources = ["dep:crysirror-siglus"]
+# Default JS/TS script host (Boa + Oxc) driving the engine object API (ADR 0005).
+# Original RFVP engine as a VM peer (ADR 0008).
+rfvp = ["dep:crysirror-rfvp"]
+bgi = ["dep:crysirror-bgi"]
+# `puppet-import`: bake local E-mote PSB files into the engine puppet format (ADR 0029).
+emote-import = ["dep:crysirror-puppet-eluna", "dep:crysirror-puppet"]
+scripting = ["dep:crysirror-engine", "dep:crysirror-script-js"]
+arc-formats = ["scripting", "crysirror-engine/arc-formats"]
+
+[dependencies]
+crysirror-core.workspace = true
+crysirror-runtime.workspace = true
+crysirror-wgpu.workspace = true
+crysirror-audio.workspace = true
+crysirror-siglus = { workspace = true, optional = true }
+crysirror-engine = { workspace = true, optional = true }
+crysirror-rfvp = { workspace = true, optional = true }
+crysirror-bgi = { workspace = true, optional = true }
+crysirror-puppet = { workspace = true, optional = true }
+crysirror-puppet-eluna = { path = "../crysirror-puppet-eluna", optional = true }
+crysirror-script-js = { workspace = true, optional = true }
+winit.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+image.workspace = true
+clap = { version = "4.5", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
+cap-std.workspace = true
+gilrs = { version = "=0.11.2", optional = true }
+
+[dev-dependencies]
+tempfile = "3.12"

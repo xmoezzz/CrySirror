@@ -1,0 +1,519 @@
+{
+  "schema": 1,
+  "source": {
+    "repository": "https://github.com/vn-tools/arc_unpacker",
+    "commit": "456834ecf2e5686813802c37efd829310485c57d",
+    "license": "GPL-3.0-or-later",
+    "copyright": "Copyright (C) 2016 rr-",
+    "source_sha256": {
+      "src/dec/alice_soft/ajp_image_decoder.cc": "c61546b2b03719de2fd9955a387dc1df762a6aabdd95016018e867c7271c1dbc",
+      "src/dec/alice_soft/dcf_image_decoder.cc": "bd09809c6948c33aab980479254a0d5975fa17fc7a59a963ce08886e67a61d62",
+      "src/dec/alice_soft/pms_image_decoder.cc": "a89bb579638046b2a7e9dbd938c021bec41386413c463fb08c659ef85da52869",
+      "src/dec/alice_soft/qnt_image_decoder.cc": "af429091baa7138dc9cc5fd9572816e57f099c81fb8a3cc23666e566c1fe2d6d",
+      "src/dec/alice_soft/vsp_image_decoder.cc": "34198f49b0a02f127e09b35d3f2178c1ee0f63d8620b2b17987ed3aed6376586",
+      "src/dec/entis/common/base_decoder.cc": "67de78f19cc2bc308d1539e620c7500d1ffc349750a177a5378a1bf2223b8a1b",
+      "src/dec/entis/common/base_erisa_decoder.cc": "06c9e46386dbac1306ccdaa1e874c69455734be98a1f3893bac7139d39c63f48",
+      "src/dec/entis/common/erisa_decoder.cc": "d53d47417b4179dddda7b77cd0b9d20e06debf7450f6e468fa9829dcf1153a5a",
+      "src/dec/entis/common/gamma_decoder.cc": "ae2c670b5befa0260bca56b4b467bd14816eeb1ca4925148f9fd6f9b81b87274",
+      "src/dec/entis/common/huffman_decoder.cc": "53d4f745c488416f215f7762dba686c6ce311472eee16fdf34f6f8c4b6a6e190",
+      "src/dec/entis/common/huffman_tree.cc": "18b2647f0c675f0576ecd34b65d30dbf30be97dc55b92bae763da584775b9386",
+      "src/dec/entis/common/prob_model.cc": "af6bf919e566aefcd2ca47996f0753fbe7f4e32a61be121eeaed64a4a3ae2ce4",
+      "src/dec/entis/common/sections.cc": "c1376f60530ec3befde158054204a59628a370c509ae13a357512446f89e8507",
+      "src/dec/entis/eri_image_decoder.cc": "5334c571a46eb4f9fffcc82bb1d739517ade456489313f08aa350d7b21836daa",
+      "src/dec/entis/image/lossless.cc": "b18976a4002e227b470eabf001288405dccf73044cca9ab469ca4c5f5527e3a8",
+      "src/dec/kaguya/ao_image_decoder.cc": "5926b28b71fee27a3b4fb37515a7db0e57b50c2f2c45be0fc231b73e84d1e65d",
+      "src/dec/kaguya/ap0_image_decoder.cc": "72e2b2c87a4246885a37d2fd5970b829ae297843b78d1261082881576145aef8",
+      "src/dec/kaguya/ap2_image_decoder.cc": "f9b9beb02a49d76954d19a5f4b267596c591bb772c917cb11cf2c558546f8cfe",
+      "src/dec/kaguya/ap3_image_decoder.cc": "7efd006dbc4d92aa0c2c8bebeb84754c26d26831e904051d0eed5281a55ead0b",
+      "src/dec/kaguya/ap_image_decoder.cc": "67a90a9aa76f21940998be08f6e448ff88e33815270c562d58dd5a0fc0e9cd02",
+      "src/dec/kaguya/aps3_image_decoder.cc": "26da31d2a1469f49c64ba27db491c4bd64a5a9e584ac7eda499eca35f77b01f1",
+      "src/dec/kaguya/raw_mask_image_decoder.cc": "e10cc39da599d9dc18026ada014e7a5742f99350290b0dbd5daf53da62226a3d",
+      "src/dec/kid/prt_image_decoder.cc": "270bf24927b7ecae04f3b2f86f6a8f7dc5f185f3caafb3fee5b2d17aa2507d10",
+      "src/dec/kirikiri/tlg/lzss_decompressor.cc": "3bacbe748be4ddf4bbeadcc702387d35278b0faad7841e03c3f598348f7546a5",
+      "src/dec/kirikiri/tlg/tlg5_decoder.cc": "8d8eefd823a85351609950039e8affa09f15c7493a8f826d3eb4446186c2cfdc",
+      "src/dec/kirikiri/tlg/tlg6_decoder.cc": "69e99d6fdc485b40251f5f25e6668f3d50fbb07584d8b8b8ddfc3eebaec1186b",
+      "src/dec/kirikiri/tlg_image_decoder.cc": "949323ed63e901096206487d2b65b9172edeb3aa9f3668ee190d3eaae123f6ca",
+      "src/dec/lizsoft/sotes_image_decoder.cc": "fb62e4ba17e03ffd8c4daa5bb4e4fd48d6d0e8cdcfd023dda58f425f64dbc646",
+      "src/dec/nscripter/spb_image_decoder.cc": "0eb8b99fe31e2de45cb6805f32e40618a85229b99be5cb996b3913e3085e4a33",
+      "src/dec/purple_software/jbp1.cc": "3f3c0f5b4e6efc8aebaba13a5a4e9e2bb72e9675fc8095a9c20e861349ac38b8",
+      "src/dec/purple_software/pb3_image_decoder.cc": "c3170d1a1fd5976b75c90f4670519a3b2e4fc3d162fee4ec525c6488cd3eab07",
+      "src/dec/real_live/g00_image_decoder.cc": "531a55e27cbab73e4b68afa2bc8ff9ec98276b3de64438167155ec80e19f56b9",
+      "src/dec/real_live/pdt10_image_decoder.cc": "b2fc5a5b6f55883e70627f60a04c556b2cf56d6aabd87a7732ebd2e64b2cf14f",
+      "src/dec/real_live/pdt9_image_decoder.cc": "6250fc1d347267c18f0b1a46b59a1977d3daffdf5e7d031c1665b204a54c8c36",
+      "src/res/image.cc": "f27fe3946610ade38afd2e96b3a6e074cfe6dbf803bd14b31555ee7b683de588",
+      "src/res/pixel_format.cc": "eabf12ce785da1816936ecbf07257c4c0f6d8a708ea6576d0c8556ba2a89d3e3"
+    }
+  },
+  "implementation": {
+    "format_count": 21,
+    "cpu_only": true,
+    "safe_rust": true,
+    "device_dependencies": [],
+    "external_tlg_dependency": false,
+    "shared_output": "crysirror_image::ImageSurface (RGBA8)",
+    "dependencies": "flate2 Rust backend; shared standard JPEG; encoding_rs for native reference names",
+    "formats": [
+      {
+        "id": "entis/eri",
+        "status": "implemented",
+        "variants": "lossless ERI0x20100/0x20200; Gamma/Huffman/Nemesis; grayscale/RGB/RGBA, all four permutations/color transforms, flipped and multiple frames; optional reference RGB additive overlay with alpha preserved",
+        "binary_fixture_count": 5
+      },
+      {
+        "id": "kid/prt",
+        "status": "implemented",
+        "variants": "versions0x65/0x66, palette8/BGR24/BGRA32, padded rows, optional alpha plane",
+        "binary_fixture_count": 2
+      },
+      {
+        "id": "lizsoft/sotes",
+        "status": "implemented",
+        "variants": "8-bit palette or BGR24, biased indirect header dimensions, vertical flip",
+        "binary_fixture_count": 2
+      },
+      {
+        "id": "purple-software/pb3",
+        "status": "implemented",
+        "variants": "v1 block planes, v2 JBP1+RLE alpha, v3 JBP1, v5 LZSS differential planes, v6 8x8 delta with optional client-scoped PB3/PNG base",
+        "binary_fixture_count": 6
+      },
+      {
+        "id": "alice-soft/ajp",
+        "status": "implemented",
+        "variants": "JPEG payload + optional PMS alpha mask, fixed format prefix XOR",
+        "binary_fixture_count": 1
+      },
+      {
+        "id": "alice-soft/dcf",
+        "status": "implemented",
+        "variants": "dcf / dfdl / dcgd embedded QNT",
+        "binary_fixture_count": 1
+      },
+      {
+        "id": "alice-soft/pms",
+        "status": "implemented",
+        "variants": "versions 1/2, palette8 and BGR565+optional alpha8, all pinned run opcodes",
+        "binary_fixture_count": 4
+      },
+      {
+        "id": "alice-soft/qnt",
+        "status": "implemented",
+        "variants": "version2 depth24, zlib 2x2 color deinterleave, odd padding, optional predictive alpha",
+        "binary_fixture_count": 4
+      },
+      {
+        "id": "alice-soft/vsp",
+        "status": "implemented",
+        "variants": "planar4 all run/copy/mask opcodes; PMS8 variant",
+        "binary_fixture_count": 3
+      },
+      {
+        "id": "kaguya/ao",
+        "status": "implemented",
+        "variants": "BGRA32 bottom-up, transparent offset canvas and nontransparent overwrite",
+        "binary_fixture_count": 0
+      },
+      {
+        "id": "kaguya/ap",
+        "status": "implemented",
+        "variants": "BGRA32 bottom-up",
+        "binary_fixture_count": 0
+      },
+      {
+        "id": "kaguya/ap0",
+        "status": "implemented",
+        "variants": "gray8 bottom-up",
+        "binary_fixture_count": 0
+      },
+      {
+        "id": "kaguya/ap2",
+        "status": "implemented",
+        "variants": "declared24/32 storedBGRA32 bottom-up, offsets metadata ignored as pinned source",
+        "binary_fixture_count": 0
+      },
+      {
+        "id": "kaguya/ap3",
+        "status": "implemented",
+        "variants": "BGR24 bottom-up, offsets metadata ignored as pinned source",
+        "binary_fixture_count": 0
+      },
+      {
+        "id": "kaguya/aps3",
+        "status": "implemented",
+        "variants": "raw or MSB LZSS wrapped AP/AO",
+        "binary_fixture_count": 0
+      },
+      {
+        "id": "kaguya/raw-mask",
+        "status": "implemented",
+        "variants": "gray8 top-down",
+        "binary_fixture_count": 0
+      },
+      {
+        "id": "nscripter/spb",
+        "status": "implemented",
+        "variants": "MSB entropy with differential channel runs and serpentine scan",
+        "binary_fixture_count": 1
+      },
+      {
+        "id": "real-live/pdt9",
+        "status": "implemented",
+        "variants": "AVG32 palette8 and signed reference table; zero history prefix",
+        "binary_fixture_count": 1
+      },
+      {
+        "id": "real-live/pdt10",
+        "status": "implemented",
+        "variants": "BGR24 LZSS + optional independent alpha8 LZSS",
+        "binary_fixture_count": 2
+      },
+      {
+        "id": "real-live/g00",
+        "status": "implemented",
+        "variants": "versions0(BGR),1(BGRA palette),2(BGRA region/parts)",
+        "binary_fixture_count": 3
+      },
+      {
+        "id": "kirikiri/tlg",
+        "status": "implemented",
+        "variants": "TLG5 channels3/4; TLG6 built-in Golomb table/method0 channels3/4 + all16 filters; SDS tags wrapper",
+        "binary_fixture_count": 3
+      }
+    ]
+  },
+  "validation": {
+    "compilation": {
+      "check": "cargo check -p crysirror-formats-arc --all-targets: passed",
+      "test": "cargo test -p crysirror-formats-arc --test images_a: 14 passed, 2 external tests ignored"
+    },
+    "ordinary_tests": {
+      "passed": 14,
+      "ignored_external": 2
+    },
+    "external_tests": {
+      "command": "ARC_UNPACKER_SOURCE=/absolute/path/to/complete/pinned/arc_unpacker cargo test -p crysirror-formats-arc --test images_a -- --ignored --nocapture",
+      "passed": 2,
+      "pixel_comparisons": 38,
+      "exact_rgba_comparisons": 37,
+      "jpeg_tolerance_comparisons": 1,
+      "fixtures": [
+        {
+          "format": "entis/eri",
+          "input": "tests/dec/entis/files/eri/FRM_0102.eri",
+          "input_sha256": "9ff813a8ec8955de5126c4f1b67e80001dcaf26ff3b79fd8dfbe97735e3b3c24",
+          "expected": "tests/dec/entis/files/eri/FRM_0102-out.png",
+          "expected_sha256": "d01656ef602533817eaa6b715ff1ed88aad87bd6b4e43677669ff3950ad8f406",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "entis/eri",
+          "input": "tests/dec/entis/files/eri/FRM_0201.eri",
+          "input_sha256": "e32e31862eef2227559cd1993d907cd1154a9a88d827d477f3aa7fb21ff9c746",
+          "expected": "tests/dec/entis/files/eri/FRM_0201-out.png",
+          "expected_sha256": "b4ce691e5bff5be2362a82c38d45f1753a69d7ee46270f24512398a8d3235b23",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "entis/eri",
+          "input": "tests/dec/entis/files/eri/cb10_14.eri",
+          "input_sha256": "5793d34664f8a1d9db158cc74907d012e54113aee07a901de80ef8eeea412f2d",
+          "expected": "tests/dec/entis/files/eri/cb10_14-out.png",
+          "expected_sha256": "f113bbe4fde8e2b84925ae8f920b9597e4f5f7d6edca913c083a97cadf0a20ad",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "entis/eri",
+          "input": "tests/dec/entis/files/eri/font24.eri",
+          "input_sha256": "f066b964883537c87575ab016e2a3ceb1ea6b3bfef18c8a9fb456867987a3819",
+          "expected": "tests/dec/entis/files/eri/font24-out.png",
+          "expected_sha256": "ff18e4418116a18fb0d793fe0acdd792a34a7c8911ea92e5c424052ff13db467",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "entis/eri",
+          "input": "tests/dec/entis/files/eri/img_rgba32.eri",
+          "input_sha256": "3b0806df4f1c9a27f567bbed33e3c453103749b99853738001c7485f5b1b9961",
+          "expected": "tests/dec/entis/files/eri/img_rgba32-out.png",
+          "expected_sha256": "8c853f38cbb65662a0089f8e46b0936c4c5a8d978180be3a77a97b4c13008037",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "kid/prt",
+          "input": "tests/dec/kid/files/prt/bg01a1.prt",
+          "input_sha256": "b33bf449ea9c8e13900c02f45f9298376b89078350dc3f9d7a9e75c32f91aedc",
+          "expected": "tests/dec/kid/files/prt/bg01a1-out.png",
+          "expected_sha256": "4d55c37856811cc40c4fd871716a50a5811f13c50a01a0078dced80202db786a",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "kid/prt",
+          "input": "tests/dec/kid/files/prt/saver_sm.prt",
+          "input_sha256": "44fb9a2705df0661ff9b5f9b4263f5f57131e1663f8b5a0032ae9307f5ab20a5",
+          "expected": "tests/dec/kid/files/prt/saver_sm-out.png",
+          "expected_sha256": "07a4584cce270b4f1d0d6fa176b8515b302b53e387fd0647c8eb1f0a247f9646",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "lizsoft/sotes",
+          "input": "tests/dec/lizsoft/files/#1410",
+          "input_sha256": "77cc3c76dfeb7278fde016fd69f3a0e4966754cc120d288accc27d9b335cdca0",
+          "expected": "tests/dec/lizsoft/files/#1410-out.png",
+          "expected_sha256": "989c89935beb2c5c91662ee7319764d2ff4b7a48e0834f30646873b22aa793de",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "lizsoft/sotes",
+          "input": "tests/dec/lizsoft/files/#1726",
+          "input_sha256": "0f790571e5362efad572341fb63b1ffa5436a717be39b68cfe3290ea8e0d70bb",
+          "expected": "tests/dec/lizsoft/files/#1726-out.png",
+          "expected_sha256": "a1203b7b95d6dd0e1e3de80a551335ec291d2eb204d7f2677bda01455c7e46dc",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "purple-software/pb3",
+          "input": "tests/dec/purple_software/files/pb3/bg401i1.pb3",
+          "input_sha256": "de3cd5ee8bbcc78f24cb68cdfd341f6c034c932aae9c9f6f18f4dfb966e4eea9",
+          "expected": "tests/dec/purple_software/files/pb3/bg401i1-out.png",
+          "expected_sha256": "cdd7776c665cfb5cdacb6e25a1e3176e5f4c62b2030e1699c5199d6909a7bb20",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "purple-software/pb3",
+          "input": "tests/dec/purple_software/files/pb3/dialog_saki.pb3",
+          "input_sha256": "5e31d231c98c8645d65e7629ddbb7e645be40bdbcd64e1d8a07ef50fa30c037b",
+          "expected": "tests/dec/purple_software/files/pb3/dialog_saki-out.png",
+          "expected_sha256": "f6a063cae6f6724f8409d6cbde49a061d5cc11cc4145d1ddb2636ce7e30599b2",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "purple-software/pb3",
+          "input": "tests/dec/purple_software/files/pb3/mask009a.pb3",
+          "input_sha256": "2d068a348a20eef98029d5ec19d9fcfe28b16233907baccfc30b51b754a51b1f",
+          "expected": "tests/dec/purple_software/files/pb3/mask009a-out.png",
+          "expected_sha256": "7070b36494a3f9dad5cebc906086fd2cad19d22aefa27a41a02cc7901cdd8bb4",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "purple-software/pb3",
+          "input": "tests/dec/purple_software/files/pb3/st-ma_d150.pb3",
+          "input_sha256": "87437cca90ef1c37b818fcd3585844527c3dc06da2ce14f27e2ee1a12a62724d",
+          "expected": "tests/dec/purple_software/files/pb3/st-ma_d150-out.png",
+          "expected_sha256": "8cd9782eded6aaab947aaad0a3c47a2db2077cd82a9e4725dbe65bd0c98584a7",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/qnt",
+          "input": "tests/dec/alice_soft/files/qnt/CG00505.QNT",
+          "input_sha256": "48850020477234b0a0cf848dc9bdf09e6576f1137c3a7f583c5fe9dc62260e88",
+          "expected": "tests/dec/alice_soft/files/qnt/CG00505-out.png",
+          "expected_sha256": "3ea965223f367269a9c01cb63cf7696d13a297809d62d984a5ae859716aca216",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/qnt",
+          "input": "tests/dec/alice_soft/files/qnt/CG64100.QNT",
+          "input_sha256": "91efe097e58c6b0cdae3fbb843a0d1e6a712fe1ef53d4c766522c11609ae89a3",
+          "expected": "tests/dec/alice_soft/files/qnt/CG64100-out.png",
+          "expected_sha256": "7640f3e5c306b4bcae70bdccc8442ac3c09c86f201ec8f06230665d9d98d52f1",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/qnt",
+          "input": "tests/dec/alice_soft/files/qnt/CG64214.QNT",
+          "input_sha256": "c9a1aeeea0fd33e30df65fe907937f4d84b54b18ef0112589c7c7e6da2330337",
+          "expected": "tests/dec/alice_soft/files/qnt/CG64214-out.png",
+          "expected_sha256": "b6ac145628004bbe5a00bf6411cfeed666599f454a61a50b5b10cc0de3cbc651",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/qnt",
+          "input": "tests/dec/alice_soft/files/qnt/cg50121.QNT",
+          "input_sha256": "2f117b33a00f70313fe5ba66bca57a052a61b01577970e9a2c134292256df4ee",
+          "expected": "tests/dec/alice_soft/files/qnt/cg50121-out.png",
+          "expected_sha256": "d2302b764183f7a748577cc87651316fab730316484e532a38fbbec2c1cdb29f",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/pms",
+          "input": "tests/dec/alice_soft/files/pms/ALCG0016.PMS",
+          "input_sha256": "575d2408439cb50c2d5b06b0966c18e5973b439ac6d8bc654ad92872da826b25",
+          "expected": "tests/dec/alice_soft/files/pms/ALCG0016-out.png",
+          "expected_sha256": "f4103dbb6c4eec0c5a4fcd8ec7ceaf878cc8a6465e14aef471a7a7368eeb9bf3",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/pms",
+          "input": "tests/dec/alice_soft/files/pms/CG40000.pm",
+          "input_sha256": "45c6e7dd7921d2e47c8896f5499763337a8eba0e69cf56495dca04c9a3918c30",
+          "expected": "tests/dec/alice_soft/files/pms/CG40000-out.png",
+          "expected_sha256": "d2830dc7a1de631bdfed09e6272669f4cb72e7f27d9bfc5d7ad1c32d92f441ed",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/pms",
+          "input": "tests/dec/alice_soft/files/pms/G006.PMS",
+          "input_sha256": "4260a27c5253e7f400d0410ba78ed677eed3ff4ab3863b8c5b846d769b93c074",
+          "expected": "tests/dec/alice_soft/files/pms/G006-out.png",
+          "expected_sha256": "baef48e859687328847e0da85e4a28dba0ee03bc53180d032f79932bed6fb4c3",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/pms",
+          "input": "tests/dec/alice_soft/files/pms/G214.PMS",
+          "input_sha256": "23a7b0ee67af06464adf51eb15e61a090956615636f6748a5c814bb216e8e99b",
+          "expected": "tests/dec/alice_soft/files/pms/G214-out.png",
+          "expected_sha256": "5c808f6e025fb8559c076acd4bc4a8682dd7e0b99cbc60d10068580d2e4cecbd",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/vsp",
+          "input": "tests/dec/alice_soft/files/vsp/045.vsp",
+          "input_sha256": "d5d7fd2ede7125a39d16219f27e34417da3daa5227dd96c6f610c8f371600b0c",
+          "expected": "tests/dec/alice_soft/files/vsp/045-out.png",
+          "expected_sha256": "bbb36202f94dd6452c850982035ff5db3fa4b16b28f418088ca71fe6342f6e95",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/vsp",
+          "input": "tests/dec/alice_soft/files/vsp/CG8367.VSP",
+          "input_sha256": "f22863ad94c1a5ee98108b34fb7d98c442770092955d9485755a5fdc6d40a6c0",
+          "expected": "tests/dec/alice_soft/files/vsp/CG8367-out.png",
+          "expected_sha256": "492c9f9506874feaef993500661ed00443ecafa23a1d3a07fd98f4f94e2e31e2",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/vsp",
+          "input": "tests/dec/alice_soft/files/vsp/CG_0295.VSP",
+          "input_sha256": "410fec356c01e11c1fe1581fe0bf78acc419e93dbf050c7d1078bd3fe0f597b3",
+          "expected": "tests/dec/alice_soft/files/vsp/CG_0295-out.png",
+          "expected_sha256": "bf3a5f81388a9c46d3f1cd9f713c836dec00cf0b03762eea83c122d80a59ee91",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "alice-soft/ajp",
+          "input": "tests/dec/alice_soft/files/ajp/CG51478.ajp",
+          "input_sha256": "a1ced5dad652c87cf0a10e48dbdc07e8830f8d1272cb62b8cfd3813cba939eaf",
+          "expected": "tests/dec/alice_soft/files/ajp/CG51478-out.png",
+          "expected_sha256": "45168e78f5a7e469879e8536d217b6c04ecbb6d13765b396f4636b26731ea679",
+          "comparison": "alpha exact; RGB abs difference <=3 (shared Rust JPEG vs upstream libjpeg)"
+        },
+        {
+          "format": "alice-soft/dcf",
+          "input": "tests/dec/alice_soft/files/dcf/tere.dcf",
+          "input_sha256": "b6ca32b22880b1cf08588ba9d7c271903b2ba1839d2cf1e59e55cc65d4435a54",
+          "expected": "tests/dec/alice_soft/files/dcf/tere-out.png",
+          "expected_sha256": "dd5db80ba3a3e5f17658414e077e9c2ebd3430ab7dfb42cfca7fdebe94f67322",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "real-live/pdt9",
+          "input": "tests/dec/real_live/files/pdt9/07T01.PDT",
+          "input_sha256": "649803e13c8010768241450bb14b99ee6534406ee5e4fb08ce47d23f185fb5b9",
+          "expected": "tests/dec/real_live/files/pdt9/07T01-out.png",
+          "expected_sha256": "9b722f538013d995e0f71a3bdee2b3e5f64415ad792727c6b5dbe7a2c34eccc0",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "real-live/pdt10",
+          "input": "tests/dec/real_live/files/pdt10/KM28B.PDT",
+          "input_sha256": "bece4eedac878821fa898473aba3c184e2e4eed6549b91287adf72c3cda2971d",
+          "expected": "tests/dec/real_live/files/pdt10/KM28B-out.png",
+          "expected_sha256": "76f5e79fbfda61b6ed30521a8ae7d044814a2f118767875380c884c6d5273f17",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "real-live/pdt10",
+          "input": "tests/dec/real_live/files/pdt10/SR_L10.PDT",
+          "input_sha256": "f97efe7e0f3f08d181b6b037eb9fb45d868dd55aa0a036e4c77c0f4959829230",
+          "expected": "tests/dec/real_live/files/pdt10/SR_L10-out.png",
+          "expected_sha256": "fa503de38ab1e0193eed1ecadcec65b599201fd288bd522ba162b6f8ca615cc4",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "real-live/g00",
+          "input": "tests/dec/real_live/files/g00/AYU_03.g00",
+          "input_sha256": "d98fd890d273d411ffede4f5f5d186662f1a2726a89b59deea1be46106e73a7a",
+          "expected": "tests/dec/real_live/files/g00/AYU_03-out.png",
+          "expected_sha256": "2280caecaea8cfd164382ad220fe70af8ef937db30810850f12c4cefaaf33b1f",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "real-live/g00",
+          "input": "tests/dec/real_live/files/g00/ayu_02.g00",
+          "input_sha256": "8fee66aea355125e451c07ca2e78cd8181853359ea883c230d03b1c5beb4d678",
+          "expected": "tests/dec/real_live/files/g00/ayu_02-out.png",
+          "expected_sha256": "3e32c6528decf48f30c3d0fee1b57627c9b7cfa01dcbf200a596a5329c2b251e",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "real-live/g00",
+          "input": "tests/dec/real_live/files/g00/ayu_05.g00",
+          "input_sha256": "37ef7ec3f3c5f1c1eaea92c9683770383b4214dd458d7d3684c4710361afab7e",
+          "expected": "tests/dec/real_live/files/g00/ayu_05-out.png",
+          "expected_sha256": "780604521baa921e3d3c0eb0f95e1716a4a7bdc8e51fd933353609d32d80a2f4",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "nscripter/spb",
+          "input": "tests/dec/nscripter/files/spb/grimoire_btn.bmp",
+          "input_sha256": "f9135ffab372ee8b6f2ab6c29f65c9cefcda0010873dcce13682408a64c78c09",
+          "expected": "tests/dec/nscripter/files/spb/grimoire_btn-out.png",
+          "expected_sha256": "08e280838057e2c02c43deffdc96ba1ece9f87c147ed135bc35060762219df14",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "kirikiri/tlg",
+          "input": "tests/dec/kirikiri/files/tlg/14.tlg",
+          "input_sha256": "6a018aec169392bff43d1c484603ed46aecceca24d90b110d692b53b92689326",
+          "expected": "tests/dec/kirikiri/files/tlg/14-out.png",
+          "expected_sha256": "84598aaf7861caee53c01957f55f49cf6ce32a071f2a819db1a7017d513d04c3",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "kirikiri/tlg",
+          "input": "tests/dec/kirikiri/files/tlg/bg08d.tlg",
+          "input_sha256": "7313c10c9e669dc162181d95b65fe0e623066209e0ae05a55a0ead2517eb98d5",
+          "expected": "tests/dec/kirikiri/files/tlg/bg08d-out.png",
+          "expected_sha256": "15fbcbd66c3db3ec89175c9ac822c43129e3711bf62da11a0a189cbff9779409",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "kirikiri/tlg",
+          "input": "tests/dec/kirikiri/files/tlg/tlg6.tlg",
+          "input_sha256": "d085114145df2b25ccb7e4dc9e747f3a465b4a30502f14737a6ea3c8019ca613",
+          "expected": "tests/dec/kirikiri/files/tlg/tlg6-out.png",
+          "expected_sha256": "99aa38a4a50367eb46c0c1c05662df7bd43aa3e4675fb214479cb3edfc295b14",
+          "comparison": "width/height and every RGBA byte exact"
+        },
+        {
+          "format": "purple-software/pb3",
+          "input": "tests/dec/purple_software/files/pb3/fk1-al_a102.pb3",
+          "input_sha256": "99773d3934d6fc92a35dae3405f02950574229dd20a8e38503c1ab5703dc7525",
+          "expected": "tests/dec/purple_software/files/pb3/fk1-al_a102-out1.png",
+          "expected_sha256": "c2872c307e910e3066d429448561747f6e4ccdb0560a1b685aa1f0da7a76dd60",
+          "comparison": "all RGBA bytes exact; client-scoped PNG base supplied"
+        },
+        {
+          "format": "purple-software/pb3",
+          "input": "tests/dec/purple_software/files/pb3/fk1-al_a102.pb3",
+          "input_sha256": "99773d3934d6fc92a35dae3405f02950574229dd20a8e38503c1ab5703dc7525",
+          "expected": "tests/dec/purple_software/files/pb3/fk1-al_a102-out2.png",
+          "expected_sha256": "68aeadffac87ff67040c2224680d329c16f93ca093a139ad1d5290fe090d77ec",
+          "comparison": "all RGBA bytes exact; client-scoped resolver returns typed NotFound"
+        }
+      ]
+    }
+  },
+  "boundaries": [
+    "No fixture binaries, user game data or fonts copied into CrySirror. Kaguya has synthetic ordinary tests matching upstream format construction rather than binary fixture distribution.",
+    "This is decoder capability, not registration of an original VM or proof an entire game runs.",
+    "Corrupt/truncated input and unsupported layouts fail explicitly; does not reproduce unsafe upstream zero-filled partial-read behavior.",
+    "QNT output padding and TLG/G00 prediction arithmetic preserve byte wrapping and sampling order.",
+    "AJP shared JPEG decoding differs from upstream libjpeg: observed corpus max RGB absolute difference3, alpha exact; no universal bit-exact JPEG claim.",
+    "JBP1 requires explicit quantization table flag; pinned upstream reads uninitialized tables when absent. Declared JBP1 depth24 only.",
+    "ERI supports original lossless transformation, not DCT/LOT; blocking degree1..10 and shared decoded/padded byte limits enforced.",
+    "Native reference names use UTF8 or strict Shift-JIS fallback. Reference reads go through context capability root; only typed NotFound means absent.",
+    "PB3 fixed format name/XOR constants and header-embedded tail keys are format algorithms, not per-title key tables.",
+    "ERI additive reference composition wraps RGB only and preserves base alpha, matching original AddSimple."
+  ]
+}

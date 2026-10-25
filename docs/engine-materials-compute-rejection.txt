@@ -1,0 +1,1 @@
+CrySirror: the PBR scene renders on the raster path only; compute ray tracing of PBR materials is not implemented

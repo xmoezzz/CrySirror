@@ -1,0 +1,35 @@
+[package]
+name = "ethornell-vm"
+version = "0.1.0"
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+edition = "2024"
+
+
+[dependencies]
+ethornell-archive = { path = "../ethornell-archive" }
+ethornell-image = { path = "../ethornell-image" }
+ethornell-core = { path = "../ethornell-core" }
+ethornell-script = { path = "../ethornell-script" }
+thiserror = "1"
+tracing = "0.1"
+encoding_rs = "0.8"
+
+# Original fixture suites require external inputs; CrySirror adapter tests are separate.
+[lib]
+test = false
+doctest = false
+
+[features]
+default=[]
+cpu-embedded=["dep:libc"]
+[target.'cfg(unix)'.dependencies]
+libc={version="0.2",optional=true}
+
+[[test]]
+name="host_boundary"
+path="tests/host_boundary.rs"
+required-features=["cpu-embedded"]

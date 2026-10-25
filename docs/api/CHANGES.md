@@ -1,0 +1,115 @@
+# API change log
+
+Newest first. Each entry is keyed by the API fingerprint printed in
+[REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
+fingerprint appears here. Mark breaking changes with **Breaking**.
+
+## `f49c116e5d278370` (2026-10-25): native image resources through the engine
+
+- `Resources.imageFormats()` reports the installed native image IDs and standard
+  extensions; `probeImage(asset)` reports matching IDs; `decodeImage(slot,
+  asset, {format?, profile?}?)` publishes a scoped RGBA surface.
+- Archive mounts, Bitmap loads, text icons, retained layers and glTF/PBR texture
+  decoding use the Runtime image registry. Source-specific base/mask/reference
+  reads stay in the same client's VFS. Native password algorithms obtain raw
+  caller key material through the shared key provider.
+- The `arc-formats` feature registers 96 concrete native image formats, with
+  variants and fidelity limits in `docs/arc-image-support.json`. A specific
+  wrapper outranks its embedded codec; genuinely ambiguous detections require
+  an explicit format ID. This is resource decoding, not a new VM adapter.
+- Existing methods and project fields are retained. Rust image plugins can
+  implement `ImageFormat`; PBR callers can inject a decoder with
+  `load_pbr_with_decoder`. Native G00 surfaces do not replace a VM's own cut,
+  pivot, message or save policies.
+
+## `794e19091fcfd6ab` (2026-10-25): shared resource archives and Rapier physics
+
+- New `Resources` class/global `resources`: installed format/transform discovery,
+  bounded probing and metadata pages, immutable client decode profiles and
+  archive mounts into the existing asset VFS. Migrated archive parsers are
+  selected by the optional `arc-formats` host feature (ADR 0044).
+- New `Physics` global `physics` and `PhysicsJoint` class: gravity, queries,
+  collision events, statistics and fixed/spherical/revolute/prismatic joints.
+  Runtime runs Rapier once per World fixed step, including data-only projects.
+- `Entity` gains impulse, torque, persistent force, sleep/wake and kinematic
+  target methods; `physicsState` and writable `angularVelocity` expose state.
+  Scene angular velocity uses degrees/s; revolute joint limits/motors use radians.
+- `ColliderSpec` adds mass/material/damping/CCD/sensor/group/lock settings.
+  Body kinds add `dynamic` and `kinematic_position`; shapes add `convex_hull`.
+  `SystemsSpec.physics` and saved physics declarations preserve logical forces,
+  targets and joints. Commands add `set_physics` and `set_angular_velocity`.
+- Existing serialized projects retain field defaults. **Rust source migration:**
+  complete `ColliderSpec`/`EntitySpec` literals must initialize the added fields.
+  The derived physics field moves from `EngineState.physics` to
+  `EngineState.runtime.physics`; `EngineState.physics()` remains the syncing
+  query accessor. Entity object identities now include client ownership.
+  Physics-owned bodies now use Rapier rather than World's ordinary integrator.
+  Invalid/sheared/nonuniform sphere and capsule transforms fail explicitly.
+  Snapshot rebuilds do not preserve native solver warm-start caches (ADR 0045).
+
+## `e5d2e7639aa37f1d` (2026-10-25): arcade vehicles
+
+- `Entity.setVehicle(spec | null)`: makes a character-collider entity an
+  arcade vehicle (ADR 0043), or removes it.
+- `Entity.drive({throttle, steer, brake, handbrake}, dt)`: moves and
+  orients the vehicle. It returns speed, lateral speed, grounded, the
+  number of wheels on the ground, blocked and yaw.
+- Vehicle state is not saved yet.
+- Not breaking.
+
+## `3c1011d7e4f37029` (2026-10-25): character fitting and clipping tools
+
+- `World.sphereCast(origin, direction, radius, maxDistance, ignore?)`: a
+  swept sphere. It returns the sphere centre at impact and the surface
+  normal. Use it for cameras and probes that must not clip into geometry.
+- `World.groundPose(position, yawDegrees, halfLength, maxDrop, ignore?)`:
+  the ground under the front and back of a body, as height, pitch, normal
+  and both contact points. Use it to conform quadrupeds and vehicles.
+- `World.modelInfo(path).bounds`: the rest-pose `{min, max}` of the model,
+  with skinned vertices posed through their joints. Use it to fit
+  colliders to models.
+- Not breaking.
+
+## `68bc97f1e36d1532` (2026-10-25): puppets and level sequences
+
+- New class `Puppets` (global `puppets`), ADR 0029: `setParameter`,
+  `releaseParameter`, `play`, `stop`, `parameters`, `motions`, `value` and
+  the property `count`.
+- New layer paint `{kind: "puppet", asset, tint?}`. PSB assets are
+  rejected.
+- New layer command `{op: "puppet", id, command}`, where `command` is a
+  `PuppetCommand`.
+- `World.playSequence`, `World.stopSequence`, `World.sequenceStatus` and
+  `World.sequenceEvents`, ADR 0040.
+- New world commands `play_sequence` and `stop_sequence`.
+- New data types: `PuppetRig` and its parts, and `SequenceSpec` and its
+  tracks.
+- Not breaking: all additions.
+
+## `1131a6a908aacc15` (2026-10-25): irradiance visibility and idle refresh
+
+- `IrradianceVolumeSpec.visibility` (bool, default `true`): Chebyshev
+  visibility from per-probe distance moments. Set it to `false` for the old
+  interpolation without occlusion.
+- `IrradianceVolumeSpec.idle_probes_per_frame` (u32, default `0`, at most
+  `probes_per_frame`): the refresh rate once the volume has converged.
+- **Behaviour change.** Converged volumes stop refreshing until a light, a
+  static object, a material override, the sun or the environment changes.
+  To keep refreshing continuously, set `idle_probes_per_frame` equal to
+  `probes_per_frame`.
+- Not breaking: both fields are optional. ADR 0028, step 2.
+
+## `28168b87bbb31005` (2026-10-25): first generated baseline
+
+- Baseline of the generated reference: 13 classes, 11 script globals,
+  44 mapped commands, data specs and the Siglus/RFVP/BGI adapter configs.
+- Included from the latest steps:
+  - `Layers.transition`, `Layers.endTransition` and the `activeTransition`
+    property (ADR 0022).
+  - `Entity.setReflectionProbe` and the spec fields `source` and `parallax`
+    (ADR 0024, ADR 0025).
+  - `Entity.setIrradianceVolume` (ADR 0028).
+  - The environment fields `reflections`, `geometry_lod` (with `gpu`) and
+    `virtual_shadows` (ADR 0023, ADR 0026, ADR 0027).
+  - BGI adapter config (ADR 0037, ADR 0039).
+- Earlier changes were not logged. ADRs 0001–0039 describe them.

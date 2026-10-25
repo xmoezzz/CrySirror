@@ -1,0 +1,2069 @@
+    Checking crysirror-core v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-core)
+    Checking crysirror-image v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-image)
+    Checking siglus_scene_vm v1.0.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_scene_vm)
+   Compiling ethornell-app v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/bgi-upstream/crates/ethornell-app)
+    Checking ethornell-audio v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/bgi-upstream/crates/ethornell-audio)
+    Checking rfvp v0.7.0 (/Users/xmoe/Documents/CrySirror/crates/rfvp)
+    Checking crysirror-ue-import v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-ue-import)
+    Checking ethornell-script v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/bgi-upstream/crates/ethornell-script)
+    Checking ethornell-archive v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/bgi-upstream/crates/ethornell-archive)
+    Checking ethornell-core v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/bgi-upstream/crates/ethornell-core)
+    Checking crysirror-compat v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-compat)
+    Checking crysirror-scene v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-scene)
+    Checking crysirror-text v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-text)
+    Checking crysirror-audio v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-audio)
+    Checking ethornell-image v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/bgi-upstream/crates/ethornell-image)
+    Checking crysirror-siglus v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus)
+    Checking crysirror-host v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-host)
+    Checking crysirror-cli v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-cli)
+warning: method `remaining` is never used
+   --> crates/bgi-upstream/crates/ethornell-image/src/cbg.rs:830:8
+    |
+821 | impl<'a> Reader<'a> {
+    | ------------------- method in this implementation
+...
+830 |     fn remaining(&self) -> &'a [u8] {
+    |        ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ethornell-image` (lib) generated 1 warning
+    Checking ethornell-vm v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/bgi-upstream/crates/ethornell-vm)
+    Checking crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+    Checking crysirror-asset v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-asset)
+    Checking ethornell-render v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/bgi-upstream/crates/ethornell-render)
+warning: unused imports: `known_call_arg_count` and `known_call_stack_output_count`
+ --> crates/bgi-upstream/crates/ethornell-vm/src/host_request.rs:4:31
+  |
+4 | use ethornell_script::calls::{known_call_arg_count, known_call_stack_output_count};
+  |                               ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: use of deprecated function `libc::mach_host_self`: Use the `mach2` crate instead
+  --> crates/bgi-upstream/crates/ethornell-vm/src/embedding_metadata.rs:33:31
+   |
+33 |     let host = unsafe { libc::mach_host_self() };
+   |                               ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `libc::mach_task_self`: Use the `mach2` crate instead
+  --> crates/bgi-upstream/crates/ethornell-vm/src/embedding_metadata.rs:52:36
+   |
+52 |         mach_port_deallocate(libc::mach_task_self(), host);
+   |                                    ^^^^^^^^^^^^^^
+
+warning: function `presentation_viewport` is never used
+  --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:97:15
+   |
+97 | pub(crate) fn presentation_viewport(
+   |               ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `viewport_to_virtual_point` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:125:15
+    |
+125 | pub(crate) fn viewport_to_virtual_point(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `game_clip_to_scissor_in` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:165:15
+    |
+165 | pub(crate) fn game_clip_to_scissor_in(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `viewport_transform` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:199:15
+    |
+199 | pub(crate) fn viewport_transform(
+    |               ^^^^^^^^^^^^^^^^^^
+
+warning: function `rasterize_text` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:264:15
+    |
+264 | pub(crate) fn rasterize_text(
+    |               ^^^^^^^^^^^^^^
+
+warning: function `apply_text_glow` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:369:15
+    |
+369 | pub(crate) fn apply_text_glow(text: &DecodedImage, glow: TextGlow) -> DecodedImage {
+    |               ^^^^^^^^^^^^^^^
+
+warning: function `text_style_at` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:431:4
+    |
+431 | fn text_style_at(styles: &[TextStyleSpan], char_index: usize) -> Option<TextStyleSpan> {
+    |    ^^^^^^^^^^^^^
+
+warning: function `measure_line` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:438:4
+    |
+438 | fn measure_line(font: &FontArc, text: &str, px_height: f32) -> u32 {
+    |    ^^^^^^^^^^^^
+
+warning: function `validate_rgba` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:469:15
+    |
+469 | pub(crate) fn validate_rgba(image: &DecodedImage) -> Result<()> {
+    |               ^^^^^^^^^^^^^
+
+warning: `ethornell-render` (lib) generated 9 warnings
+warning: function `game_clip_to_scissor` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:141:15
+    |
+141 | pub(crate) fn game_clip_to_scissor(
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `surface_to_virtual_point` is never used
+   --> crates/bgi-upstream/crates/ethornell-render/src/shared.rs:214:15
+    |
+214 | pub(crate) fn surface_to_virtual_point(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `ethornell-render` (lib test) generated 11 warnings (9 duplicates)
+warning: unused import: `std::collections::BTreeMap`
+   --> crates/bgi-upstream/crates/ethornell-vm/src/user_data.rs:805:5
+    |
+805 | use std::collections::BTreeMap;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `MAX_MEMORY_SIZE`
+     --> crates/bgi-upstream/crates/ethornell-vm/src/lib.rs:13648:9
+      |
+13648 |         MAX_MEMORY_SIZE, NativeCallFrame, NativeOpcode, ResourceLoadOrigin, SoundApi, SysApi,
+      |         ^^^^^^^^^^^^^^^
+
+    Checking siglus_key_recovery v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_key_recovery)
+warning: `ethornell-image` (lib test) generated 1 warning (1 duplicate)
+    Checking siglus_assets v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_assets)
+warning: variable does not need to be mutable
+    --> crates/bgi-upstream/crates/ethornell-vm/src/lib.rs:7414:13
+     |
+7414 |         let mut shared = self.system81_shared.lock().expect("system81 state poisoned");
+     |             ----^^^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `AUX_MEMORY_TAG_BASE` is never used
+  --> crates/bgi-upstream/crates/ethornell-vm/src/lib.rs:64:7
+   |
+64 | const AUX_MEMORY_TAG_BASE: u32 = 0x20;
+   |       ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `portable_physical_memory_mb` is never used
+    --> crates/bgi-upstream/crates/ethornell-vm/src/lib.rs:2075:4
+     |
+2075 | fn portable_physical_memory_mb() -> (u32, u32) {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `native_file_hash` is never used
+    --> crates/bgi-upstream/crates/ethornell-vm/src/lib.rs:2219:4
+     |
+2219 | fn native_file_hash(bytes: &[u8]) -> [u32; 2] {
+     |    ^^^^^^^^^^^^^^^^
+
+warning: methods `poll_wait_timing_procedure`, `free_next_called_program`, `free_loaded_program_value`, `free_loaded_program_index`, `program_index_for_program_value`, and `rand_msvc_wide` are never used
+    --> crates/bgi-upstream/crates/ethornell-vm/src/lib.rs:6618:8
+     |
+2608 | impl Vm {
+     | ------- methods in this implementation
+...
+6618 |     fn poll_wait_timing_procedure<A>(&mut self, api: &mut A, trace_events: bool) -> bool
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+7057 |     fn free_next_called_program(&mut self, trace_events: bool) -> Value {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+7074 |     fn free_loaded_program_value(&mut self, program: Value, trace_events: bool) -> Value {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+7087 |     fn free_loaded_program_index(&mut self, index: usize, trace_events: bool) -> Value {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+7120 |     fn program_index_for_program_value(&self, value: &Value) -> Option<usize> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+8118 |     fn rand_msvc_wide(&mut self) -> i32 {
+     |        ^^^^^^^^^^^^^^
+
+warning: methods `capture`, `exchange`, and `restore` are never used
+   --> crates/bgi-upstream/crates/ethornell-vm/src/local_window.rs:134:19
+    |
+108 | impl LocalWindow {
+    | ---------------- methods in this implementation
+...
+134 |     pub(crate) fn capture(&mut self, source: &[u8]) {
+    |                   ^^^^^^^
+...
+150 |     pub(crate) fn exchange(&mut self, live: &mut [u8], scratch: &mut Vec<u8>) {
+    |                   ^^^^^^^^
+...
+181 |     pub(crate) fn restore(&self, destination: &mut [u8]) {
+    |                   ^^^^^^^
+
+warning: constant `GRAPH_TEXT_EXTENT_FONT_PARAMETERS` is never used
+     --> crates/bgi-upstream/crates/ethornell-vm/src/native_call.rs:22651:7
+      |
+22651 | const GRAPH_TEXT_EXTENT_FONT_PARAMETERS: &[NativeParameterSpec] = &[
+      |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `has_status_flag`, `deadline_reached`, `message_queue`, `message_queue_mut`, and `procedure_callbacks_is_empty` are never used
+   --> crates/bgi-upstream/crates/ethornell-vm/src/native_thread.rs:363:19
+    |
+303 | impl CThread {
+    | ------------ methods in this implementation
+...
+363 |     pub(crate) fn has_status_flag(&self, flag: i32) -> bool {
+    |                   ^^^^^^^^^^^^^^^
+...
+385 |     pub(crate) fn deadline_reached(&self, now_ms: i32) -> bool {
+    |                   ^^^^^^^^^^^^^^^^
+...
+471 |     pub(crate) fn message_queue(&self) -> &VecDeque<Value> {
+    |                   ^^^^^^^^^^^^^
+...
+475 |     pub(crate) fn message_queue_mut(&mut self) -> &mut VecDeque<Value> {
+    |                   ^^^^^^^^^^^^^^^^^
+...
+527 |     pub(crate) fn procedure_callbacks_is_empty(&self) -> bool {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `sys_read_profile_string` is never used
+ --> crates/bgi-upstream/crates/ethornell-vm/src/profile.rs:4:19
+  |
+3 | impl Vm {
+  | ------- method in this implementation
+4 |     pub(crate) fn sys_read_profile_string(&mut self) -> VmResult<i32> {
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `profile_key_string` and `profile_default_string` are never used
+  --> crates/bgi-upstream/crates/ethornell-vm/src/profile.rs:38:8
+   |
+37 | impl Vm {
+   | ------- methods in this implementation
+38 |     fn profile_key_string(&self, value: Value) -> String {
+   |        ^^^^^^^^^^^^^^^^^^
+...
+45 |     fn profile_default_string(&self, value: Value) -> String {
+   |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `resolve_profile_default` is never used
+  --> crates/bgi-upstream/crates/ethornell-vm/src/profile.rs:58:4
+   |
+58 | fn resolve_profile_default(key: &str, default_text: &str) -> Option<String> {
+   |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `clip_sjis_c_string` is never used
+  --> crates/bgi-upstream/crates/ethornell-vm/src/profile.rs:65:4
+   |
+65 | fn clip_sjis_c_string(text: &str, max_len: usize) -> String {
+   |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `value_label` is never used
+  --> crates/bgi-upstream/crates/ethornell-vm/src/profile.rs:84:4
+   |
+84 | fn value_label(value: &Value) -> String {
+   |    ^^^^^^^^^^^
+
+warning: field `slot` is never read
+ --> crates/bgi-upstream/crates/ethornell-vm/src/records.rs:5:16
+  |
+4 | pub(crate) struct RecordTableState {
+  |                   ---------------- field in this struct
+5 |     pub(crate) slot: u32,
+  |                ^^^^
+  |
+  = note: `RecordTableState` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: constant `BCS_MAGIC` is never used
+ --> crates/bgi-upstream/crates/ethornell-vm/src/scenario.rs:4:7
+  |
+4 | const BCS_MAGIC: &[u8] = b"BurikoCompiledScriptVer1.00\0";
+  |       ^^^^^^^^^
+
+warning: methods `scenario_code_preprocess` and `find_loaded_bcs` are never used
+   --> crates/bgi-upstream/crates/ethornell-vm/src/scenario.rs:55:19
+    |
+ 20 | impl Vm {
+    | ------- methods in this implementation
+...
+ 55 |     pub(crate) fn scenario_code_preprocess(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+209 |     fn find_loaded_bcs(&self, script_name: &str, body_length: usize) -> Option<(u32, Vec<u8>)> {
+    |        ^^^^^^^^^^^^^^^
+
+warning: function `bcs_matches_script_name` is never used
+   --> crates/bgi-upstream/crates/ethornell-vm/src/scenario.rs:319:4
+    |
+319 | fn bcs_matches_script_name(program: &ethornell_script::bcs::BcsProgram, script_name: &str) -> bool {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `normalized_script_stem` is never used
+   --> crates/bgi-upstream/crates/ethornell-vm/src/scenario.rs:329:4
+    |
+329 | fn normalized_script_stem(name: &str) -> String {
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `read_u32` is never used
+   --> crates/bgi-upstream/crates/ethornell-vm/src/scenario.rs:350:4
+    |
+350 | fn read_u32(buf: &[u8], offset: usize) -> Option<u32> {
+    |    ^^^^^^^^
+
+warning: field `mode` is never read
+  --> crates/bgi-upstream/crates/ethornell-vm/src/system81_state.rs:11:16
+   |
+ 9 | pub(crate) struct ResourceStream {
+   |                   -------------- field in this struct
+10 |     pub(crate) path: String,
+11 |     pub(crate) mode: i32,
+   |                ^^^^
+   |
+   = note: `ResourceStream` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `pixel_shader_version` is never read
+  --> crates/bgi-upstream/crates/ethornell-vm/src/system81_state.rs:90:16
+   |
+66 | pub(crate) struct System81SharedState {
+   |                   ------------------- field in this struct
+...
+90 |     pub(crate) pixel_shader_version: u16,
+   |                ^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `System81SharedState` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: function `write_native_system_time` is never used
+   --> crates/bgi-upstream/crates/ethornell-vm/src/user_data.rs:426:4
+    |
+426 | fn write_native_system_time(destination: &mut [u8]) {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+    Checking na_mpeg2_decoder v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/na_mpeg2_decoder)
+warning: `ethornell-vm` (lib) generated 25 warnings (run `cargo fix --lib -p ethornell-vm` to apply 2 suggestions)
+warning: unused import: `scan_game_root`
+ --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:1:67
+  |
+1 | use ethornell_archive::{MagicKind, ResourceManager, detect_magic, scan_game_root};
+  |                                                                   ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Mutex`
+  --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:11:22
+   |
+11 | use std::sync::{Arc, Mutex};
+   |                      ^^^^^
+
+warning: unused import: `Duration`
+  --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:12:17
+   |
+12 | use std::time::{Duration, Instant};
+   |                 ^^^^^^^^
+
+warning: unused import: `Write`
+ --> crates/bgi-upstream/crates/ethornell-app/src/file_policy.rs:5:16
+  |
+5 |     io::{self, Write},
+  |                ^^^^^
+
+warning: unused import: `blit_decoded_image`
+ --> crates/bgi-upstream/crates/ethornell-app/src/graph_bitmap_nodes.rs:2:74
+  |
+2 |     DecodedImage, RuntimeGraphResource, RuntimeSurface, RuntimeTraceApi, blit_decoded_image,
+  |                                                                          ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ethornell_vm::GraphApi`
+ --> crates/bgi-upstream/crates/ethornell-app/src/native_graph_resource.rs:2:5
+  |
+2 | use ethornell_vm::GraphApi;
+  |     ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `std::io::Read`
+   --> crates/bgi-upstream/crates/ethornell-app/src/user_files.rs:319:13
+    |
+319 |         use std::io::Read;
+    |             ^^^^^^^^^^^^^
+
+warning: unused imports: `blit_decoded_image_format1_to_format2` and `blit_decoded_image_format2_source_over`
+   --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:120:5
+    |
+120 |     blit_decoded_image_format1_to_format2, blit_decoded_image_format2_source_over,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `NATIVE_TICK_MS`
+   --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:146:14
+    |
+146 | use timing::{NATIVE_TICK_MS, normalize_engine_elapsed_ms};
+    |              ^^^^^^^^^^^^^^
+
+warning: unused import: `resolve_existing_path_case_insensitive`
+   --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:149:25
+    |
+149 |     read_runtime_bytes, resolve_existing_path_case_insensitive, runtime_file_cache_key,
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unnecessary parentheses around `if` condition
+    --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:8268:49
+     |
+8268 |             let (blend_mode, node_opacity) = if (self.native_filters.contains_key(layer_id)
+     |                                                 ^
+...
+8271 |                     || layer.key.starts_with("runtime:landscape:")))
+     |                                                                    ^
+     |
+     = note: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
+help: remove these parentheses
+     |
+8268 ~             let (blend_mode, node_opacity) = if self.native_filters.contains_key(layer_id)
+8269 |                 || self.native_effector_rasters.contains_key(layer_id)
+8270 |                 || (layer.key.starts_with("runtime:backml:")
+8271 ~                     || layer.key.starts_with("runtime:landscape:"))
+     |
+
+error[E0433]: cannot find module or crate `winit` in this scope
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:10742:13
+      |
+10742 |         use winit::keyboard::KeyCode;
+      |             ^^^^^ use of unresolved module or unlinked crate `winit`
+      |
+      = help: if you wanted to use a crate named `winit`, use `cargo add winit` to add it to your `Cargo.toml`
+
+error[E0425]: cannot find function `execute_audio_command_checked` in module `super`
+   --> crates/bgi-upstream/crates/ethornell-app/src/audio_runtime.rs:219:28
+    |
+219 |         let error = super::execute_audio_command_checked(
+    |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `super`
+    |
+note: found an item that was configured out
+   --> crates/bgi-upstream/crates/ethornell-app/src/audio_runtime.rs:247:15
+    |
+246 | #[cfg(not(feature = "cpu-embedded"))]
+    |          -------------------------- the item is gated here
+247 | pub(crate) fn execute_audio_command_checked(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0425]: cannot find function `input_descriptor_for_keycode` in module `super`
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:10758:31
+      |
+10758 |             assert_eq!(super::input_descriptor_for_keycode(code), Some(descriptor));
+      |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `super`
+      |
+note: found an item that was configured out
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:9771:4
+      |
+ 9770 | #[cfg(all(feature = "desktop-window", not(feature = "cpu-embedded")))]
+      |           -------------------------- the item is gated behind the `desktop-window` feature
+ 9771 | fn input_descriptor_for_keycode(code: KeyCode) -> Option<i32> {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0425]: cannot find function `input_descriptor_for_keycode` in module `super`
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:10769:37
+      |
+10769 |             let descriptor = super::input_descriptor_for_keycode(code).unwrap();
+      |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `super`
+      |
+note: found an item that was configured out
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:9771:4
+      |
+ 9770 | #[cfg(all(feature = "desktop-window", not(feature = "cpu-embedded")))]
+      |           -------------------------- the item is gated behind the `desktop-window` feature
+ 9771 | fn input_descriptor_for_keycode(code: KeyCode) -> Option<i32> {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `super::graph::RuntimeGraphResource`
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:10112:9
+      |
+10112 |     use super::graph::RuntimeGraphResource;
+      |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    Checking crysirror-video v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-video)
+warning: methods `free_next_called_program`, `free_loaded_program_value`, `free_loaded_program_index`, `program_index_for_program_value`, and `rand_msvc_wide` are never used
+    --> crates/bgi-upstream/crates/ethornell-vm/src/lib.rs:7057:8
+     |
+2608 | impl Vm {
+     | ------- methods in this implementation
+...
+7057 |     fn free_next_called_program(&mut self, trace_events: bool) -> Value {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+7074 |     fn free_loaded_program_value(&mut self, program: Value, trace_events: bool) -> Value {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+7087 |     fn free_loaded_program_index(&mut self, index: usize, trace_events: bool) -> Value {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+7120 |     fn program_index_for_program_value(&self, value: &Value) -> Option<usize> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+8118 |     fn rand_msvc_wide(&mut self) -> i32 {
+     |        ^^^^^^^^^^^^^^
+
+warning: methods `deadline_reached`, `message_queue`, and `message_queue_mut` are never used
+   --> crates/bgi-upstream/crates/ethornell-vm/src/native_thread.rs:385:19
+    |
+303 | impl CThread {
+    | ------------ methods in this implementation
+...
+385 |     pub(crate) fn deadline_reached(&self, now_ms: i32) -> bool {
+    |                   ^^^^^^^^^^^^^^^^
+...
+471 |     pub(crate) fn message_queue(&self) -> &VecDeque<Value> {
+    |                   ^^^^^^^^^^^^^
+...
+475 |     pub(crate) fn message_queue_mut(&mut self) -> &mut VecDeque<Value> {
+    |                   ^^^^^^^^^^^^^^^^^
+
+warning: `ethornell-vm` (lib test) generated 26 warnings (22 duplicates) (run `cargo fix --lib -p ethornell-vm --tests` to apply 2 suggestions)
+    Checking crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+    Checking crysirror-engine v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-engine)
+    Checking crysirror-author v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-author)
+    Checking crysirror-rfvp v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-rfvp)
+    Checking crysirror-wgpu v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-wgpu)
+warning: value assigned to `start` is never read
+   --> crates/bgi-upstream/crates/ethornell-app/src/perspective_blit.rs:177:25
+    |
+177 |         let mut start = self.end;
+    |                         ^^^^^^^^ this value is reassigned later and never used
+...
+183 |             start = self.end;
+    |             ---------------- `start` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+error[E0433]: cannot find module or crate `runtime_frontend` in this scope
+  --> crates/bgi-upstream/crates/ethornell-app/src/save_repro.rs:34:22
+   |
+34 |         let report = runtime_frontend::drive_runtime_frame(
+   |                      ^^^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `runtime_frontend`
+   |
+note: found an item that was configured out
+  --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:90:5
+   |
+89 | #[cfg(not(feature = "cpu-embedded"))]
+   |          -------------------------- the item is gated here
+90 | mod runtime_frontend;
+   |     ^^^^^^^^^^^^^^^^
+help: to make use of source file crates/bgi-upstream/crates/ethornell-app/src/runtime_frontend.rs, use `mod runtime_frontend` in this file to declare the module
+  --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:1:1
+   |
+ 1 + mod runtime_frontend;
+   |
+
+warning: variable does not need to be mutable
+   --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:674:13
+    |
+674 |         let mut buffer = Vec::new();
+    |             ----^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `KeyCode` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:156:6
+    |
+156 | enum KeyCode {
+    |      ^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `MOVIE_READ_BUFFER_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:633:7
+    |
+633 | const MOVIE_READ_BUFFER_SIZE: usize = 12 * 1024 * 1024;
+    |       ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `0` is never read
+   --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:638:10
+    |
+638 |     Heap(Vec<u8>),
+    |     ---- ^^^^^^^
+    |     |
+    |     field in this variant
+    |
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+    |
+638 -     Heap(Vec<u8>),
+638 +     Heap(()),
+    |
+
+warning: method `load_decoded` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:680:8
+    |
+667 | impl MovieReadBuffer {
+    | -------------------- method in this implementation
+...
+680 |     fn load_decoded(
+    |        ^^^^^^^^^^^^
+
+warning: fields `movie_read_buffer`, `graph_driver_mode`, `clock_pause_section`, `engine_clock_frozen`, and `next_timeline_handle` are never read
+    --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:826:5
+     |
+ 771 | struct RuntimeTraceApi {
+     |        --------------- fields in this struct
+...
+ 826 |     movie_read_buffer: MovieReadBuffer,
+     |     ^^^^^^^^^^^^^^^^^
+...
+ 929 |     graph_driver_mode: i32,
+     |     ^^^^^^^^^^^^^^^^^
+...
+1024 |     clock_pause_section: bool,
+     |     ^^^^^^^^^^^^^^^^^^^
+1025 |     pub(crate) engine_clock_frozen: bool,
+     |                ^^^^^^^^^^^^^^^^^^^
+...
+1102 |     next_timeline_handle: i32,
+     |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple associated items are never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:1250:8
+     |
+1249 | impl RuntimeTraceApi {
+     | -------------------- associated items in this implementation
+1250 |     fn new(manager: ResourceManager) -> Self {
+     |        ^^^
+...
+2222 |     fn write_call_coverage_if_requested(&self) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2254 |     fn should_continue_vm_after_yield(&self) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2266 |     fn vm_after_yield_blockers(&self) -> Vec<&'static str> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^
+...
+2283 |     fn has_blocking_user_controls(&self) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+2663 |     fn load_graph_image_key(&mut self, key: &str) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^^
+...
+2981 |     fn trace_timeline_event(&mut self, event: TimelineEvent) {
+     |        ^^^^^^^^^^^^^^^^^^^^
+...
+3080 |     fn alloc_timeline(&mut self) -> i32 {
+     |        ^^^^^^^^^^^^^^
+...
+3103 |     fn adopt_previous_graph_object_layers(&mut self, object: i32) -> Option<usize> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3137 |     fn register_layer_for_current_object(&mut self, layer_id: i32) -> Option<i32> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3639 |     fn enter_clock_pause(&mut self, always: bool) {
+     |        ^^^^^^^^^^^^^^^^^
+...
+3649 |     fn leave_clock_pause(&mut self) {
+     |        ^^^^^^^^^^^^^^^^^
+...
+3659 |     pub(crate) fn sync_host_window_state(&mut self, focused: bool, minimized: bool) {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^
+...
+3731 |     pub(crate) fn presentation_scale(&self) -> ethornell_render::PresentationScale {
+     |                   ^^^^^^^^^^^^^^^^^^
+...
+3769 |     fn apply_display_toggle_request(&mut self) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3788 |     fn set_movie_minimize_muted(&mut self, muted: bool) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3827 |     fn update_graph_object(&mut self, object: i32) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^
+...
+3923 |     fn refresh_graph_object_rect(&mut self, args: &[ethornell_vm::Value]) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+4605 |     fn apply_graph_layer_property(&mut self, args: &[ethornell_vm::Value]) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+4642 |     fn set_graph_node_mask(&mut self, node: i32, bitmap: i32) {
+     |        ^^^^^^^^^^^^^^^^^^^
+...
+4701 |     fn apply_graph_object_position(&mut self, args: &[ethornell_vm::Value]) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+4760 |     fn attach_graph_surface(&mut self, parent: i32, child: i32, x: f32, y: f32) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^^
+...
+4816 |     fn detach_graph_surface(&mut self, parent: i32, child: i32) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^^
+...
+5647 |     fn apply_graph_layer_color_blend(&mut self, args: &[ethornell_vm::Value]) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+6080 |     fn apply_graph_effect_config(&mut self, effect_id: u16, args: &[ethornell_vm::Value]) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+6205 |     fn apply_graph_affine_transform(&mut self, args: &[ethornell_vm::Value]) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+6293 |     fn apply_graph_rect_transition(&mut self, args: &[ethornell_vm::Value]) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+6999 |     fn copy_graph_backing(&mut self, source: i32, destination: i32) {
+     |        ^^^^^^^^^^^^^^^^^^
+...
+7982 |     fn ensure_transform_layer(&mut self, layer_id: i32, resource_id: i32) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+...
+9036 |     fn trace_render_snapshot(&self, frame: usize, report: Option<&ethornell_vm::VmRunReport>) {
+     |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `from_env` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:9457:8
+     |
+9456 | impl RuntimeFramePacing {
+     | ----------------------- associated function in this implementation
+9457 |     fn from_env() -> Self {
+     |        ^^^^^^^^
+
+warning: associated items `new`, `take_restart`, and `use_host_clock` are never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:9495:8
+     |
+9494 | impl RuntimeEngine {
+     | ------------------ associated items in this implementation
+9495 |     fn new(
+     |        ^^^
+...
+9531 |     fn take_restart(&mut self) -> Option<Self> {
+     |        ^^^^^^^^^^^^
+...
+9582 |     pub(crate) fn use_host_clock(&mut self) {
+     |                   ^^^^^^^^^^^^^^
+
+warning: function `parse_usize_env` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:9744:4
+     |
+9744 | fn parse_usize_env(key: &str) -> Option<usize> {
+     |    ^^^^^^^^^^^^^^^
+
+warning: function `read_vm_u32` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:9751:4
+     |
+9751 | fn read_vm_u32(memory: &[u8], address: usize) -> Option<u32> {
+     |    ^^^^^^^^^^^
+
+warning: function `input_class_state_for_descriptor` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:9913:4
+     |
+9913 | fn input_class_state_for_descriptor(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variants `MouseHorizontalWheel`, `SysKeyPress`, and `SysKeyRelease` are never constructed
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:19631:5
+      |
+19614 | enum RuntimeInputEvent {
+      |      ----------------- variants in this enum
+...
+19631 |     MouseHorizontalWheel {
+      |     ^^^^^^^^^^^^^^^^^^^^
+...
+19639 |     SysKeyPress {
+      |     ^^^^^^^^^^^
+...
+19643 |     SysKeyRelease {
+      |     ^^^^^^^^^^^^^
+      |
+      = note: `RuntimeInputEvent` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `native_audio_duration` is never used
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:28932:4
+      |
+28932 | fn native_audio_duration(value: i32) -> u64 {
+      |    ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `normalize_transform_scale` is never used
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:29037:4
+      |
+29037 | fn normalize_transform_scale(value: f32) -> f32 {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `is_scene_transition_resource` is never used
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:29087:4
+      |
+29087 | fn is_scene_transition_resource(key: &str) -> bool {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `infer_text_color` is never used
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:29301:4
+      |
+29301 | fn infer_text_color(args: &[ethornell_vm::Value]) -> Option<[f32; 4]> {
+      |    ^^^^^^^^^^^^^^^^
+
+warning: function `infer_text_rect` is never used
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:29329:4
+      |
+29329 | fn infer_text_rect(ints: &[i32]) -> Option<(i32, i32, i32, i32)> {
+      |    ^^^^^^^^^^^^^^^
+
+warning: function `load_runtime_image` is never used
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:29363:4
+      |
+29363 | fn load_runtime_image(manager: &ResourceManager) -> Result<DecodedImage> {
+      |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `load_runtime_bgm` is never used
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:29414:4
+      |
+29414 | fn load_runtime_bgm(manager: &ResourceManager) -> Result<Vec<u8>> {
+      |    ^^^^^^^^^^^^^^^^
+
+warning: method `run_scheduled_restart` is never used
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:29964:19
+      |
+29961 | impl RuntimeTraceApi {
+      | -------------------- method in this implementation
+...
+29964 |     pub(crate) fn run_scheduled_restart(&mut self) {
+      |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `start`, `cancel`, `release`, and `evaluate` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:89:19
+    |
+ 88 | impl GraphAnimationRegistry {
+    | --------------------------- methods in this implementation
+ 89 |     pub(crate) fn start(&mut self, handle: i32, duration: i32, args: &[Value]) {
+    |                   ^^^^^
+...
+107 |     pub(crate) fn cancel(&mut self, handle: i32) {
+    |                   ^^^^^^
+...
+114 |     pub(crate) fn release(&mut self, handle: i32) {
+    |                   ^^^^^^^
+...
+122 |     pub(crate) fn evaluate(&mut self, args: &[Value]) -> Option<GraphAnimationSnapshot> {
+    |                   ^^^^^^^^
+
+warning: fields `duration_ticks`, `released`, and `args` are never read
+   --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:163:5
+    |
+161 | struct GraphAnimationRecord {
+    |        -------------------- fields in this struct
+162 |     handle: i32,
+163 |     duration_ticks: u32,
+    |     ^^^^^^^^^^^^^^
+...
+166 |     released: bool,
+    |     ^^^^^^^^
+167 |     args: Vec<i32>,
+    |     ^^^^
+    |
+    = note: `GraphAnimationRecord` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: associated items `new` and `snapshot` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:171:8
+    |
+170 | impl GraphAnimationRecord {
+    | ------------------------- associated items in this implementation
+171 |     fn new(handle: i32) -> Self {
+    |        ^^^
+...
+182 |     fn snapshot(&self) -> GraphAnimationSnapshot {
+    |        ^^^^^^^^
+
+warning: struct `GraphAnimationSnapshot` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:195:19
+    |
+195 | pub(crate) struct GraphAnimationSnapshot {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:279:19
+     |
+ 234 | impl LayerAnimationSystem {
+     | ------------------------- methods in this implementation
+...
+ 279 |     pub(crate) fn scale_x_to(&mut self, layer_id: i32, from: f32, to: f32, duration_ticks: u32) {
+     |                   ^^^^^^^^^^
+...
+ 290 |     pub(crate) fn scale_y_to(&mut self, layer_id: i32, from: f32, to: f32, duration_ticks: u32) {
+     |                   ^^^^^^^^^^
+...
+ 301 |     pub(crate) fn base_vector_to(
+     |                   ^^^^^^^^^^^^^^
+...
+ 336 |     pub(crate) fn spline_vector_to(
+     |                   ^^^^^^^^^^^^^^^^
+...
+ 409 |     pub(crate) fn animate_object_alpha(
+     |                   ^^^^^^^^^^^^^^^^^^^^
+...
+ 941 |     pub(crate) fn tick_native_object_controls(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1068 |     pub(crate) fn tick_native_special_path_controls(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1191 |     pub(crate) fn tick_native_shake_object_controls(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1308 |     pub(crate) fn tick_native_spline_controls(
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variants `BaseX`, `BaseY`, `BaseZ`, `ScaleX`, and `ScaleY` are never constructed
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:1577:5
+     |
+1576 | pub(crate) enum LayerAnimationProperty {
+     |                 ---------------------- variants in this enum
+1577 |     BaseX,
+     |     ^^^^^
+1578 |     BaseY,
+     |     ^^^^^
+1579 |     BaseZ,
+     |     ^^^^^
+...
+1583 |     ScaleX,
+     |     ^^^^^^
+1584 |     ScaleY,
+     |     ^^^^^^
+     |
+     = note: `LayerAnimationProperty` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: enum `AnimationFidelity` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:1815:6
+     |
+1815 | enum AnimationFidelity {
+     |      ^^^^^^^^^^^^^^^^^
+
+warning: function `animation_fidelity` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:1824:4
+     |
+1824 | fn animation_fidelity() -> AnimationFidelity {
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `report_unrecovered_curve_once` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:1835:4
+     |
+1835 | fn report_unrecovered_curve_once(curve: i32, kind: &'static str) {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variants `PiecewiseLinear` and `LegacyNaturalCubic` are never constructed
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:1859:5
+     |
+1855 | enum SplineSampler {
+     |      ------------- variants in this enum
+...
+1859 |     PiecewiseLinear(Vec<f32>),
+     |     ^^^^^^^^^^^^^^^
+...
+1862 |     LegacyNaturalCubic(NaturalCubicSpline),
+     |     ^^^^^^^^^^^^^^^^^^
+     |
+     = note: `SplineSampler` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: associated function `from_control_points` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:1866:8
+     |
+1865 | impl SplineSampler {
+     | ------------------ associated function in this implementation
+1866 |     fn from_control_points(values: Vec<f32>) -> Self {
+     |        ^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `new` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:1898:8
+     |
+1897 | impl NaturalCubicSpline {
+     | ----------------------- associated function in this implementation
+1898 |     fn new(values: Vec<f32>) -> Self {
+     |        ^^^
+
+warning: function `motion_coord` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/animation.rs:2030:15
+     |
+2030 | pub(crate) fn motion_coord(raw: i32) -> f32 {
+     |               ^^^^^^^^^^^^
+
+warning: field `native_start_parameter` is never read
+  --> crates/bgi-upstream/crates/ethornell-app/src/audio_runtime.rs:43:16
+   |
+34 | pub(crate) struct SoundSlot {
+   |                   --------- field in this struct
+...
+43 |     pub(crate) native_start_parameter: i32,
+   |                ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `SoundSlot` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `frame_selected` is never used
+ --> crates/bgi-upstream/crates/ethornell-app/src/debug_trace.rs:1:15
+  |
+1 | pub(crate) fn frame_selected(frame: usize, selector: Option<&str>) -> bool {
+  |               ^^^^^^^^^^^^^^
+
+warning: function `parse_frame` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/debug_trace.rs:21:4
+   |
+21 | fn parse_frame(value: &str) -> Option<usize> {
+   |    ^^^^^^^^^^^
+
+warning: method `handles` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/display_tree.rs:173:8
+    |
+117 | impl NativeDisplayChain {
+    | ----------------------- method in this implementation
+...
+173 |     fn handles(&self) -> &[i32] {
+    |        ^^^^^^^
+
+warning: methods `children`, `descendants_inclusive`, `set_local_z`, `set_transform`, and `chain_handles` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/display_tree.rs:311:19
+    |
+206 | impl NativeDisplayTree {
+    | ---------------------- methods in this implementation
+...
+311 |     pub(crate) fn children(&self, handle: i32) -> Vec<i32> {
+    |                   ^^^^^^^^
+...
+327 |     pub(crate) fn descendants_inclusive(&self, handle: i32) -> Vec<i32> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+...
+361 |     pub(crate) fn set_local_z(&mut self, handle: i32, z: i32) {
+    |                   ^^^^^^^^^^^
+...
+368 |     pub(crate) fn set_transform(&mut self, handle: i32, x: f32, y: f32, z: i32) {
+    |                   ^^^^^^^^^^^^^
+...
+460 |     pub(crate) fn chain_handles(&self) -> &[i32] {
+    |                   ^^^^^^^^^^^^^
+
+warning: function `policy_error` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/file_policy.rs:11:4
+   |
+11 | fn policy_error(code: u32, error: io::Error) -> io::Error {
+   |    ^^^^^^^^^^^^
+
+warning: type alias `WriterLock` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/file_policy.rs:38:17
+   |
+38 | pub(crate) type WriterLock = ();
+   |                 ^^^^^^^^^^
+
+warning: field `user` is never read
+  --> crates/bgi-upstream/crates/ethornell-app/src/file_policy.rs:43:9
+   |
+41 | pub(crate) struct FilePolicy {
+   |                   ---------- field in this struct
+42 |     pub resource: PathBuf,
+43 |     pub user: PathBuf,
+   |         ^^^^
+   |
+   = note: `FilePolicy` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: methods `lock_writer` and `validate_resource_tree` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/file_policy/hosted.rs:613:12
+    |
+484 | impl FilePolicy {
+    | --------------- methods in this implementation
+...
+613 |     pub fn lock_writer(&self) -> io::Result<WriterLock> {
+    |            ^^^^^^^^^^^
+...
+616 |     pub fn validate_resource_tree(&self) -> io::Result<()> {
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `set_property` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:79:19
+   |
+78 | impl RuntimeGraphObjectProperties {
+   | --------------------------------- method in this implementation
+79 |     pub(crate) fn set_property(&mut self, property: u32, value: i32, extra: i32) {
+   |                   ^^^^^^^^^^^^
+
+warning: field `render_priority` is never read
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:258:16
+    |
+247 | pub(crate) struct RuntimeGraphTransitionNode {
+    |                   -------------------------- field in this struct
+...
+258 |     pub(crate) render_priority: i32,
+    |                ^^^^^^^^^^^^^^^
+    |
+    = note: `RuntimeGraphTransitionNode` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `subregion` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:273:19
+    |
+263 | impl RuntimeGraphResource {
+    | ------------------------- method in this implementation
+...
+273 |     pub(crate) fn subregion(&self, x: i32, y: i32, width: i32, height: i32) -> Self {
+    |                   ^^^^^^^^^
+
+warning: method `screen_z` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:330:19
+    |
+315 | impl RuntimeGraphLayer {
+    | ---------------------- method in this implementation
+...
+330 |     pub(crate) fn screen_z(&self) -> i32 {
+    |                   ^^^^^^^^
+
+warning: function `blit_decoded_image_format2_source_over` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:661:15
+    |
+661 | pub(crate) fn blit_decoded_image_format2_source_over(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `blit_decoded_image_format1_to_format2` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:723:15
+    |
+723 | pub(crate) fn blit_decoded_image_format1_to_format2(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `blend_decoded_image_parameter` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:836:15
+    |
+836 | pub(crate) fn blend_decoded_image_parameter(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `fixed_16_to_f32` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:903:15
+    |
+903 | pub(crate) fn fixed_16_to_f32(value: i32) -> f32 {
+    |               ^^^^^^^^^^^^^^^
+
+warning: method `screen_geometry` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:1287:19
+     |
+1003 | impl NativeMode5NodeArgs {
+     | ------------------------ method in this implementation
+...
+1287 |     pub(crate) fn screen_geometry(
+     |                   ^^^^^^^^^^^^^^^
+
+warning: function `mul_progress` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/graph.rs:1121:12
+     |
+1121 |         fn mul_progress(delta: i32, progress: i32) -> i32 {
+     |            ^^^^^^^^^^^^
+
+warning: variants `Configure` and `Image` are never constructed
+  --> crates/bgi-upstream/crates/ethornell-app/src/graph_bitmap_nodes.rs:44:5
+   |
+43 | pub(crate) enum RuntimeBitmapNodeLayout {
+   |                 ----------------------- variants in this enum
+44 |     Configure(Vec<i32>),
+   |     ^^^^^^^^^
+45 |     Image { x: f32, y: f32, z: i32 },
+   |     ^^^^^
+   |
+   = note: `RuntimeBitmapNodeLayout` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: methods `bind_configured_bitmap_node` and `bind_image_bitmap_node` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph_bitmap_nodes.rs:190:19
+    |
+ 55 | impl RuntimeTraceApi {
+    | -------------------- methods in this implementation
+...
+190 |     pub(crate) fn bind_configured_bitmap_node(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+207 |     pub(crate) fn bind_image_bitmap_node(
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `shadow_for_height` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph_defaults.rs:312:19
+    |
+260 | impl GraphRuntimeDefaults {
+    | ------------------------- method in this implementation
+...
+312 |     pub(crate) fn shadow_for_height(&self, font_height: f32) -> Option<(i32, i32, f32)> {
+    |                   ^^^^^^^^^^^^^^^^^
+
+warning: field `parameters` is never read
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph_effect.rs:295:5
+    |
+292 | struct GraphEffectProcess {
+    |        ------------------ field in this struct
+...
+295 |     parameters: [i32; 4],
+    |     ^^^^^^^^^^
+    |
+    = note: `GraphEffectProcess` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: multiple methods are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph_effect.rs:313:19
+    |
+312 | impl GraphEffectRegistry {
+    | ------------------------ methods in this implementation
+313 |     pub(crate) fn contains(&self, handle: i32) -> bool {
+    |                   ^^^^^^^^
+...
+317 |     pub(crate) fn configure_loader(&mut self, handle: i32, mode: i32, values: [i32; 4]) -> i32 {
+    |                   ^^^^^^^^^^^^^^^^
+...
+384 |     pub(crate) fn configure_resource(
+    |                   ^^^^^^^^^^^^^^^^^^
+...
+414 |     pub(crate) fn configure_rect(
+    |                   ^^^^^^^^^^^^^^
+...
+464 |     pub(crate) fn cancel(&mut self, handle: i32) -> i32 {
+    |                   ^^^^^^
+...
+634 |     pub(crate) fn movie_diagnostics(&self) -> Vec<(i32, bool, i32, Option<usize>)> {
+    |                   ^^^^^^^^^^^^^^^^^
+...
+684 |     pub(crate) fn set_all_movie_volumes(&mut self, volume: i32) -> i32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+...
+700 |     pub(crate) fn duration_ms(&self, handle: i32) -> i32 {
+    |                   ^^^^^^^^^^^
+
+warning: methods `group_pointer_activation_enabled` and `complete` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/graph_input.rs:237:19
+    |
+ 46 | impl RuntimeGraphInputObject {
+    | ---------------------------- methods in this implementation
+...
+237 |     pub(crate) fn group_pointer_activation_enabled(&self, group: i32) -> bool {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+416 |     pub(crate) fn complete(&mut self, region: GraphInputRegion, local_x: i32, local_y: i32) {
+    |                   ^^^^^^^^
+
+warning: methods `contains` and `metadata` are never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/graph_movie.rs:47:19
+   |
+23 | impl BurikoMovieRegistry {
+   | ------------------------ methods in this implementation
+...
+47 |     pub(crate) fn contains(&self, handle: i32) -> bool {
+   |                   ^^^^^^^^
+...
+51 |     pub(crate) fn metadata(&self, handle: i32) -> Option<[i32; 5]> {
+   |                   ^^^^^^^^
+
+warning: methods `target_at_point` and `sample` are never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/graph_sprite_targets.rs:52:19
+   |
+16 | impl GraphSpriteTargetRegistry {
+   | ------------------------------ methods in this implementation
+...
+52 |     pub(crate) fn target_at_point(&self, mut is_hit: impl FnMut(i32) -> bool) -> i32 {
+   |                   ^^^^^^^^^^^^^^^
+...
+82 |     pub(crate) fn sample(&mut self, mut sample_sprite: impl FnMut(i32) -> i32) {
+   |                   ^^^^^^
+
+warning: associated function `from_env` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/headless.rs:38:12
+   |
+37 | impl HeadlessInputScript {
+   | ------------------------ associated function in this implementation
+38 |     pub fn from_env() -> Option<Self> {
+   |            ^^^^^^^^
+
+warning: function `initial_selection` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/host_dialog.rs:33:4
+   |
+33 | fn initial_selection(initial_directory: &str, default_name: &str) -> String {
+   |    ^^^^^^^^^^^^^^^^^
+
+warning: variant `RetryCancel` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/host_dialog.rs:404:5
+    |
+400 | pub(crate) enum MessageDialogKind {
+    |                 ----------------- variant in this enum
+...
+404 |     RetryCancel,
+    |     ^^^^^^^^^^^
+    |
+    = note: `MessageDialogKind` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `contains` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/input_state.rs:28:19
+   |
+10 | impl NativeInputScopeRegistry {
+   | ----------------------------- method in this implementation
+...
+28 |     pub(crate) fn contains(&self, packed_scope: &i32) -> bool {
+   |                   ^^^^^^^^
+
+warning: method `graph90_selector` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/native_background.rs:82:19
+   |
+47 | impl NativeBackgroundClass {
+   | -------------------------- method in this implementation
+...
+82 |     pub(crate) fn graph90_selector(self) -> Option<u16> {
+   |                   ^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:183:18
+    |
+183 | pub(crate) const CDSP_OBJ_SIZE: usize = 0x134;
+    |                  ^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:184:18
+    |
+184 | pub(crate) const CDSP_OBJ_BACK_SIZE: usize = 0x13c;
+    |                  ^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_N_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:185:18
+    |
+185 | pub(crate) const CDSP_OBJ_BACK_N_SIZE: usize = 0x144;
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_B_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:186:18
+    |
+186 | pub(crate) const CDSP_OBJ_BACK_B_SIZE: usize = 0x14c;
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_S_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:187:18
+    |
+187 | pub(crate) const CDSP_OBJ_BACK_S_SIZE: usize = 0x1a4;
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_F_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:188:18
+    |
+188 | pub(crate) const CDSP_OBJ_BACK_F_SIZE: usize = 0x170;
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_D_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:189:18
+    |
+189 | pub(crate) const CDSP_OBJ_BACK_D_SIZE: usize = 0x2244;
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_DST_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:190:18
+    |
+190 | pub(crate) const CDSP_OBJ_BACK_DST_SIZE: usize = 0x158;
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_GRD_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:191:18
+    |
+191 | pub(crate) const CDSP_OBJ_BACK_GRD_SIZE: usize = 0x148;
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_RPL_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:192:18
+    |
+192 | pub(crate) const CDSP_OBJ_BACK_RPL_SIZE: usize = 0x168;
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_STR_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:193:18
+    |
+193 | pub(crate) const CDSP_OBJ_BACK_STR_SIZE: usize = 0x170;
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_RTT_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:194:18
+    |
+194 | pub(crate) const CDSP_OBJ_BACK_RTT_SIZE: usize = 0x154;
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_MSC_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:195:18
+    |
+195 | pub(crate) const CDSP_OBJ_BACK_MSC_SIZE: usize = 0x154;
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_BACK_ML_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:196:18
+    |
+196 | pub(crate) const CDSP_OBJ_BACK_ML_SIZE: usize = 0x3e0;
+    |                  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_SPRITE_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:197:18
+    |
+197 | pub(crate) const CDSP_OBJ_SPRITE_SIZE: usize = 0x418;
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_WINDOW_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:198:18
+    |
+198 | pub(crate) const CDSP_OBJ_WINDOW_SIZE: usize = 0x3cc;
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_EFFECTOR_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:199:18
+    |
+199 | pub(crate) const CDSP_OBJ_EFFECTOR_SIZE: usize = 0x1c8;
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_FILTER_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:200:18
+    |
+200 | pub(crate) const CDSP_OBJ_FILTER_SIZE: usize = 0x14c;
+    |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_GROUP_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:201:18
+    |
+201 | pub(crate) const CDSP_OBJ_GROUP_SIZE: usize = 0x134;
+    |                  ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_KNOB_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:202:18
+    |
+202 | pub(crate) const CDSP_OBJ_KNOB_SIZE: usize = 0x174;
+    |                  ^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_LANDSCAPE_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:203:18
+    |
+203 | pub(crate) const CDSP_OBJ_LANDSCAPE_SIZE: usize = 0x17c;
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CDSP_OBJ_MAP_SIZE` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:204:18
+    |
+204 | pub(crate) const CDSP_OBJ_MAP_SIZE: usize = 0x1bc;
+    |                  ^^^^^^^^^^^^^^^^^
+
+warning: struct `BitmapInfoRecordLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:211:19
+    |
+211 | pub(crate) struct BitmapInfoRecordLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `BitmapRegistryEntryLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:225:19
+    |
+225 | pub(crate) struct BitmapRegistryEntryLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjBackLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:267:19
+    |
+267 | pub(crate) struct CDspObjBackLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjBackDLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:283:21
+    |
+283 | opaque_back_layout!(CDspObjBackDLayout32, 0x2108);
+    |                     ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this warning originates in the macro `opaque_back_layout` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: struct `CDspObjBackDstLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:284:21
+    |
+284 | opaque_back_layout!(CDspObjBackDstLayout32, 0x1c);
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this warning originates in the macro `opaque_back_layout` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: struct `CDspObjBackGrdLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:285:21
+    |
+285 | opaque_back_layout!(CDspObjBackGrdLayout32, 0x0c);
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this warning originates in the macro `opaque_back_layout` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: struct `CDspObjBackRttLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:286:21
+    |
+286 | opaque_back_layout!(CDspObjBackRttLayout32, 0x18);
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this warning originates in the macro `opaque_back_layout` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: struct `CDspObjBackMscLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:287:21
+    |
+287 | opaque_back_layout!(CDspObjBackMscLayout32, 0x18);
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this warning originates in the macro `opaque_back_layout` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: struct `CDspObjBackMlLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:288:21
+    |
+288 | opaque_back_layout!(CDspObjBackMlLayout32, 0x2a4);
+    |                     ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this warning originates in the macro `opaque_back_layout` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: struct `CDspObjBackNLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:292:19
+    |
+292 | pub(crate) struct CDspObjBackNLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjBackBLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:300:19
+    |
+300 | pub(crate) struct CDspObjBackBLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjBackSLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:310:19
+    |
+310 | pub(crate) struct CDspObjBackSLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjBackFLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:321:19
+    |
+321 | pub(crate) struct CDspObjBackFLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjBackRplLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:340:19
+    |
+340 | pub(crate) struct CDspObjBackRplLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjBackStrLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:350:19
+    |
+350 | pub(crate) struct CDspObjBackStrLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjSpriteLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:360:19
+    |
+360 | pub(crate) struct CDspObjSpriteLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjWindowLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:367:19
+    |
+367 | pub(crate) struct CDspObjWindowLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjEffectorLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:374:19
+    |
+374 | pub(crate) struct CDspObjEffectorLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjFilterLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:381:19
+    |
+381 | pub(crate) struct CDspObjFilterLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjKnobLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:388:19
+    |
+388 | pub(crate) struct CDspObjKnobLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjLandscapeLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:395:19
+    |
+395 | pub(crate) struct CDspObjLandscapeLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `CDspObjMapLayout32` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_display.rs:402:19
+    |
+402 | pub(crate) struct CDspObjMapLayout32 {
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: field `handle` is never read
+  --> crates/bgi-upstream/crates/ethornell-app/src/native_effect.rs:18:5
+   |
+17 | struct NativeParticleScreen {
+   |        -------------------- field in this struct
+18 |     handle: i32,
+   |     ^^^^^^
+   |
+   = note: `NativeParticleScreen` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `particle_screen_mut` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/native_effect.rs:94:8
+   |
+77 | impl NativeEffectState {
+   | ---------------------- method in this implementation
+...
+94 |     fn particle_screen_mut(&mut self, handle: i32) -> Option<&mut NativeParticleScreen> {
+   |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `is_native_blend_mode` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_effect.rs:982:15
+    |
+982 | pub(super) fn is_native_blend_mode(value: i32) -> bool {
+    |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: method `apply_native_transition_args` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/native_graph.rs:4576:8
+     |
+  11 | impl RuntimeTraceApi {
+     | -------------------- method in this implementation
+...
+4576 |     fn apply_native_transition_args(&mut self, args: &[ethornell_vm::Value]) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `graph91_multilayer_render_id` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/native_graph_sys91.rs:2251:8
+     |
+ 230 | impl RuntimeTraceApi {
+     | -------------------- associated function in this implementation
+...
+2251 |     fn graph91_multilayer_render_id(layer: usize) -> i32 {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `set_sound_minimize_muted` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_sound.rs:867:19
+    |
+  9 | impl RuntimeTraceApi {
+    | -------------------- method in this implementation
+...
+867 |     pub(super) fn set_sound_minimize_muted(&mut self, muted: bool) {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `x`, `y`, `bitmap`, `blend_mode`, and `alpha` are never read
+  --> crates/bgi-upstream/crates/ethornell-app/src/native_user.rs:19:5
+   |
+18 | struct NativeDebugBitmapDraw {
+   |        --------------------- fields in this struct
+19 |     x: i32,
+   |     ^
+20 |     y: i32,
+   |     ^
+21 |     bitmap: i32,
+   |     ^^^^^^
+22 |     blend_mode: i32,
+   |     ^^^^^^^^^^
+23 |     alpha: i32,
+   |     ^^^^^
+   |
+   = note: `NativeDebugBitmapDraw` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: multiple fields are never read
+  --> crates/bgi-upstream/crates/ethornell-app/src/native_user.rs:28:5
+   |
+27 | struct NativeDebugTextDraw {
+   |        ------------------- fields in this struct
+28 |     x: i32,
+   |     ^
+29 |     y: i32,
+   |     ^
+30 |     text: String,
+   |     ^^^^
+31 |     font_id: i32,
+   |     ^^^^^^^
+32 |     font_size: i32,
+   |     ^^^^^^^^^
+33 |     style: i32,
+   |     ^^^^^
+34 |     color: i32,
+   |     ^^^^^
+35 |     blend_mode: i32,
+   |     ^^^^^^^^^^
+36 |     alpha: i32,
+   |     ^^^^^
+37 |     extent: i32,
+   |     ^^^^^^
+   |
+   = note: `NativeDebugTextDraw` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: fields `selector` and `arguments` are never read
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_user.rs:112:5
+    |
+111 | struct NativeDialogRequest {
+    |        ------------------- fields in this struct
+112 |     selector: u16,
+    |     ^^^^^^^^
+113 |     arguments: Vec<String>,
+    |     ^^^^^^^^^
+    |
+    = note: `NativeDialogRequest` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: fields `path`, `style`, and `tile` are never read
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_user.rs:132:5
+    |
+131 | struct NativeWallpaperRequest {
+    |        ---------------------- fields in this struct
+132 |     path: String,
+    |     ^^^^
+133 |     style: i32,
+    |     ^^^^^
+134 |     tile: i32,
+    |     ^^^^
+    |
+    = note: `NativeWallpaperRequest` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: methods `has_visible_modeless_dialog` and `modeless_dialog_text_lines` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_user.rs:595:8
+    |
+447 | impl NativeUserState {
+    | -------------------- methods in this implementation
+...
+595 |     fn has_visible_modeless_dialog(&self) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+599 |     fn modeless_dialog_text_lines(&self) -> Vec<(String, f32, f32, f32)> {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `handle_native_edit_key`, `append_native_edit_text`, `has_visible_user_modeless_dialog`, and `user_modeless_dialog_text_lines` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/native_user.rs:766:19
+    |
+730 | impl RuntimeTraceApi {
+    | -------------------- methods in this implementation
+...
+766 |     pub(super) fn handle_native_edit_key(&mut self, code: KeyCode) -> bool {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+...
+792 |     pub(super) fn append_native_edit_text(&mut self, text: &str) -> bool {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+...
+813 |     pub(super) fn has_visible_user_modeless_dialog(&self) -> bool {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+817 |     pub(super) fn user_modeless_dialog_text_lines(&self) -> Vec<(String, f32, f32, f32)> {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `place_scenario_sprite` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/scene.rs:61:15
+   |
+61 | pub(crate) fn place_scenario_sprite(name: &str, sequence: u32) -> ScenarioSpritePlacement {
+   |               ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `load_default_font` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/snapshot.rs:52:15
+   |
+52 | pub(crate) fn load_default_font() -> Result<FontArc> {
+   |               ^^^^^^^^^^^^^^^^^
+
+warning: function `default_font` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/src/snapshot.rs:65:4
+   |
+65 | fn default_font(
+   |    ^^^^^^^^^^^^
+
+warning: struct `RuntimeFrameComposition` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/snapshot.rs:188:19
+    |
+188 | pub(crate) struct RuntimeFrameComposition {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `write_runtime_snapshot` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/snapshot.rs:194:15
+    |
+194 | pub(crate) fn write_runtime_snapshot(api: &RuntimeTraceApi, path: &Path) -> Result<()> {
+    |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `write_composed_runtime_snapshot` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/snapshot.rs:202:15
+    |
+202 | pub(crate) fn write_composed_runtime_snapshot(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `compose_runtime_frame_with_diagnostics` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/snapshot.rs:256:15
+    |
+256 | pub(crate) fn compose_runtime_frame_with_diagnostics(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `stable_framebuffer_hash` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/snapshot.rs:270:15
+    |
+270 | pub(crate) fn stable_framebuffer_hash(framebuffer: &DecodedImage) -> u64 {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `measure_text_advance` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/snapshot.rs:1365:15
+     |
+1365 | pub(crate) fn measure_text_advance(text: &str, size: f32, spacing: f32) -> i32 {
+     |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `owner_layer_count` and `update_descriptor` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/surface_controls.rs:49:19
+    |
+ 27 | impl SurfaceControlRegistry {
+    | --------------------------- methods in this implementation
+...
+ 49 |     pub(crate) fn owner_layer_count(&self, owner: SurfaceControlOwner) -> usize {
+    |                   ^^^^^^^^^^^^^^^^^
+...
+109 |     pub(crate) fn update_descriptor(
+    |                   ^^^^^^^^^^^^^^^^^
+
+warning: method `render_native_message_text` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/text.rs:1445:19
+     |
+ 156 | impl RuntimeTraceApi {
+     | -------------------- method in this implementation
+...
+1445 |     pub(crate) fn render_native_message_text(&mut self, text: &str) {
+     |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_and_wrap_message` is never used
+    --> crates/bgi-upstream/crates/ethornell-app/src/text.rs:2064:15
+     |
+2064 | pub(crate) fn parse_and_wrap_message(
+     |               ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `start_message` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/text_anim.rs:130:19
+    |
+129 | impl TextRuntime {
+    | ---------------- method in this implementation
+130 |     pub(crate) fn start_message(&mut self, text: String, target_node: i32) {
+    |                   ^^^^^^^^^^^^^
+
+warning: multiple methods are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/timeline.rs:11:19
+    |
+ 10 | impl TimelineSystem {
+    | ------------------- methods in this implementation
+ 11 |     pub(crate) fn create(&mut self, handle: i32) {
+    |                   ^^^^^^
+...
+ 15 |     pub(crate) fn configure(&mut self, args: &[Value]) -> Option<TimelineEvent> {
+    |                   ^^^^^^^^^
+...
+ 28 |     pub(crate) fn attach(&mut self, args: &[Value]) -> Option<TimelineEvent> {
+    |                   ^^^^^^
+...
+ 40 |     pub(crate) fn set_enabled(&mut self, handle: i32, enabled: bool) -> TimelineEvent {
+    |                   ^^^^^^^^^^^
+...
+ 70 |     pub(crate) fn set_duration_ms(&mut self, handle: i32, duration_ms: i32) -> TimelineEvent {
+    |                   ^^^^^^^^^^^^^^^
+...
+ 87 |     pub(crate) fn attachments(&self, handle: i32) -> Vec<i32> {
+    |                   ^^^^^^^^^^^
+...
+116 |     pub(crate) fn poll(&self, handle: i32) -> TimelinePoll {
+    |                   ^^^^
+...
+127 |     pub(crate) fn query(&self, handle: i32, target: i32) -> i32 {
+    |                   ^^^^^
+
+warning: fields `attachments` and `duration_ticks` are never read
+   --> crates/bgi-upstream/crates/ethornell-app/src/timeline.rs:140:5
+    |
+138 | struct RuntimeTimeline {
+    |        --------------- fields in this struct
+139 |     handle: i32,
+140 |     attachments: Vec<i32>,
+    |     ^^^^^^^^^^^
+141 |     duration_ticks: u32,
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `RuntimeTimeline` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: associated items `new`, `configure`, `attach`, and `poll` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/timeline.rs:148:8
+    |
+147 | impl RuntimeTimeline {
+    | -------------------- associated items in this implementation
+148 |     fn new(handle: i32) -> Self {
+    |        ^^^
+...
+159 |     fn configure(&mut self, args: &[Value]) {
+    |        ^^^^^^^^^
+...
+175 |     fn attach(&mut self, target: i32) {
+    |        ^^^^^^
+...
+181 |     fn poll(&self) -> TimelinePoll {
+    |        ^^^^
+
+warning: struct `TimelinePoll` is never constructed
+   --> crates/bgi-upstream/crates/ethornell-app/src/timeline.rs:191:19
+    |
+191 | pub(crate) struct TimelinePoll {
+    |                   ^^^^^^^^^^^^
+
+warning: enum `TimelineEvent` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/timeline.rs:198:17
+    |
+198 | pub(crate) enum TimelineEvent {
+    |                 ^^^^^^^^^^^^^
+
+warning: function `value_to_i32` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/timeline.rs:214:4
+    |
+214 | fn value_to_i32(value: &Value) -> Option<i32> {
+    |    ^^^^^^^^^^^^
+
+warning: method `apply_title_graph_payload_override` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/title.rs:180:19
+    |
+  4 | impl RuntimeTraceApi {
+    | -------------------- method in this implementation
+...
+180 |     pub(crate) fn apply_title_graph_payload_override(&mut self, packed: i32) -> i32 {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `title_payload_for_control_text` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/title.rs:591:15
+    |
+591 | pub(crate) fn title_payload_for_control_text(text: &str) -> Option<i32> {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `title_object_for_control_text` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/title.rs:612:15
+    |
+612 | pub(crate) fn title_object_for_control_text(text: &str) -> Option<i32> {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `runtime_file_exists` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/src/user_files.rs:229:15
+    |
+229 | pub(crate) fn runtime_file_exists(manager: &ResourceManager, archive: &str, file: &str) -> bool {
+    |               ^^^^^^^^^^^^^^^^^^^
+
+    Checking crysirror-script-js v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-script-js)
+warning: `ethornell-app` (lib) generated 157 warnings (run `cargo fix --lib -p ethornell-app` to apply 12 suggestions)
+    Checking crysirror-bgi v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-bgi)
+warning: variable does not need to be mutable
+     --> crates/bgi-upstream/crates/ethornell-app/src/lib.rs:15846:13
+      |
+15846 |         let mut window = |api: &mut super::RuntimeTraceApi| {
+      |             ----^^^^^^
+      |             |
+      |             help: remove this `mut`
+
+Some errors have detailed explanations: E0425, E0433.
+For more information about an error, try `rustc --explain E0425`.
+warning: `ethornell-app` (lib test) generated 14 warnings (12 duplicates)
+error: could not compile `ethornell-app` (lib test) due to 5 previous errors; 14 warnings emitted
+warning: build failed, waiting for other jobs to finish...
+warning: unused import: `Write`
+ --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:5:16
+  |
+5 |     io::{self, Write},
+  |                ^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `windows_wildcard_matches` is never used
+ --> crates/bgi-upstream/crates/ethornell-app/tests/capability_policy.rs:5:4
+  |
+5 | fn windows_wildcard_matches(pattern: &str, value: &str) -> bool {
+  |    ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `policy_error` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:11:4
+   |
+11 | fn policy_error(code: u32, error: io::Error) -> io::Error {
+   |    ^^^^^^^^^^^^
+
+warning: struct `PolicyMetadata` is never constructed
+  --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:18:19
+   |
+18 | pub(crate) struct PolicyMetadata {
+   |                   ^^^^^^^^^^^^^^
+
+warning: methods `is_file`, `is_dir`, `len`, and `readonly` are never used
+  --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:24:12
+   |
+23 | impl PolicyMetadata {
+   | ------------------- methods in this implementation
+24 |     pub fn is_file(&self) -> bool { !self.is_dir }
+   |            ^^^^^^^
+25 |     pub fn is_dir(&self) -> bool { self.is_dir }
+   |            ^^^^^^
+26 |     pub fn len(&self) -> u64 { self.len }
+   |            ^^^
+27 |     pub fn readonly(&self) -> bool { self.readonly }
+   |            ^^^^^^^^
+
+warning: type alias `WriterLock` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:38:17
+   |
+38 | pub(crate) type WriterLock = ();
+   |                 ^^^^^^^^^^
+
+warning: fields `resource` and `user` are never read
+  --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:42:9
+   |
+41 | pub(crate) struct FilePolicy {
+   |                   ---------- fields in this struct
+42 |     pub resource: PathBuf,
+   |         ^^^^^^^^
+43 |     pub user: PathBuf,
+   |         ^^^^
+   |
+   = note: `FilePolicy` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: function `active` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:55:15
+   |
+55 | pub(crate) fn active() -> Option<FilePolicy> {
+   |               ^^^^^^
+
+warning: function `restricted` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:58:15
+   |
+58 | pub(crate) fn restricted() -> bool {
+   |               ^^^^^^^^^^
+
+warning: function `scope` is never used
+  --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy.rs:61:15
+   |
+61 | pub(crate) fn scope<T>(policy: &FilePolicy, f: impl FnOnce() -> T) -> T {
+   |               ^^^^^
+
+warning: method `children` is never used
+   --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy/hosted.rs:274:8
+    |
+252 | impl<F> Tree<F> {
+    | --------------- method in this implementation
+...
+274 |     fn children(&self, dir: &str, recursive: bool) -> Vec<(String, bool)> {
+    |        ^^^^^^^^
+
+warning: methods `metadata_in` and `walk` are never used
+   --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy/hosted.rs:345:8
+    |
+344 | impl HostedRoots {
+    | ---------------- methods in this implementation
+345 |     fn metadata_in(&self, root: Root, key: &str) -> Option<PolicyMetadata> {
+    |        ^^^^^^^^^^^
+...
+462 |     fn walk(&self, root: Root, dir: &str, recursive: bool) -> io::Result<Vec<(String, bool)>> {
+    |        ^^^^
+
+warning: multiple methods are never used
+   --> crates/bgi-upstream/crates/ethornell-app/tests/../src/file_policy/hosted.rs:613:12
+    |
+484 | impl FilePolicy {
+    | --------------- methods in this implementation
+...
+613 |     pub fn lock_writer(&self) -> io::Result<WriterLock> {
+    |            ^^^^^^^^^^^
+...
+616 |     pub fn validate_resource_tree(&self) -> io::Result<()> {
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+...
+619 |     pub fn open_manager(&self) -> ethornell_core::Result<ethornell_archive::ResourceManager> {
+    |            ^^^^^^^^^^^^
+...
+656 |     pub fn metadata(&self, name: &str) -> Option<PolicyMetadata> {
+    |            ^^^^^^^^
+...
+669 |     pub fn user_metadata(&self, name: &str) -> Option<PolicyMetadata> {
+    |            ^^^^^^^^^^^^^
+...
+672 |     pub fn enumerate_user(
+    |            ^^^^^^^^^^^^^^
+...
+701 |     pub fn enumerate(
+    |            ^^^^^^^^^
+...
+741 |     pub fn create_directory(&self, name: &str) -> io::Result<()> {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: `ethornell-app` (test "capability_policy") generated 13 warnings (run `cargo fix --test "capability_policy" -p ethornell-app` to apply 1 suggestion)

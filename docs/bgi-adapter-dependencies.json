@@ -1,0 +1,18 @@
+{
+  "command": [
+    "cargo",
+    "tree",
+    "--locked",
+    "-p",
+    "crysirror-bgi",
+    "--edges",
+    "normal",
+    "--prefix",
+    "none"
+  ],
+  "device_dependency_matches": [
+    "cpal v0.15.3"
+  ],
+  "scope": "Selected BGI package with normal dependencies; desktop audio features are not enabled by this command.",
+  "note": "cpal is pulled by the existing Runtime -> vendored siglus_scene_vm -> kira default backend. libc is a separate ordinary filesystem/capability dependency, not classified as an output-device crate."
+}

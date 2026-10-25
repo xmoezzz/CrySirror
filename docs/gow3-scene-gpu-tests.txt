@@ -1,0 +1,28 @@
+   Compiling image v0.24.9
+   Compiling crysirror-scene v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-scene)
+   Compiling crysirror-image v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-image)
+   Compiling crysirror-asset v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-asset)
+   Compiling crysirror-siglus v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus)
+   Compiling crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+   Compiling crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+   Compiling crysirror-wgpu v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-wgpu)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.86s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running tests/gpu_smoke.rs (target/debug/deps/gpu_smoke-496e0b3e6bdb103b)
+
+running 11 tests
+test alpha_mask_invisible_surface_does_not_cast_solid_shadow ... ok
+test developer_surface_shaders_scope_parameters_time_and_errors_reach_pixels ... ok
+test engine_material_alpha_sort_depth_opacity_and_unlit_reach_pixels ... ok
+test material_opacity_textures_resolve_under_each_client_capability_root ... ok
+test original_siglus_pck_and_g00_reach_shared_raster_and_compute_pixels ... ok
+test pbr_path_renders_sky_lit_geometry_and_sun_shadows ... ok
+test retained_layers_blend_and_clip_match_linear_color_equations ... ok
+test shader_presets_and_authored_uv_custom_waves_animate_in_native_data_project ... ok
+test shared_scene_reaches_actual_pixels ... ok
+test siglus_resource_uses_shared_upload_and_compute_rays_keep_overlays ... ok
+test terrain_and_hdr_particles_render ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.85s
+

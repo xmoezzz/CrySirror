@@ -1,0 +1,34 @@
+   Compiling crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+   Compiling crysirror-engine v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.48s
+     Running tests/physics.rs (target/debug/deps/physics-4a99a7128d12b118)
+
+running 5 tests
+test model_info_reports_rest_bounds ... ok
+test sphere_casts_stop_a_radius_early_and_ground_pose_follows_slopes_and_steps ... ok
+test animation_crossfade_is_world_state ... ok
+test arcade_vehicle_accelerates_steers_drifts_climbs_and_stops_at_walls ... ok
+test character_falls_lands_slides_on_walls_and_climbs_steps ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+     Running tests/rigid_body_api.rs (target/debug/deps/rigid_body_api-d5e5b6b6c5f3354c)
+
+running 2 tests
+test entity_payload_and_query_ignore_cannot_alias_another_clients_same_id ... ok
+test public_impulses_forces_contacts_and_joint_handles_use_shared_runtime ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/physics_simulation.rs (target/debug/deps/physics_simulation-07091fd7328f19cb)
+
+running 6 tests
+test axis_heightfield_queries_keep_origin_and_distance_within_seam_tolerance ... ok
+test failed_staged_sync_discards_derived_world_before_retry_or_query ... ok
+test restore_rebuilds_saved_velocity_forces_joint_and_pending_target ... ok
+test clients_collisions_queries_ignores_and_generations_are_isolated ... ok
+test one_32ms_tick_matches_two_16ms_ticks_with_moving_kinematic_contact ... ok
+test json_rigid_bodies_fall_stack_and_do_not_rebuild_on_unrelated_revisions ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+

@@ -1,0 +1,2 @@
+    Checking crysirror-text v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-text)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.05s

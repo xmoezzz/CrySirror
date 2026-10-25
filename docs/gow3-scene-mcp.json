@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-25",
+  "protocol": "2025-06-18",
+  "transport": "actual stdio subprocess",
+  "tools": {
+    "project_validate": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"schema_valid\": true, \"asset_files\": 1, \"asset_scope\": \"declared\", \"native_vms_verified\": false}"
+        }
+      ]
+    },
+    "engine_trace": {
+      "frame": 1,
+      "entities": 1,
+      "environment": [
+        1,
+        {
+          "ambient_occlusion": 1.0,
+          "bloom": 0.009999999776482582,
+          "exposure": 0.0,
+          "hdr": null,
+          "intensity": 0.699999988079071,
+          "rotation_degrees": 0.0,
+          "shadow_distance": 150.0,
+          "show_sky": true,
+          "sun": {
+            "color": [
+              1.0,
+              0.9399999976158142,
+              0.8399999737739563
+            ],
+            "direction": [
+              0.30000001192092896,
+              -1.0,
+              0.5
+            ],
+            "intensity": 5.0,
+            "shadows": true
+          },
+          "temporal_aa": true,
+          "tonemap": "aces"
+        }
+      ],
+      "world_camera_override": null
+    },
+    "scene_capture": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"path\": \"/Users/xmoe/.cache/crysirror/gow3/olympus-engine-preview/preview/mcp/c82f37b00da649ab9f98f4d1aa34e374.png\", \"frames\": 1, \"renderer\": \"raster\"}"
+        },
+        {
+          "type": "image",
+          "mimeType": "image/png",
+          "bytes": 1433017,
+          "sha256": "91dba1a0f00b5b5716d2b04f0c4a2d7ea26b9e5bc90d77c992aee3bd68a5152b"
+        }
+      ]
+    }
+  }
+}

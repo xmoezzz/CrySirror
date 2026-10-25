@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-25",
+  "protocol": "2025-06-18",
+  "tools": {
+    "project_validate": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"schema_valid\": true, \"asset_files\": 2, \"asset_scope\": \"declared\", \"native_vms_verified\": false}"
+        }
+      ]
+    },
+    "shader_validate": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"abi\": 1, \"asset\": \"waves.wgsl\", \"client\": \"game\", \"gpu_created\": false, \"stages\": [\"color\", \"prepass\", \"shadow\"], \"valid\": true}"
+        }
+      ]
+    },
+    "shader_validate_escape": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"error\": \"path escapes root\"}"
+        }
+      ],
+      "isError": true
+    },
+    "engine_trace": {
+      "frame": 121,
+      "time_ms": 1920,
+      "effects": [
+        {
+          "name": "fresnel",
+          "effect": {
+            "intensity": 3.0,
+            "kind": "fresnel",
+            "power": 2.0
+          }
+        },
+        {
+          "name": "dissolve",
+          "effect": {
+            "edge_color": [
+              3.0,
+              0.4000000059604645,
+              0.019999999552965164
+            ],
+            "edge_width": 0.11999999731779099,
+            "kind": "dissolve",
+            "threshold": 0.5
+          }
+        },
+        {
+          "name": "developer waves",
+          "effect": {
+            "asset": "waves.wgsl",
+            "kind": "custom",
+            "parameters": [
+              [
+                0.699999988079071,
+                0.03999999910593033,
+                0.800000011920929,
+                0.30000001192092896
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ]
+            ]
+          }
+        },
+        {
+          "name": "fog",
+          "effect": {
+            "density": 2.200000047683716,
+            "edge_fade": 0.20000000298023224,
+            "kind": "fog",
+            "noise_scale": 5.0,
+            "speed": [
+              0.07999999821186066,
+              0.029999999329447746
+            ]
+          }
+        }
+      ],
+      "pixels_rendered": false
+    },
+    "scene_capture": {
+      "bytes": 243287,
+      "sha256": "4d81d2c6fbfe7c5b481bdb4c1cd9d525115827469a57f9b0262229ca77ddbbd4",
+      "output": "/Users/xmoe/.cache/crysirror/shader-effects-mcp/shader-effects.png"
+    }
+  }
+}

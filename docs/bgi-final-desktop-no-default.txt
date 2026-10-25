@@ -1,0 +1,35 @@
+    Checking ppv-lite86 v0.2.21
+    Checking na_mpeg2_decoder v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/na_mpeg2_decoder)
+    Checking crysirror-scene v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-scene)
+    Checking kira v0.9.6
+    Checking crysirror-image v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-image)
+    Checking wmv-decoder v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/na_wmv_player)
+    Checking crysirror-text v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-text)
+    Checking crysirror-audio v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-audio)
+    Checking crysirror-siglus v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus)
+    Checking crysirror-asset v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-asset)
+    Checking rand_chacha v0.9.0
+    Checking crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+    Checking siglus_assets v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_assets)
+    Checking rand v0.9.5
+    Checking siglus_key_recovery v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_key_recovery)
+    Checking eluna_rs v0.1.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/eluna_rs)
+    Checking siglus_scene_vm v1.0.0 (/Users/xmoe/Documents/CrySirror/crates/siglus-upstream/siglus_scene_vm)
+    Checking crysirror-video v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-video)
+    Checking crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+    Checking crysirror-wgpu v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-wgpu)
+    Checking crysirror-desktop v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-desktop)
+warning: variable does not need to be mutable
+   --> crates/crysirror-desktop/src/main.rs:168:9
+    |
+168 |     let mut rt = Runtime::with_registry(load_project(path)?, path, dir, registry)?;
+    |         ----^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `crysirror-desktop` (bin "crysirror") generated 1 warning (run `cargo fix --bin "crysirror" -p crysirror-desktop` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.30s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`

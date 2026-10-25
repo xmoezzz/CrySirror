@@ -1,0 +1,44 @@
+{
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "-p",
+    "crysirror-runtime",
+    "--test",
+    "physics_simulation",
+    "-p",
+    "crysirror-engine",
+    "--test",
+    "physics",
+    "--test",
+    "rigid_body_api",
+    "--no-fail-fast"
+  ],
+  "start": "2026-10-25T13:42:25.673865+00:00",
+  "end": "2026-10-25T13:42:36.850452+00:00",
+  "returncode": 0,
+  "passed": 13,
+  "failed": 0,
+  "ignored": 0,
+  "log": "docs/physics-integration-tests.txt",
+  "coverage": [
+    "Pure Runtime JSON rigid-body stack and stable shape/body creation counts",
+    "Authoritative World 32ms equals two 16ms steps with kinematic contact",
+    "Saved transforms/velocities/forces/joints/pending kinematic target rebuild",
+    "Client collision/query isolation and stale entity generations",
+    "Staged-world failure resets derived physics before retry",
+    "Heightfield axis-ray seam origin/distance tolerance",
+    "Reflective Rust API impulses, persistent forces, sensors, joints and cross-client object handles",
+    "Existing character, camera sphere cast, ground pose and arcade vehicle regressions",
+    "Explicit paused-client impulse and torque immediately update saved World velocities, survive restore, and do not advance position while paused"
+  ],
+  "snapshot_limits": "Solver warm-start/contact impulse caches are not serialized; no bit-exact solver restore claim.",
+  "no_devices": true,
+  "source_sha256": {
+    "crates/crysirror-runtime/src/physics.rs": "bb05f5d7ca7ff334f557d1c183d1a45bcec896d0e11550ac8fe837c1cb820da5",
+    "crates/crysirror-engine/src/physics_api.rs": "c1934e3ba6d9416494590179de88212d4a0334b30195039cfc54f2435105b19d",
+    "crates/crysirror-scene/src/physics.rs": "31d49dbb250d2696fc33daa19c5f780f6629e9644e3a26b1f723ac415c81969b",
+    "crates/crysirror-engine/tests/rigid_body_api.rs": "e06619ba3f7aef4fb0d4ab27801d122d65c5d222a2ea4dcc52662ca865d84a26"
+  }
+}

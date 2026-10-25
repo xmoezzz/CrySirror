@@ -1,0 +1,27 @@
+    Checking crysirror-image v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-image)
+    Checking crysirror-siglus v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus)
+    Checking crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+    Checking crysirror-wgpu v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-wgpu)
+warning: using `chunks_exact` with a constant chunk size
+  --> crates/crysirror-wgpu/src/geometry.rs:41:29
+   |
+41 |         for face in indices.chunks_exact(3){
+   |                             ^^^^^^^^^^^^^^^ help: consider using `as_chunks` instead: `as_chunks::<3>().0`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#chunks_exact_to_as_chunks
+   = note: `#[warn(clippy::chunks_exact_to_as_chunks)]` on by default
+
+warning: using `chunks_exact_mut` with a constant chunk size
+  --> crates/crysirror-wgpu/src/text.rs:29:26
+   |
+29 |         for px in pixels.chunks_exact_mut(4){px[..3].fill(255);}
+   |                          ^^^^^^^^^^^^^^^^^^^ help: consider using `as_chunks` instead: `as_chunks_mut::<4>().0`
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#chunks_exact_to_as_chunks
+
+warning: `crysirror-wgpu` (lib test) generated 2 warnings (run `cargo clippy --fix --lib -p crysirror-wgpu --tests -- --no-deps` to apply 2 suggestions)
+warning: `crysirror-wgpu` (lib) generated 2 warnings (2 duplicates)
+    Checking crysirror-desktop v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-desktop)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.90s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`

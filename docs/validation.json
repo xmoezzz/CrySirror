@@ -1,0 +1,136 @@
+{
+  "snapshot": "2026-10-24",
+  "iteration": "engine-owned-audio-and-text-0.2.0",
+  "python": {
+    "tests_run": 82,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "executed": true,
+    "log": "docs/python-test-results.txt"
+  },
+  "rust": {
+    "cargo": "1.98.1",
+    "rustc": "1.98.1",
+    "declared_minimum": "1.88",
+    "minimum_tested": false,
+    "compiled": true,
+    "tests_executed": true,
+    "tests_passed": 78,
+    "tests_failed": 0,
+    "tests_ignored": 3,
+    "check_log": "docs/rust-check-results.txt",
+    "test_log": "docs/rust-test-results.txt",
+    "no_default_features_check": true
+  },
+  "gpu": {
+    "executed": true,
+    "explicit_pixel_tests_passed": 2,
+    "default_gpu_test_ignored": true,
+    "log": "docs/gpu-test-results.txt",
+    "screenshot_produced": true,
+    "capture": "dist/siglus-resource-raytrace.png",
+    "capture_log": "docs/siglus-resource-render.json",
+    "adapter": "Apple M5",
+    "backend": "Metal",
+    "compute_raytrace_executed": true,
+    "hardware_raytrace_implemented": false,
+    "hardware_request_rejected_without_fallback": true,
+    "capability_log": "docs/gpu-info.json"
+  },
+  "desktop": {
+    "wgpu": "=0.20.1",
+    "winit": "=0.30.12",
+    "executable_produced": true,
+    "interactive_window_tested": false,
+    "audible_output_tested": false
+  },
+  "authoring": {
+    "implemented": true,
+    "profile": "offline-sync-buildProject",
+    "compiler": "oxc =0.75.0 (components 0.75.1)",
+    "js_engine": "boa_engine =0.20.0",
+    "typescript_typecheck": false,
+    "live_gameplay_js": false
+  },
+  "mcp": {
+    "project_stdio_executed": true,
+    "generated_arena_validated": true,
+    "log": "docs/arena-mcp-validation.json",
+    "native_live_session": false,
+    "gpu_capture_tool_tested_this_iteration": false
+  },
+  "upstreams": {
+    "rfvp_checked_out": true,
+    "siglus_checked_out": true,
+    "lock": "upstream-lock.json",
+    "complete_semantic_review": false,
+    "native_adapters_linked": [],
+    "native_fixtures_executed": false,
+    "original_siglus_resource_decoder_executed": true,
+    "siglus_resource_fixture_comparisons_passed": 3,
+    "resource_comparison_log": "docs/siglus-resource-comparison.json"
+  },
+  "remote_created": false,
+  "ci_run": false,
+  "release_bundles_regenerated": false,
+  "verification_script_run_this_iteration": false,
+  "console_targets_deferred": [
+    "switch",
+    "psv"
+  ],
+  "platform_scope": {
+    "desktop": [
+      "windows",
+      "linux",
+      "macos"
+    ],
+    "later": [
+      "mobile",
+      "web"
+    ],
+    "validated_here": [
+      "macos-metal"
+    ]
+  },
+  "compatibility": {
+    "siglus_resources": true,
+    "siglus_vm": false,
+    "rfvp_vm": false,
+    "game_data_used": false
+  },
+  "engine_systems": {
+    "audio": {
+      "implemented": true,
+      "crate": "crysirror-audio",
+      "buses": [
+        "sfx",
+        "music",
+        "voice",
+        "ui"
+      ],
+      "native_pan_fade_seek_streaming": false,
+      "audible_output_tested": false,
+      "bus_settings_saved": false
+    },
+    "text": {
+      "implemented": true,
+      "crate": "crysirror-text",
+      "resource_owner": "Runtime Assets",
+      "cpu_layout_glyph_raster_test_executed": true,
+      "font_bundled": false,
+      "log": "docs/text-font-test-results.txt",
+      "gpu_capture": "dist/engine-text-service.png"
+    },
+    "ui": {
+      "widget_tree_implemented": false
+    },
+    "layer": {
+      "profile": "flat-z-order-only"
+    },
+    "world": {
+      "profile": "static-Scene3d-only",
+      "dynamic_world_implemented": false
+    }
+  }
+}

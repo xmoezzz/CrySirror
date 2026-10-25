@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-24",
+  "fixture": "rfvp win95_painter_demo painter.hcb + graph/* (commit 062fec82033b554b9eb3b5da069518c0c96a354e)",
+  "font_for_comparison": "upstream checkout's MSGOTHIC.TTF, supplied at test time only via CRYSIRROR_TEST_FONT; not copied into CrySirror",
+  "reference": "unmodified upstream rfvp_os_host (features rfvp-os,image-formats,zlib-flate2,random), scratch harness outside the repo",
+  "candidate": "crysirror-rfvp adapter through crysirror-runtime (cargo test -p crysirror-rfvp -- --ignored)",
+  "input_sequence": "120 idle frames; pointer (250,300); left down; drag x 250..420 step 10; release; 5 frames",
+  "boot_framebuffer_fnv1a": {"upstream": "4d85221136d4986a", "crysirror": "4d85221136d4986a"},
+  "final_framebuffer_fnv1a": {"upstream": "4d85221136d4986a", "crysirror": "4d85221136d4986a"},
+  "result": "bit-identical framebuffers",
+  "upstream_finding": "In both hosts the script observes InputGetDown=20 and reads the cursor (250,300) but begin_canvas_action returns before PrimSetTile, so no cell is painted. This reproduces in the unmodified upstream host and is not patched here."
+}

@@ -1,0 +1,16 @@
+[package]
+name = "crysirror-siglus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crysirror-core.workspace = true
+crysirror-compat.workspace = true
+crysirror-image.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+image.workspace = true

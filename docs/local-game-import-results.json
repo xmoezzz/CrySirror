@@ -1,0 +1,688 @@
+{
+  "date": "2026-10-25",
+  "scope": "offline static asset conversion and actual CrySirror raster capture; original game executables were not run",
+  "ashen": {
+    "toc": {
+      "version": 8,
+      "chunks": 6702,
+      "files": 4811,
+      "compression": [
+        "Oodle"
+      ],
+      "encrypted": false
+    },
+    "shipping_exe_sha256": "40b683564a52703ec1c193c8e8b4c5823c0feda3d12505029143d723bc7b365d",
+    "schema_recovery": {
+      "bytes": 1055371,
+      "enums": 1276,
+      "schemas": 7312,
+      "unknown_kinds": {}
+    },
+    "schema_sha256": "3f085a24ce2c887e3a58e9fd10b7ad4d608d5949779ae86f5a1e076b3026ca86",
+    "component_probe": {
+      "class": "StaticMeshComponent",
+      "exports": 100,
+      "fail": 0,
+      "guid_tail_ok": 100,
+      "ok": 100,
+      "sample": {
+        "AttachParent": {
+          "index": 9
+        },
+        "RelativeLocation": [
+          1.4796286191952306,
+          20.0,
+          98.235080412672
+        ],
+        "RelativeRotation": [
+          -15.0,
+          0.0,
+          0.0
+        ],
+        "RelativeScale3D": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "StaticMesh": {
+          "index": -42
+        }
+      },
+      "top_errors": []
+    },
+    "source_map": "Portfolio/Content/Maps/FantasyCastle/Map/L_FantasyCastle",
+    "exports": 10436,
+    "static_mesh_components": 4816,
+    "unique_meshes": 132,
+    "native_instances": 7710,
+    "geometry_failures": [],
+    "material_failures": [
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_2",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_5",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_3",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_2",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_4",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_2",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_2",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_2",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_2",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_4",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_4",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column_2",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      },
+      {
+        "source": "MI_Column",
+        "message": "ambiguous streaming texture name T_Column_BC"
+      }
+    ],
+    "gltf_nodes": 7667,
+    "gltf_meshes_including_material_variants": 175,
+    "triangles_submitted": 13426416,
+    "base_color_textures": 31,
+    "omissions": [
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet10.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet11.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet12.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet13.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet14.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet14_0.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet15.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet16.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet17.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet18.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet19.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet20.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet21.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet22.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet23.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet25.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet26.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet27.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet28.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet29.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet30.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet31.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet32.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet33.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet34.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet34_1.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet34_2.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet34_3.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet35.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet36.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet37.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet3_20.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet4.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet5.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet6.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet7.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet8.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet8_1.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet9.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet9_0.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet9_1.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_FogSheet_14.NODE_AddStaticMeshComponent-0",
+        "mesh": "/Game/Maps/FantasyCastle/Meshes/SM_Fog_Plane.SM_Fog_Plane",
+        "reason": "explicitly excluded unsupported mesh in preview profile"
+      },
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_Sky_Sphere_2.SkySphereMesh",
+        "reason": "sky-sized geometry >5 km; engine sky used"
+      }
+    ],
+    "renderer": "raster",
+    "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "hardware_raytracing": false,
+    "capture": "/Users/xmoe/.cache/crysirror/ashen/castle-textured-preview/castle.png",
+    "capture_sha256": "8aa989763e7731f463939bec8e2c65db85944680d634d68c5bf82476dd88d74b",
+    "original_materials": false,
+    "original_lighting": false,
+    "gameplay_executed": false,
+    "original_comparison": false,
+    "limitations": [
+      "Conventional fallback LOD, not Nanite clusters",
+      "Base-color heuristic only (512px mips): UE shader graphs, material overrides, lights, landscapes, skeletal meshes and runtime logic are not converted"
+    ],
+    "shipping_exe_version_string": "Unreal Engine 5.7.4 (UTF-16 string in PE image)"
+  },
+  "god_of_war_iii": {
+    "archives": [
+      {
+        "archive": "BAS.PSARC",
+        "files": 75,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 25,
+          ".WAD": 25,
+          ".TXT": 25
+        }
+      },
+      {
+        "archive": "CAV.PSARC",
+        "files": 42,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 14,
+          ".WAD": 14,
+          ".TXT": 14
+        }
+      },
+      {
+        "archive": "CHALLENGE.PSARC",
+        "files": 42,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 14,
+          ".WAD": 14,
+          ".TXT": 14
+        }
+      },
+      {
+        "archive": "CRN.PSARC",
+        "files": 21,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 7,
+          ".WAD": 7,
+          ".TXT": 7
+        }
+      },
+      {
+        "archive": "GAME.PSARC",
+        "files": 120,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".GTF": 10,
+          ".PNG": 31,
+          ".TXT": 56,
+          ".TS": 11,
+          ".WAD": 11,
+          ".IFF": 1
+        }
+      },
+      {
+        "archive": "GAME_SUB.PSARC",
+        "files": 32,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 16,
+          ".WAD": 16
+        }
+      },
+      {
+        "archive": "GAZ.PSARC",
+        "files": 33,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 11,
+          ".WAD": 11,
+          ".TXT": 11
+        }
+      },
+      {
+        "archive": "HDS.PSARC",
+        "files": 111,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 37,
+          ".WAD": 37,
+          ".TXT": 37
+        }
+      },
+      {
+        "archive": "ICA.PSARC",
+        "files": 45,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 15,
+          ".WAD": 15,
+          ".TXT": 15
+        }
+      },
+      {
+        "archive": "JAPANESE.PSARC",
+        "files": 3454,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".XVAG": 3454
+        }
+      },
+      {
+        "archive": "LAB.PSARC",
+        "files": 27,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 9,
+          ".WAD": 9,
+          ".TXT": 9
+        }
+      },
+      {
+        "archive": "MUSIC.PSARC",
+        "files": 374,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".XVAG": 374
+        }
+      },
+      {
+        "archive": "OLY.PSARC",
+        "files": 122,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 40,
+          ".WAD": 40,
+          ".TXT": 42
+        }
+      },
+      {
+        "archive": "POS.PSARC",
+        "files": 51,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 17,
+          ".WAD": 17,
+          ".TXT": 17
+        }
+      },
+      {
+        "archive": "RES.PSARC",
+        "files": 367,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".TS": 178,
+          ".WAD": 188,
+          ".TXT": 1
+        }
+      },
+      {
+        "archive": "STREAMS.PSARC",
+        "files": 1125,
+        "compression": "zlib",
+        "block_size": 65536,
+        "extensions": {
+          ".VAG": 41,
+          ".XVAG": 1084
+        }
+      }
+    ],
+    "archive_count": 16,
+    "total_files": 6041,
+    "hero": {
+      "bytes": 44147008,
+      "consumed": 44147008,
+      "record_count": 885,
+      "kinds": {
+        "0x00140000": 1,
+        "0x00020000": 50,
+        "0x00010000": 276,
+        "0x00030000": 50,
+        "0x00150000": 1,
+        "0x00120000": 1,
+        "0x000b0009": 1,
+        "0x000c0009": 1,
+        "0x000d0009": 1,
+        "0x000e0009": 1,
+        "0x000f0009": 1,
+        "0x00100009": 1,
+        "0x0001000d": 52,
+        "0x00010077": 254,
+        "0x00190000": 70,
+        "0x001a0000": 70,
+        "0x00010056": 32,
+        "0x00010034": 17,
+        "0x00010052": 2,
+        "0x00010018": 1,
+        "0x0001001f": 2
+      },
+      "mesh_decoder": false,
+      "scene_renderer": false
+    },
+    "hero_sha256": "0147a2703b539e07d856a8faa6c9a371a3cf4df4e83f77f872cf3249ab51899c",
+    "level": {
+      "supported": false,
+      "bytes": 48310336,
+      "error": "unsupported unframed level block 'EntityCount' at 0xd60; native level serialization required"
+    },
+    "scene_rendered": false
+  },
+  "references": {
+    "CUE4Parse": {
+      "url": "https://github.com/FabianFG/CUE4Parse.git",
+      "commit": "460fc477bad0f9db3cfc387365a6699ee246377e"
+    },
+    "psarc-tool": {
+      "url": "https://github.com/AlexAltea/psarc-tool.git",
+      "commit": "9e8e2e5ce4c58155e8be06c812cd72794997f396"
+    }
+  },
+  "validation": {
+    "cargo_check_workspace_all_targets": "passed",
+    "cargo_test_workspace": {
+      "passed": 158,
+      "failed": 0,
+      "ignored": 8
+    },
+    "python_tests": {
+      "passed": 106
+    },
+    "external_bridge_build": "passed with upstream warnings",
+    "actual_metal_capture": "passed",
+    "gpu_smoke_suite_rerun": false
+  }
+}

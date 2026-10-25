@@ -1,0 +1,215 @@
+{
+  "schema": 2,
+  "name": "CrySirror Audio Fixture",
+  "content_revision": "fixture-2",
+  "canvas": [
+    960,
+    540
+  ],
+  "background": [
+    20,
+    28,
+    44,
+    255
+  ],
+  "assets": "assets",
+  "clients": [
+    {
+      "name": "compat-client-a",
+      "adapter": "crysirror-script-v1",
+      "game": "fixture-a",
+      "asset_prefix": "a",
+      "program": [
+        {
+          "op": "sprite",
+          "id": 0,
+          "asset": "panel.png",
+          "rect": [
+            28,
+            28,
+            240,
+            120
+          ],
+          "z": 10
+        },
+        {
+          "op": "wait_input"
+        },
+        {
+          "op": "sprite",
+          "id": 1,
+          "asset": "marker.png",
+          "rect": [
+            100,
+            170,
+            64,
+            64
+          ],
+          "z": 11
+        },
+        {
+          "op": "wait",
+          "ms": 1500
+        },
+        {
+          "op": "remove",
+          "id": 1
+        },
+        {
+          "op": "halt"
+        }
+      ]
+    },
+    {
+      "name": "compat-client-b",
+      "adapter": "crysirror-script-v1",
+      "game": "fixture-b",
+      "asset_prefix": "b",
+      "program": [
+        {
+          "op": "sprite",
+          "id": 0,
+          "asset": "panel.png",
+          "rect": [
+            692,
+            28,
+            240,
+            120
+          ],
+          "z": 10
+        },
+        {
+          "op": "wait_input"
+        },
+        {
+          "op": "sprite",
+          "id": 1,
+          "asset": "marker.png",
+          "rect": [
+            796,
+            170,
+            64,
+            64
+          ],
+          "z": 11
+        },
+        {
+          "op": "halt"
+        }
+      ]
+    },
+    {
+      "name": "sound",
+      "adapter": "crysirror-script-v1",
+      "game": "audio-fixture",
+      "program": [
+        {
+          "op": "wait_input"
+        },
+        {
+          "op": "play",
+          "channel": 0,
+          "asset": "tone.wav"
+        },
+        {
+          "op": "halt"
+        }
+      ]
+    }
+  ],
+  "scene3d": {
+    "camera": {
+      "eye": [
+        5,
+        4,
+        7
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "up": [
+        0,
+        1,
+        0
+      ],
+      "fov_y_degrees": 50,
+      "near": 0.1,
+      "far": 100
+    },
+    "meshes": [
+      {
+        "name": "ground",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          0,
+          -1.2,
+          0
+        ],
+        "scale": [
+          8,
+          0.2,
+          7
+        ],
+        "color": [
+          60,
+          72,
+          96,
+          255
+        ]
+      },
+      {
+        "name": "shared-world-cube",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation_degrees": [
+          0,
+          28,
+          0
+        ],
+        "scale": [
+          1.8,
+          1.8,
+          1.8
+        ],
+        "color": [
+          105,
+          175,
+          240,
+          255
+        ]
+      },
+      {
+        "name": "second-cube",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          -2.5,
+          -0.4,
+          -0.5
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "color": [
+          220,
+          155,
+          75,
+          255
+        ]
+      }
+    ]
+  }
+}

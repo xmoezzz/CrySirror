@@ -1,0 +1,1103 @@
+{
+  "schema_version": 1,
+  "group": "images-c",
+  "upstream": {
+    "repository": "https://github.com/vn-tools/arc_unpacker",
+    "commit": "456834ecf2e5686813802c37efd829310485c57d",
+    "local_reference": "local/reference/arc_unpacker",
+    "license": "GPL-3.0-or-later",
+    "source_files": [
+      {
+        "path": "src/algo/pack/lzss.cc",
+        "sha256": "ca38b23eb53487a93b3fd62183012008f284084cd96b9590a4269b5711f1052e"
+      },
+      {
+        "path": "src/dec/abogado/kg_image_decoder.cc",
+        "sha256": "4cab483550d0174087bef6fffe921170f29131ec4825cc59fd449e55bc2b8b35"
+      },
+      {
+        "path": "src/dec/abogado/kg_image_decoder.h",
+        "sha256": "c9e318ef0e7c20594e67cd6251c603c48a2896c80dae911e7f970c0f243813b8"
+      },
+      {
+        "path": "src/dec/amuse_craft/pgd_c00_image_decoder.cc",
+        "sha256": "8d2c4e60ae05864909ade80f1c564ad002ea65245be4598effeeb3d6978a1566"
+      },
+      {
+        "path": "src/dec/amuse_craft/pgd_c00_image_decoder.h",
+        "sha256": "946f5f862278e702c7fe6cd037f3f8a01c72cf90848d3fbb4034dc87281e131d"
+      },
+      {
+        "path": "src/dec/amuse_craft/pgd_ge_image_decoder.cc",
+        "sha256": "9c0629eb96034ae5fc4c616371d82019f77832228e4ea76f56506be49c3e4b9a"
+      },
+      {
+        "path": "src/dec/amuse_craft/pgd_ge_image_decoder.h",
+        "sha256": "c0e9acfb0e72419710b8c95930413a48b70221a15ddaff7d444efb7f6ecf607b"
+      },
+      {
+        "path": "src/dec/aoi/agf_image_decoder.cc",
+        "sha256": "0857ffc38eb3d9bdcc5de97158521713ce8baf10a0c60da4e1d90feab540439a"
+      },
+      {
+        "path": "src/dec/aoi/agf_image_decoder.h",
+        "sha256": "26a1519adab121b8b4cdc4f2a5fa9a73fe4a497a98ccfee5d4f6793431cf7ade"
+      },
+      {
+        "path": "src/dec/aoi/iph_image_decoder.cc",
+        "sha256": "293ef81d150792a912a52c870376fa3966ee2018df82bde91d6452af3983112e"
+      },
+      {
+        "path": "src/dec/aoi/iph_image_decoder.h",
+        "sha256": "b3f74bc3c2f1d82de68648e389ac8ef0beecfa3582bc3817da24079c66229621"
+      },
+      {
+        "path": "src/dec/bishop/bsg_image_decoder.cc",
+        "sha256": "9798dad90daadb39d10204b5142cfaff70df89ce458e6fdea7eedafc6f67a852"
+      },
+      {
+        "path": "src/dec/bishop/bsg_image_decoder.h",
+        "sha256": "d378c152c09d56c11066cca2abfafa95b85ea04e5ad1b2d8492a0a11cf5d4b48"
+      },
+      {
+        "path": "src/dec/complets/gd_image_decoder.cc",
+        "sha256": "c0c203a3922937274b1719112c5c99af164bb0b0566759ff77de88f2972f0f1f"
+      },
+      {
+        "path": "src/dec/complets/gd_image_decoder.h",
+        "sha256": "2487e2bfc886aaf738566eca542708e53b269be71774cab658c2b7385dae5eab"
+      },
+      {
+        "path": "src/dec/cronus/common.cc",
+        "sha256": "223a4b669ac338d7e1fe22f3f6cb861cc30f9d1f01aa79484c62c874c7d3fd06"
+      },
+      {
+        "path": "src/dec/cronus/common.h",
+        "sha256": "f88c9466fcc804c5c1c644abe5acce177e2cf63c3f9156b5c6d62dddd0d31de9"
+      },
+      {
+        "path": "src/dec/cronus/grp_image_decoder.cc",
+        "sha256": "6036d73b587fa613071215d35a322106718b983b8fc435a6e4cbea3dc96e0b28"
+      },
+      {
+        "path": "src/dec/cronus/grp_image_decoder.h",
+        "sha256": "79a0ef556d3bd9f8b033b3529222e57b01b5882cfb390a91cd54dcf3cb04e802"
+      },
+      {
+        "path": "src/dec/cronus/pak_archive_decoder.cc",
+        "sha256": "351933ad23015d55a253961b2eaf66765a4e4e7b206599405c92a9d3911ddfb6"
+      },
+      {
+        "path": "src/dec/fvp/nvsg_image_decoder.cc",
+        "sha256": "9db6ade916c8a3265a785842735ddbcdcb5f3796d67f5d3c25e4edf3687b43a0"
+      },
+      {
+        "path": "src/dec/fvp/nvsg_image_decoder.h",
+        "sha256": "cd8be8aa9d249272a190516601fab2fc1b0cdfcc7953819db0e3a65ce08c69ac"
+      },
+      {
+        "path": "src/dec/gpk2/gfb_image_decoder.cc",
+        "sha256": "ff932fc9cd89059c1a191d0750ad005bffd350f1c98c795a699e474fce4aeea0"
+      },
+      {
+        "path": "src/dec/gpk2/gfb_image_decoder.h",
+        "sha256": "361502696e3420f09c40ebb9b9bbfade0f9c7d1e64af78724b05747b484ee56e"
+      },
+      {
+        "path": "src/dec/gs/gs_image_decoder.cc",
+        "sha256": "14fdb74bdba196e80d910a8cac4123eab90bd6075d7f7d0c328324ca6b0b3c5d"
+      },
+      {
+        "path": "src/dec/gs/gs_image_decoder.h",
+        "sha256": "55724c696ed98fdd2e1dad384a17c720ab4b54bc297aed5ff9a7beb89364fc9b"
+      },
+      {
+        "path": "src/dec/leaf/common/custom_lzss.cc",
+        "sha256": "ccc2cccd9e69a31cf427f4262fb728769ec7a758eea64a74148b022324e041d9"
+      },
+      {
+        "path": "src/dec/leaf/common/custom_lzss.h",
+        "sha256": "92557fbbf27b3c18b9f3f00e146ac0d62d0b54d778669ff69be77fee70b370ad"
+      },
+      {
+        "path": "src/dec/leaf/kcap_group/bbm_image_decoder.cc",
+        "sha256": "b1f8983602c6f4a9ce49863a484530d5097b0f914da9db754f89e5eb944913e7"
+      },
+      {
+        "path": "src/dec/leaf/kcap_group/bbm_image_decoder.h",
+        "sha256": "302c8c3cdcd2c64d94f5eddf7fae4c7b620207107878eaffe2500449102abc19"
+      },
+      {
+        "path": "src/dec/leaf/kcap_group/bjr_image_decoder.cc",
+        "sha256": "b6da6c3aef8f17db6dff976424bd534dd5d5f8f851d0dd43c34a7b3ffdc43809"
+      },
+      {
+        "path": "src/dec/leaf/kcap_group/bjr_image_decoder.h",
+        "sha256": "340984e3f4d86eb1fce6e3c28837de082eb45f84b2419f2bf2fbf4730df7e80a"
+      },
+      {
+        "path": "src/dec/leaf/kcap_group/kcap_archive_decoder.cc",
+        "sha256": "3727f32d3e89e15007251f2941561561ac749f2cc625be528cfa5c2112777fbc"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lc3_image_decoder.cc",
+        "sha256": "1888db56a6062d6b2375820a944196cbe8d13ff8a5c6b77f898a776bb934bfff"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lc3_image_decoder.h",
+        "sha256": "571a909675672a04b9aa6d4c76bad868115422a6f16794570e7ad9698d6769a1"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lf2_image_decoder.cc",
+        "sha256": "41b93ead447a71e3a6935f8442413fd2f7d60f2a8c1f95ddb647e22e22ca8a65"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lf2_image_decoder.h",
+        "sha256": "a5138f3485a3aca3ab2f9166bd734ce143862016492fe4fda6e13ad418e1a7ea"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lf3_image_decoder.cc",
+        "sha256": "338e98efc8954cddafdbce12259bc5e1ab945710bb76ac8b6e7e3d6c95bc7d6e"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lf3_image_decoder.h",
+        "sha256": "cbbca9dc24df3ac5b47016d5d648bed5a2396d29bccdbc9f86f54d8121869880"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lfb_image_decoder.cc",
+        "sha256": "6f7a12f7e83cd57f8dc3232d198413d27acbd808c8d839a34d861d43d116f081"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lfb_image_decoder.h",
+        "sha256": "98411b6824ca42395d7b44cc0c3e1f72fd346c71c8d64eb6f6fe14395294fa33"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lfg_image_decoder.cc",
+        "sha256": "957865d0b1ed6b0400ac622d9fca6e57ac305783c45009d98790ecbfb83ef06d"
+      },
+      {
+        "path": "src/dec/leaf/leafpack_group/lfg_image_decoder.h",
+        "sha256": "ec8d50168f6b551a0429a44d5162d89cdff42046a4cd122a46959671e327bba4"
+      },
+      {
+        "path": "src/dec/leaf/pak1_group/grp_image_decoder.cc",
+        "sha256": "e51113161f8962a4db31db5976720efb6f255ed09b5f96c12dbf41f57c58eeb0"
+      },
+      {
+        "path": "src/dec/leaf/pak1_group/grp_image_decoder.h",
+        "sha256": "9ea822f37f19a8571b9043c443b64b357629999603153147c4b38003d7bc9d58"
+      },
+      {
+        "path": "src/dec/liar_soft/cg_decompress.cc",
+        "sha256": "99016df1756868e820af42c234b4caddcf555e55c0ca4f083d6a5873891e018c"
+      },
+      {
+        "path": "src/dec/liar_soft/cg_decompress.h",
+        "sha256": "bbc4e37ac9f5d1046c4b235f20e457e550699f3324fcbc02a812f836076a58bc"
+      },
+      {
+        "path": "src/dec/liar_soft/lim_image_decoder.cc",
+        "sha256": "9ce34f4deb3412eabaf8bf4bd7ea388ded0033dd3d029651d06f0d79ac1625a8"
+      },
+      {
+        "path": "src/dec/liar_soft/lim_image_decoder.h",
+        "sha256": "2b3fe33b2608e7633a0ace6ae0ccf270e72f73ef80835f894761e406e9662e58"
+      },
+      {
+        "path": "src/dec/liar_soft/wcg_image_decoder.cc",
+        "sha256": "82f50baa2b74de8d07c2556e319f1d9945e07ca452c8e5970b505807dfade622"
+      },
+      {
+        "path": "src/dec/liar_soft/wcg_image_decoder.h",
+        "sha256": "c8e96b2c7bb57a81d7d3e866b1f891d908522b473d4138aa0897937623258a56"
+      },
+      {
+        "path": "src/dec/libido/mnc_image_decoder.cc",
+        "sha256": "a47b06ba4ccbf0fdd4fcb17ac138060b60da681c4a0616ae6cafa3e001317b7a"
+      },
+      {
+        "path": "src/dec/libido/mnc_image_decoder.h",
+        "sha256": "9931c42cf4a8867726916201a83a052ae204af183d142aa4c403dcbe438d6bed"
+      },
+      {
+        "path": "src/dec/lilim/abm_image_decoder.cc",
+        "sha256": "00c754698a706b241e176505896c232a2d5506e26f4a992448c545440e259b7a"
+      },
+      {
+        "path": "src/dec/lilim/abm_image_decoder.h",
+        "sha256": "bcfaef91450194dc02f82578caed8075fd45e16b3cb870d635271ae481fbddfe"
+      },
+      {
+        "path": "src/dec/lilim/common.cc",
+        "sha256": "ed92a6f1e6fb5c4b11491e48405fa397741319b5ad1372da50a01e7dd22033ae"
+      },
+      {
+        "path": "src/dec/lilim/common.h",
+        "sha256": "bb45f550936e816b82e1a0a2e1115f4fc62551527d3a7700afc62c9f9601cf0d"
+      },
+      {
+        "path": "src/dec/lilim/dbm_image_decoder.cc",
+        "sha256": "8951955e269512b4d0f11b0fb6cb282f60b862ecc44573cdc7374541ba5adca6"
+      },
+      {
+        "path": "src/dec/lilim/dbm_image_decoder.h",
+        "sha256": "52494bd2ff3c6c787c409bc0e77cc0272bd5db55e399727d83cb11adff9ca875"
+      },
+      {
+        "path": "src/dec/lucifen/elg_image_decoder.cc",
+        "sha256": "959573bba019add7bb4966b1a414d5d90e326663cd40461f8585996c2252b493"
+      },
+      {
+        "path": "src/dec/lucifen/elg_image_decoder.h",
+        "sha256": "659ba10a59418d12e775365c5377638c0731697f59f44300edf8836933bc0cf8"
+      },
+      {
+        "path": "src/dec/majiro/rc8_image_decoder.cc",
+        "sha256": "5b02133b7da2549269f36dc4f355771a5d58abb0adf6f035248ee35f9c2d9bbc"
+      },
+      {
+        "path": "src/dec/majiro/rc8_image_decoder.h",
+        "sha256": "e31e0f298c3f378da93eca2e974ad71e8dd6747557e7556296f65dd45e9fa807"
+      },
+      {
+        "path": "src/dec/majiro/rct_image_decoder.cc",
+        "sha256": "9c6652840d18686a561ec04df99a0409232843bdc63fa610e4b7301b0c71aec4"
+      },
+      {
+        "path": "src/dec/majiro/rct_image_decoder.h",
+        "sha256": "bbe091aa92a8c412c9a5352a4a33004f5990dbc937d2926105fb05579b088a44"
+      },
+      {
+        "path": "src/dec/nsystem/mgd_image_decoder.cc",
+        "sha256": "fa05c66bc3af5047cac09863c813a16d411c3a7b7a56cdfc06833abcaa023839"
+      },
+      {
+        "path": "src/dec/nsystem/mgd_image_decoder.h",
+        "sha256": "334e79288bb4c5c05daee61c8616518dfd498940cbf107ade9778f057a9cd74e"
+      },
+      {
+        "path": "src/dec/png/png_image_decoder.cc",
+        "sha256": "123cf7cfbab9d59ad57b2dfec9195aa2696bef692dcccfbdb0bba63f33e5c86e"
+      },
+      {
+        "path": "src/dec/qlie/dpng_image_decoder.cc",
+        "sha256": "782cf6f57270094ebcbdd2d0b1ad647e50b898dd0dfcf17938eb22a139a78f31"
+      },
+      {
+        "path": "src/dec/qlie/dpng_image_decoder.h",
+        "sha256": "fa23edd6ae4f15569649b826b538d483e0fddf329a9af05f1e88aefde01b1162"
+      },
+      {
+        "path": "src/dec/tabito/gwd_image_decoder.cc",
+        "sha256": "bb2eef6368315dc2c3e2fee6ae9297703e0e31717e6310722dcd16afe512316f"
+      },
+      {
+        "path": "src/dec/tabito/gwd_image_decoder.h",
+        "sha256": "130e48a86a78614bfc00ff44b55e21febfe794fb6b74f7f7e1ec03c3cdffd099"
+      },
+      {
+        "path": "src/dec/truevision/tga_image_decoder.cc",
+        "sha256": "065a307fb61f99c67fda2800ef9c3a40e3f10c944638c7d549c59289c3ea85d4"
+      },
+      {
+        "path": "src/dec/wild_bug/wbm_image_decoder.cc",
+        "sha256": "7c64fd253e3f0b6bf04188b369e7397396cdb99a6b50918dd212ecb29245f08e"
+      },
+      {
+        "path": "src/dec/wild_bug/wbm_image_decoder.h",
+        "sha256": "5dde246072d76873d9c4c9abfb56c591358b279ff00e00504e8e6068fce6fa16"
+      },
+      {
+        "path": "src/dec/wild_bug/wpx/common.h",
+        "sha256": "1880a3ab564185692d9da978d60b54777834131a2bf2b3b7e346146b7636cb6e"
+      },
+      {
+        "path": "src/dec/wild_bug/wpx/decoder.cc",
+        "sha256": "579756fd55859cbe4e7a6682e3c3477351059fe57cab4ea90decba44226e1bed"
+      },
+      {
+        "path": "src/dec/wild_bug/wpx/decoder.h",
+        "sha256": "cc06dbd823edf695535a92408012bcce53e4fd511fbbf42348c05a306490ac84"
+      },
+      {
+        "path": "src/dec/wild_bug/wpx/retrieval.cc",
+        "sha256": "51547de651222ddfe8ead4ee30a26a6fcd1b7b80ee2cbf4468848485cdab7c25"
+      },
+      {
+        "path": "src/dec/wild_bug/wpx/retrieval.h",
+        "sha256": "a5a7cc2004b25bd00f67ff4520d7e405f696ce2939bb020d30ef097dd90f2ea3"
+      },
+      {
+        "path": "src/dec/wild_bug/wpx/transcription.cc",
+        "sha256": "99998802c3302d335e736b98649a5d723a3b795481babd6656414a2b3d5b5f2d"
+      },
+      {
+        "path": "src/dec/wild_bug/wpx/transcription.h",
+        "sha256": "b92be1f56929d39c82360b871f9f89b98e8c3e1c571a41d1a69775949a6571d0"
+      },
+      {
+        "path": "src/dec/yuka_script/ykg_image_decoder.cc",
+        "sha256": "c294d16567ff5e590463405d01b8d8bf4bf0c5841a772d54ea0bed7e8d40f1af"
+      },
+      {
+        "path": "src/dec/yuka_script/ykg_image_decoder.h",
+        "sha256": "32145758b31bac20ab58a7d1c776b4d02615f47f1b1913550dcd73bd796a362a"
+      },
+      {
+        "path": "src/io/msb_bit_stream.cc",
+        "sha256": "afe7b1d2d98cac8886e6c2f4c0c8398d7a79c402e0e5d1844cfb74378bd11b42"
+      },
+      {
+        "path": "src/io/path.cc",
+        "sha256": "40b29c05fc799872fbd963c70c7d8a7b21ff1c94efe1eb872ab9a01de30082e7"
+      },
+      {
+        "path": "src/res/image.cc",
+        "sha256": "f27fe3946610ade38afd2e96b3a6e074cfe6dbf803bd14b31555ee7b683de588"
+      },
+      {
+        "path": "src/res/pixel_format.cc",
+        "sha256": "eabf12ce785da1816936ecbf07257c4c0f6d8a708ea6576d0c8556ba2a89d3e3"
+      }
+    ]
+  },
+  "implementation": {
+    "files": [
+      "crates/crysirror-formats-arc/src/images_c.rs",
+      "crates/crysirror-formats-arc/src/images_c/common.rs",
+      "crates/crysirror-formats-arc/src/images_c/elg.rs",
+      "crates/crysirror-formats-arc/src/images_c/extra.rs",
+      "crates/crysirror-formats-arc/src/images_c/gwd.rs",
+      "crates/crysirror-formats-arc/src/images_c/leaf.rs",
+      "crates/crysirror-formats-arc/src/images_c/liar.rs",
+      "crates/crysirror-formats-arc/src/images_c/majiro.rs",
+      "crates/crysirror-formats-arc/src/images_c/mgd.rs",
+      "crates/crysirror-formats-arc/src/images_c/misc.rs",
+      "crates/crysirror-formats-arc/src/images_c/pgd.rs",
+      "crates/crysirror-formats-arc/src/images_c/wbm.rs"
+    ],
+    "registered_format_ids": [
+      "abogado/kg",
+      "bishop/bsg",
+      "complets/gd",
+      "cronus/grp",
+      "lucifen/elg",
+      "nsystem/mgd",
+      "tabito/gwd",
+      "wild-bug/wbm",
+      "majiro/rc8",
+      "majiro/rct",
+      "amuse-craft/pgd-c00",
+      "amuse-craft/pgd-ge",
+      "gpk2/gfb",
+      "gs/gfx",
+      "fvp/nvsg",
+      "yuka-script/ykg",
+      "qlie/dpng",
+      "aoi/agf",
+      "aoi/iph",
+      "leaf/bbm",
+      "leaf/bjr",
+      "leaf/grp",
+      "leaf/lc3",
+      "leaf/lf2",
+      "leaf/lf3",
+      "leaf/lfb",
+      "leaf/lfg",
+      "liar-soft/lim",
+      "liar-soft/wcg",
+      "libido/mnc",
+      "lilim/abm",
+      "lilim/dbm"
+    ],
+    "count": 32,
+    "output": "crysirror_image::ImageSurface; top-left owned RGBA8",
+    "unsafe_code": "forbidden at crate root",
+    "devices": "none",
+    "io": "No ambient IO in decoders; dependent resources use client-scoped ImageDecodeContext callbacks.",
+    "memory_limits": "Encoded data and individual intermediates <=64 MiB; dimensions1..8192; RGBA<=64MiB; shared registry adds cumulative and recursive limits.",
+    "registration": "Formats are installed by crysirror_formats_arc::register_images; IDs are actual decoders rather than upstream inventory aliases."
+  },
+  "compilation": {
+    "command": "cargo check -p crysirror-formats-arc",
+    "exit_code": 0,
+    "log": "target/verification/arc-images-c-check.log"
+  },
+  "ordinary_validation": {
+    "command": "cargo test -p crysirror-formats-arc --test images_c",
+    "exit_code": 0,
+    "passed": 23,
+    "failed": 0,
+    "ignored": 1,
+    "fixtures": "Built in Rust memory from explicit binary fields and independently specified RGBA; no binary fixture committed.",
+    "log": "target/verification/arc-images-c-tests.log"
+  },
+  "external_validation": {
+    "command": "cargo test -p crysirror-formats-arc --test images_c external_upstream_pixels_match_exactly -- --ignored --nocapture",
+    "exit_code": 0,
+    "pixel_exact_inputs": 56,
+    "log": "target/verification/arc-images-c-external.log",
+    "fixture_policy": "Fixtures remain external under the pinned reference checkout; no images, encoded fixture bytes or fonts are copied into the project. Their presence in upstream does not establish redistribution rights.",
+    "test_passed": 1,
+    "test_ignored_when_explicitly_run": 0,
+    "per_case_results": [
+      {
+        "id": "cronus/grp",
+        "input": "cronus/files/grp/DPBG03D",
+        "width": 640,
+        "height": 480,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "cronus/grp",
+        "input": "cronus/files/grp/TCF12",
+        "width": 148,
+        "height": 480,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "cronus/grp",
+        "input": "cronus/files/grp/MSGPARTS",
+        "width": 300,
+        "height": 138,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "cronus/grp",
+        "input": "cronus/files/grp/SR1",
+        "width": 800,
+        "height": 600,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "cronus/grp",
+        "input": "cronus/files/grp/SELWIN",
+        "width": 480,
+        "height": 29,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lucifen/elg",
+        "input": "lucifen/files/elg/rf_bg.elg",
+        "width": 1280,
+        "height": 720,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lucifen/elg",
+        "input": "lucifen/files/elg/tl_ref.elg",
+        "width": 1436,
+        "height": 28,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lucifen/elg",
+        "input": "lucifen/files/elg/rule006.elg",
+        "width": 1280,
+        "height": 720,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lucifen/elg",
+        "input": "lucifen/files/elg/if_lb.elg",
+        "width": 68,
+        "height": 77,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "nsystem/mgd",
+        "input": "nsystem/files/mgd/GS_UD.MGD",
+        "width": 800,
+        "height": 600,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "nsystem/mgd",
+        "input": "nsystem/files/mgd/saveload_p.MGD",
+        "width": 800,
+        "height": 600,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "tabito/gwd",
+        "input": "tabito/files/gwd/logo",
+        "width": 209,
+        "height": 84,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "wild-bug/wbm",
+        "input": "wild_bug/files/wbm/S_M01.WBM",
+        "width": 100,
+        "height": 75,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "wild-bug/wbm",
+        "input": "wild_bug/files/wbm/S_Y08.WBM",
+        "width": 100,
+        "height": 75,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "wild-bug/wbm",
+        "input": "wild_bug/files/wbm/EF_WIPE_LR.WBM",
+        "width": 800,
+        "height": 600,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "wild-bug/wbm",
+        "input": "wild_bug/files/wbm/ZD0211.WBM",
+        "width": 106,
+        "height": 156,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "wild-bug/wbm",
+        "input": "wild_bug/files/wbm/ZD0710.WBM",
+        "width": 50,
+        "height": 120,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "wild-bug/wbm",
+        "input": "wild_bug/files/wbm/E_AT06S.WBM",
+        "width": 100,
+        "height": 75,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "majiro/rc8",
+        "input": "majiro/files/rc8/style_tc_geo00_a_.rc8",
+        "width": 60,
+        "height": 150,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "majiro/rct",
+        "input": "majiro/files/rct/face_dummy.rct",
+        "width": 182,
+        "height": 187,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "majiro/rct",
+        "input": "majiro/files/rct/ev04_01c.rct",
+        "width": 1920,
+        "height": 1080,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "majiro/rct",
+        "input": "majiro/files/rct/st_kaoru_b_02_14_m-zlib.rct",
+        "width": 290,
+        "height": 910,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "amuse-craft/pgd-c00",
+        "input": "amuse_craft/files/pgd-c00/FA03C_01E-zlib.PGD",
+        "width": 170,
+        "height": 150,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "amuse-craft/pgd-ge",
+        "input": "amuse_craft/files/pgd-ge/SYSTEM.PGD",
+        "width": 400,
+        "height": 150,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "amuse-craft/pgd-ge",
+        "input": "amuse_craft/files/pgd-ge/SECRET.PGD",
+        "width": 192,
+        "height": 108,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "amuse-craft/pgd-ge",
+        "input": "amuse_craft/files/pgd-ge/ETLA023R.PGD",
+        "width": 240,
+        "height": 152,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "gs/gfx",
+        "input": "gs/files/gs-gfx/SYSLOGO",
+        "width": 800,
+        "height": 600,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "gs/gfx",
+        "input": "gs/files/gs-gfx/TRMASK16",
+        "width": 800,
+        "height": 600,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "gs/gfx",
+        "input": "gs/files/gs-gfx/IMG019KBS",
+        "width": 92,
+        "height": 32,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "fvp/nvsg",
+        "input": "fvp/files/nvsg/BG085_001",
+        "width": 1280,
+        "height": 720,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "fvp/nvsg",
+        "input": "fvp/files/nvsg/CHR_Shigure",
+        "width": 99,
+        "height": 1166,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "fvp/nvsg",
+        "input": "fvp/files/nvsg/bu_effect22_F_1",
+        "width": 37,
+        "height": 36,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "fvp/nvsg",
+        "input": "fvp/files/nvsg/gaiji_heart",
+        "width": 104,
+        "height": 104,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "fvp/nvsg",
+        "input": "fvp/files/nvsg/diss48",
+        "width": 1024,
+        "height": 640,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "yuka-script/ykg",
+        "input": "yuka_script/files/ykg/reimu.ykg",
+        "width": 641,
+        "height": 720,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "qlie/dpng",
+        "input": "qlie/files/dpng/electricity02.png",
+        "width": 1280,
+        "height": 720,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "aoi/iph",
+        "input": "aoi/files/iph/cgsA00-zlib.iph",
+        "width": 256,
+        "height": 192,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/bbm",
+        "input": "leaf/files/bbm/Stage_14_E0_OBJ-zlib.bbm",
+        "width": 512,
+        "height": 512,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/bjr",
+        "input": "leaf/files/bjr/v00232-zlib.BJR",
+        "width": 800,
+        "height": 600,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/grp",
+        "input": "leaf/files/grp/ase200.grp",
+        "width": 8,
+        "height": 16,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/lf2",
+        "input": "leaf/files/lf2/C1F01.LF2",
+        "width": 115,
+        "height": 215,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/lf3",
+        "input": "leaf/files/lf3/KEY2.LF3",
+        "width": 540,
+        "height": 185,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/lc3",
+        "input": "leaf/files/lc3/KAO0903.LC3",
+        "width": 168,
+        "height": 200,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/lfb",
+        "input": "leaf/files/lfb/LIFEM.LFB",
+        "width": 128,
+        "height": 128,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/lfg",
+        "input": "leaf/files/lfg/OP_L6.LFG",
+        "width": 272,
+        "height": 389,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "leaf/lfg",
+        "input": "leaf/files/lfg/MAX_C09.LFG",
+        "width": 168,
+        "height": 387,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "liar-soft/lim",
+        "input": "liar_soft/files/lim/7035.lim",
+        "width": 640,
+        "height": 480,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "liar-soft/lim",
+        "input": "liar_soft/files/lim/MU_ST.lim",
+        "width": 52,
+        "height": 88,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "liar-soft/wcg",
+        "input": "liar_soft/files/wcg/0003.wcg",
+        "width": 557,
+        "height": 362,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "libido/mnc",
+        "input": "libido/files/mnc/test-zlib.MNC",
+        "width": 200,
+        "height": 132,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lilim/abm",
+        "input": "lilim/files/abm/kj_ase.abm",
+        "width": 48,
+        "height": 80,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lilim/abm",
+        "input": "lilim/files/abm/popsave.abm",
+        "width": 144,
+        "height": 56,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lilim/dbm",
+        "input": "lilim/files/dbm/WD04.dbm",
+        "width": 128,
+        "height": 64,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lilim/dbm",
+        "input": "lilim/files/dbm/TB_fin.dbm",
+        "width": 640,
+        "height": 480,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lilim/dbm",
+        "input": "lilim/files/dbm/prompt.dbm",
+        "width": 16,
+        "height": 192,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      },
+      {
+        "id": "lilim/dbm",
+        "input": "lilim/files/dbm/C01.dbm",
+        "width": 32,
+        "height": 64,
+        "comparison": "all RGBA channels and dimensions exactly equal independent expected PNG"
+      }
+    ]
+  },
+  "formats": [
+    {
+      "id": "abogado/kg",
+      "source": "src/dec/abogado/kg_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "kg_escape_recency_and_repetition_bitstreams",
+      "external_exact_inputs": 0
+    },
+    {
+      "id": "bishop/bsg",
+      "source": "src/dec/bishop/bsg_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "bsg_planar_raw_and_rle",
+      "external_exact_inputs": 0
+    },
+    {
+      "id": "complets/gd",
+      "source": "src/dec/complets/gd_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "gd_sixteen_bit_dictionary_backreferences",
+      "external_exact_inputs": 0
+    },
+    {
+      "id": "cronus/grp",
+      "source": "src/dec/cronus/grp_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "cronus_plain_header_and_elg_rgb_mask",
+      "external_exact_inputs": 5
+    },
+    {
+      "id": "lucifen/elg",
+      "source": "src/dec/lucifen/elg_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "cronus_plain_header_and_elg_rgb_mask",
+      "external_exact_inputs": 4
+    },
+    {
+      "id": "nsystem/mgd",
+      "source": "src/dec/nsystem/mgd_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "mgd_plain_png_and_sgd_color_delta",
+      "external_exact_inputs": 2
+    },
+    {
+      "id": "tabito/gwd",
+      "source": "src/dec/tabito/gwd_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "gwd_gray_with_inverted_separate_mask",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "wild-bug/wbm",
+      "source": "src/dec/wild_bug/wbm_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "wbm_plain_sections_remove_stride_and_mask",
+      "external_exact_inputs": 6
+    },
+    {
+      "id": "majiro/rc8",
+      "source": "src/dec/majiro/rc8_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "rc8_and_rct_literals_and_overlap_runs",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "majiro/rct",
+      "source": "src/dec/majiro/rct_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "rc8_and_rct_literals_and_overlap_runs",
+      "external_exact_inputs": 3
+    },
+    {
+      "id": "amuse-craft/pgd-c00",
+      "source": "src/dec/amuse_craft/pgd_c00_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "pgd_ge_delta_and_chroma_and_c00_embedded_tga",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "amuse-craft/pgd-ge",
+      "source": "src/dec/amuse_craft/pgd_ge_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "pgd_ge_delta_and_chroma_and_c00_embedded_tga",
+      "external_exact_inputs": 3
+    },
+    {
+      "id": "gpk2/gfb",
+      "source": "src/dec/gpk2/gfb_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "gfb_bottom_up_alpha_fallback_and_gs_lzss",
+      "external_exact_inputs": 0
+    },
+    {
+      "id": "gs/gfx",
+      "source": "src/dec/gs/gs_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "gfb_bottom_up_alpha_fallback_and_gs_lzss",
+      "external_exact_inputs": 3
+    },
+    {
+      "id": "fvp/nvsg",
+      "source": "src/dec/fvp/nvsg_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "nvsg_all_pixel_modes_and_stacked_frames",
+      "external_exact_inputs": 5
+    },
+    {
+      "id": "yuka-script/ykg",
+      "source": "src/dec/yuka_script/ykg_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "ykg_unswaps_png_and_dpng_places_and_overwrites_tiles",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "qlie/dpng",
+      "source": "src/dec/qlie/dpng_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "ykg_unswaps_png_and_dpng_places_and_overwrites_tiles",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "aoi/agf",
+      "source": "src/dec/aoi/agf_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "agf_four_commands_and_iph_raw_and_compressed",
+      "external_exact_inputs": 0
+    },
+    {
+      "id": "aoi/iph",
+      "source": "src/dec/aoi/iph_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "agf_four_commands_and_iph_raw_and_compressed",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "leaf/bbm",
+      "source": "src/dec/leaf/kcap_group/bbm_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "leaf_bbm_and_grp_palette_mask_and_bjr_filename",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "leaf/bjr",
+      "source": "src/dec/leaf/kcap_group/bjr_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "leaf_bbm_and_grp_palette_mask_and_bjr_filename",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "leaf/grp",
+      "source": "src/dec/leaf/pak1_group/grp_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "leaf_bbm_and_grp_palette_mask_and_bjr_filename",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "leaf/lc3",
+      "source": "src/dec/leaf/leafpack_group/lc3_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "leaf_lf2_lf3_lc3_and_lfb",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "leaf/lf2",
+      "source": "src/dec/leaf/leafpack_group/lf2_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "leaf_lf2_lf3_lc3_and_lfb",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "leaf/lf3",
+      "source": "src/dec/leaf/leafpack_group/lf3_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "leaf_lf2_lf3_lc3_and_lfb",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "leaf/lfb",
+      "source": "src/dec/leaf/leafpack_group/lfb_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "leaf_lf2_lf3_lc3_and_lfb",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "leaf/lfg",
+      "source": "src/dec/leaf/leafpack_group/lfg_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "leaf_lfg_both_traversals",
+      "external_exact_inputs": 2
+    },
+    {
+      "id": "liar-soft/lim",
+      "source": "src/dec/liar_soft/lim_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "liar_lim_and_wcg_dictionary_planes_and_alpha",
+      "external_exact_inputs": 2
+    },
+    {
+      "id": "liar-soft/wcg",
+      "source": "src/dec/liar_soft/wcg_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "liar_lim_and_wcg_dictionary_planes_and_alpha",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "libido/mnc",
+      "source": "src/dec/libido/mnc_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "libido_mnc_and_lilim_abm_dbm",
+      "external_exact_inputs": 1
+    },
+    {
+      "id": "lilim/abm",
+      "source": "src/dec/lilim/abm_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "libido_mnc_and_lilim_abm_dbm",
+      "external_exact_inputs": 2
+    },
+    {
+      "id": "lilim/dbm",
+      "source": "src/dec/lilim/dbm_image_decoder.cc",
+      "implementation": "bounded safe CPU decoder; see known_boundaries for variant limits",
+      "ordinary_test": "libido_mnc_and_lilim_abm_dbm",
+      "external_exact_inputs": 4
+    }
+  ],
+  "known_boundaries": [
+    "Majiro RCT original CRC32/password-to-derived-XOR cipher is implemented through ctx.key(\"majiro/rct\"). Passwords are caller-provided raw bytes, not guessed encodings or bundled game keys; unavailable client keys fail. The encrypted branch is behavior-tested with an independent synthetic ciphertext, not an external game-key fixture.",
+    "YKG supports the same unencrypted reversed-PNG form as pinned upstream; encrypted/non-PNG forms explicitly fail.",
+    "GFB palette/8-bit mode was unsupported in pinned upstream and remains rejected. PGD GE accepts only the implemented filters2 and3.",
+    "BJR filename transforms and filename-derived Cronus delta keys are verified for ASCII basenames only; non-ASCII filenames fail rather than guessing UTF8/CP932/native-char signedness.",
+    "RCT base names retain their byte interpretation as UTF8 capability paths; non-UTF8 names fail instead of guessing CP932. Non-ASCII base names have no external fixture validation. Optional missing base/mask/palette follows typed NotFound only; missing resolver, denied reads and corrupt nested images fail.",
+    "RCT mask lookup tries the conventional sibling stem_.rc8 then stem_.rct; it does not enumerate an ambient global stem index as upstream VirtualFileSystem did.",
+    "KG malformed/truncated alpha channels fail instead of upstream per-game exception suppression; KG images require at least two pixels as the native bitstream always writes two seeds.",
+    "Unknown compression/pixel variants, invalid offsets, unsupported versions and malformed/truncated streams fail. Where upstream returned partially zero-filled output after malformed compression, this port generally rejects that malformed stream.",
+    "Generic image output does not claim to migrate VM-specific animation, pivots or region playback semantics; original VMs remain separate."
+  ],
+  "filename_audit": {
+    "source_findings": [
+      "io::path stores std::string bytes and name() returns the filename without re-encoding.",
+      "Leaf KCAP and Majiro ARC convert source SJIS archive entry paths to UTF8 before constructing io::File.",
+      "BJR sums/xors std::string char values; Cronus sums unsigned bstr values. The two are different for non-ASCII names."
+    ],
+    "oracle": {
+      "char_signed": 1,
+      "utf8_name": "\u65e5\u672c.bjr",
+      "bjr_key1": 65604,
+      "bjr_key2": 4294967228,
+      "bjr_key3": 86,
+      "cronus_unsigned_byte_sum": 1468
+    },
+    "oracle_source": "target/verification/arc-filename-oracle.cpp",
+    "oracle_command": "clang++ -std=c++17 target/verification/arc-filename-oracle.cpp -o target/verification/arc-filename-oracle && target/verification/arc-filename-oracle",
+    "oracle_exit_code": 0,
+    "scope": "The oracle is a synthetic filename pure-code check on this host. BJR/Cronus filename-derived branches intentionally require ASCII until native filename encoding/signedness policy is explicit."
+  },
+  "encrypted_rct_validation": {
+    "test": "encrypted_rct_uses_original_cipher_and_client_scoped_raw_password_bytes",
+    "independent_ciphertext": "Calculated with Python zlib.crc32 plus original little-endian derived-word formula; no production key stored.",
+    "assertions": [
+      "NUL/nonUTF8 bytes in synthetic password retain original raw-byte interpretation.",
+      "Correct client key produces independently specified RGBA.",
+      "Missing provider, another client with the same key ID absent, and removed key fail."
+    ]
+  }
+}

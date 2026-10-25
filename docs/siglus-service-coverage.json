@@ -1,0 +1,186 @@
+{
+  "date": "2026-10-25",
+  "scope": "Siglus native service migration audit; checked code paths are not full game compatibility",
+  "upstream": {
+    "url": "https://github.com/xmoezzz/siglus_rs",
+    "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+    "complete_checkout": "/Users/xmoe/.cache/crysirror/upstream-20261024/siglus_rs",
+    "source_snapshots": [
+      {
+        "role": "text policy",
+        "path": "crates/siglus_scene_vm/src/runtime/forms/stage.rs",
+        "sha256": "970a4807b63db2893379e1ccb3a03ab71c383325d3952d31796d42ffea8d2d02"
+      },
+      {
+        "role": "native UI/reveal",
+        "path": "crates/siglus_scene_vm/src/runtime/ui.rs",
+        "sha256": "507acf5afd6ba2bb18fb68ff8b0e7e9980b18e5e90894fb063ac0551ead512e2"
+      },
+      {
+        "role": "native raster/font",
+        "path": "crates/siglus_scene_vm/src/text_render.rs",
+        "sha256": "5375c80a6a6c94796cc3039097e816de8cf7cd21fe75c0befa4fbe85fc6afc49"
+      },
+      {
+        "role": "native movie",
+        "path": "crates/siglus_scene_vm/src/movie/mod.rs",
+        "sha256": "993bf6124599fd25e103d5dabeb6a383ee5ad7df792dad87fd6f3908323214da"
+      },
+      {
+        "role": "native render plan",
+        "path": "crates/siglus_scene_vm/src/render_plan/mod.rs",
+        "sha256": "096c65c936751d5f8fcb1ceb06feaac8bc8c64b93997f221f8d095f7ac0da315"
+      }
+    ]
+  },
+  "actual_factory": {
+    "file": "crates/crysirror-runtime/src/runtime.rs",
+    "factory": "SiglusFactory",
+    "vm": "crysirror_siglus_vm::adapter::SiglusVm",
+    "vendor_role": "siglus_scene_vm source/decode/wipe helpers remain a separate compiled dependency; its full renderer/UI are not the registered adapter"
+  },
+  "coverage": [
+    {
+      "feature": "image decoding and basic native objects",
+      "engine": "crysirror-image + crysirror-siglus G00 + crysirror-scene Layer",
+      "native_bridge": "connected for RECT/PCT in FRONT; scoped immutable RGBA upload",
+      "limits": [
+        "unknown object types fail",
+        "child/button and multistage composition not covered"
+      ]
+    },
+    {
+      "feature": "sprite color filters and blends",
+      "engine": "LayerFilter + five blend modes; engine GPU arithmetic previously tested",
+      "native_bridge": "connected for mono/reverse/bright/dark/color_rate/color_add and blends 0-4",
+      "limits": [
+        "native masks/tone curves/lights/fog/clip/world/overlay rejected",
+        "native distortion/wipe state not exported"
+      ]
+    },
+    {
+      "feature": "native dialogue text and name",
+      "engine": "crysirror-text shaping/raster + Text API and scoped RGBA surfaces exist",
+      "native_bridge": "not connected; CD_TEXT/CD_NAME fallback triggers explicit export error",
+      "limits": [
+        "ported MWND dispatch hooks always return false",
+        "ported UiRuntime.message_waiting always false",
+        "generic grapheme reveal cannot replace native char/reveal_index semantics"
+      ]
+    },
+    {
+      "feature": "ruby/vertical/font choice/native glyph ordering",
+      "engine": "generic ruby/vertical/fallback/rich styles/outline/shadow exist",
+      "native_bridge": "not connected to native MWND glyph state",
+      "limits": [
+        "original formatting/layout/read flags and original glyph layer order remain native policy",
+        "no native font/ruby pixel differential completed"
+      ]
+    },
+    {
+      "feature": "screen wipe transitions",
+      "engine": "engine Layer transitions + original wipe.wgsl/mask generators exist",
+      "native_bridge": "not connected; active native globals.wipe is rejected",
+      "limits": [
+        "page curl/partial-range native ownership is not covered"
+      ]
+    },
+    {
+      "feature": "SFX/music/voice",
+      "engine": "crysirror-audio Mixer/streaming/buses/spatial/Audio API exist",
+      "native_bridge": "not connected to original Siglus audio managers; limited port uses stubs and unsupported forms",
+      "limits": [
+        "BGM play_name_script explicitly errors native BGM not bound",
+        "play status stubs do not prove original wait/fade/persistent audio fidelity",
+        "native NWA/OVK/channel semantics need adapter mapping"
+      ]
+    },
+    {
+      "feature": "OMV/Theora/MPEG/WMV video",
+      "engine": "crysirror-video decoders + World video service exist",
+      "native_bridge": "not connected; ported MovieManager.prepare explicitly errors",
+      "limits": [
+        "OMV/Theora compile-only in existing evidence",
+        "video audio track routing is absent",
+        "original movie waits/key skip/PTS/alpha need native bridge verification"
+      ]
+    },
+    {
+      "feature": "original snapshots and saves",
+      "engine": "Runtime SaveEnvelope + native adapter bincode snapshot and original save codec entry points",
+      "native_bridge": "connected for covered rect/arithmetic/timewait paths",
+      "limits": [
+        "MwndGlyph/MwndMessagePage/Ruby serialization structures retained but no native text pipeline reaches them normally",
+        "existing native save test covers rect savepoint/import and TIMEWAIT_KEY, not real-game ruby/reveal state",
+        "derived text/image backend restoration differs from full upstream implementation"
+      ]
+    },
+    {
+      "feature": "mesh/Emote objects",
+      "engine": "general glTF/animation and renderer exist; upstream xfile/eluna source present separately",
+      "native_bridge": "not connected by current RECT/PCT exporter",
+      "limits": [
+        "uninhabited Emote runtime",
+        "object types other than RECT/PCT fail visibly"
+      ]
+    }
+  ],
+  "behavior_validation": {
+    "executed": "two independently generated self-authored native SCN programs through actual desktop CLI trace",
+    "results": {
+      "text": {
+        "command": [
+          "target/release/crysirror",
+          "trace",
+          "/Users/xmoe/.cache/crysirror/siglus-service-audit/text-project.json",
+          "--frames",
+          "1",
+          "--data-dir",
+          "/Users/xmoe/.cache/crysirror/siglus-service-audit/state"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "CrySirror: VM game: I/O: native message layout must be implemented before CD_TEXT/CD_NAME can render\n",
+        "scene_bytes": 211,
+        "scene_sha256": "589ef395820cd21889ffdb66c328f566a9961be701f31def9727ed1701f30049"
+      },
+      "name": {
+        "command": [
+          "target/release/crysirror",
+          "trace",
+          "/Users/xmoe/.cache/crysirror/siglus-service-audit/name-project.json",
+          "--frames",
+          "1",
+          "--data-dir",
+          "/Users/xmoe/.cache/crysirror/siglus-service-audit/state"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "CrySirror: VM game: I/O: native message layout must be implemented before CD_TEXT/CD_NAME can render\n",
+        "scene_bytes": 207,
+        "scene_sha256": "588e04e4b2e221684a4cc89ef6a11e1c5752c8189dad4d686cc2f1c3c68558b4"
+      },
+      "source_sha256": {
+        "crates/crysirror-siglus-vm/src/export.rs": "5bde87263635dc9a53ff5cb55690cbae112baabc5892d6d5d8811e0aaeaa136b",
+        "crates/crysirror-siglus-vm/src/runtime/ui.rs": "476a204cfeffbdc10c2da109eeb117991dbe359606fa768214b1f54b61824fd2",
+        "crates/crysirror-siglus-vm/src/runtime/forms/stage.rs": "e76095a9e4ec8c3fb0aac122c96d725af3634c3c48e81f995d3c522a4360c65b"
+      }
+    },
+    "binary_sha256": "fc3463bffab13261c924557ee7b6c5c04b4cdcc5cb15146f16dfdd7f0fb5820f",
+    "native_text_rendered": false,
+    "font_read": false,
+    "game_data_read": false,
+    "gpu_created": false
+  },
+  "implementation_changes": false,
+  "compilation": "No new compilation claimed by this read-only audit; existing release executable used",
+  "next_native_acceptance": [
+    "PUSH STR -> TEXT rf_flag -> WAIT/reveal -> EOF, with exact char/reveal_index and read flags",
+    "NAME resolution/Gameexe color/font policy -> native name glyphs",
+    "native MWND ruby/vertical glyph placements -> shared raster service without re-layout",
+    "save at partial reveal, import and resume with matching text/glyphs/read flags",
+    "native BGM/SE/PCM/voice/music wait/fade/loop -> shared mixer sample/event traces",
+    "native MOV/OBJECT movie start/wait/key skip/end -> shared video PTS/alpha/audio clock"
+  ],
+  "ownership_rule": "Native opcode/value/layout/reveal/read/save policies stay in the adapter; font resources/raster/DSP/device output are shared engine mechanisms"
+}

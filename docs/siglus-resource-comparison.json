@@ -1,0 +1,22 @@
+{
+  "fixtures": [
+    {
+      "fixture": "type0-overlap",
+      "frames": 1,
+      "pixels_and_metadata_match": true
+    },
+    {
+      "fixture": "type1-palette-alpha",
+      "frames": 1,
+      "pixels_and_metadata_match": true
+    },
+    {
+      "fixture": "type2-reused-missing-crop",
+      "frames": 3,
+      "pixels_and_metadata_match": true
+    }
+  ],
+  "original_decoder_executed": true,
+  "vm_executed": false,
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954"
+}

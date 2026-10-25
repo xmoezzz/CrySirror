@@ -1,0 +1,25 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.06s
+     Running unittests src/lib.rs (target/debug/deps/crysirror_text-b12c2c15c6743dbe)
+
+running 1 test
+test tests::supplied_font_layout_and_positioned_raster_are_cpu_only ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.02s
+
+     Running tests/advanced_fonts.rs (target/debug/deps/advanced_fonts-3c254bf0bb8fd31f)
+
+running 2 tests
+test supplied_fonts_raster_color_outline_shadow_reveal_icons_and_sdf_dedup ... ok
+test supplied_fonts_shape_fallback_arabic_bidi_ruby_and_vertical ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+   Doc-tests crysirror_text
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

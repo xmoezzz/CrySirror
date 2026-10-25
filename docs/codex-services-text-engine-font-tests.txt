@@ -1,0 +1,10 @@
+    Blocking waiting for file lock on build directory
+   Compiling crysirror-engine v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.08s
+     Running tests/rich_text_api.rs (target/debug/deps/rich_text_api-bc2c8f2caa92d94d)
+
+running 1 test
+test shaped_surface_typewriter_localization_and_client_isolation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.55s
+

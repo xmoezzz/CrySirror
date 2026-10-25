@@ -1,0 +1,150 @@
+{
+  "schema": 1,
+  "date": "2026-10-25",
+  "objective": "Extract native-engine capabilities into CrySirror services; external game launch is not acceptance",
+  "implementation": {
+    "shared_cpu_backend": "crysirror-image::bitmap",
+    "engine_class": "Bitmap",
+    "script_global": "bitmap",
+    "methods": [
+      "create",
+      "load",
+      "fill",
+      "blit",
+      "stretch",
+      "info",
+      "remove"
+    ],
+    "operations": [
+      "uniform RGBA creation",
+      "clipped fill",
+      "clipped copy",
+      "RGB color key",
+      "explicit opacity/mask math",
+      "nearest stretch preserving clipped sampling phase"
+    ],
+    "pixel_math": [
+      "copy",
+      "copy_rgb",
+      "source_over",
+      "mask255",
+      "premultiplied_mask256"
+    ],
+    "existing_services_reused": [
+      "client-scoped Assets surfaces and revision/budget validation",
+      "provider-aware FileSystem and capability roots",
+      "immutable generated native images",
+      "Layer rotation/scale/pivot/filter/composition",
+      "Oxc/Boa binding generated from class registry"
+    ],
+    "native_bridge_fix": "Siglus CENTER_REP anchor/pivot/depth translation to shared SpriteTransform",
+    "protected_renderer_files_modified": false,
+    "standalone_game_runs_used_as_acceptance": false
+  },
+  "source": {
+    "url": "https://github.com/xmoezzz/siglus_rs.git",
+    "pin": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+    "attribution": "crates/crysirror-image/UPSTREAM.md",
+    "transforms": "docs/native-audit-siglus-transform.md"
+  },
+  "compilation_and_tests": [
+    {
+      "name": "rust-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "crysirror-image",
+        "-p",
+        "crysirror-engine",
+        "-p",
+        "crysirror-script-js",
+        "-p",
+        "crysirror-siglus-vm",
+        "-p",
+        "crysirror-runtime"
+      ],
+      "exit_code": 0,
+      "started_utc": "2026-10-25T08:42:52.586390+00:00",
+      "seconds": 59.77,
+      "log": "docs/bitmap-capabilities-rust-tests.txt",
+      "counts": {
+        "passed": 94,
+        "failed": 0,
+        "ignored": 1
+      }
+    },
+    {
+      "name": "workspace-check",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--workspace",
+        "--all-targets"
+      ],
+      "exit_code": 0,
+      "started_utc": "2026-10-25T08:43:52.357255+00:00",
+      "seconds": 15.733,
+      "log": "docs/bitmap-capabilities-workspace-check.txt"
+    }
+  ],
+  "python": {
+    "command": [
+      "/opt/homebrew/bin/python3.11",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-v"
+    ],
+    "passed": 132,
+    "failed": 0,
+    "log": "docs/bitmap-capabilities-python-tests.txt",
+    "new_reference_guard_tests": 6
+  },
+  "native_differential": {
+    "reallive_copy_mask_cases": 19200,
+    "avg32_mask_cases": 9216,
+    "avg32_nearest_cases": 12,
+    "result": "all pixel arrays equal",
+    "devices_created": false,
+    "data": "self-authored synthetic byte arrays; no fonts/game assets",
+    "original_log": "/tmp/codex-bitmap-differential.log",
+    "reproduce_tool": "tools/compare_bitmap_upstream.py",
+    "reference_driver": "tools/bitmap_reference.rs",
+    "log": "docs/bitmap-capabilities-differential.txt"
+  },
+  "behavior": [
+    "Rust provider override beats same-name invalid disk image",
+    "native generated image and current-client surface accepted as sources",
+    "overlapping self-copy reads original image",
+    "invalid operation leaves revision/pixels unchanged",
+    "other clients cannot read/mutate/remove these surfaces",
+    "TypeScript executes real bitmap methods through Oxc/Boa",
+    "bitmap pixels feed existing Layer transform and filter parameters",
+    "native Siglus setter fixture exercises actual bridge and EngineSystems geometry"
+  ],
+  "limits": [
+    "CPU pixel and shared Layer geometry/parameters validated; no new GPU shader execution claim",
+    "RealLive/AVG32/BGI VM adapters not implemented by this capability extraction",
+    "nearest sampling only; no RealLive bilinear",
+    "no external mask planes or AVG32 native fade",
+    "explicit premultiplied input mode does not convert PNGs automatically",
+    "mutable surfaces transient, not serialized by Runtime snapshots",
+    "client surface slots shared with existing text/native producers"
+  ],
+  "source_sha256": {
+    "crates/crysirror-image/src/bitmap.rs": "468003d9c88f766c7e291a3b679bc074b13217bad75b471fd385e799e1cc7da0",
+    "crates/crysirror-engine/src/bitmap_api.rs": "149a4e23b27c1cba90928f91f8f67ee8e6a5a7308e25cc8dee071f3480c2dd9f",
+    "crates/crysirror-engine/tests/bitmap_api.rs": "0e2288475b2c04acc2524994912a4c62ea74a6e3a94176ab72cb48f6fc154b80",
+    "crates/crysirror-script-js/tests/bitmap.rs": "fe43b94d89493b586d9c938b5fbbf8f0130a572da44a67189943163afefa17a6",
+    "crates/crysirror-siglus-vm/src/export.rs": "2683842ba30462c3824f38082631934e34e7636bd5525c9cbbc54fe8700db077",
+    "tools/compare_bitmap_upstream.py": "55491fd2895846ef68fa49b5acd1dcbb474a226ae89a1dd878eaafbe442998f3",
+    "tools/bitmap_reference.rs": "e36df9b51a61dcb5a8cde2ff05f55de3a160d48cb4141a2ac7200447006b4c69",
+    "tests/test_bitmap_tools.py": "02dbab08099135f04e77635b02240749d08ae85cd63f3d9d35015b600c0dddde",
+    "crates/crysirror-runtime/src/assets.rs": "8dc26f63ec29998683babe580906ecfd5f36ae6e441077e0a09781cfaff5f9c1"
+  }
+}

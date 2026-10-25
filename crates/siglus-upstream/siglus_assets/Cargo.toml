@@ -1,0 +1,26 @@
+[package]
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+name = "siglus_assets"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+anyhow = "1"
+encoding_rs = "0.8"
+hex = "0.4"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+image = { version = "0.24", default-features = false, features = ["png", "jpeg", "bmp", "dds"] }
+lewton = { version = "0.10", default-features = true }
+na_mpeg2_decoder = { path = "../na_mpeg2_decoder" }
+
+[lints.rust]
+warnings = "allow"

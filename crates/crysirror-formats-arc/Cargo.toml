@@ -1,0 +1,22 @@
+[package]
+name = "crysirror-formats-arc"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0-or-later"
+rust-version.workspace = true
+publish = false
+description = "Explicit GPL format plugins ported from the pinned arc_unpacker source"
+
+[dependencies]
+crysirror-core.workspace = true
+crysirror-resource.workspace = true
+crysirror-image.workspace = true
+image.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ethornell-image = { path = "../bgi-upstream/crates/ethornell-image" }
+anyhow.workspace = true
+serde_json.workspace = true
+encoding_rs = "0.8"
+
+[dev-dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

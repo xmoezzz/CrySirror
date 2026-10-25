@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "license": "MPL-2.0",
+  "reviewed_complete_resource_files": {
+    "crates/siglus_scene_vm/src/assets/g00.rs": "128cd51eb201e2ca5e7594d23f05a99f68e2aa9303a3ef12d900624db4b04b19",
+    "crates/siglus_assets/src/g00.rs": "78b6f7243e969a4bc9a75f5fbfb89afba842d090636d6e763cf509fa7d4dff92",
+    "crates/siglus_scene_vm/src/assets/mod.rs": "6804f71c6abccc712532acda7249dbe01ee9a7fb2337d1a336b9ef80f1b7962f",
+    "crates/siglus_assets/src/lzss.rs": "45f4202821f6d953eff3bec37da30e1ea07840a001783b26a22edef017925c06"
+  }
+}

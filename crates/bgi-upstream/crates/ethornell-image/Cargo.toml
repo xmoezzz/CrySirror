@@ -1,0 +1,22 @@
+[package]
+name = "ethornell-image"
+version = "0.1.0"
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+edition = "2024"
+
+
+[dependencies]
+crysirror-image.workspace = true
+ethornell-core = { path = "../ethornell-core" }
+serde.workspace = true
+byteorder = "1"
+image.workspace = true
+
+# Original fixture suites require external inputs; CrySirror adapter tests are separate.
+[lib]
+test = false
+doctest = false

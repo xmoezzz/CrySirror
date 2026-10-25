@@ -1,0 +1,76 @@
+{
+  "source_pin": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "runs": [
+    {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "crysirror-siglus-vm",
+        "adapter::verification_tests::native_center_rep_moves_the_scale_origin_without_shifting_unit_scale_xy",
+        "--",
+        "--exact",
+        "--nocapture"
+      ],
+      "start": "2026-10-25T08:40:07.308870+00:00",
+      "end": "2026-10-25T08:40:07.451352+00:00",
+      "returncode": 0,
+      "log": "docs/native-audit-siglus-transform-targeted.txt",
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "crysirror-siglus-vm",
+        "-p",
+        "crysirror-runtime"
+      ],
+      "start": "2026-10-25T08:40:07.451385+00:00",
+      "end": "2026-10-25T08:40:25.224645+00:00",
+      "returncode": 0,
+      "log": "docs/native-audit-siglus-transform-suites.txt",
+      "passed": 43,
+      "failed": 0,
+      "ignored": 0
+    },
+    {
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "-p",
+        "crysirror-siglus-vm",
+        "-p",
+        "crysirror-runtime",
+        "--all-targets"
+      ],
+      "start": "2026-10-25T08:40:40.725929+00:00",
+      "end": "2026-10-25T08:40:48.287834+00:00",
+      "returncode": 0,
+      "log": "docs/native-audit-siglus-transform-check.txt"
+    },
+    {
+      "command": [
+        "/opt/homebrew/bin/python3.11",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "start": "2026-10-25T08:40:48.288134+00:00",
+      "end": "2026-10-25T08:40:57.784516+00:00",
+      "returncode": 0,
+      "log": "docs/native-audit-siglus-transform-python.txt",
+      "tests_run": 126
+    }
+  ],
+  "gpu_validation": "not run; CPU shared EngineSystems geometry tested"
+}

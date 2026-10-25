@@ -1,0 +1,24 @@
+[package]
+name = "ethornell-script"
+version = "0.1.0"
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+edition = "2024"
+
+
+[dependencies]
+ethornell-core = { path = "../ethornell-core" }
+serde.workspace = true
+byteorder = "1"
+encoding_rs = "0.8"
+
+[dev-dependencies]
+serde_json.workspace = true
+
+# Original fixture suites require external inputs; CrySirror adapter tests are separate.
+[lib]
+test = false
+doctest = false

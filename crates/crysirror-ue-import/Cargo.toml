@@ -1,0 +1,21 @@
+[package]
+name = "crysirror-ue-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Developer tool: read authorized Unreal Engine 5 IoStore builds and convert content to CrySirror (ADR 0013). Not part of the player."
+
+[[bin]]
+name = "ue-import"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# MIT-licensed open-source Kraken/Mermaid/Selkie/Leviathan decoder (Oodle formats).
+oozextract = "=0.5.6"
+# MIT pure-Rust zstd decoder (compressed .usmap files).
+ruzstd = "0.7"

@@ -1,0 +1,65 @@
+{
+  "date": "2026-10-25",
+  "implementation": "shared CPU material contract and PBR transparent composition, ADR 0015",
+  "compilation": {
+    "workspace_all_targets": "passed",
+    "desktop_no_default_features": "passed, existing unused_mut warning",
+    "desktop_release": "passed",
+    "external_bridge": "passed, upstream warnings"
+  },
+  "behavior": {
+    "workspace": {
+      "passed": 162,
+      "failed": 0,
+      "ignored": 11
+    },
+    "explicit_gpu": {
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0
+    },
+    "python_3_11": {
+      "passed": 109,
+      "failed": 0
+    },
+    "mcp": "project_validate, engine_trace and scene_capture via actual stdio; engine-materials-mcp.json",
+    "unsupported_compute_pbr": {
+      "exit_code": 1,
+      "message": "CrySirror: the PBR scene renders on the raster path only; compute ray tracing of PBR materials is not implemented"
+    }
+  },
+  "native_gallery": {
+    "project": "examples/materials/project.json",
+    "screenshot": "/Users/xmoe/Documents/CrySirror/dist/engine-materials.png",
+    "script_required": false,
+    "self_authored": true
+  },
+  "castle": {
+    "input_instances": 7710,
+    "rendered_nodes": 7709,
+    "submitted_triangles": 13426500,
+    "retained_fog_instances": 42,
+    "engine_materials": 42,
+    "original_base_color_maps": 31,
+    "self_authored_opacity_maps": 1,
+    "omissions": [
+      {
+        "name": "/Game/Maps/FantasyCastle/Map/L_FantasyCastle.L_FantasyCastle:PersistentLevel.BP_Sky_Sphere_2.SkySphereMesh",
+        "reason": "sky-sized geometry >5 km; engine sky used"
+      }
+    ],
+    "original_geometry_failures": [],
+    "approximation": "Serialized local Color/MaxOpacity (clamped 0..1)/DepthFadeDistance(cm -> m), unlit blend with a self-authored elliptical mask; original noise/projection/panning shader not evaluated",
+    "screenshot": "/Users/xmoe/.cache/crysirror/ashen/castle-engine-materials/castle.png",
+    "screenshot_sha256": "03702581de2be14cf7042b5198d38987d0a06dc49410f26886642d48f2531983",
+    "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "renderer": "raster",
+    "hardware_raytracing": false,
+    "original_materials": false,
+    "original_lighting": false,
+    "original_executable_run": false,
+    "gpu_frame_time_measured": false
+  },
+  "gow3": "No new mesh decoding or scene-rendering result; EntityCount layout still unsupported",
+  "content_policy": "User content, source-specific profiles and screenshots remain external; no extracted game assets in source export"
+}

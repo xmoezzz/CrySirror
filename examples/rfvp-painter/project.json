@@ -1,0 +1,16 @@
+{
+  "schema": 2,
+  "name": "RFVP Win95 Painter (original engine)",
+  "content_revision": "rfvp-painter-1",
+  "canvas": [1024, 640],
+  "background": [0, 0, 0, 255],
+  "assets": "assets",
+  "clients": [
+    {
+      "name": "painter",
+      "adapter": "rfvp",
+      "game": "win95-painter",
+      "config": { "root": "game", "font": "font/host-font.ttf" }
+    }
+  ]
+}

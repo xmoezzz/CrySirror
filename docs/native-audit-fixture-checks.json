@@ -1,0 +1,33 @@
+{
+  "generated_native_fixture_projects": [
+    {
+      "case": "rect",
+      "exit_code": 0,
+      "stdout": "{\"schema_valid\": true, \"name\": \"Native Siglus rect fixture\", \"native_vms_verified\": false, \"asset_files\": 1}",
+      "stderr": ""
+    },
+    {
+      "case": "image",
+      "exit_code": 0,
+      "stdout": "{\"schema_valid\": true, \"name\": \"Native Siglus image fixture\", \"native_vms_verified\": false, \"asset_files\": 1}",
+      "stderr": ""
+    },
+    {
+      "case": "input",
+      "exit_code": 0,
+      "stdout": "{\"schema_valid\": true, \"name\": \"Native Siglus input fixture\", \"native_vms_verified\": false, \"asset_files\": 1}",
+      "stderr": ""
+    },
+    {
+      "case": "message",
+      "exit_code": 0,
+      "stdout": "{\"schema_valid\": true, \"name\": \"Native Siglus message fixture\", \"native_vms_verified\": false, \"asset_files\": 1}",
+      "stderr": ""
+    }
+  ],
+  "new_example_compiled_and_run": true,
+  "new_example": "/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm/examples/native_fixture.rs",
+  "old_resource_example_explicitly_data_vm": true,
+  "python_boundary_suite": "tests/test_siglus_native.py; included in native-audit-python-tests.txt",
+  "new_native_fixture_abi_tests": "crysirror-siglus-vm adapter::verification_tests; included in native-audit-rust-tests.txt"
+}

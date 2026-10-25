@@ -1,0 +1,625 @@
+   Compiling crysirror-audio v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-audio)
+   Compiling crysirror-engine v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-engine)
+   Compiling crysirror-script-js v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-script-js)
+   Compiling crysirror-desktop v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-desktop)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.12s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+     Running unittests src/lib.rs (target/debug/deps/crysirror_asset-bc0ae6b7cfbb7488)
+
+running 17 tests
+test indices::tests::corrupt_unknown_and_out_of_bounds_streams_fail ... ok
+test pbr::tests::flat_primitive_has_unit_normals_and_orthogonal_tangents ... ok
+test indices::tests::topology_modes_deltas_and_endian_have_known_results ... ok
+test anim::tests::hierarchy_sampling_blending_and_palette ... ok
+test pbr::tests::hdr_rejects_non_equirect_and_garbage ... ok
+test pbr::tests::mip_chain_reaches_one_pixel_and_averages_in_linear_space ... ok
+test pbr::material_contract_tests::gltf_blend_mask_and_unlit_keep_their_distinct_semantics ... ok
+test tests::punctual_lights_become_entity_lights_and_directional_is_reported ... ok
+test terrain::tests::mesh_has_upward_normals_and_matching_counts ... ok
+test tests::unsupported_inputs_fail_visibly ... ok
+test tests::imports_hierarchy_transform_material_and_external_buffer ... ok
+test pbr::engine_material_extras_tests::extras_share_validation_and_keep_opacity_linear ... ok
+test cluster::tests::split_respects_the_cluster_size_and_keeps_every_triangle ... ok
+test cluster::tests::open_borders_are_locked ... ok
+test cluster::tests::simplify_halves_a_closed_mesh_without_breaking_it ... ok
+test cluster::tests::uv_seams_do_not_block_simplification_and_stay_closed_by_position ... ok
+test cluster::tests::dag_cuts_are_crack_free_and_monotonic ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_audio-3d54e20a47d95eb1)
+
+running 6 tests
+test pcm_output::tests::final_device_conversion_clamps_after_mix_and_rejects_nonfinite_samples ... ok
+test pcm_output::tests::restore_epoch_discards_previously_buffered_samples_without_a_device ... ok
+test tests::paused_start_and_device_errors_are_explicit ... ok
+test tests::bus_changes_gain_without_restarting_or_affecting_other_clients ... ok
+test tests::retrigger_restore_and_client_ids_preserve_voice_semantics ... ok
+test pcm_output::tests::bounded_queue_preserves_stereo_order_and_pads_silence_without_device ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/offline.rs (target/debug/deps/offline-80dd79a15e753ac1)
+
+running 9 tests
+test rate_pitch_and_backward_seek_change_actual_samples ... ok
+test exact_fades_crossfade_loop_points_and_pause ... ok
+test spatial_pan_distance_listener_orientation_and_occlusion_lowpass_reach_samples ... ok
+test buses_and_dialogue_ducking_are_client_scoped_and_restore_music ... ok
+test corrupt_unknown_and_invalid_controls_fail_without_devices ... ok
+test random_container_is_reproducible_varied_and_avoids_immediate_repeats ... ok
+test pool_steals_oldest_low_priority_and_rejects_stale_cross_client_handles ... ok
+test streaming_decoder_reads_bounded_prefix_and_seeks_exact_pcm_frames ... ok
+test compressed_music_streams_decode_and_seek_without_whole_song_pcm ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_author-bd3d0b8ec9648d44)
+
+running 6 tests
+test tests::syntax_and_unsupported_source_profiles_fail ... ok
+test tests::no_ambient_node_or_browser_capabilities ... ok
+test tests::invalid_data_and_missing_entrypoint_fail ... ok
+test tests::javascript_and_typescript_share_the_data_contract ... ok
+test tests::typescript_builds_data_that_the_runtime_executes ... ok
+test tests::loops_and_recursion_are_guarded ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running unittests src/main.rs (target/debug/deps/crysirror_author-a2777aea230e6089)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/deps/cli-37572dd008a12c10)
+
+running 2 tests
+test cli_failure_emits_no_project ... ok
+test cli_emits_a_valid_project ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+     Running unittests src/main.rs (target/debug/deps/crysirror_contract-c2f4665fd9a49deb)
+
+running 3 tests
+test tests::unknown_commands_fail_instead_of_succeeding_as_noops ... ok
+test tests::rejects_duplicate_client_names ... ok
+test tests::replay_accepts_the_repository_fixture ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_compat-35af59e23a0a5da8)
+
+running 2 tests
+test tests::case_folding_is_opt_in ... ok
+test tests::windows_asset_names_are_normalized_at_adapter_boundary ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_core-0ed2cb33bc24294e)
+
+running 20 tests
+test save::tests::crc_reference_vector ... ok
+test binary::tests::bounds_and_endianness ... ok
+test save::tests::bounds_are_enforced ... ok
+test path::tests::normalizes_only_harmless_components ... ok
+test graphics::tests::required_raytracing_never_silently_falls_back ... ok
+test path::tests::preserves_case ... ok
+test path::tests::rejects_escape_and_host_paths ... ok
+test graphics::tests::unimplemented_upscalers_fail_instead_of_falling_back ... ok
+test save::tests::rejects_cross_engine_saves ... ok
+test save::tests::round_trip ... ok
+test save::tests::rejects_every_truncation ... ok
+test vfs::tests::mount_prefix_is_component_exact ... ok
+test save::tests::rejects_bit_flips ... ok
+test state::tests::failed_audio_batch_does_not_advance_generation ... ok
+test state::tests::a_bad_batch_does_not_half_apply ... ok
+test state::tests::updates_are_allowed_at_capacity ... ok
+test vfs::tests::memory_provider_canonicalizes_and_rejects_traversal ... ok
+test state::tests::client_ids_prevent_legacy_handle_collisions ... ok
+test state::tests::draw_order_is_stable ... ok
+test state::tests::replaying_the_same_sound_changes_generation ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/crysirror-c7b739c3d5032c2a)
+
+running 1 test
+test gamepad::tests::labels_and_native_controls_map_without_a_device ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/deps/cli-69c555aaaada1579)
+
+running 4 tests
+test validation_uses_real_cli ... ok
+test inspection_reports_only_actually_registered_native_vms ... ok
+test trace_is_executed_without_a_display ... ok
+test shader_check_validates_all_passes_without_creating_gpu_and_rejects_escape ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.65s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_engine-c16da489615bdad9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/api_coverage.rs (target/debug/deps/api_coverage-2eb35b019b3fbba2)
+
+running 1 test
+test every_command_variant_has_an_api_method_that_exists ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/app.rs (target/debug/deps/app-c645a6d5b9bb63de)
+
+running 8 tests
+test typescript_declarations_cover_registered_classes ... ok
+test behaviour_error_faults_the_app_visibly ... ok
+test object_api_spawns_moves_and_invalidates_entities ... ok
+test engine_material_api_validates_rolls_back_and_survives_save_restore ... ok
+test lifecycle_order_fixed_steps_pause_and_reverse_shutdown ... ok
+test filesystem_class_uses_client_capabilities ... ok
+test plugins_drive_world_through_runtime_extraction ... ok
+test native_siglus_vm_is_a_peer_client_visible_through_the_object_api ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/audio_mixer.rs (target/debug/deps/audio_mixer-b728e06ca907c839)
+
+running 4 tests
+test entity_attachment_tracks_camera_and_stale_generation_stops ... ok
+test real_samples_pause_seek_partial_parameters_buses_and_scope ... ok
+test channel_retrigger_restore_and_pooled_voices_share_one_output ... ok
+test music_crossfade_and_script_random_container_pool_limit_reach_samples ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/gameplay_ai.rs (target/debug/deps/gameplay_ai-358ae0c6146ed0b7)
+
+running 2 tests
+test state_machine_and_montage_drive_layers_through_the_api ... ok
+test knight_perceives_navigates_around_wall_faces_and_attacks ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests/input_rebind.rs (target/debug/deps/input_rebind-b5515a120f81f80a)
+
+running 5 tests
+test active_pad_switch_does_not_leak_other_pad_press_and_navigation_pulses_once ... ok
+test analog_button_edges_respect_action_threshold_even_for_a_short_pulse ... ok
+test keyboard_edges_analog_deadzone_and_signed_axis_are_distinct ... ok
+test capture_profile_roundtrip_rejection_and_prompt_family_follow_activity ... ok
+test reflective_api_rebinding_profile_and_hints_reach_real_app ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/lights.rs (target/debug/deps/lights-aa62534b7c4508a1)
+
+running 2 tests
+test script_reflection_probes_extract_world_positions_and_validate ... ok
+test script_lights_follow_transforms_units_and_toggles ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/localization.rs (target/debug/deps/localization-08486821280bcaaa)
+
+running 2 tests
+test locale_fallback_plural_operands_fonts_and_literal_parameters ... ok
+test reflective_catalogs_are_client_scoped_and_bad_profiles_roll_back ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/physics.rs (target/debug/deps/physics-67918738457a5db5)
+
+running 2 tests
+test animation_crossfade_is_world_state ... ok
+test character_falls_lands_slides_on_walls_and_climbs_steps ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests/rich_text_api.rs (target/debug/deps/rich_text_api-fd2f147a507042df)
+
+running 1 test
+test shaped_surface_typewriter_localization_and_client_isolation ... ignored, requires an explicitly supplied system font; no fonts are distributed
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/systems.rs (target/debug/deps/systems-ba274121966378bf)
+
+running 4 tests
+test spatial_voice_attenuates_with_listener_distance_without_restarting ... ok
+test levels_stream_in_and_out_with_hysteresis_and_survive_save_load ... ok
+test character_lands_on_procedural_terrain_heightfield ... ok
+test vertical_raycasts_hit_terrain_everywhere ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
+
+     Running tests/transition.rs (target/debug/deps/transition-8494514894e94670)
+
+running 1 test
+test scripted_transition_advances_with_world_time_and_ends ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/video.rs (target/debug/deps/video-bdfcffecf5665d0d)
+
+running 1 test
+test scripted_video_drives_a_surface_by_world_time ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_host-89a2e45658559bb1)
+
+running 5 tests
+test tests::unknown_client_is_rejected ... ok
+test tests::time_is_monotonic ... ok
+test tests::assets_are_read_only_to_clients ... ok
+test tests::save_namespace_includes_engine_and_game ... ok
+test tests::two_compatibility_clients_share_services_without_sharing_object_ids ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_image-ab0ec78dcfffdeac)
+
+running 3 tests
+test tests::invalid_surfaces_and_unknown_formats_fail ... ok
+test tests::channels_and_registration ... ok
+test dds::tests::dds_raw_channels_bc1_and_invalid_headers ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_rfvp-bcf93aa368138d9d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/painter.rs (target/debug/deps/painter-188e4afcc5d06e3c)
+
+running 1 test
+test original_rfvp_painter_boots_renders_and_receives_input ... ignored, requires a caller-supplied font via CRYSIRROR_TEST_FONT; none bundled
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_runtime-b91862acf3eb41b5)
+
+running 36 tests
+test model::tests::action_rejects_negative_size ... ok
+test assets::tests::relative_symlink_cannot_cross_client_root_even_if_project_can_read_it ... ok
+test assets::tests::identical_names_use_separate_client_roots ... ok
+test model::tests::paths_are_confined ... ok
+test model::tests::camera_parallel_up_rejected ... ok
+test model::tests::duplicate_clients_rejected ... ok
+test model::tests::index_validation ... ok
+test model::tests::unknown_native_adapter_is_not_a_demo_vm ... ok
+test model::tests::demo_is_valid ... ok
+test model::tests::unknown_fields_rejected ... ok
+test runtime::engine_tests::focused_ui_consumes_enter_and_button_pauses_only_its_world ... ok
+test runtime::required_engine_save_test::modern_save_must_not_silently_drop_engine_state ... ok
+test runtime::siglus_pack_tests::bad_native_header_rejected_without_panic ... ok
+test runtime::engine_tests::invalid_engine_save_is_transactional ... ok
+test runtime::siglus_pack_tests::unknown_native_opcode_never_reports_success ... ok
+test runtime::siglus_pack_tests::native_gosub_return_unicode_and_branch_execute_original_instruction_paths ... ok
+test runtime::provider_tests::siglus_reads_its_scene_through_a_mounted_provider ... ok
+test script::tests::changed_program_rejects_save ... ok
+test script::tests::failed_batch_does_not_advance_vm ... ok
+test runtime::engine_tests::systems_keep_running_after_data_vm_halt_and_restore_exactly ... ok
+test script::tests::one_press_does_not_skip_two_waits ... ok
+test script::tests::wait_is_driven_by_engine_clock ... ok
+test runtime::tests::corrupt_save_does_not_mutate_live_state ... ok
+test runtime::tests::invalid_vm_payload_is_transactional ... ok
+test runtime::siglus_pack_tests::independent_siglus_clients_share_layers_without_aliasing_ids ... ok
+test runtime::tests::roundtrip_rewinds_runtime ... ok
+test runtime::tests::two_clients_share_services_but_not_ids ... ok
+test vfs::tests::asset_mount_is_read_only ... ok
+test vfs::tests::symlink_cannot_escape_assets ... ok
+test vfs::tests::seekable_assets_keep_client_roots_and_provider_precedence ... ok
+test runtime::siglus_pack_tests::native_pck_loads_original_scene_metadata_and_g00_through_scoped_host ... ok
+test runtime::siglus_native_tests::original_siglus_bytecode_calls_shared_layers_and_roundtrips_native_wait ... ok
+test vfs::tests::provider_mounts_shadow_disk_per_client_only ... ok
+test vfs::tests::storage_handle_is_client_scoped_thread_safe_and_lists ... ok
+test vfs::tests::disk_namespaces_are_separate ... ok
+test runtime::siglus_pack_tests::fresh_native_restore_rebuilds_images_without_advancing_pc_or_wait ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_scene-6536c928b0f0beff)
+
+running 17 tests
+test input::joypad_mode_tests::consuming_up_or_down_up_matches_tona_button_stock_semantics ... ok
+test input::joypad_mode_tests::keyboard_activity_leaves_joypad_mode ... ok
+test input::joypad_mode_tests::joypad_keeps_complete_32_button_backend_domain ... ok
+test input::joypad_mode_tests::consuming_down_prevents_release_from_becoming_down_up ... ok
+test input::joypad_mode_tests::joypad_key_uses_button_stock_lifecycle ... ok
+test input::joypad_mode_tests::native_ui_resync_consumes_edges_but_keeps_mode ... ok
+test projection::tests::billboard_texture_top_projects_above_its_bottom ... ok
+test projection::tests::world_depth_matches_d3d_lh_near_and_far_planes ... ok
+test components::tests::crossfade_moves_weights_and_drops_faded_layers ... ok
+test projection::tests::world_view_angle_is_vertical_and_does_not_change_with_window_width ... ok
+test projection::tests::yaw_pitch_roll_matches_d3dx_application_order ... ok
+test components::tests::colliders_validate ... ok
+test effect::tests::effect_data_rejects_unknown_code_and_bad_parameters ... ok
+test animgraph::tests::blendspace_transitions_and_montage_notifies ... ok
+test gameplay::tests::effects_modify_attributes_with_stacking_periods_and_clamps ... ok
+test gameplay::tests::abilities_check_tags_cost_cooldown_and_cancel ... ok
+test terrain::tests::procedural_terrain_is_deterministic_bounded_and_seeded ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/systems.rs (target/debug/deps/systems-810fee6a33076271)
+
+running 12 tests
+test layer_text_unsupported_native_layout_fails_visibly ... ok
+test game_pause_keeps_real_time_animation_running ... ok
+test negative_parent_scale_retains_face_orientation ... ok
+test held_pointer_after_restore_requires_release_before_activation ... ok
+test layers_inherit_visibility_opacity_transform_and_rotated_clip ... ok
+test invalid_ui_world_action_rejected_during_install ... ok
+test ui_capture_release_focus_modal_and_slider ... ok
+test object_anchor_and_rotated_leaf_clips_follow_sprite_projection ... ok
+test world_scoping_generation_hierarchy_and_atomic_rollback ... ok
+test retained_mutations_are_scoped_transactional_and_cascade ... ok
+test initial_environment_is_scoped_validated_transactional_and_saved ... ok
+test fixed_step_chunking_and_state_roundtrip ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_script_js-f2969c63a7e8d2ab)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/host.rs (target/debug/deps/host-0db46119ef23ffdf)
+
+running 8 tests
+test script_imports_blender_gltf_model ... ok
+test runaway_loops_are_bounded ... ok
+test sources_must_be_added_before_init ... ok
+test scripts_reach_layers_ui_camera_environment_and_save_load ... ok
+test typescript_behaviour_drives_world_through_object_api ... ok
+test engine_errors_become_catchable_js_exceptions_and_uncaught_ones_fault ... ok
+test typescript_materials_use_the_shared_engine_contract_and_snapshot ... ok
+test script_controls_a_character_with_input_actions_gravity_and_raycasts ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_siglus-3fd825dd63581bd8)
+
+running 5 tests
+test g00::lzss_fast_path_tests::type0_literal_is_emitted_as_rgba_before_backreference_reuse ... ok
+test g00::original_g00_layout_tests::type1_expands_palette_indices_like_c_g00_chip_get_data ... ok
+test g00::original_g00_layout_tests::type2_cut_uses_fixed_msvc_headers_and_display_rect_coordinates ... ok
+test g00::lzss_fast_path_tests::overlapping_match_matches_original_forward_byte_copy ... ok
+test tests::type3_preserves_jpeg_pixels_through_shared_decoder ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/resources.rs (target/debug/deps/resources-fa1e57ef7ca94329)
+
+running 3 tests
+test malformed_and_excessive_lengths_fail_before_allocation ... ok
+test literal_and_overlapping_type0_enters_shared_decoder_registry ... ok
+test native_type2_slots_crops_centers_and_reused_cuts_are_preserved ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_siglus_vm-729fd90ce02aad03)
+
+running 3 tests
+test export::filter_tests::siglus_object_effects_map_to_layer_filter_units ... ok
+test native_save_tests::native_timewait_key_requires_decide_release_and_does_not_reuse_edge ... ok
+test native_save_tests::original_savepoint_exports_native_codec_and_import_resumes_with_loaded_flag ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_text-dbfa95087103bb05)
+
+running 11 tests
+test tests::explicit_glyph_surface_is_bounded_before_allocation ... ok
+test tests::supplied_font_layout_and_positioned_raster_are_cpu_only ... ignored, requires a caller-supplied licensed font via CRYSIRROR_TEST_FONT; none bundled
+test tests::legacy_layout_is_not_silently_approximated ... ok
+test sdf::tests::exact_distance_field_has_inside_outside_and_padding ... ok
+test layout::tests::bidi_visual_order_keeps_logical_byte_indices ... ok
+test rich::tests::markup_styles_ruby_icons_and_strict_errors ... ok
+test layout::tests::uax_breaks_cjk_prohibitions_newlines_and_atomic_ruby ... ok
+test reveal::tests::combining_emoji_pause_chunking_markers_and_restore ... ok
+test raster::tests::dilation_blur_and_linear_alpha_composition_are_measurable ... ok
+test tests::invalid_font_is_an_error ... ok
+test raster::tests::optimized_disk_dilation_matches_independent_brute_force ... ok
+
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/advanced_fonts.rs (target/debug/deps/advanced_fonts-1d6edfcf91c62e0d)
+
+running 2 tests
+test supplied_fonts_raster_color_outline_shadow_reveal_icons_and_sdf_dedup ... ignored, requires licensed system font paths: CRYSIRROR_TEST_FONT / _CJK_FONT / _ARABIC_FONT
+test supplied_fonts_shape_fallback_arabic_bidi_ruby_and_vertical ... ignored, requires licensed system font paths: CRYSIRROR_TEST_FONT / _CJK_FONT / _ARABIC_FONT
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_ue_import-5b22af22f98d94d9)
+
+running 3 tests
+test zen::tests::name_batch_decodes_ascii_and_utf16_with_alignment ... ok
+test usmap::encoding_tests::byte_enum_metadata_is_preserved_as_usmap_enum ... ok
+test usmap::encoding_tests::encoding_roundtrips_inheritance_arrays_and_enum_values ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/ue_import-5490341f2cfa072c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_video-4e56d54bb9fdddc6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/decode.rs (target/debug/deps/decode-5196e7073deeee65)
+
+running 3 tests
+test unknown_and_truncated_containers_fail_visibly ... ok
+test player_presents_frames_by_time_and_loops ... ok
+test mpeg2_and_wmv2_decode_red_then_blue_with_timestamps ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_wgpu-e8ccfbfdbce92d54)
+
+running 9 tests
+test geometry::tests::linear_white_and_black ... ok
+test geometry::tests::aspect_fit_and_pointer_agree ... ok
+test geometry::tests::quad_uses_top_left_coordinates ... ok
+test lights::tests::lights_land_in_their_clusters_and_culled_ones_do_not ... ok
+test lights::tests::shadow_budget_prefers_near_lights_and_point_lights_take_six_tiles ... ok
+test pbr::tests::sh9_of_constant_environment_gives_pi_times_radiance ... ok
+test lights::tests::upper_light_maps_to_top_rows_and_budget_is_counted ... ok
+test effect::tests::custom_errors_are_diagnostics_not_gpu_panics ... ok
+test effect::tests::builtins_and_custom_compile_for_all_coverage_passes ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/gpu_smoke.rs (target/debug/deps/gpu_smoke-a6e1943381d4dcf4)
+
+running 22 tests
+test alpha_mask_invisible_surface_does_not_cast_solid_shadow ... ignored, requires a real wgpu adapter; execute explicitly
+test authored_equirect_probe_without_parallax_uses_the_prefilter_direction_convention ... ignored, requires a real wgpu adapter; execute explicitly
+test box_reflection_probes_capture_offscreen_walls_in_the_right_directions ... ignored, requires a real wgpu adapter; execute explicitly
+test cluster_lod_draws_fewer_triangles_far_away_with_matching_pixels ... ignored, requires a real wgpu adapter; execute explicitly
+test clustered_point_and_spot_lights_light_only_their_regions ... ignored, requires a real wgpu adapter; execute explicitly
+test developer_surface_shaders_scope_parameters_time_and_errors_reach_pixels ... ignored, requires a real wgpu adapter; execute explicitly
+test directional_and_ambient_volumes_and_exponent_falloff_stay_inside_their_ranges ... ignored, requires a real wgpu adapter; execute explicitly
+test engine_material_alpha_sort_depth_opacity_and_unlit_reach_pixels ... ignored, requires a real wgpu adapter; execute explicitly
+test height_fog_and_auto_exposure_reach_pixels ... ignored, requires a real wgpu adapter; execute explicitly
+test local_point_and_spot_shadows_darken_only_occluded_floor ... ignored, requires a real wgpu adapter; execute explicitly
+test material_opacity_textures_resolve_under_each_client_capability_root ... ignored, requires a real wgpu adapter; execute explicitly
+test original_siglus_pck_and_g00_reach_shared_raster_and_compute_pixels ... ignored, requires a real wgpu adapter; execute explicitly
+test pbr_path_renders_sky_lit_geometry_and_sun_shadows ... ignored, requires a real wgpu adapter; execute explicitly
+test retained_layers_blend_and_clip_match_linear_color_equations ... ignored, requires a real wgpu adapter; execute explicitly
+test screen_space_reflections_show_the_object_in_a_mirror_floor ... ignored, requires a real wgpu adapter; execute explicitly
+test screen_transitions_compose_old_and_new_frames_with_siglus_arithmetic ... ignored, requires a real wgpu adapter or Mesa software Vulkan; CI GPU job runs this explicitly
+test shader_presets_and_authored_uv_custom_waves_animate_in_native_data_project ... ignored, requires a real wgpu adapter; execute explicitly
+test shared_scene_reaches_actual_pixels ... ignored, requires a real wgpu adapter or Mesa software Vulkan; CI GPU job runs this explicitly
+test siglus_resource_uses_shared_upload_and_compute_rays_keep_overlays ... ignored, requires a real wgpu adapter; execute explicitly
+test siglus_style_layer_filters_match_reference_arithmetic ... ignored, requires a real wgpu adapter; execute explicitly
+test terrain_and_hdr_particles_render ... ignored, requires a real wgpu adapter; execute explicitly
+test two_channel_normal_maps_and_specular_strength_change_shading ... ignored, requires a real wgpu adapter; execute explicitly
+
+test result: ok. 0 passed; 0 failed; 22 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_asset
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_audio
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_author
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_compat
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_engine
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_host
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_image
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_rfvp
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_scene
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_script_js
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_siglus
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_siglus_vm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_text
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_ue_import
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_video
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_wgpu
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

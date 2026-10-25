@@ -1,0 +1,15 @@
+[package]
+name = "crysirror-video"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Device-free video decoding service over the vendored Siglus decoders (OMV/Theora, MPEG-1/2, WMV/VC-1)"
+
+[dependencies]
+anyhow.workspace = true
+siglus_omv_decoder = { path = "../siglus-upstream/siglus_omv_decoder" }
+siglus_assets = { path = "../siglus-upstream/siglus_assets" }
+siglus_scene_vm = { path = "../siglus-upstream/siglus_scene_vm", default-features = false }
+na_mpeg2_decoder = { path = "../siglus-upstream/na_mpeg2_decoder" }
+wmv-decoder = { path = "../siglus-upstream/na_wmv_player", default-features = false }

@@ -1,0 +1,258 @@
+   Compiling crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+   Compiling crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+   Compiling crysirror-image v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-image)
+   Compiling crysirror-engine v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-engine)
+   Compiling crysirror-author v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-author)
+   Compiling crysirror-script-js v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-script-js)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.52s
+     Running unittests src/lib.rs (target/debug/deps/crysirror_engine-b3beac946fecd53f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/api_coverage.rs (target/debug/deps/api_coverage-ab69eb5abf8ffcf0)
+
+running 1 test
+test every_command_variant_has_an_api_method_that_exists ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/app.rs (target/debug/deps/app-49b1e33f3d2b1341)
+
+running 8 tests
+test typescript_declarations_cover_registered_classes ... ok
+test behaviour_error_faults_the_app_visibly ... ok
+test object_api_spawns_moves_and_invalidates_entities ... ok
+test engine_material_api_validates_rolls_back_and_survives_save_restore ... ok
+test lifecycle_order_fixed_steps_pause_and_reverse_shutdown ... ok
+test filesystem_class_uses_client_capabilities ... ok
+test plugins_drive_world_through_runtime_extraction ... ok
+test native_siglus_vm_is_a_peer_client_visible_through_the_object_api ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/audio_mixer.rs (target/debug/deps/audio_mixer-1d363c209bd71402)
+
+running 4 tests
+test entity_attachment_tracks_camera_and_stale_generation_stops ... ok
+test real_samples_pause_seek_partial_parameters_buses_and_scope ... ok
+test channel_retrigger_restore_and_pooled_voices_share_one_output ... ok
+test music_crossfade_and_script_random_container_pool_limit_reach_samples ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/bitmap_api.rs (target/debug/deps/bitmap_api-d15f52a2133259b0)
+
+running 2 tests
+test provider_decode_self_copy_and_failed_mutation_are_real_client_surface_operations ... ok
+test scaling_output_feeds_existing_layer_rotation_and_filter_without_a_native_renderer ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/gameplay_ai.rs (target/debug/deps/gameplay_ai-22035567dfdf1b0e)
+
+running 2 tests
+test state_machine_and_montage_drive_layers_through_the_api ... ok
+test knight_perceives_navigates_around_wall_faces_and_attacks ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.57s
+
+     Running tests/input_rebind.rs (target/debug/deps/input_rebind-ec0716c2349d9f33)
+
+running 5 tests
+test analog_button_edges_respect_action_threshold_even_for_a_short_pulse ... ok
+test active_pad_switch_does_not_leak_other_pad_press_and_navigation_pulses_once ... ok
+test keyboard_edges_analog_deadzone_and_signed_axis_are_distinct ... ok
+test capture_profile_roundtrip_rejection_and_prompt_family_follow_activity ... ok
+test reflective_api_rebinding_profile_and_hints_reach_real_app ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/lights.rs (target/debug/deps/lights-93dd9f5e2ace7a4d)
+
+running 2 tests
+test script_reflection_probes_extract_world_positions_and_validate ... ok
+test script_lights_follow_transforms_units_and_toggles ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/localization.rs (target/debug/deps/localization-5217f8dd8b4539e9)
+
+running 2 tests
+test locale_fallback_plural_operands_fonts_and_literal_parameters ... ok
+test reflective_catalogs_are_client_scoped_and_bad_profiles_roll_back ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/physics.rs (target/debug/deps/physics-a9bf50f018f60c52)
+
+running 2 tests
+test animation_crossfade_is_world_state ... ok
+test character_falls_lands_slides_on_walls_and_climbs_steps ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+
+     Running tests/rich_text_api.rs (target/debug/deps/rich_text_api-97c99df0e998b599)
+
+running 1 test
+test shaped_surface_typewriter_localization_and_client_isolation ... ignored, requires an explicitly supplied system font; no fonts are distributed
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/systems.rs (target/debug/deps/systems-a2da7cbd3ba2b332)
+
+running 4 tests
+test spatial_voice_attenuates_with_listener_distance_without_restarting ... ok
+test levels_stream_in_and_out_with_hysteresis_and_survive_save_load ... ok
+test character_lands_on_procedural_terrain_heightfield ... ok
+test vertical_raycasts_hit_terrain_everywhere ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.03s
+
+     Running tests/transition.rs (target/debug/deps/transition-3a3da75d6b217b35)
+
+running 1 test
+test scripted_transition_advances_with_world_time_and_ends ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/video.rs (target/debug/deps/video-8c49ec8bb961736c)
+
+running 1 test
+test scripted_video_drives_a_surface_by_world_time ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_image-91fc040e0ac10a3b)
+
+running 7 tests
+test bitmap::tests::clipping_keeps_source_destination_correspondence_and_accepts_extreme_rects ... ok
+test bitmap::tests::nearest_clipping_preserves_phase_and_color_key_preserves_alpha ... ok
+test bitmap::tests::invalid_surfaces_fail_before_mutation ... ok
+test tests::channels_and_registration ... ok
+test bitmap::tests::math_profiles_preserve_their_distinct_alpha_and_rounding ... ok
+test tests::invalid_surfaces_and_unknown_formats_fail ... ok
+test dds::tests::dds_raw_channels_bc1_and_invalid_headers ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_runtime-c1e9ad1d71eee2ac)
+
+running 36 tests
+test model::tests::action_rejects_negative_size ... ok
+test model::tests::paths_are_confined ... ok
+test model::tests::duplicate_clients_rejected ... ok
+test model::tests::camera_parallel_up_rejected ... ok
+test model::tests::index_validation ... ok
+test model::tests::unknown_native_adapter_is_not_a_demo_vm ... ok
+test model::tests::demo_is_valid ... ok
+test assets::tests::relative_symlink_cannot_cross_client_root_even_if_project_can_read_it ... ok
+test assets::tests::identical_names_use_separate_client_roots ... ok
+test model::tests::unknown_fields_rejected ... ok
+test runtime::engine_tests::focused_ui_consumes_enter_and_button_pauses_only_its_world ... ok
+test runtime::siglus_pack_tests::bad_native_header_rejected_without_panic ... ok
+test runtime::siglus_pack_tests::native_gosub_return_unicode_and_branch_execute_original_instruction_paths ... ok
+test runtime::provider_tests::siglus_reads_its_scene_through_a_mounted_provider ... ok
+test runtime::required_engine_save_test::modern_save_must_not_silently_drop_engine_state ... ok
+test runtime::engine_tests::invalid_engine_save_is_transactional ... ok
+test runtime::siglus_pack_tests::unknown_native_opcode_never_reports_success ... ok
+test script::tests::changed_program_rejects_save ... ok
+test script::tests::failed_batch_does_not_advance_vm ... ok
+test script::tests::one_press_does_not_skip_two_waits ... ok
+test runtime::siglus_pack_tests::independent_siglus_clients_share_layers_without_aliasing_ids ... ok
+test script::tests::wait_is_driven_by_engine_clock ... ok
+test runtime::tests::corrupt_save_does_not_mutate_live_state ... ok
+test runtime::tests::invalid_vm_payload_is_transactional ... ok
+test runtime::tests::roundtrip_rewinds_runtime ... ok
+test runtime::engine_tests::systems_keep_running_after_data_vm_halt_and_restore_exactly ... ok
+test runtime::tests::two_clients_share_services_but_not_ids ... ok
+test vfs::tests::asset_mount_is_read_only ... ok
+test runtime::siglus_native_tests::original_siglus_bytecode_calls_shared_layers_and_roundtrips_native_wait ... ok
+test vfs::tests::symlink_cannot_escape_assets ... ok
+test runtime::siglus_pack_tests::native_pck_loads_original_scene_metadata_and_g00_through_scoped_host ... ok
+test vfs::tests::provider_mounts_shadow_disk_per_client_only ... ok
+test runtime::siglus_pack_tests::fresh_native_restore_rebuilds_images_without_advancing_pc_or_wait ... ok
+test vfs::tests::storage_handle_is_client_scoped_thread_safe_and_lists ... ok
+test vfs::tests::seekable_assets_keep_client_roots_and_provider_precedence ... ok
+test vfs::tests::disk_namespaces_are_separate ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_script_js-1e4eaac24212c3ad)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/bitmap.rs (target/debug/deps/bitmap-c95fa516a8208cb5)
+
+running 1 test
+test typescript_bitmaps_publish_shared_pixels_and_feed_transformed_filtered_layers ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/host.rs (target/debug/deps/host-8a469ba4ef8d7431)
+
+running 8 tests
+test typescript_behaviour_drives_world_through_object_api ... ok
+test script_imports_blender_gltf_model ... ok
+test sources_must_be_added_before_init ... ok
+test engine_errors_become_catchable_js_exceptions_and_uncaught_ones_fault ... ok
+test typescript_materials_use_the_shared_engine_contract_and_snapshot ... ok
+test scripts_reach_layers_ui_camera_environment_and_save_load ... ok
+test runaway_loops_are_bounded ... ok
+test script_controls_a_character_with_input_actions_gravity_and_raycasts ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/services.rs (target/debug/deps/services-bc2174c711e1f1db)
+
+running 1 test
+test typescript_service_globals_drive_real_pcm_rebinding_and_localization ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_siglus_vm-b351014d1efbe7ab)
+
+running 7 tests
+test export::filter_tests::siglus_object_effects_map_to_layer_filter_units ... ok
+test adapter::verification_tests::native_text_and_name_report_the_missing_message_bridge_instead_of_succeeding ... ok
+test native_save_tests::native_timewait_key_requires_decide_release_and_does_not_reuse_edge ... ok
+test adapter::verification_tests::native_center_rep_moves_the_scale_origin_without_shifting_unit_scale_xy ... ok
+test adapter::verification_tests::native_decide_wait_requires_down_up_and_snapshot_repeats_the_edge ... ok
+test adapter::verification_tests::original_savepoint_exports_real_codec_and_failed_import_rolls_back ... ok
+test native_save_tests::original_savepoint_exports_native_codec_and_import_resumes_with_loaded_flag ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests crysirror_engine
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_image
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_script_js
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_siglus_vm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

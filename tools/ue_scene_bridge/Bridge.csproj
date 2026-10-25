@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>true</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup><ProjectReference Include="$(Cue4ParseRoot)/CUE4Parse/CUE4Parse.csproj" /><ProjectReference Include="$(Cue4ParseRoot)/CUE4Parse-Conversion/CUE4Parse-Conversion.csproj" /></ItemGroup>
+</Project>

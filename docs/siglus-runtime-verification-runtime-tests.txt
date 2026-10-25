@@ -1,0 +1,19 @@
+    Blocking waiting for file lock on build directory
+   Compiling crysirror-scene v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-scene)
+   Compiling crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+   Compiling crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.26s
+     Running unittests src/lib.rs (target/debug/deps/crysirror_runtime-85e8258a4973169b)
+
+running 8 tests
+test runtime::siglus_pack_tests::bad_native_header_rejected_without_panic ... ok
+test runtime::siglus_pack_tests::native_gosub_return_unicode_and_branch_execute_original_instruction_paths ... ok
+test runtime::siglus_pack_tests::unknown_native_opcode_never_reports_success ... ok
+test runtime::provider_tests::siglus_reads_its_scene_through_a_mounted_provider ... ok
+test runtime::siglus_pack_tests::independent_siglus_clients_share_layers_without_aliasing_ids ... ok
+test runtime::siglus_native_tests::original_siglus_bytecode_calls_shared_layers_and_roundtrips_native_wait ... ok
+test runtime::siglus_pack_tests::native_pck_loads_original_scene_metadata_and_g00_through_scoped_host ... ok
+test runtime::siglus_pack_tests::fresh_native_restore_rebuilds_images_without_advancing_pc_or_wait ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s
+

@@ -1,0 +1,69 @@
+warning: method `remaining` is never used
+   --> crates/bgi-upstream/crates/ethornell-image/src/cbg.rs:830:8
+    |
+821 | impl<'a> Reader<'a> {
+    | ------------------- method in this implementation
+...
+830 |     fn remaining(&self) -> &'a [u8] {
+    |        ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ethornell-image` (lib) generated 1 warning
+   Compiling crysirror-formats-arc v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-formats-arc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.66s
+     Running tests/images_b.rs (target/debug/deps/images_b-65aa2a2ad13498b2)
+
+running 49 tests
+test crowd_cwd_555_is_truncated ... ok
+test cmp_msb_lzss ... ok
+test crowd_cwl_dictionary_stream ... ok
+test dds_dxt3_original_alpha_nibble_order ... ok
+test dds_multisurface_and_unknown_fourcc_fail ... ok
+test bmp_preserves_partial_alpha_but_normalizes_all_zero ... ok
+test dds_dxt1_pad_dimensions_and_565_truncation ... ok
+test crowd_zbm_inverts_first_hundred_bytes ... ok
+test bmz_zlib_bmp ... ok
+test ed8_custom_bit_order_and_palette ... ok
+test eagls_fixed_native_key_schedule ... ok
+test epf_lzss_bgra ... ok
+test edt_literal_raw_and_diff_transparency ... ok
+test external_dependency_images ... ignored, requires external pinned image/dependency fixtures
+test ex3_identity_dictionary ... ok
+test external_fc01_keys ... ignored, requires external pinned fixtures and explicit ARC_FC01_KEY_101/200
+test external_upstream_corpus ... ignored, requires external pinned arc_unpacker image fixtures
+test fc01_acd_black_and_white ... ok
+test fc01_documented_zero_tail_but_truncated_token_fails ... ok
+test fil_grayscale ... ok
+test crowd_cwp_restores_png_then_swaps_and_forces_alpha ... ok
+test isg_rle_and_lzss_variants ... ok
+test ivory_prs_delta_channel ... ok
+test fc01_mcg_explicit_client_key_and_padded_stride ... ok
+test pajamas_ep_planar_literals_and_offset ... ok
+test mgf_replaces_only_signature ... ok
+test kiss_palette_uses_red_index_and_preserves_alpha ... ok
+test mebius_mcg_all_types_and_canvas_offset ... ok
+test masked_bmp_reads_scoped_sibling_and_replaces_alpha ... ok
+test pga_png_header ... ok
+test jpeg_standard_grayscale ... ok
+test png_standard_alpha ... ok
+test png_packed_palette_and_trns ... ok
+test pmp_xor_zlib ... ok
+test silky_akb_predictive_overlay ... ok
+test png16_strips_low_bytes_instead_of_rounding ... ok
+test syg_bgr ... ok
+test teyl_bgra ... ok
+test tga_rle_flips_and_5551 ... ok
+test triangle_yb_delta_alpha ... ok
+test silky_akb_plus_reads_authored_sibling_and_green_is_transparent ... ok
+test twilight_cv2_24_still_uses_four_bytes_and_stride ... ok
+test twilight_missing_palette_uses_native_gray_and_errors_propagate ... ok
+test twilight_tfbm_zlib_stride ... ok
+test truncated_unknown_and_oversized_fail ... ok
+test xyz_rgb_palette_is_opaque ... ok
+test ycg_two_independent_zlib_streams ... ok
+test webp_standard_lossless_alpha ... ok
+test zlib_checksum_and_declared_lengths_fail_closed ... ok
+
+test result: ok. 46 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

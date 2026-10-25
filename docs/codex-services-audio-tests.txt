@@ -1,0 +1,35 @@
+   Compiling crysirror-audio v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-audio)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.58s
+     Running unittests src/lib.rs (target/debug/deps/crysirror_audio-ec12e73bd99e69db)
+
+running 6 tests
+test pcm_output::tests::final_device_conversion_clamps_after_mix_and_rejects_nonfinite_samples ... ok
+test tests::paused_start_and_device_errors_are_explicit ... ok
+test pcm_output::tests::restore_epoch_discards_previously_buffered_samples_without_a_device ... ok
+test tests::bus_changes_gain_without_restarting_or_affecting_other_clients ... ok
+test tests::retrigger_restore_and_client_ids_preserve_voice_semantics ... ok
+test pcm_output::tests::bounded_queue_preserves_stereo_order_and_pads_silence_without_device ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/offline.rs (target/debug/deps/offline-0e8192339833aa10)
+
+running 9 tests
+test spatial_pan_distance_listener_orientation_and_occlusion_lowpass_reach_samples ... ok
+test rate_pitch_and_backward_seek_change_actual_samples ... ok
+test corrupt_unknown_and_invalid_controls_fail_without_devices ... ok
+test buses_and_dialogue_ducking_are_client_scoped_and_restore_music ... ok
+test exact_fades_crossfade_loop_points_and_pause ... ok
+test pool_steals_oldest_low_priority_and_rejects_stale_cross_client_handles ... ok
+test random_container_is_reproducible_varied_and_avoids_immediate_repeats ... ok
+test streaming_decoder_reads_bounded_prefix_and_seeks_exact_pcm_frames ... ok
+test compressed_music_streams_decode_and_seek_without_whole_song_pcm ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+   Doc-tests crysirror_audio
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

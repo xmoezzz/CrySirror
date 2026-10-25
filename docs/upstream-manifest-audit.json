@@ -1,0 +1,298 @@
+{
+  "rfvp": {
+    "scope": "static manifest audit; all optional/target/dev path edges are included conservatively",
+    "native_vm_connected": false,
+    "packages": {
+      "anzu-hal": {
+        "manifest": "crates/anzu-hal/Cargo.toml",
+        "local_dependencies": [],
+        "host_dependencies": [],
+        "unresolved_paths": []
+      },
+      "na_mpeg2_decoder": {
+        "manifest": "crates/na_mpeg2_decoder/Cargo.toml",
+        "local_dependencies": [],
+        "host_dependencies": [
+          {
+            "package": "winit",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "wgpu",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "rodio",
+            "section": "dependencies",
+            "optional": true
+          }
+        ],
+        "unresolved_paths": []
+      },
+      "rfvp": {
+        "manifest": "crates/rfvp/Cargo.toml",
+        "local_dependencies": [
+          "rfvp_bitmap",
+          "wmv-decoder",
+          "na_mpeg2_decoder",
+          "anzu-hal"
+        ],
+        "host_dependencies": [
+          {
+            "package": "winit",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "wgpu",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "softbuffer",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "egui",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "kira",
+            "section": "target.cfg(not(target_os = \"uefi\")).dependencies",
+            "optional": true
+          },
+          {
+            "package": "rodio",
+            "section": "target.cfg(all(not(target_arch = \"wasm32\"), not(target_os = \"uefi\"))).dependencies",
+            "optional": true
+          },
+          {
+            "package": "cpal",
+            "section": "target.cfg(target_arch = \"wasm32\").dependencies",
+            "optional": true
+          },
+          {
+            "package": "wgpu",
+            "section": "target.cfg(target_arch = \"wasm32\").dependencies",
+            "optional": true
+          },
+          {
+            "package": "egui-wgpu",
+            "section": "target.cfg(any(target_os = \"windows\", target_os = \"linux\", target_os = \"macos\")).dependencies",
+            "optional": true
+          }
+        ],
+        "unresolved_paths": []
+      },
+      "rfvp_bitmap": {
+        "manifest": "crates/rfvp-bitmap/Cargo.toml",
+        "local_dependencies": [],
+        "host_dependencies": [],
+        "unresolved_paths": []
+      },
+      "wmv-decoder": {
+        "manifest": "crates/na_wmv_player/Cargo.toml",
+        "local_dependencies": [],
+        "host_dependencies": [
+          {
+            "package": "winit",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "wgpu",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "cpal",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "kira",
+            "section": "target.cfg(any(target_os = \"linux\", target_os = \"macos\", target_os = \"windows\")).dependencies",
+            "optional": true
+          }
+        ],
+        "unresolved_paths": []
+      }
+    },
+    "candidate_seams": {
+      "crates/rfvp/src/host_api": true,
+      "crates/rfvp/src/portable": true,
+      "crates/rfvp/src/no_std_core.rs": true,
+      "crates/rfvp/src/script": true,
+      "crates/rfvp/src/subsystem": true,
+      "crates/rfvp-horizon": false,
+      "crates/rfvp-psv": false,
+      "platform/switch": true,
+      "platform/vita": true
+    },
+    "unselected_package_count": 14
+  },
+  "siglus_rs": {
+    "scope": "static manifest audit; all optional/target/dev path edges are included conservatively",
+    "native_vm_connected": false,
+    "packages": {
+      "na_mpeg2_decoder": {
+        "manifest": "crates/na_mpeg2_decoder/Cargo.toml",
+        "local_dependencies": [],
+        "host_dependencies": [
+          {
+            "package": "winit",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "wgpu",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "rodio",
+            "section": "dependencies",
+            "optional": true
+          }
+        ],
+        "unresolved_paths": []
+      },
+      "shion-xfile": {
+        "manifest": "crates/shion-xfile/Cargo.toml",
+        "local_dependencies": [],
+        "host_dependencies": [],
+        "unresolved_paths": []
+      },
+      "siglus_assets": {
+        "manifest": "crates/siglus_assets/Cargo.toml",
+        "local_dependencies": [
+          "na_mpeg2_decoder"
+        ],
+        "host_dependencies": [],
+        "unresolved_paths": []
+      },
+      "siglus_key_recovery": {
+        "manifest": "crates/siglus_key_recovery/Cargo.toml",
+        "local_dependencies": [
+          "siglus_assets"
+        ],
+        "host_dependencies": [],
+        "unresolved_paths": []
+      },
+      "siglus_omv_decoder": {
+        "manifest": "crates/siglus_omv_decoder/Cargo.toml",
+        "local_dependencies": [
+          "theora-rs"
+        ],
+        "host_dependencies": [],
+        "unresolved_paths": []
+      },
+      "siglus_scene_vm": {
+        "manifest": "crates/siglus_scene_vm/Cargo.toml",
+        "local_dependencies": [
+          "siglus_omv_decoder",
+          "na_mpeg2_decoder",
+          "wmv-decoder",
+          "siglus_key_recovery",
+          "siglus_assets",
+          "shion-xfile"
+        ],
+        "host_dependencies": [
+          {
+            "package": "kira",
+            "section": "target.cfg(not(any(target_os = \"horizon\", target_os = \"vita\"))).dependencies",
+            "optional": false
+          },
+          {
+            "package": "wgpu",
+            "section": "target.cfg(not(any(target_os = \"horizon\", target_os = \"vita\"))).dependencies",
+            "optional": false
+          },
+          {
+            "package": "winit",
+            "section": "target.cfg(not(any(target_os = \"horizon\", target_os = \"vita\"))).dependencies",
+            "optional": false
+          },
+          {
+            "package": "egui",
+            "section": "target.cfg(not(any(target_os = \"horizon\", target_os = \"vita\"))).dependencies",
+            "optional": false
+          },
+          {
+            "package": "egui-wgpu",
+            "section": "target.cfg(not(any(target_os = \"horizon\", target_os = \"vita\"))).dependencies",
+            "optional": false
+          },
+          {
+            "package": "kira",
+            "section": "target.cfg(target_os = \"horizon\").dependencies",
+            "optional": false
+          },
+          {
+            "package": "kira",
+            "section": "target.cfg(target_os = \"vita\").dependencies",
+            "optional": false
+          },
+          {
+            "package": "winit",
+            "section": "target.cfg(target_os = \"android\").dependencies",
+            "optional": false
+          },
+          {
+            "package": "wgpu",
+            "section": "target.cfg(all(target_arch = \"wasm32\", target_os = \"unknown\")).dependencies",
+            "optional": false
+          }
+        ],
+        "unresolved_paths": [
+          "vendor/eluna_rs"
+        ]
+      },
+      "theora-rs": {
+        "manifest": "crates/theora-rs/Cargo.toml",
+        "local_dependencies": [],
+        "host_dependencies": [],
+        "unresolved_paths": []
+      },
+      "wmv-decoder": {
+        "manifest": "crates/na_wmv_player/Cargo.toml",
+        "local_dependencies": [],
+        "host_dependencies": [
+          {
+            "package": "winit",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "wgpu",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "cpal",
+            "section": "dependencies",
+            "optional": true
+          },
+          {
+            "package": "kira",
+            "section": "target.cfg(any(target_os = \"linux\", target_os = \"macos\", target_os = \"windows\")).dependencies",
+            "optional": true
+          }
+        ],
+        "unresolved_paths": []
+      }
+    },
+    "candidate_seams": {
+      "crates/siglus_scene_vm": true,
+      "crates/siglus_assets": true,
+      "crates/shion-render": true,
+      "crates/shion-xfile": true,
+      "crates/shion-xscene": true
+    },
+    "unselected_package_count": 17
+  }
+}

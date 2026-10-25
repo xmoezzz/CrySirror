@@ -1,0 +1,325 @@
+{
+  "schema": 2,
+  "name": "CrySirror arena blockout",
+  "content_revision": "arena-1",
+  "canvas": [
+    1280,
+    720
+  ],
+  "background": [
+    16,
+    20,
+    30,
+    255
+  ],
+  "assets": "assets",
+  "fonts": {},
+  "clients": [
+    {
+      "name": "arena",
+      "adapter": "crysirror-script-v1",
+      "game": "arena",
+      "asset_prefix": "",
+      "config": null,
+      "program": [
+        {
+          "op": "halt"
+        }
+      ]
+    }
+  ],
+  "scene3d": {
+    "camera": {
+      "eye": [
+        11.0,
+        9.0,
+        14.0
+      ],
+      "target": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "up": [
+        0.0,
+        1.0,
+        0.0
+      ],
+      "fov_y_degrees": 55.0,
+      "near": 0.1,
+      "far": 100.0
+    },
+    "meshes": [
+      {
+        "name": "floor",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          12.0,
+          0.2,
+          12.0
+        ],
+        "color": [
+          65,
+          75,
+          90,
+          255
+        ]
+      },
+      {
+        "name": "pillar_0_0",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          -4.0,
+          0.0,
+          -4.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      },
+      {
+        "name": "pillar_0_1",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          0.0,
+          0.0,
+          -4.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      },
+      {
+        "name": "pillar_0_2",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          4.0,
+          0.0,
+          -4.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      },
+      {
+        "name": "pillar_1_0",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          -4.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      },
+      {
+        "name": "pillar_1_1",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      },
+      {
+        "name": "pillar_1_2",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          4.0,
+          0.0,
+          0.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      },
+      {
+        "name": "pillar_2_0",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          -4.0,
+          0.0,
+          4.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      },
+      {
+        "name": "pillar_2_1",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          0.0,
+          0.0,
+          4.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      },
+      {
+        "name": "pillar_2_2",
+        "geometry": {
+          "kind": "cube"
+        },
+        "translation": [
+          4.0,
+          0.0,
+          4.0
+        ],
+        "rotation_degrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.6,
+          2.0,
+          0.6
+        ],
+        "color": [
+          110,
+          145,
+          175,
+          255
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+warning: method `remaining` is never used
+   --> crates/bgi-upstream/crates/ethornell-image/src/cbg.rs:830:8
+    |
+821 | impl<'a> Reader<'a> {
+    | ------------------- method in this implementation
+...
+830 |     fn remaining(&self) -> &'a [u8] {
+    |        ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `ethornell-image` (lib) generated 1 warning
+    Checking crysirror-formats-arc v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-formats-arc)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.28s

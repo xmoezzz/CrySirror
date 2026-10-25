@@ -1,0 +1,1 @@
+PASS: RealLive Copy/Mask255=19200, AVG32 premultiplied mask=9216, AVG32 nearest RGB/mask=12

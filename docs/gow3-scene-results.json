@@ -1,0 +1,181 @@
+{
+  "date": "2026-10-25",
+  "scope": "Selected OLY100.WAD encoded rest-space preview; not complete game or faithful original scene",
+  "source": {
+    "archive_entry": "OLY.PSARC:/WAD/PS3_BE/OLY100.WAD",
+    "bytes": 48310336,
+    "sha256": "40793aed3f556e51312efa2fff92d2f2172b8d14bd723460fc674cd981ae2f7c"
+  },
+  "implementation": {
+    "shared_topology_api": "crysirror_asset::indices::decode",
+    "shared_dds_api": "crysirror_image::decode_standard",
+    "data_environment_api": "SystemsSpec.environment",
+    "native_frontend": "tools/gow3_scene.py",
+    "ts_js_executed": false
+  },
+  "compilation": {
+    "workspace_all_targets": "passed",
+    "desktop_no_default": "passed",
+    "desktop_release": "passed",
+    "cpu_transcode_example": "passed",
+    "warnings": [
+      "existing desktop no-default unused_mut",
+      "dependency block 0.1.6 future incompatibility"
+    ]
+  },
+  "behavior": {
+    "rust_workspace": {
+      "passed": 170,
+      "failed": 0,
+      "ignored": 13
+    },
+    "ignored_details": {
+      "gpu": 11,
+      "font": 1,
+      "rfvp_game": 1
+    },
+    "explicit_metal_gpu": {
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0
+    },
+    "python_3_11": {
+      "passed": 117,
+      "failed": 0
+    },
+    "native_conversion": {
+      "native": {
+        "source": "olympus.wad",
+        "records": 16520,
+        "native_mesh_groups": 247,
+        "surface_groups": 1474,
+        "meshlets": 2118,
+        "vertices": 495471,
+        "triangles": 548191,
+        "native_instances": 247,
+        "index_decoder": "crysirror-asset::indices",
+        "index_differential_matches": 2118,
+        "texture_decoder": "crysirror-image::decode_standard",
+        "decoded_texture_previews": 97,
+        "unsupported_textures": [],
+        "unsupported_uv": [
+          {
+            "mesh": "MG_f57b3658_0",
+            "group": 0,
+            "error": "UV0 source remap/cardinality unresolved; material omitted"
+          },
+          {
+            "mesh": "MG_2b5f074_0",
+            "group": 4,
+            "error": "UV0 source remap/cardinality unresolved; material omitted"
+          },
+          {
+            "mesh": "MG_bfe9fab_0",
+            "group": 2,
+            "error": "UV0 source remap/cardinality unresolved; material omitted"
+          },
+          {
+            "mesh": "MG_a057ada1_0",
+            "group": 1,
+            "error": "UV0 source remap/cardinality unresolved; material omitted"
+          },
+          {
+            "mesh": "MG_a057ada1_0",
+            "group": 6,
+            "error": "UV0 source remap/cardinality unresolved; material omitted"
+          },
+          {
+            "mesh": "MG_512c9cba_0",
+            "group": 14,
+            "error": "UV0 source remap/cardinality unresolved; material omitted"
+          },
+          {
+            "mesh": "MG_3a0ac138_0",
+            "group": 0,
+            "error": "UV0 source remap/cardinality unresolved; material omitted"
+          }
+        ],
+        "source_normals_normalized": 1006,
+        "transform_policy": "encoded_rest_space; native entity matrices retained as metadata, not composed",
+        "original_materials": false,
+        "original_animation_pose": false,
+        "original_lighting": false,
+        "complete_game_scene": false,
+        "limitations": [
+          "First MG surface table; alternate native tables not selected",
+          "Native bind/entity/animation transform composition unresolved; encoded rest geometry only",
+          "Native shader semantics, baked vertex lighting and source punctual lights not reproduced",
+          "Source coordinate units preserved; physical scale not calibrated"
+        ],
+        "material_summary": {
+          "source_records": 549,
+          "records_without_unique_sampler_0": 53,
+          "textured_surface_groups": 1380,
+          "neutral_surface_groups": 94,
+          "surfaces_without_verified_uv": 83,
+          "neutral_policy": "Explicit diagnostic fallback for missing verified UV or unique base-color sampler; native shader may need no base texture"
+        }
+      },
+      "conversion": {
+        "gltf_nodes": 247,
+        "gltf_meshes": 247,
+        "buffer_bytes": 28834900,
+        "rendered_triangles": 548191,
+        "geometry_bounds": [
+          [
+            -43.996726989746094,
+            -55.880680084228516,
+            -395.0
+          ],
+          [
+            243.23187255859375,
+            75.50009155273438,
+            43.996673583984375
+          ]
+        ],
+        "omitted": [],
+        "base_color_textures": 0,
+        "profile_textures": 75,
+        "engine_materials": 393,
+        "profile_shaders": 0,
+        "original_materials": false,
+        "original_lighting": false,
+        "rendered": false
+      }
+    },
+    "capture": {
+      "path": "/Users/xmoe/.cache/crysirror/gow3/olympus-engine-preview/preview/scene.png",
+      "width": 1280,
+      "height": 720,
+      "sha256": "91dba1a0f00b5b5716d2b04f0c4a2d7ea26b9e5bc90d77c992aee3bd68a5152b",
+      "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+      "renderer": "raster",
+      "hardware_raytracing": false,
+      "project": "/Users/xmoe/.cache/crysirror/gow3/olympus-engine-preview/preview/project.json",
+      "script_argument_used": false,
+      "environment_owner": 1
+    },
+    "cli_project_validate": {
+      "name": "God of War III: Olympus OLY100 rest-space preview",
+      "native_adapter_verification": false,
+      "schema_valid": true
+    },
+    "mcp_evidence": "gow3-scene-mcp.json",
+    "cpu_transcode_example_tests": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "not_validated": [
+    "native entity/bind/animation transform composition",
+    "remaining UV remapping",
+    "original shaders and lighting",
+    "complete original scene/game",
+    "official/native index decoder equivalence",
+    "Windows/Linux runtime",
+    "hardware ray tracing",
+    "GPU frame time"
+  ],
+  "asset_distribution": "No game data or captures in source export; all generated content stays external"
+}

@@ -1,0 +1,43 @@
+{
+  "command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--no-fail-fast",
+    "-p",
+    "crysirror-runtime",
+    "--test",
+    "native_services",
+    "-p",
+    "crysirror-audio",
+    "--test",
+    "channels",
+    "-p",
+    "crysirror-bgi",
+    "--lib"
+  ],
+  "start": "2026-10-25T09:27:59.712783+00:00",
+  "end": "2026-10-25T09:28:28.385513+00:00",
+  "returncode": 0,
+  "passed": 55,
+  "failed": 0,
+  "ignored": 0,
+  "log": "docs/bgi-native-services-tests.txt",
+  "followup": {
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "crysirror-audio",
+      "--test",
+      "channels"
+    ],
+    "returncode": 0,
+    "passed": 4,
+    "failed": 0,
+    "ignored": 0,
+    "reason": "Added a two-block PCM cursor-continuity assertion for restart=false.",
+    "log": "docs/bgi-native-channels-final-tests.txt"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "rust_oxc_boa_build": true,
+  "source_kind": "typescript",
+  "validated_world_entities": 3,
+  "per_frame_js": false
+}

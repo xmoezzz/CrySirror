@@ -1,0 +1,3 @@
+crysirror-audio v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-audio)
+├── anyhow v1.0.104
+└── crysirror-core v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-core)

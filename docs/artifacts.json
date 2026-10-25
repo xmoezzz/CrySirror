@@ -1,0 +1,14 @@
+{
+  "source_snapshot": true,
+  "binary_release": false,
+  "tested_implementation_commit": "7d343c0975738c611d52f22f59bb60a193092c37",
+  "git_bundle": {
+    "verified": true,
+    "recloned": true,
+    "default_checkout": "main",
+    "restored_python_tests": 79,
+    "rust_executed": false,
+    "log": "docs/bundle-restore-tests.txt"
+  },
+  "hashes": "external CrySirror-SHA256SUMS.txt; integrity checks are not compilation results"
+}

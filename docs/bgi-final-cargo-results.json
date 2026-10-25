@@ -1,0 +1,61 @@
+[
+  {
+    "name": "rust-tests",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--workspace"
+    ],
+    "exit_code": 0,
+    "started_utc": "2026-10-25T09:43:23.644311+00:00",
+    "seconds": 154.983,
+    "log": "docs/bgi-final-rust-tests.txt",
+    "counts": {
+      "passed": 291,
+      "failed": 0,
+      "ignored": 31
+    }
+  },
+  {
+    "name": "workspace-check",
+    "command": [
+      "cargo",
+      "check",
+      "--locked",
+      "--workspace",
+      "--all-targets"
+    ],
+    "exit_code": 101,
+    "started_utc": "2026-10-25T09:45:58.630273+00:00",
+    "seconds": 24.141,
+    "log": "docs/bgi-final-workspace-check.txt"
+  },
+  {
+    "name": "workspace-check-repaired",
+    "command": [
+      "cargo",
+      "check",
+      "--locked",
+      "--workspace",
+      "--all-targets"
+    ],
+    "exit_code": 0,
+    "seconds": 9.032,
+    "log": "docs/bgi-final-workspace-check-repaired.txt"
+  },
+  {
+    "name": "desktop-no-default",
+    "command": [
+      "cargo",
+      "check",
+      "--locked",
+      "-p",
+      "crysirror-desktop",
+      "--no-default-features"
+    ],
+    "exit_code": 0,
+    "seconds": 15.341,
+    "log": "docs/bgi-final-desktop-no-default.txt"
+  }
+]

@@ -1,0 +1,96 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/crysirror-core",
+    "crates/crysirror-compat",
+    "crates/crysirror-host",
+    "crates/crysirror-cli",
+    "crates/crysirror-runtime",
+    "crates/crysirror-wgpu",
+    "crates/crysirror-desktop",
+    "crates/crysirror-author",
+    "crates/crysirror-image",
+    "crates/crysirror-resource",
+    "crates/crysirror-formats-arc",
+    "crates/crysirror-physics",
+    "crates/crysirror-siglus",
+    "crates/crysirror-text",
+    "crates/crysirror-audio",
+    "crates/crysirror-scene",
+    "crates/crysirror-puppet",
+    "crates/crysirror-puppet-eluna",
+    "crates/crysirror-siglus-vm",
+    "crates/crysirror-asset",
+    "crates/crysirror-engine",
+    "crates/crysirror-script-js",
+    "crates/crysirror-rfvp",
+    "crates/rfvp",
+    "crates/siglus-upstream/siglus_scene_vm",
+    "crates/crysirror-ue-import",
+    "crates/crysirror-video",
+    "crates/crysirror-bgi",
+    "crates/bgi-upstream/crates/ethornell-core",
+    "crates/bgi-upstream/crates/ethornell-archive",
+    "crates/bgi-upstream/crates/ethornell-image",
+    "crates/bgi-upstream/crates/ethornell-script",
+    "crates/bgi-upstream/crates/ethornell-vm",
+    "crates/bgi-upstream/crates/ethornell-audio",
+    "crates/bgi-upstream/crates/ethornell-render",
+    "crates/bgi-upstream/crates/ethornell-app",
+]
+exclude = [
+    "crates/bgi-upstream/crates/na_mpeg2_decoder",
+    "crates/bgi-upstream/crates/na_wmv_player",
+]
+default-members = ["crates/crysirror-desktop"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MPL-2.0"
+# Storage leases require Rust 1.89; the workspace is tested on 1.98.1.
+rust-version = "1.89"
+
+[workspace.dependencies]
+crysirror-core = { path = "crates/crysirror-core" }
+crysirror-compat = { path = "crates/crysirror-compat" }
+crysirror-host = { path = "crates/crysirror-host" }
+crysirror-runtime = { path = "crates/crysirror-runtime" }
+crysirror-wgpu = { path = "crates/crysirror-wgpu" }
+crysirror-image = { path = "crates/crysirror-image" }
+crysirror-resource = { path = "crates/crysirror-resource" }
+crysirror-formats-arc = { path = "crates/crysirror-formats-arc" }
+crysirror-physics = { path = "crates/crysirror-physics" }
+crysirror-siglus = { path = "crates/crysirror-siglus" }
+crysirror-text = { path = "crates/crysirror-text" }
+crysirror-audio = { path = "crates/crysirror-audio" }
+crysirror-scene = { path = "crates/crysirror-scene" }
+crysirror-puppet = { path = "crates/crysirror-puppet" }
+crysirror-siglus-vm = { path = "crates/crysirror-siglus-vm" }
+crysirror-asset = { path = "crates/crysirror-asset" }
+crysirror-engine = { path = "crates/crysirror-engine" }
+crysirror-script-js = { path = "crates/crysirror-script-js" }
+crysirror-author = { path = "crates/crysirror-author" }
+crysirror-rfvp = { path = "crates/crysirror-rfvp" }
+crysirror-bgi = { path = "crates/crysirror-bgi" }
+# Vendored original Siglus SceneVm (MPL-2.0), headless profile; see crates/siglus-upstream/UPSTREAM.md.
+siglus_scene_vm = { path = "crates/siglus-upstream/siglus_scene_vm", default-features = false }
+# Vendored original RFVP engine (MPL-2.0), headless profile; see crates/rfvp/UPSTREAM.md.
+rfvp = { path = "crates/rfvp", default-features = false, features = ["runtime-core-deps", "soft-render-core", "no-audio", "image-formats", "zlib-flate2", "random"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+anyhow = "1.0"
+# Deliberately pinned API generations, compiled in this desktop iteration.
+wgpu = { version = "=0.20.1", features = ["wgsl"] }
+winit = "=0.30.12"
+pollster = "0.3"
+bytemuck = { version = "1.16", features = ["derive"] }
+glam = "0.27"
+ab_glyph = "0.2.29"
+image = { version = "0.24.9", default-features = false, features = ["png", "jpeg", "bmp", "hdr", "dds", "tga", "webp", "gif", "tiff", "pnm", "ico"] }
+blake3 = "1.5"
+cap-std = "3.4"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

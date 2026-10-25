@@ -1,0 +1,19 @@
+[package]
+name = "ethornell-core"
+version = "0.1.0"
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+edition = "2024"
+
+
+[dependencies]
+thiserror = "1"
+tracing-subscriber = { version="0.3", features=["env-filter"] }
+
+# Original fixture suites require external inputs; CrySirror adapter tests are separate.
+[lib]
+test = false
+doctest = false

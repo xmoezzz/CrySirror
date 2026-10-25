@@ -1,0 +1,17 @@
+[package]
+name="ethornell-render"
+version="0.1.0"
+edition="2024"
+license="MPL-2.0"
+publish=false
+[features]
+default=["cpu-embedded"]
+cpu-embedded=[]
+[dependencies]
+ethornell-core={path="../ethornell-core"}
+ethornell-image={path="../ethornell-image"}
+tracing="0.1"
+ab_glyph="0.2"
+[lib]
+test=false
+doctest=false

@@ -1,0 +1,13 @@
+[package]
+name = "crysirror-physics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+[dependencies]
+rapier3d = "=0.22.0"
+glam = { workspace = true, features = ["serde"] }
+serde.workspace = true
+anyhow.workspace = true
+[dev-dependencies]
+serde_json.workspace = true

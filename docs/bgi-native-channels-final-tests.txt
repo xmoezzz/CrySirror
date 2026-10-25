@@ -1,0 +1,12 @@
+   Compiling crysirror-audio v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-audio)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.03s
+     Running tests/channels.rs (target/debug/deps/channels-778861615f46593b)
+
+running 4 tests
+test intro_plays_once_then_only_tail_loops_and_declared_length_is_respected ... ok
+test public_buses_and_ducking_control_only_the_owning_clients_channels ... ok
+test malformed_replacement_preserves_playing_channel_and_restart_false_preserves_cursor ... ok
+test pan_gain_and_pause_fades_obey_sample_boundaries ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

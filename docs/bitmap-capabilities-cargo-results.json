@@ -1,0 +1,43 @@
+[
+  {
+    "name": "rust-tests",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "crysirror-image",
+      "-p",
+      "crysirror-engine",
+      "-p",
+      "crysirror-script-js",
+      "-p",
+      "crysirror-siglus-vm",
+      "-p",
+      "crysirror-runtime"
+    ],
+    "exit_code": 0,
+    "started_utc": "2026-10-25T08:42:52.586390+00:00",
+    "seconds": 59.77,
+    "log": "docs/bitmap-capabilities-rust-tests.txt",
+    "counts": {
+      "passed": 94,
+      "failed": 0,
+      "ignored": 1
+    }
+  },
+  {
+    "name": "workspace-check",
+    "command": [
+      "cargo",
+      "check",
+      "--locked",
+      "--workspace",
+      "--all-targets"
+    ],
+    "exit_code": 0,
+    "started_utc": "2026-10-25T08:43:52.357255+00:00",
+    "seconds": 15.733,
+    "log": "docs/bitmap-capabilities-workspace-check.txt"
+  }
+]

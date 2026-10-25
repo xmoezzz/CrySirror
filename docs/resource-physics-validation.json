@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "validated_at": "2026-10-25T13:49:03.482699+00:00",
+  "host": {
+    "os": "macos",
+    "arch": "aarch64"
+  },
+  "compilation": {
+    "command": [
+      "cargo",
+      "check",
+      "--workspace",
+      "--all-targets",
+      "--features",
+      "crysirror-desktop/arc-formats"
+    ],
+    "exit_code": 0,
+    "log": "target/verification/resource-physics-workspace-check.log"
+  },
+  "rust_behavior": {
+    "command": [
+      "cargo",
+      "test",
+      "--workspace",
+      "--features",
+      "crysirror-desktop/arc-formats"
+    ],
+    "exit_code": 0,
+    "suites": 94,
+    "passed": 368,
+    "failed": 0,
+    "ignored": 35,
+    "log": "target/verification/resource-physics-workspace-tests.log"
+  },
+  "python_behavior": {
+    "command": [
+      "/opt/homebrew/bin/python3.11",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-v"
+    ],
+    "exit_code": 0,
+    "passed": 157,
+    "log": "target/verification/resource-physics-python.log"
+  },
+  "api_fingerprint": "794e19091fcfd6ab",
+  "resource_scope": {
+    "upstream_commit": "456834ecf2e5686813802c37efd829310485c57d",
+    "registered_rust_ids": 5,
+    "ported": 3,
+    "partial": 2,
+    "pending": 284,
+    "upstream_registered_ids": 289,
+    "ledger": "crates/crysirror-formats-arc/upstream-formats.json"
+  },
+  "external_source_corpus": {
+    "explicit_ignored_test_executed": true,
+    "test_cases_passed": 1,
+    "self_authored_upstream_fixtures_compared": 14,
+    "original_cpp_executable_built_or_run": false,
+    "log": "target/verification/codex-arc-upstream-corpus.log"
+  },
+  "physics_evidence": {
+    "backend": "rapier3d 0.22.0",
+    "backend_tests_passed": 25,
+    "runtime_object_and_legacy_tests_passed": 13,
+    "oxc_boa_runtime_test_passed": 1,
+    "results": "docs/physics-integration-validation.json",
+    "benchmark": "docs/physics-benchmark-results.json"
+  },
+  "limits": [
+    "Ignored tests are not passes; GPU/font-dependent tests were not executed here.",
+    "No Windows/Linux hardware, commercial-level render or complete-game compatibility result is claimed.",
+    "Remaining arc_unpacker formats and unsupported variants are recorded as pending/partial.",
+    "Snapshots rebuild logical physics state; native solver warm-start caches are not serialized."
+  ]
+}

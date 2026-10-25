@@ -1,0 +1,354 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index df3fc27..d525c5b 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1165,6 +1165,7 @@ name = "ethornell-app"
+ version = "0.1.0"
+ dependencies = [
+  "ab_glyph",
++ "chardetng",
+  "encoding_rs",
+  "ethornell-archive",
+  "ethornell-audio",
+diff --git a/README.md b/README.md
+index 8d46a54..0bd1960 100644
+--- a/README.md
++++ b/README.md
+@@ -49,7 +49,22 @@ including the Android and iOS apps and the console ports.
+ The window uses the game's icon from `icon.png`, an `.ico` file, or the icon
+ resources embedded in its Windows executable, in that order.
+ 
+-For a GBK Chinese translation, also set `ETHORNELL_TEXT_ENCODING=gbk`.
+-This selects the encoding of text buffers passed to the graphics API, including
+-dialogue and speaker names. The default is Shift-JIS (`cp932`). It does not
+-change the encoding of resource names or BP system strings.
++On PC (desktop and headless), display text defaults to **Auto**: at startup
++the engine samples BCS scenario strings once to choose Shift-JIS (`cp932`) or
++GBK (`cp936`). It does not detect each line. Short or inconclusive samples fall
++back to Shift-JIS. Override with
++`--text-encoding gbk` (or `cp932` / `auto`), for example:
++
++```sh
++ethornell run --game /path/to/game --text-encoding auto
++```
++
++`ETHORNELL_TEXT_ENCODING=auto|cp932|gbk` is also supported on desktop/headless;
++the command-line choice takes priority. This selects graphics text buffers,
++including dialogue and speaker names. Resource names and BP system strings
++keep their existing Shift-JIS encoding. Auto selects one display code page for
++the session; it does not select a different encoding for each file.
++
++Auto detection is compiled only for PC builds. iOS, Android, Web, Vita and
++Switch retain their existing explicit/fixed encoding configuration and do not
++scan scenario resources for encoding detection.
+diff --git a/crates/ethornell-app/Cargo.toml b/crates/ethornell-app/Cargo.toml
+index f8fe588..6d4753f 100644
+--- a/crates/ethornell-app/Cargo.toml
++++ b/crates/ethornell-app/Cargo.toml
+@@ -31,6 +31,10 @@ image = { workspace = true, features = ["ico"] }
+ pelite = { version = "0.10", default-features = false, features = ["std"] }
+ libc = "0.2"
+ 
++# Startup text detection is a PC-only capability.
++[target.'cfg(any(target_os="windows",target_os="macos",target_os="linux",target_os="freebsd",target_os="openbsd",target_os="netbsd",target_os="dragonfly",target_os="illumos",target_os="solaris",target_os="haiku"))'.dependencies]
++chardetng = "0.1.17"
++
+ [target.'cfg(not(any(target_arch="wasm32",target_os="vita",target_os="horizon")))'.dependencies.wgpu]
+ workspace = true
+ features = ["dx12", "metal", "webgpu"]
+diff --git a/crates/ethornell-app/build.rs b/crates/ethornell-app/build.rs
+index 7f8587a..2b95d4b 100644
+--- a/crates/ethornell-app/build.rs
++++ b/crates/ethornell-app/build.rs
+@@ -1,9 +1,27 @@
+-// cfg aliases for the host file policy (src/file_policy.rs).
++// Platform cfg aliases for file access and desktop text detection.
+ fn main() {
+     println!("cargo::rustc-check-cfg=cfg(fd_policy)");
++    println!("cargo::rustc-check-cfg=cfg(desktop_host)");
+     println!("cargo::rustc-check-cfg=cfg(hosted_files)");
+     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
++    // Keep startup text detection out of mobile, browser and console builds.
++    // Match the desktop-only chardetng dependency in Cargo.toml.
++    if matches!(
++        os.as_str(),
++        "windows"
++            | "macos"
++            | "linux"
++            | "freebsd"
++            | "openbsd"
++            | "netbsd"
++            | "dragonfly"
++            | "illumos"
++            | "solaris"
++            | "haiku"
++    ) {
++        println!("cargo::rustc-cfg=desktop_host");
++    }
+     let unix = std::env::var_os("CARGO_CFG_UNIX").is_some();
+     // The consoles are `unix` to Rust but have no directory descriptors;
+     // like the web, they hand the engine their file roots instead.
+diff --git a/crates/ethornell-app/src/host_runtime.rs b/crates/ethornell-app/src/host_runtime.rs
+index a140ad3..e3818a1 100644
+--- a/crates/ethornell-app/src/host_runtime.rs
++++ b/crates/ethornell-app/src/host_runtime.rs
+@@ -1289,6 +1289,23 @@ mod tests {
+         .unwrap();
+         (root, runtime)
+     }
++    #[test]
++    #[cfg(unix)]
++    fn bootstrap_restart_preserves_session_text_encoding() {
++        let (root, mut host) = minimal_host("encoding-restart");
++        assert_eq!(host.runtime.vm.graph_text_encoding(), encoding_rs::GBK);
++        host.runtime.api.native_system.bootstrap_request = Some((
++            None,
++            "system.arc".into(),
++            "ipl._bp".into(),
++        ));
++        let restarted = host.runtime.take_restart().unwrap();
++        assert_eq!(restarted.vm.graph_text_encoding(), encoding_rs::GBK);
++        drop(restarted);
++        drop(host);
++        std::fs::remove_dir_all(root).unwrap();
++    }
++
+     #[test]
+     #[cfg(unix)]
+     fn public_host_without_surface_halts_and_pause_cancel_clears_gesture_history() {
+diff --git a/crates/ethornell-app/src/lib.rs b/crates/ethornell-app/src/lib.rs
+index 4c15ee6..8c6a357 100644
+--- a/crates/ethornell-app/src/lib.rs
++++ b/crates/ethornell-app/src/lib.rs
+@@ -78,6 +78,10 @@ mod runtime_frontend;
+ mod scenario;
+ mod scene;
+ mod snapshot;
++#[cfg(desktop_host)]
++mod text_encoding;
++#[cfg(desktop_host)]
++pub use text_encoding::TextEncoding;
+ mod surface_controls;
+ mod target_checks;
+ mod text;
+@@ -247,6 +251,9 @@ const CONFIRMED_TITLE_FNV: u64 = 0xc6bdd0d97d4f4893;
+ const CONFIRMED_TITLE_LEN: usize = 26272;
+ 
+ pub struct AppConfig {
++    /// None uses ETHORNELL_TEXT_ENCODING, then Auto. An explicit choice wins.
++    #[cfg(desktop_host)]
++    pub text_encoding: Option<TextEncoding>,
+     pub game_root: GameRoot,
+     pub trace: bool,
+     pub fail_on_stub: bool,
+@@ -298,6 +305,16 @@ pub fn run(config: AppConfig) -> Result<()> {
+         "archive-backed resource manager ready"
+     );
+ 
++    #[cfg(desktop_host)]
++    let encoding = match config.text_encoding {
++        Some(choice) => choice.resolve(&manager),
++        None => text_encoding::select(
++            &manager,
++            std::env::var("ETHORNELL_TEXT_ENCODING").ok().as_deref(),
++        ),
++    };
++    #[cfg(not(desktop_host))]
++    let encoding = encoding_rs::SHIFT_JIS;
+     let bgm = load_runtime_bgm(&manager);
+     let native_root = game_root_path(&manager);
+     tracing::info!(
+@@ -325,6 +342,7 @@ pub fn run(config: AppConfig) -> Result<()> {
+                 config.trace,
+                 config.fail_on_stub,
+                 !headless,
++                encoding,
+             )),
+             Err(err) => {
+                 tracing::warn!(script, %err, "startup script unavailable");
+@@ -9466,20 +9484,12 @@ impl RuntimeEngine {
+         trace: bool,
+         fail_on_stub: bool,
+         native_dialog_presentation: bool,
++        encoding: &'static encoding_rs::Encoding,
+     ) -> Self {
+         let program = ethornell_script::parse_bp_program(Some(script.to_string()), bytes);
+         let mut vm = ethornell_vm::Vm::new();
+         vm.set_native_abi_profile(confirmed_native_profile(&manager, bytes));
+-        if let Ok(label) = std::env::var("ETHORNELL_TEXT_ENCODING") {
+-            match label.trim().to_ascii_lowercase().as_str() {
+-                "gbk" | "cp936" | "windows-936" => {
+-                    vm.set_graph_text_encoding(encoding_rs::GBK);
+-                    tracing::info!(encoding = "GBK", "game display text encoding configured");
+-                }
+-                "shift_jis" | "shift-jis" | "sjis" | "cp932" => {}
+-                _ => tracing::warn!(%label, "unsupported ETHORNELL_TEXT_ENCODING; using Shift-JIS"),
+-            }
+-        }
++        vm.set_graph_text_encoding(encoding);
+         vm.start(&program);
+         Self {
+             vm,
+@@ -9538,6 +9548,7 @@ impl RuntimeEngine {
+             self.options.trace,
+             self.options.fail_on_stub,
+             self.api.native_dialog_presentation,
++            self.vm.graph_text_encoding(),
+         );
+         if self.api.host_realtime_clock {
+             engine.use_host_clock();
+diff --git a/crates/ethornell-app/src/save_repro.rs b/crates/ethornell-app/src/save_repro.rs
+index 8ff29bf..e187a89 100644
+--- a/crates/ethornell-app/src/save_repro.rs
++++ b/crates/ethornell-app/src/save_repro.rs
+@@ -9,6 +9,13 @@ fn game_input_repro() {
+     let bytes = manager
+         .read_decoded_from_archive("system.arc", "ipl._bp")
+         .unwrap();
++    #[cfg(desktop_host)]
++    let encoding = text_encoding::select(
++        &manager,
++        std::env::var("ETHORNELL_TEXT_ENCODING").ok().as_deref(),
++    );
++    #[cfg(not(desktop_host))]
++    let encoding = encoding_rs::SHIFT_JIS;
+     let mut runtime = RuntimeEngine::new(
+         "system.arc:ipl._bp",
+         &bytes,
+@@ -17,6 +24,7 @@ fn game_input_repro() {
+         false,
+         false,
+         false,
++        encoding,
+     );
+     let mut script = HeadlessInputScript::from_env();
+     let mut events = VecDeque::new();
+diff --git a/crates/ethornell-cli/src/main.rs b/crates/ethornell-cli/src/main.rs
+index 34d1adc..6b93ac3 100644
+--- a/crates/ethornell-cli/src/main.rs
++++ b/crates/ethornell-cli/src/main.rs
+@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
+ #[derive(Debug, Parser)]
+ #[command(name = "ethornell")]
+ #[command(about = "Rust Ethornell / BURIKO General Interpreter runtime tools")]
+-#[command(args_conflicts_with_subcommands = true)]
+ struct Cli {
+     #[command(subcommand)]
+     command: Option<Command>,
+@@ -33,6 +32,9 @@ struct Cli {
+     /// the program), a folder dialog asks for one; a folder dropped on the
+     /// program arrives here.
+     game: Option<PathBuf>,
++    /// Display text: auto, cp932 (Shift-JIS), or gbk. Overrides ETHORNELL_TEXT_ENCODING.
++    #[arg(long, global = true)]
++    text_encoding: Option<ethornell_app::TextEncoding>,
+ }
+ 
+ #[derive(Debug, Subcommand)]
+@@ -312,12 +314,16 @@ impl MagicStats {
+ /// Plays a game without a command line: the folder given (dropped on the
+ /// program) or one chosen in a dialog. Errors are shown in a dialog too, as
+ /// there may be no terminal to print them.
+-fn play(game: Option<PathBuf>) -> anyhow::Result<()> {
++fn play(
++    game: Option<PathBuf>,
++    text_encoding: Option<ethornell_app::TextEncoding>,
++) -> anyhow::Result<()> {
+     let Some(game) = game.or_else(ethornell_app::choose_game_folder) else {
+         return Ok(());
+     };
+     let result = GameRoot::new(game).map_err(anyhow::Error::from).and_then(|game_root| {
+         ethornell_app::run(ethornell_app::AppConfig {
++            text_encoding,
+             game_root,
+             trace: false,
+             fail_on_stub: false,
+@@ -336,8 +342,11 @@ fn play(game: Option<PathBuf>) -> anyhow::Result<()> {
+ fn main() -> anyhow::Result<()> {
+     init_tracing();
+     let cli = Cli::parse();
++    if cli.game.is_some() && cli.command.is_some() {
++        bail!("a game folder and a subcommand cannot be combined");
++    }
+     let Some(command) = cli.command else {
+-        return play(cli.game);
++        return play(cli.game, cli.text_encoding);
+     };
+ 
+     match command {
+@@ -420,6 +429,7 @@ fn main() -> anyhow::Result<()> {
+         } => {
+             let game_root = GameRoot::new(game)?;
+             ethornell_app::run(ethornell_app::AppConfig {
++                text_encoding: cli.text_encoding,
+                 game_root,
+                 trace,
+                 fail_on_stub,
+@@ -1757,3 +1767,26 @@ fn print_disasm(
+     }
+     Ok(())
+ }
++
++#[cfg(test)]
++mod encoding_cli_tests {
++    use super::*;
++    use ethornell_app::TextEncoding;
++
++    #[test]
++    fn encoding_option_works_for_direct_launch_and_run() {
++        for args in [
++            vec!["ethornell", "--text-encoding", "auto", "game"],
++            vec!["ethornell", "run", "--game", "game", "--text-encoding", "auto"],
++            vec!["ethornell", "--text-encoding", "auto", "run", "--game", "game"],
++        ] {
++            assert_eq!(
++                Cli::try_parse_from(args).unwrap().text_encoding,
++                Some(TextEncoding::Auto),
++            );
++        }
++        let cli = Cli::try_parse_from(["ethornell", "run", "--game", "game"]).unwrap();
++        assert_eq!(cli.text_encoding, None); // environment, then Auto
++        assert!(Cli::try_parse_from(["ethornell", "--text-encoding", "utf8", "game"]).is_err());
++    }
++}
+diff --git a/crates/ethornell-vm/src/lib.rs b/crates/ethornell-vm/src/lib.rs
+index 7a2e2b7..e5896d1 100644
+--- a/crates/ethornell-vm/src/lib.rs
++++ b/crates/ethornell-vm/src/lib.rs
+@@ -2641,6 +2641,11 @@ impl Vm {
+         self.timing.advance(milliseconds);
+     }
+ 
++    /// The configured display-text code page, including the Shift-JIS default.
++    pub fn graph_text_encoding(&self) -> &'static encoding_rs::Encoding {
++        self.graph_text_encoding.unwrap_or(encoding_rs::SHIFT_JIS)
++    }
++
+     /// Select the code page of text passed to native graph drawing calls.
+     /// Resource names and BP system strings retain their original encoding.
+     pub fn set_graph_text_encoding(&mut self, encoding: &'static encoding_rs::Encoding) {
+diff --git a/platform/console/Cargo.lock b/platform/console/Cargo.lock
+index a8aa58e..6d670a8 100644
+--- a/platform/console/Cargo.lock
++++ b/platform/console/Cargo.lock
+@@ -867,6 +867,7 @@ name = "ethornell-app"
+ version = "0.1.0"
+ dependencies = [
+  "ab_glyph",
++ "chardetng",
+  "encoding_rs",
+  "ethornell-archive",
+  "ethornell-audio",
+diff --git a/platform/vita/player/Cargo.lock b/platform/vita/player/Cargo.lock
+index a7c99a5..af9c18f 100644
+--- a/platform/vita/player/Cargo.lock
++++ b/platform/vita/player/Cargo.lock
+@@ -867,6 +867,7 @@ name = "ethornell-app"
+ version = "0.1.0"
+ dependencies = [
+  "ab_glyph",
++ "chardetng",
+  "encoding_rs",
+  "ethornell-archive",
+  "ethornell-audio",

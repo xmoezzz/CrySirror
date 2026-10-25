@@ -1,0 +1,72 @@
+   Compiling crysirror-image v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-image)
+   Compiling crysirror-siglus v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus)
+   Compiling crysirror-siglus-vm v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-siglus-vm)
+   Compiling crysirror-runtime v0.2.0 (/Users/xmoe/Documents/CrySirror/crates/crysirror-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.22s
+     Running unittests src/lib.rs (target/debug/deps/crysirror_runtime-e8303161e6d2f8ec)
+
+running 36 tests
+test model::tests::action_rejects_negative_size ... ok
+test model::tests::paths_are_confined ... ok
+test model::tests::index_validation ... ok
+test model::tests::camera_parallel_up_rejected ... ok
+test model::tests::duplicate_clients_rejected ... ok
+test model::tests::unknown_native_adapter_is_not_a_demo_vm ... ok
+test model::tests::demo_is_valid ... ok
+test model::tests::unknown_fields_rejected ... ok
+test assets::tests::relative_symlink_cannot_cross_client_root_even_if_project_can_read_it ... ok
+test assets::tests::identical_names_use_separate_client_roots ... ok
+test runtime::siglus_pack_tests::bad_native_header_rejected_without_panic ... ok
+test runtime::engine_tests::focused_ui_consumes_enter_and_button_pauses_only_its_world ... ok
+test runtime::siglus_pack_tests::native_gosub_return_unicode_and_branch_execute_original_instruction_paths ... ok
+test runtime::required_engine_save_test::modern_save_must_not_silently_drop_engine_state ... ok
+test runtime::provider_tests::siglus_reads_its_scene_through_a_mounted_provider ... ok
+test runtime::engine_tests::invalid_engine_save_is_transactional ... ok
+test runtime::siglus_pack_tests::unknown_native_opcode_never_reports_success ... ok
+test runtime::tests::corrupt_save_does_not_mutate_live_state ... ok
+test runtime::siglus_pack_tests::independent_siglus_clients_share_layers_without_aliasing_ids ... ok
+test script::tests::changed_program_rejects_save ... ok
+test script::tests::failed_batch_does_not_advance_vm ... ok
+test script::tests::one_press_does_not_skip_two_waits ... ok
+test script::tests::wait_is_driven_by_engine_clock ... ok
+test runtime::tests::two_clients_share_services_but_not_ids ... ok
+test runtime::tests::roundtrip_rewinds_runtime ... ok
+test runtime::tests::invalid_vm_payload_is_transactional ... ok
+test runtime::engine_tests::systems_keep_running_after_data_vm_halt_and_restore_exactly ... ok
+test vfs::tests::asset_mount_is_read_only ... ok
+test vfs::tests::symlink_cannot_escape_assets ... ok
+test runtime::siglus_pack_tests::native_pck_loads_original_scene_metadata_and_g00_through_scoped_host ... ok
+test vfs::tests::provider_mounts_shadow_disk_per_client_only ... ok
+test runtime::siglus_native_tests::original_siglus_bytecode_calls_shared_layers_and_roundtrips_native_wait ... ok
+test runtime::siglus_pack_tests::fresh_native_restore_rebuilds_images_without_advancing_pc_or_wait ... ok
+test vfs::tests::storage_handle_is_client_scoped_thread_safe_and_lists ... ok
+test vfs::tests::seekable_assets_keep_client_roots_and_provider_precedence ... ok
+test vfs::tests::disk_namespaces_are_separate ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src/lib.rs (target/debug/deps/crysirror_siglus_vm-2a98b513dc293220)
+
+running 7 tests
+test export::filter_tests::siglus_object_effects_map_to_layer_filter_units ... ok
+test adapter::verification_tests::native_text_and_name_report_the_missing_message_bridge_instead_of_succeeding ... ok
+test native_save_tests::native_timewait_key_requires_decide_release_and_does_not_reuse_edge ... ok
+test adapter::verification_tests::native_center_rep_moves_the_scale_origin_without_shifting_unit_scale_xy ... ok
+test adapter::verification_tests::native_decide_wait_requires_down_up_and_snapshot_repeats_the_edge ... ok
+test adapter::verification_tests::original_savepoint_exports_real_codec_and_failed_import_rolls_back ... ok
+test native_save_tests::original_savepoint_exports_native_codec_and_import_resumes_with_loaded_flag ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests crysirror_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crysirror_siglus_vm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

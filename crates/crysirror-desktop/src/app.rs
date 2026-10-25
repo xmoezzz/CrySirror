@@ -1,0 +1,602 @@
+// SPDX-License-Identifier: MPL-2.0
+use crate::audio::Audio;
+use anyhow::{bail, ensure, Context, Result};
+use crysirror_core::service::InputFrame;
+use crysirror_runtime::{vfs, Runtime};
+use crysirror_wgpu::{geometry::Viewport, Gpu, RenderTarget, Renderer, RenderingPath};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use winit::{
+    application::ApplicationHandler,
+    dpi::LogicalSize,
+    event::{ElementState, MouseButton, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
+    window::{Window, WindowId},
+};
+
+/// What the window loop drives: a plain runtime, or the engine App with
+/// behaviours/scripts (which owns the runtime).
+pub enum Core {
+    Plain(Runtime),
+    #[cfg(feature = "scripting")]
+    Scripted(Box<crysirror_engine::App>),
+}
+impl Core {
+    pub fn rt(&mut self) -> &mut Runtime {
+        match self {
+            Core::Plain(rt) => rt,
+            #[cfg(feature = "scripting")]
+            Core::Scripted(app) => app
+                .runtime_mut()
+                .expect("engine context present between frames"),
+        }
+    }
+    fn tick(&mut self, ms: u64, input: InputFrame) -> Result<bool> {
+        match self {
+            Core::Plain(rt) => {
+                rt.tick(ms, input)?;
+                Ok(false)
+            }
+            #[cfg(feature = "scripting")]
+            Core::Scripted(app) => {
+                app.frame(ms, input)?;
+                Ok(app.quit_requested())
+            }
+        }
+    }
+}
+
+pub struct RunOptions {
+    pub font: Option<PathBuf>,
+    pub muted: bool,
+    pub frames: Option<u64>,
+    pub capture: Option<PathBuf>,
+    pub state_dir: PathBuf,
+    pub rendering_path: RenderingPath,
+}
+struct WindowState {
+    surface: wgpu::Surface<'static>,
+    window: Arc<Window>,
+    renderer: Renderer,
+    config: wgpu::SurfaceConfiguration,
+    minimized: bool,
+}
+pub struct App {
+    core: Core,
+    options: RunOptions,
+    instance: wgpu::Instance,
+    window: Option<WindowState>,
+    audio: Audio,
+    #[cfg(feature = "gamepad")]
+    gamepad: Option<crate::gamepad::Backend>,
+    input: InputFrame,
+    focused: bool,
+    last_tick: Instant,
+    remainder: Duration,
+    presented: u64,
+    error: Option<anyhow::Error>,
+}
+
+pub fn load_fonts(rt: &mut Runtime, override_font: Option<&Path>) -> Result<()> {
+    for (alias, path) in &rt.project.fonts {
+        let bytes = rt.assets.read(path)?;
+        rt.assets.text.add_font(alias, bytes.to_vec())?;
+    }
+    if let Some(path) = override_font {
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .with_context(|| format!("font {}", path.display()))?
+            .take(32 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        ensure!(bytes.len() <= 32 * 1024 * 1024, "font exceeds 32 MiB");
+        rt.assets.text.add_font("default", bytes)?;
+    }
+    Ok(())
+}
+/// What a movie advances between frames: the bare runtime, or an engine
+/// App whose scripts keep running.
+pub trait MovieSource {
+    fn advance(&mut self, step_ms: u64) -> Result<()>;
+    fn runtime(&mut self) -> &mut Runtime;
+}
+impl MovieSource for Runtime {
+    fn advance(&mut self, step_ms: u64) -> Result<()> {
+        self.tick(step_ms, crysirror_core::service::InputFrame::default())
+    }
+    fn runtime(&mut self) -> &mut Runtime {
+        self
+    }
+}
+
+/// Renders `frames` consecutive frames with one renderer (caches, TAA and
+/// probe state carry over like a running game), advancing the source by
+/// `step_ms` between them. `output` receives the last frame.
+#[allow(clippy::too_many_arguments)]
+pub fn movie_on(
+    gpu: Arc<Gpu>,
+    source: &mut dyn MovieSource,
+    font: Option<&Path>,
+    output: &Path,
+    dir: &Path,
+    frames: u32,
+    step_ms: u64,
+    rendering_path: RenderingPath,
+) -> Result<serde_json::Value> {
+    std::fs::create_dir_all(dir)?;
+    let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    renderer.set_rendering_path(rendering_path)?;
+    load_fonts(source.runtime(), font)?;
+    let mut last = None;
+    for i in 0..frames {
+        if i > 0 {
+            source.advance(step_ms)?;
+        }
+        let rt = source.runtime();
+        renderer.set_scene3d(rt.render_scene3d()?.as_ref())?;
+        renderer.set_pbr_scene(rt.render_pbr()?)?;
+        renderer.set_engine_frame(rt.host.engine.frame(rt.project.canvas)?)?;
+        renderer.set_transition(rt.render_transition()?)?;
+        let image = renderer.capture(&rt.host.scene, &mut rt.assets, rt.project.canvas, rt.project.background)?;
+        image
+            .save_with_format(dir.join(format!("frame_{i:05}.png")), image::ImageFormat::Png)
+            .context("save movie frame")?;
+        last = Some(image);
+    }
+    if let Some(image) = last {
+        image.save_with_format(output, image::ImageFormat::Png)?;
+    }
+    Ok(serde_json::json!({"movie_frames": frames, "movie_dir": dir, "step_ms": step_ms}))
+}
+pub fn capture_on(
+    gpu: Arc<Gpu>,
+    rt: &mut Runtime,
+    font: Option<&Path>,
+    path: &Path,
+    rendering_path: RenderingPath,
+) -> Result<serde_json::Value> {
+    let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    renderer.set_rendering_path(rendering_path)?;
+    renderer.set_scene3d(rt.render_scene3d()?.as_ref())?;
+    renderer.set_pbr_scene(rt.render_pbr()?)?;
+    renderer.set_engine_frame(rt.host.engine.frame(rt.project.canvas)?)?;
+    renderer.set_transition(rt.render_transition()?)?;
+    load_fonts(rt, font)?;
+    let image = renderer.capture(
+        &rt.host.scene,
+        &mut rt.assets,
+        rt.project.canvas,
+        rt.project.background,
+    )?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    image
+        .save_with_format(path, image::ImageFormat::Png)
+        .with_context(|| format!("save {}", path.display()))?;
+    // Renderer statistics of the captured frame (null without a PBR scene).
+    Ok(match renderer.pbr() {
+        Some(p) => {
+            let (l, r, v, g) = (p.lod_stats(), p.probe_stats(), p.vsm_stats(), p.gi_stats());
+            serde_json::json!({
+                "geometry_lod": {"primitives": l.lod_primitives, "source_triangles": l.source_triangles,
+                    "drawn_triangles": l.drawn_triangles, "clusters_drawn": l.clusters_drawn},
+                "reflection_probes": {"submitted": r.submitted, "active": r.active},
+                "virtual_shadows": {"requested": v.requested, "resident": v.resident, "rendered": v.rendered, "dropped": v.dropped, "invalidations": v.invalidations},
+                "irradiance_volume": {"probes": g.probes, "refreshed": g.refreshed, "total_refreshed": g.total_refreshed, "sweeps": g.sweeps, "converged": g.converged},
+            })
+        }
+        None => serde_json::Value::Null,
+    })
+}
+impl App {
+    pub fn run(core: Core, options: RunOptions) -> Result<()> {
+        let audio = Audio::new(options.muted);
+        #[cfg(feature = "gamepad")]
+        let gamepad = match crate::gamepad::Backend::new() {
+            Ok(backend) => Some(backend),
+            Err(error) => {
+                log::warn!("gamepad backend unavailable: {error:#}; keyboard/mouse remain active");
+                None
+            }
+        };
+        let event_loop = EventLoop::new()?;
+        let mut app = Self {
+            core,
+            options,
+            instance: wgpu::Instance::default(),
+            window: None,
+            audio,
+            #[cfg(feature = "gamepad")]
+            gamepad,
+            input: InputFrame::default(),
+            focused: true,
+            last_tick: Instant::now(),
+            remainder: Duration::ZERO,
+            presented: 0,
+            error: None,
+        };
+        event_loop.run_app(&mut app)?;
+        match app.error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+    fn init(&mut self, el: &ActiveEventLoop) -> Result<()> {
+        if self.window.is_some() {
+            return Ok(());
+        }
+        let canvas = self.core.rt().project.canvas;
+        let window = Arc::new(
+            el.create_window(
+                Window::default_attributes()
+                    .with_title(format!("CrySirror | {}", self.core.rt().project.name))
+                    .with_inner_size(LogicalSize::new(canvas[0] as f64, canvas[1] as f64)),
+            )?,
+        );
+        let surface = self.instance.create_surface(window.clone())?;
+        let gpu = Arc::new(pollster::block_on(Gpu::request(
+            &self.instance,
+            Some(&surface),
+        ))?);
+        log::info!("GPU: {:?}", gpu.adapter.get_info());
+        let caps = surface.get_capabilities(&gpu.adapter);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|format| format.is_srgb())
+            .context("surface has no sRGB format")?;
+        let size = window.inner_size();
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: *caps.alpha_modes.first().context("surface alpha modes")?,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&gpu.device, &config);
+        let mut renderer = Renderer::new(gpu, format);
+        renderer.set_scene3d(self.core.rt().render_scene3d()?.as_ref())?;
+        renderer.set_pbr_scene(self.core.rt().render_pbr()?)?;
+        renderer.set_rendering_path(self.options.rendering_path)?;
+        load_fonts(self.core.rt(), self.options.font.as_deref())?;
+        self.window = Some(WindowState {
+            surface,
+            window,
+            renderer,
+            config,
+            minimized: false,
+        });
+        self.last_tick = Instant::now();
+        self.remainder = Duration::ZERO;
+        self.audio.resume();
+        Ok(())
+    }
+    fn fail(&mut self, el: &ActiveEventLoop, error: anyhow::Error) {
+        log::error!("{error:#}");
+        self.error = Some(error);
+        el.exit();
+    }
+    fn save(&mut self) -> Result<()> {
+        let bytes = self.core.rt().snapshot()?;
+        std::fs::create_dir_all(&self.options.state_dir)?;
+        // App-selected state root. VM writes still go through per-client capabilities.
+        let dir = cap_dir(&self.options.state_dir)?;
+        vfs::write_atomic(&dir, "quick.save", &bytes).map_err(|e| anyhow::anyhow!("{e}"))?;
+        log::info!(
+            "saved {}",
+            self.options.state_dir.join("quick.save").display()
+        );
+        Ok(())
+    }
+    fn load(&mut self) -> Result<()> {
+        let dir = cap_dir(&self.options.state_dir)?;
+        let bytes = vfs::read_limited(&dir, "quick.save").map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.core.rt().restore(&bytes)?;
+        self.input.buttons_pressed = 0;
+        self.last_tick = Instant::now();
+        self.remainder = Duration::ZERO;
+        log::info!("restored quick.save; audio restarts at sample zero");
+        Ok(())
+    }
+    fn button(&mut self, bit: u64, down: bool) {
+        if down {
+            if self.input.buttons_down & bit == 0 {
+                self.input.buttons_pressed |= bit;
+            }
+            self.input.buttons_down |= bit;
+        } else {
+            self.input.buttons_down &= !bit;
+        }
+    }
+    fn redraw(&mut self, el: &ActiveEventLoop) -> Result<()> {
+        let Some(w) = self.window.as_mut() else {
+            return Ok(());
+        };
+        if w.minimized {
+            return Ok(());
+        }
+        let now = Instant::now();
+        let delta = now
+            .duration_since(self.last_tick)
+            .min(Duration::from_millis(250))
+            + self.remainder;
+        self.last_tick = now;
+        let ms = if self.options.frames.is_some() {
+            16
+        } else {
+            delta.as_millis() as u64
+        };
+        self.remainder = if self.options.frames.is_some() {
+            Duration::ZERO
+        } else {
+            delta - Duration::from_millis(ms)
+        };
+        #[allow(unused_mut)]
+        let mut frame_input = self.input;
+        #[cfg(feature = "gamepad")]
+        if let Some(gamepad) = &mut self.gamepad {
+            let events = gamepad.poll()?;
+            if let Core::Scripted(app) = &mut self.core {
+                for event in events {
+                    if self.focused
+                        || matches!(
+                            event,
+                            crysirror_engine::input_api::GamepadEvent::Connected { .. }
+                                | crysirror_engine::input_api::GamepadEvent::Disconnected { .. }
+                        )
+                    {
+                        app.context().state()?.actions.inject_gamepad(event)?;
+                    }
+                }
+            }
+            if self.focused {
+                frame_input = gamepad.navigation_frame(frame_input);
+            } else {
+                gamepad.reset_navigation();
+            }
+        }
+        if !self.focused {
+            frame_input = InputFrame::default();
+        }
+        if self
+            .core
+            .tick(if self.presented == 0 { 0 } else { ms }, frame_input)?
+        {
+            el.exit();
+        }
+        self.input.buttons_pressed = 0;
+        match &mut self.core {
+            #[cfg(feature = "scripting")]
+            Core::Scripted(app) => {
+                let frames = app.context().state()?.mixer_audio.take_output();
+                let voices = !app.runtime()?.host.scene.voices().is_empty();
+                let restored = app.runtime()?.restored;
+                self.audio.sync_mixed(&frames, voices, restored)?;
+            }
+            Core::Plain(runtime) => self.audio.sync(runtime)?,
+        }
+        let frame = match w.surface.get_current_texture() {
+            Ok(frame) => frame,
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                w.surface.configure(&w.renderer.gpu.device, &w.config);
+                return Ok(());
+            }
+            Err(wgpu::SurfaceError::Timeout) => return Ok(()),
+            Err(e) => bail!("surface error: {e}"),
+        };
+        let view = frame.texture.create_view(&Default::default());
+        let rt = self.core.rt();
+        w.renderer.set_scene3d(rt.render_scene3d()?.as_ref())?;
+        w.renderer.set_pbr_scene(rt.render_pbr()?)?;
+        w.renderer
+            .set_engine_frame(rt.host.engine.frame(rt.project.canvas)?)?;
+        w.renderer.set_transition(rt.render_transition()?)?;
+        w.renderer.render(
+            &rt.host.scene,
+            &mut rt.assets,
+            RenderTarget {
+                view: &view,
+                size: [w.config.width, w.config.height],
+            },
+            rt.project.canvas,
+            rt.project.background,
+        )?;
+        w.window.pre_present_notify();
+        frame.present();
+        self.presented += 1;
+        if self
+            .options
+            .frames
+            .is_some_and(|limit| self.presented >= limit)
+        {
+            if let Some(path) = &self.options.capture {
+                capture_on(
+                    w.renderer.gpu.clone(),
+                    self.core.rt(),
+                    self.options.font.as_deref(),
+                    path,
+                    self.options.rendering_path,
+                )?;
+            }
+            el.exit();
+        }
+        Ok(())
+    }
+    fn event(&mut self, el: &ActiveEventLoop, event: WindowEvent) -> Result<()> {
+        match event {
+            WindowEvent::CloseRequested => el.exit(),
+            WindowEvent::RedrawRequested => self.redraw(el)?,
+            WindowEvent::Resized(size) => {
+                if let Some(w) = self.window.as_mut() {
+                    w.minimized = size.width == 0 || size.height == 0;
+                    if !w.minimized {
+                        ensure!(
+                            size.width <= w.renderer.gpu.device.limits().max_texture_dimension_2d
+                                && size.height
+                                    <= w.renderer.gpu.device.limits().max_texture_dimension_2d,
+                            "window exceeds GPU target dimensions"
+                        );
+                        w.config.width = size.width;
+                        w.config.height = size.height;
+                        w.surface.configure(&w.renderer.gpu.device, &w.config);
+                    }
+                }
+                self.last_tick = Instant::now();
+                self.remainder = Duration::ZERO;
+            }
+            WindowEvent::Focused(focused) => {
+                self.focused = focused;
+                self.input = InputFrame::default();
+                #[cfg(feature = "gamepad")]
+                if let Some(backend) = &mut self.gamepad {
+                    backend.reset_navigation();
+                }
+                #[cfg(feature = "scripting")]
+                if let Core::Scripted(app) = &mut self.core {
+                    let actions = &mut app.context().state()?.actions;
+                    actions.reset_devices();
+                    actions.cancel_rebind();
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if !self.focused {
+                    return Ok(());
+                }
+                let pressed = event.state == ElementState::Pressed;
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    if pressed && !event.repeat {
+                        match code {
+                            KeyCode::Escape => el.exit(),
+                            KeyCode::F5 => self.save()?,
+                            KeyCode::F9 => self.load()?,
+                            KeyCode::F12 => {
+                                let path = self.options.capture.clone().unwrap_or_else(|| {
+                                    self.options.state_dir.join(format!(
+                                        "capture-{}.png",
+                                        self.core.rt().host.scene.frame()
+                                    ))
+                                });
+                                if let Some(w) = &self.window {
+                                    capture_on(
+                                        w.renderer.gpu.clone(),
+                                        self.core.rt(),
+                                        self.options.font.as_deref(),
+                                        &path,
+                                        self.options.rendering_path,
+                                    )?;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    let bit = match code {
+                        KeyCode::Enter => Some(1),
+                        KeyCode::Space => Some(2),
+                        KeyCode::ArrowLeft => Some(4),
+                        KeyCode::ArrowRight => Some(8),
+                        KeyCode::ArrowUp => Some(16),
+                        KeyCode::ArrowDown => Some(32),
+                        KeyCode::Tab => Some(64),
+                        KeyCode::KeyW => Some(1 << 7),
+                        KeyCode::KeyA => Some(1 << 8),
+                        KeyCode::KeyS => Some(1 << 9),
+                        KeyCode::KeyD => Some(1 << 10),
+                        KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(1 << 11),
+                        KeyCode::ControlLeft | KeyCode::ControlRight => Some(1 << 12),
+                        KeyCode::KeyE => Some(1 << 13),
+                        KeyCode::KeyQ => Some(1 << 14),
+                        KeyCode::KeyF => Some(1 << 15),
+                        KeyCode::KeyR => Some(1 << 18),
+                        _ => None,
+                    };
+                    if let Some(bit) = bit {
+                        self.button(bit, pressed);
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let bit = match button {
+                    MouseButton::Left => Some(1 << 16),
+                    MouseButton::Right => Some(1 << 17),
+                    _ => None,
+                };
+                if let Some(bit) = bit {
+                    self.button(bit, state == ElementState::Pressed);
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(w) = &self.window {
+                    if !w.minimized {
+                        let vp = Viewport::fit(
+                            self.core.rt().project.canvas,
+                            [w.config.width, w.config.height],
+                        );
+                        let [x, y] =
+                            vp.pointer(position.x, position.y, self.core.rt().project.canvas);
+                        self.input.pointer_x = x;
+                        self.input.pointer_y = y;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+fn cap_dir(path: &Path) -> Result<cap_std::fs::Dir> {
+    Ok(cap_std::fs::Dir::open_ambient_dir(
+        path,
+        cap_std::ambient_authority(),
+    )?)
+}
+impl ApplicationHandler for App {
+    fn resumed(&mut self, el: &ActiveEventLoop) {
+        if let Err(e) = self.init(el) {
+            self.fail(el, e);
+        }
+    }
+    fn suspended(&mut self, _: &ActiveEventLoop) {
+        self.window = None;
+        self.audio.pause();
+        self.input = InputFrame::default();
+        #[cfg(feature = "gamepad")]
+        if let Some(backend) = &mut self.gamepad {
+            backend.reset_navigation();
+        }
+        #[cfg(feature = "scripting")]
+        if let Core::Scripted(app) = &mut self.core {
+            if let Ok(state) = app.context().state() {
+                state.actions.reset_devices();
+                state.actions.cancel_rebind();
+            }
+        }
+    }
+    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if self.window.as_ref().is_some_and(|w| w.window.id() == id) {
+            if let Err(e) = self.event(el, event) {
+                self.fail(el, e);
+            }
+        }
+    }
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        el.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(16),
+        ));
+        if let Some(w) = &self.window {
+            if !w.minimized {
+                w.window.request_redraw();
+            }
+        }
+    }
+}

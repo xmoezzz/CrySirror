@@ -1,0 +1,102 @@
+{
+  "schema": 1,
+  "validated_at": "2026-10-25T14:51:38.099780+00:00",
+  "implementation": {
+    "image_decoder_ids": 96,
+    "ported": 80,
+    "partial": 16,
+    "archive_decoder_ids": 5,
+    "other_pending": 188,
+    "upstream_commit": "456834ecf2e5686813802c37efd829310485c57d",
+    "ledger": "docs/arc-image-support.json"
+  },
+  "compilation": {
+    "command": [
+      "cargo",
+      "check",
+      "--workspace",
+      "--all-targets",
+      "--features",
+      "crysirror-desktop/arc-formats"
+    ],
+    "exit_code": 0,
+    "log": "target/verification/arc-image-workspace-check.log"
+  },
+  "workspace_behavior": {
+    "command": [
+      "cargo",
+      "test",
+      "--workspace",
+      "--features",
+      "crysirror-desktop/arc-formats"
+    ],
+    "exit_code": 0,
+    "suites": 101,
+    "passed": 464,
+    "failed": 0,
+    "ignored": 42,
+    "log": "target/verification/arc-image-workspace-tests.log"
+  },
+  "python_behavior": {
+    "command": [
+      "/opt/homebrew/bin/python3.11",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests",
+      "-v"
+    ],
+    "passed": 162,
+    "failed": 0,
+    "log": "target/verification/arc-image-python-tests.log"
+  },
+  "image_group_behavior": {
+    "ordinary_tests_passed": 88,
+    "external_tests_explicitly_run": 7,
+    "external_image_comparisons": 177,
+    "exact_rgba": 174,
+    "documented_lossy_rounding": 3,
+    "group_evidence": [
+      "docs/arc-images-a.json",
+      "docs/arc-images-b.json",
+      "docs/arc-images-c.json",
+      "docs/arc-images-d.json"
+    ]
+  },
+  "integration_behavior": {
+    "engine_tests_passed": 3,
+    "covers": [
+      "mounted SAR native images into Bitmap/Resources pixels",
+      "gltf native texture decoding and exact sRGB/linear mip pixels",
+      "native caller keys/client isolation",
+      "scoped references, masks, typed missing/denied/corrupt resources",
+      "failed decode keeps prior image slot revision"
+    ]
+  },
+  "metal_behavior": {
+    "gpu": "AdapterInfo { name: \"Apple M5\", vendor: 0, device: 0, device_type: IntegratedGpu, driver: \"\", driver_info: \"\", backend: Metal }",
+    "archive": "nscripter/sar",
+    "native_image_ids": [
+      "almond-collective/teyl",
+      "glib/pgx",
+      "fvp/nvsg"
+    ],
+    "png_reference": "png/png",
+    "native_pixels_equal_reference": 49152,
+    "source_interior_pixel_samples_exact": 16,
+    "capture": "images/native-image-registry.png",
+    "capture_sha256": "76bb7f6908fefdb0be654ec318cae7c75b9462c15a95823039b6d9f75f0f9156",
+    "generator": "tools/make_native_image_smoke.py",
+    "log": "target/verification/arc-image-metal-archive-render.log",
+    "self_authored_data_only": true
+  },
+  "api_fingerprint": "f49c116e5d278370",
+  "limits": [
+    "Ignored workspace cases are not counted as passes; external image cases are separately explicitly executed.",
+    "Native format and codec/filename/key/dependency limits remain in the per-format support ledger.",
+    "No external fixture binaries, per-title key tables, fonts or game data are distributed.",
+    "One local Metal raster run does not validate other platforms, hardware ray tracing or complete native games.",
+    "Resource decoding does not register native VMs or replace their cuts/pivots/wait/save semantics."
+  ]
+}

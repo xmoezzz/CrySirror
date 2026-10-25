@@ -1,0 +1,20 @@
+[package]
+name = "crysirror-script-js"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Default JS/TS script host (Boa + Oxc) bound to the engine object API (ADR 0005)"
+
+[dependencies]
+crysirror-engine.workspace = true
+crysirror-author.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+# Same pinned generation as crysirror-author; both are pure-Rust implementations.
+boa_engine = "=0.20.0"
+
+[dev-dependencies]
+crysirror-core.workspace = true
+crysirror-runtime.workspace = true
+tempfile = "3.12"

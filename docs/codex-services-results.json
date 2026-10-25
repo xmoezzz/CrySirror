@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-25",
+  "scope": "Codex parallel audio/text/input/localization service work; renderer/native level work belongs to Claude",
+  "implementation": {
+    "audio": "Shared scoped CPU mixer, pools/random containers/spatial attenuation/pan/occlusion lowpass/buses/ducking, streaming music/fades/crossfades/loop points/rate-pitch and reflective Audio API",
+    "text": "Rustybuzz/bidi/UAX14+documented CJK tailoring, fallback, ruby/vertical rich layout/icons/outline/shadow/grapheme events, CPU RGBA and SDF atlas",
+    "input": "Runtime rebind/capture/profiles, analog/dead zone/edge state, optional GilRs desktop backend and semantic prompt tokens",
+    "localization": "Scoped catalogs, CLDR plurals, font-alias selection, explicit profile persistence",
+    "engine_surfaces": "Text class publishes client-scoped surfaces, advances reveal and exports/restores explicit logical checkpoints",
+    "integration_fixes": [
+      "VFS capability-only seekable disk files preserve provider precedence",
+      "No double playback: App PCM vs plain runtime legacy device paths",
+      "Text reveal/event rollback on publication or queue overflow",
+      "PCM restore epoch flushes software queue and source block; endpoint clamps final samples",
+      "Background gamepad routing suppressed; focus/suspend clear state and cancel rebind",
+      "Surface budgets/revisions validate before insertion; client-scoped release"
+    ]
+  },
+  "compilation": {
+    "workspace_all_targets": "passed",
+    "desktop_release": "passed",
+    "desktop_no_default": "passed",
+    "audio_strict_clippy": "passed",
+    "text_strict_clippy": "passed",
+    "warnings": [
+      "existing desktop no-default unused_mut",
+      "dependency block 0.1.6 future incompatibility"
+    ]
+  },
+  "behavior": {
+    "workspace": {
+      "passed": 219,
+      "failed": 0,
+      "ignored": 27
+    },
+    "additional_js_services": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0
+    },
+    "unique_normal_cpu_tests_verified": 220,
+    "default_ignored_details": {
+      "gpu": 22,
+      "text_font": 4,
+      "rfvp_font_fixture": 1
+    },
+    "explicit_system_font_tests": 4,
+    "python": {
+      "passed": 126,
+      "failed": 0
+    },
+    "audio_profile_tests_included_in_workspace": {
+      "passed": 15,
+      "failed": 0,
+      "ignored": 0
+    },
+    "hardware_audio_device_opened": false,
+    "hardware_gamepad_tested": false,
+    "gpu_suite_rerun": false,
+    "generated_types": {
+      "path": "/Users/xmoe/.cache/crysirror/codex-text/crysirror.d.ts",
+      "new_classes_verified": [
+        "Audio",
+        "Text",
+        "Localization",
+        "Input"
+      ]
+    },
+    "images": [
+      {
+        "path": "/Users/xmoe/.cache/crysirror/codex-text/rich-text.png",
+        "sha256": "9ea0a18d550ea6863f8943d0d5919a998561e6af306f1f957a8ecc5a4f3456ee"
+      },
+      {
+        "path": "/Users/xmoe/.cache/crysirror/codex-text/sdf-atlas-0.png",
+        "sha256": "965063c20b4add4aea3991073f880348ec32f8e763cd199ea8da37dd14d13f77"
+      }
+    ]
+  },
+  "vcs": {
+    "initialized": true,
+    "origin": "git@github.com:xmoezzz/CrySirror.git",
+    "ssh_read_verified": true,
+    "remote_heads_at_configuration": 0,
+    "commits_created": 0,
+    "pushed": false
+  },
+  "parallel_boundaries": {
+    "excluded": [
+      "crates/crysirror-wgpu",
+      "crysirror-scene/view.rs",
+      "crysirror-scene/components.rs",
+      "crysirror-asset",
+      "tools/gow3_*",
+      "probe code"
+    ],
+    "adr_range": "0030-0033",
+    "status_policy": "append own section only"
+  },
+  "limits": [
+    "SDF GPU/3D rendering not integrated",
+    "Advanced audio voices/buses and text/localization/input session config are not automatic Runtime snapshot contents; explicit config/state APIs are documented",
+    "Decode/mixing on App thread, no hard realtime, independent time stretch or HRTF",
+    "No actual soundcard listening or hardware gamepad validation",
+    "CJK prohibition is a documented subset; full UAX50/TCY/advanced ruby variants not complete",
+    "MCP remains its existing fresh-process service; live MCP attachment not added",
+    "No native Siglus original-video/audio/save equivalence claim"
+  ],
+  "asset_policy": "No fonts/game assets/credentials/SDKs added; system fonts are read at runtime by ignored tests; previews stay external"
+}

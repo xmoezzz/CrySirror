@@ -1,0 +1,26 @@
+{
+  "project_validate": {
+    "schema_valid": true,
+    "asset_files": 1,
+    "native_vms_verified": false
+  },
+  "stdio_engine_trace": {
+    "frame": 64,
+    "paused": true,
+    "ui_event": {
+      "kind": "activate",
+      "value": 0.0,
+      "widget": {
+        "id": 2,
+        "owner": 1
+      }
+    }
+  },
+  "scene_capture": {
+    "path": "/Users/xmoe/Documents/CrySirror/dist/systems-mcp/9ba2dfdbfae34490b4ac05ce118c8974.png",
+    "frames": 16,
+    "renderer": "compute-raytrace"
+  },
+  "png_sha256": "cf12f2cf902a752a72e8f4f02cec8280392bb987e9d28b100d6e6f32e1b3c9e6",
+  "live_session_control": false
+}

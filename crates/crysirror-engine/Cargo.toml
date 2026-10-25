@@ -1,0 +1,34 @@
+[package]
+name = "crysirror-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Engine object model, lifecycle, plugins and script-host contracts (ADR 0004/0005)"
+
+[features]
+# GPL archive migration plugins are explicitly selected by the host.
+arc-formats = ["dep:crysirror-formats-arc", "crysirror-runtime/arc-formats"]
+
+[dependencies]
+crysirror-core.workspace = true
+crysirror-scene.workspace = true
+crysirror-puppet.workspace = true
+crysirror-runtime.workspace = true
+crysirror-physics.workspace = true
+crysirror-asset.workspace = true
+crysirror-audio.workspace = true
+crysirror-text.workspace = true
+crysirror-image.workspace = true
+crysirror-resource.workspace = true
+crysirror-formats-arc = { workspace = true, optional = true }
+intl_pluralrules = "=7.0.2"
+unic-langid = "0.9"
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+glam.workspace = true
+
+[dev-dependencies]
+tempfile = "3.12"
+crysirror-siglus-vm.workspace = true

@@ -1,0 +1,17 @@
+{
+  "siglus_rs": {
+    "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+    "files": {
+      "crates/siglus_scene_vm/src/runtime/input.rs": "db14cec9adcea4f1407f8305cb56af280abe1f6eda031ce0dafeb6d6203389d0",
+      "crates/siglus_scene_vm/src/runtime/int_event.rs": "b9e56aa8691d61298f2b2b22ae49ea8e6847c48837249035221cbc5eede0c456",
+      "crates/siglus_scene_vm/src/render_math.rs": "aca5f53e112c8647fb204adb93254c6f3d84232eb079124eda710c3d2e81f90f",
+      "crates/siglus_scene_vm/src/layer.rs": "a5e6776e3a7fee7fa42e853a8b95317801dc196637ab9015c90820b9a832911e"
+    }
+  },
+  "rfvp": {
+    "commit": "062fec82033b554b9eb3b5da069518c0c96a354e",
+    "files": {
+      "crates/rfvp/src/exit_confirm_ui.rs": "6d903a90fd199a75259de2456c7026390f2ee40a9167cdd69795c65e30828084"
+    }
+  }
+}
