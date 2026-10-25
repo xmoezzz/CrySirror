@@ -21,8 +21,9 @@ image.workspace = true
 crysirror-asset.workspace = true
 half = { version = "2", features = ["bytemuck"] }
 serde_json.workspace = true
+serde.workspace = true
 
-naga = { version = "=0.20.0", features = ["wgsl-in"] }
+naga = { version = "=29.0.3", features = ["wgsl-in"] }
 pollster.workspace = true
 
 [dev-dependencies]

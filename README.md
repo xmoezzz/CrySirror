@@ -20,8 +20,10 @@ see [AUTHORING.md](docs/AUTHORING.md) and `examples/desktop/arena.ts`.
 The monorepo now includes a separate `crysirror-siglus` resource frontend and
 shared `crysirror-image` services. Native G00 pixels/metadata have been compared
 with the executed original decoder. The renderer also has an executed GPU
-compute ray tracer with directional shadows; hardware ray tracing is still
-unsupported and fails explicitly. [ADR 0003](docs/adr/0003-siglus-monorepo-and-rendering-capabilities.md)
+compute ray tracer with directional shadows. Native BLAS/TLAS ray queries now
+provide opaque primary rays and hybrid PBR sun shadows, negotiated separately
+for Vulkan, DX12 and Metal; see [ADR 0051](docs/adr/0051-hardware-ray-query.md).
+[ADR 0003](docs/adr/0003-siglus-monorepo-and-rendering-capabilities.md)
 documents the boundaries, commands and desktop platform scope.
 
 The engine owns its [Audio/SFX, Text, UI, Layer and World systems](docs/ENGINE_SYSTEMS.md).
@@ -53,11 +55,11 @@ SDKs. The default desktop executable owns `winit`; the renderer uses `wgpu`
 and does not depend on `winit`. Switch and PS Vita backends are deferred,
 not conditional claims of support hidden inside the desktop implementation.
 
-The default dependencies pin `wgpu = 0.20.1` and `winit = 0.30.12`. This is a
+The default dependencies pin `wgpu = 29.0.3` and `winit = 0.30.12`. This is a
 chosen API baseline, not a claim that these are the latest versions or that
 upstream engines already compile against it. Cargo.lock now records a real,
 successfully built dependency resolution. Resolved dependencies require Rust
-1.88; the workspace declares that minimum, but only 1.98.1 was tested here.
+1.89; the workspace declares that minimum, but only 1.98.1 was tested here.
 A full dependency license audit is still pending.
 
 ## What is in the implementation
@@ -69,7 +71,7 @@ A full dependency license audit is still pending.
 | Siglus resources | Separate native G00 decoder, shared image/JPEG/upload services | Original SceneVm/syscalls/saves not linked |
 | Text | Supplied-font rasterization, simple wrapping/kerning, cached text surfaces | No bundled font, ruby/kinsoku/native layout not emulated |
 | 3D | Camera, transformed cubes/indexed triangles, lighting, depth buffer | Static opaque prototype, not PBR/animation/physics |
-| Ray tracing | Optional GPU compute primary/shadow rays, same 2D overlays | Software traversal; no hardware acceleration, GI or reflections |
+| Ray tracing | Separate compute traversal and native BLAS/TLAS queries; opaque primary rays, hybrid PBR sun shadows, shared overlays | Capability negotiation across Vulkan/DX12/Metal; no RT GI/reflections, alpha candidates or vendor-wide hardware validation |
 | Audio | rodio output, namespaced channels, retrigger/loop/stop/gain | Native game codecs/semantics not verified |
 | Files | Per-client capability directories, read-only assets, bounded atomic writes | Not a sandbox for arbitrary native Rust code |
 | Saves | VM + shared-state snapshot, staged all-VM restore, version/identity/checksum checks | Not an importer for original saves; audio restarts |
@@ -129,12 +131,23 @@ No fonts are distributed in this repository or its source artifacts.
 cargo run -p crysirror-desktop -- inspect examples/desktop/project.json
 cargo run -p crysirror-desktop -- trace examples/desktop/project.json --frames 120 --press-at 1
 cargo run -p crysirror-desktop -- render examples/desktop/project.json --output dist/capture.png
+cargo run -p crysirror-desktop -- gpu-info
+cargo run -p crysirror-desktop -- render examples/desktop/arena.json --renderer hardware-raytrace --output dist/hardware-rt.png
 ```
 
 `trace` executes VM ticks without opening a window or emitting sound. `render`
 uses the actual wgpu pipeline offscreen and requires a working GPU/backend,
 including a software Vulkan adapter where available. It never substitutes a
 fabricated PNG when GPU initialization fails.
+
+`gpu-info` separates adapter availability from features enabled on the default
+raster device. Explicit `--renderer hardware-raytrace` requests native ray
+queries and AS limits, or fails with a reason; it never silently substitutes
+software tracing. Render JSON records the selected device and encoded RT work.
+Those counters do not measure GPU completion or performance. Native API support
+also does not independently certify dedicated RT silicon. The initial profile
+uses opaque triangles; masked/transparent casters and custom fragment-discard
+materials fail visibly. PBR remains raster shaded with hardware sun visibility.
 
 The former bootstrap CLI remains available under a different binary name:
 

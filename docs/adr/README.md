@@ -60,7 +60,7 @@ moves to `done` only with recorded behavior evidence.
 | R7 | Other VMs (siglus_rs SceneVm, RFVP) plug in as script hosts | 0005, 0008 | Siglus subset + RFVP registered as VmAdapters |
 | R8 | Abstract filesystem; native engines keep their own FS semantics | 0006 | mount table + providers |
 | R9 | Load Blender models | 0007, 0010 | glTF 2.0 import incl. textured PBR; .blend via Blender CLI export |
-| R10 | Ray tracing | 0003, 0007 | compute RT exists; hardware RT needs wgpu upgrade |
+| R10 | Ray tracing | 0003, 0007, 0051 | native opaque primary queries and hybrid PBR sun shadows; broader RT effects and multi-device validation remain |
 | R11 | DLSS-class upscaling | 0007 | capability contract only; vendor SDKs not distributed |
 | R12 | Asynchronous/multithreaded execution across every engine subsystem | 0049, 0050 | required; only initial assets/pose stage implemented |
 
@@ -84,3 +84,4 @@ moves to `done` only with recorded behavior evidence.
 | [0048](0048-reallive-vm-engine-apis.md) | Pure RealLive VM and semantic adapter over reusable retained Canvas/GlyphRun/UI/audio/Media APIs | API bridge implemented; opening-profile evidence separate |
 | [0049](0049-multithreaded-tasks-and-async-assets.md) | Bounded CPU/asset workers, awaitable reads, asynchronous image/model imports and parallel poses | stage one implemented; engine-wide requirement in 0050 |
 | [0050](0050-engine-wide-async-execution.md) | Engine-wide asynchronous/multithreaded execution and explicit subsystem migration; local validation, no unsolicited GitHub CI | accepted requirement; partially implemented |
+| [0051](0051-hardware-ray-query.md) | Native BLAS/TLAS ray queries, capability negotiation across Vulkan/DX12/Metal, opaque primary rays and hybrid PBR sun visibility | initial implementation; validation recorded in STATUS.md |

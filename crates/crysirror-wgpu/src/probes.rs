@@ -136,23 +136,23 @@ impl ProbeResources {
         });
         let layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("probe faces"),
-            bind_group_layouts: &[&bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
         });
-        let pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor { cache: None,
             label: Some("probe cube to equirect"),
             layout: Some(&layout),
-            vertex: wgpu::VertexState { module, entry_point: "vs_main", buffers: &[], compilation_options: Default::default() },
+            vertex: wgpu::VertexState { module, entry_point: Some("vs_main"), buffers: &[], compilation_options: Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module,
-                entry_point: "fs_cube_to_equirect",
+                entry_point: Some("fs_cube_to_equirect"),
                 targets: &[Some(hdr.into())],
                 compilation_options: Default::default(),
             }),
             primitive: Default::default(),
             depth_stencil: None,
             multisample: Default::default(),
-            multiview: None,
+            multiview_mask: None,
         });
         let mut basis = [[0f32; 4]; 12];
         for (k, (f, u)) in FACES.iter().enumerate() {

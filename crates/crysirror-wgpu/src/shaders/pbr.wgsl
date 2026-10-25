@@ -394,7 +394,8 @@ fn gi_irradiance(p: vec3<f32>, n: vec3<f32>, v: vec3<f32>, fallback: vec3<f32>) 
 }
 
 // Cascaded sun shadows selected by view depth, blended across cascade seams.
-fn sun_shadow(world: vec3<f32>, nl: f32) -> f32 {
+fn sun_shadow(world: vec3<f32>, nl: f32, pixel:vec2<f32>) -> f32 {
+    if frame.rt_shadow.x>0.5 {return textureLoad(ao_texture,vec2<i32>(pixel),0).g;}
     if frame.vsm2.x > 0.5 {
         return vsm_shadow(world, nl);
     }
@@ -510,7 +511,7 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
     let kd = (vec3<f32>(1.0) - f) * (1.0 - metallic);
     var visibility = 1.0;
     if frame.sun_color.w > 0.5 && nl > 0.0 {
-        visibility = sun_shadow(i.world, max(dot(ng, l), 0.0));
+        visibility = sun_shadow(i.world, max(dot(ng, l), 0.0),i.clip.xy);
     }
     let direct = (kd * base.rgb / PI + spec) * frame.sun_color.rgb * frame.sun_dir.w * nl * visibility;
 

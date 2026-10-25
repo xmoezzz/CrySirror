@@ -1100,3 +1100,61 @@ extraction. ADR 0038 records this delivered capability increment.
   of workflow files were checked. No Rust/API implementation changed, so no new
   compilation or engine/hardware behavior is claimed for this documentation
   and workflow-removal change.
+
+## 2026-10-26 — Native hardware ray queries and shared PBR sun visibility
+
+- Implementation: migrated the default host to pinned wgpu 29.0.3 (resolved
+  core/HAL/types 29.0.4), retaining renderer/event-loop separation. Native
+  Vulkan/DX12/Metal adapters are selected by actual ray-query feature bits,
+  surface compatibility and AS limits, without vendor-name allowlists. Raster
+  devices do not opt into experimental features. Unsupported explicit hardware
+  requests fail with adapter/backend reasons. ADR 0051 records this contract.
+- Implementation: renderer-owned BLAS/TLAS, opaque primary rays and hard sun
+  queries; position-based AS cache, metadata-only uploads, move/removal handling
+  and recovery from abandoned encoders. PBR uses shared world/model/terrain/skin
+  geometry prepared on bounded workers, its existing depth/normal prepass and a
+  combined AO/visibility target. Other PBR shading remains in CrySirror's existing
+  pipeline. Engine overlays still compose after the primary-ray output.
+- Implementation: CLI reports adapter availability separately from device
+  enablement and exposes encoded build/query counters. Counters are not GPU
+  completion or performance evidence. Portable API support does not certify
+  dedicated RT silicon; that report field remains unverified/null.
+- Compilation/CPU validation: renderer unit suite passed 26 tests, with three
+  GPU tests ignored in that invocation. The synthetic capability matrix covers
+  native backends and vendor identifiers, missing features/limits, software
+  rejection and device opt-in. Geometry tests verify shared transformed/skinned
+  vertices. Shader validation uses Naga. API documentation regeneration/check
+  passed five tests without a signature/fingerprint change. Python tooling
+  passed 165 tests. `cargo check --locked --workspace --all-targets` passed.
+  The generated API fingerprint remains `df17e49431e56860`.
+- GPU backend behavior: explicit unit invocation on Apple M5 / Metal passed
+  all six tests (including two actual GPU pixel tests): primary hits/occlusion,
+  metadata recoloring without rebuild, moved/removed geometry, abandoned-build
+  recovery, and AO-preserving directional shadow/empty-scene output. Evidence:
+  `target/verification/hardware-rt-backend-gpu-tests.log`. The pinned Naga Metal
+  ready-flag loop issue was reproduced and avoided with single-proceed queries
+  for force-opaque triangles; this is not a candidate-processing implementation.
+- GPU integration behavior: on Apple M5 / Metal, the 120-triangle primary scene
+  matched the existing compute reference within the asserted pixel tolerance,
+  composited the engine's green overlay and reused its AS on a repeated frame.
+  The 24-triangle PBR floor/cube scene produced a measured shadow-on/off pixel
+  difference through native sun queries and rejected a masked material.
+  Evidence: `hardware-rt-{primary,pbr}-after-reset.log` and the rendered images
+  in `target/verification/hardware-rt/`. Initial renderer tests timed out while
+  even an empty GPU submission stalled; those failed runs are not passes.
+  Following device/session recovery, the above explicit tests passed. Capture
+  now tracks its submitted readback and returns a finite timeout with context.
+  The final-source integration invocation passed both tests together in 7.23s:
+  `target/verification/hardware-rt-renderer-gpu-final.log`.
+- GPU CLI/regression behavior: the real CLI raster/hardware selection and
+  encoded-work-report test passed on the recovered Metal device. The existing
+  raster PBR sky/lighting/sun-shadow pixel regression also passed. Evidence:
+  `hardware-rt-cli-render-final.log` and `hardware-rt-raster-pbr-final.log`.
+- Limits: single world-space BLAS geometry/identity TLAS instance, at most
+  1,000,000 primitives; no refit/compaction/per-mesh instancing, RT reflections,
+  RT GI or denoiser. Masked/transparent casters and custom fragment-discard
+  materials fail visibly. Fixed world-space ray bias is an initial profile.
+  Windows/Vulkan/DX12 and NVIDIA/AMD/Intel physical execution remain unverified.
+  Core/compat remain device-free and forbid unsafe code; the renderer isolates
+  wgpu's required unsafe experimental-consent token at explicit device opt-in.
+  No game data, fonts, proprietary SDKs or GitHub workflows were added.

@@ -364,9 +364,12 @@ fn run() -> Result<()> {
                 input
             };
             let instance = wgpu::Instance::default();
-            let gpu = Arc::new(pollster::block_on(Gpu::request(&instance, None))?);
+            let path: RenderingPath = renderer.into();
+            let gpu = Arc::new(pollster::block_on(Gpu::request_for(&instance, None, path))?);
             let adapter = format!("{:?}", gpu.adapter.get_info());
-            let path = renderer.into();
+            let hardware_raytracing = path == RenderingPath::HardwareRaytrace
+                && gpu.capabilities().hardware_raytrace;
+            let hardware_rt_report = gpu.hardware_rt_report();
             #[cfg(feature = "scripting")]
             if let (false, Some(dir)) = (script.is_empty(), &movie_dir) {
                 // Scripts keep running while the movie is captured.
@@ -391,7 +394,7 @@ fn run() -> Result<()> {
                 let rt = movie.0.into_runtime()?;
                 println!(
                     "{}",
-                    serde_json::json!({"output":output,"gpu":adapter,"renderer":path.name(),"stats":stats,"hardware_raytracing":false,"runtime":rt.inspect(),"audio_emitted":false})
+                    serde_json::json!({"output":output,"gpu":adapter,"renderer":path.name(),"stats":stats,"hardware_raytracing":hardware_raytracing,"hardware_rt_report":hardware_rt_report,"runtime":rt.inspect(),"audio_emitted":false})
                 );
                 return Ok(());
             }
@@ -417,7 +420,7 @@ fn run() -> Result<()> {
             };
             println!(
                 "{}",
-                serde_json::json!({"output":output,"gpu":adapter,"renderer":path.name(),"stats":stats,"hardware_raytracing":false,"runtime":rt.inspect(),"audio_emitted":false})
+                serde_json::json!({"output":output,"gpu":adapter,"renderer":path.name(),"stats":stats,"hardware_raytracing":hardware_raytracing,"hardware_rt_report":hardware_rt_report,"runtime":rt.inspect(),"audio_emitted":false})
             );
             Ok(())
         }
@@ -499,14 +502,22 @@ fn run() -> Result<()> {
         } => puppet_import(&sources, &out, key, samples),
         Command::GpuInfo => {
             let instance = wgpu::Instance::default();
+            // Inspect every available backend/adapter without requesting experimental
+            // features. The default device below remains a normal raster device.
+            let all_adapters: Vec<_> = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
+                .iter()
+                .map(|adapter| crysirror_wgpu::rt_capabilities::report(adapter, None))
+                .collect();
             let gpu = pollster::block_on(Gpu::request(&instance, None))?;
             let caps = gpu.capabilities();
             let features = gpu.adapter.features();
             println!(
                 "{}",
                 serde_json::json!({"adapter":format!("{:?}",gpu.adapter.get_info()),
-                "implemented":{"raster":caps.raster,"compute_raytrace":caps.compute_raytrace,"hardware_raytrace":caps.hardware_raytrace},
-                "adapter_advertises":{"ray_query":features.contains(wgpu::Features::RAY_QUERY),"acceleration_structures":features.contains(wgpu::Features::RAY_TRACING_ACCELERATION_STRUCTURE)}})
+                "implemented":{"raster":true,"compute_raytrace":true,"hardware_raytrace":true},
+                "default_device_enabled":{"raster":caps.raster,"compute_raytrace":caps.compute_raytrace,"hardware_raytrace":caps.hardware_raytrace},
+                "hardware_rt_report":gpu.hardware_rt_report(),"all_adapters":all_adapters,
+                "adapter_advertises":{"ray_query":features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY),"acceleration_structures":features.contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)}})
             );
             Ok(())
         }

@@ -104,29 +104,29 @@ impl Transitions {
         });
         let present_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("present"),
-            bind_group_layouts: &[&present_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&present_layout)],
+            immediate_size: 0,
         });
         let present = |entry: &str| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor { cache: None,
                 label: Some("present"),
                 layout: Some(&present_pl),
                 vertex: wgpu::VertexState {
                     module: &present_shader,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
                     buffers: &[],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &present_shader,
-                    entry_point: entry,
+                    entry_point: Some(entry),
                     compilation_options: Default::default(),
                     targets: &[Some(format.into())],
                 }),
                 primitive: Default::default(),
                 depth_stencil: None,
                 multisample: Default::default(),
-                multiview: None,
+                multiview_mask: None,
             })
         };
         let copy_pipeline = present("fs_copy");
@@ -167,53 +167,53 @@ impl Transitions {
         });
         let wipe_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wipe"),
-            bind_group_layouts: &[&wipe_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&wipe_layout)],
+            immediate_size: 0,
         });
-        let wipe_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let wipe_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor { cache: None,
             label: Some("siglus wipe"),
             layout: Some(&wipe_pl),
             vertex: wgpu::VertexState {
                 module: &wipe_shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &wipe_shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(raw_format.into())],
             }),
             primitive: Default::default(),
             depth_stencil: None,
             multisample: Default::default(),
-            multiview: None,
+            multiview_mask: None,
         });
         let dither_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("engine ordered dither"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ordered_dither.wgsl").into()),
         });
         let ordered_dither_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor { cache: None,
                 label: Some("engine ordered dither"),
                 layout: Some(&wipe_pl),
                 vertex: wgpu::VertexState {
                     module: &dither_shader,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
                     buffers: &[],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &dither_shader,
-                    entry_point: "fs_main",
+                    entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
                     targets: &[Some(raw_format.into())],
                 }),
                 primitive: Default::default(),
                 depth_stencil: None,
                 multisample: Default::default(),
-                multiview: None,
+                multiview_mask: None,
             });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("wipe sampler"),
@@ -402,9 +402,9 @@ impl Transitions {
                         },
                     ],
                 });
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { multiview_mask: None,
                     label: Some("engine screen transition"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { depth_slice: None,
                         view: &f.out.raw,
                         resolve_target: None,
                         ops: wgpu::Operations {
@@ -442,9 +442,9 @@ impl Transitions {
                 resource: wgpu::BindingResource::TextureView(present_src),
             }],
         });
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { multiview_mask: None,
             label: Some("present"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment { depth_slice: None,
                 view: target,
                 resolve_target: None,
                 ops: wgpu::Operations {

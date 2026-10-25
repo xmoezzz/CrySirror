@@ -159,7 +159,9 @@ pub fn movie_on(
     if let Some(image) = last {
         image.save_with_format(output, image::ImageFormat::Png)?;
     }
-    Ok(serde_json::json!({"movie_frames": frames, "movie_dir": dir, "step_ms": step_ms}))
+    Ok(serde_json::json!({"movie_frames": frames, "movie_dir": dir, "step_ms": step_ms,
+        "hardware_rt_report":renderer.gpu.hardware_rt_report(),
+        "hardware_rt_stats":renderer.hardware_rt_stats()}))
 }
 pub fn capture_on(
     gpu: Arc<Gpu>,
@@ -189,8 +191,9 @@ pub fn capture_on(
     image
         .save_with_format(path, image::ImageFormat::Png)
         .with_context(|| format!("save {}", path.display()))?;
-    // Renderer statistics of the captured frame (null without a PBR scene).
-    Ok(match renderer.pbr() {
+    // Resource reports and encoded-work counters accompany the captured frame;
+    // capability advertisement alone is not evidence that rays were dispatched.
+    let mut stats = match renderer.pbr() {
         Some(p) => {
             let (l, r, v, g) = (p.lod_stats(), p.probe_stats(), p.vsm_stats(), p.gi_stats());
             serde_json::json!({
@@ -201,8 +204,11 @@ pub fn capture_on(
                 "irradiance_volume": {"probes": g.probes, "refreshed": g.refreshed, "total_refreshed": g.total_refreshed, "sweeps": g.sweeps, "converged": g.converged},
             })
         }
-        None => serde_json::Value::Null,
-    })
+        None => serde_json::json!({}),
+    };
+    stats["hardware_rt_report"] = serde_json::to_value(renderer.gpu.hardware_rt_report())?;
+    stats["hardware_rt_stats"] = renderer.hardware_rt_stats().unwrap_or(serde_json::Value::Null);
+    Ok(stats)
 }
 impl App {
     pub fn run(core: Core, options: RunOptions) -> Result<()> {
@@ -273,9 +279,10 @@ impl App {
         );
         window.set_ime_allowed(true);
         let surface = self.instance.create_surface(window.clone())?;
-        let gpu = Arc::new(pollster::block_on(Gpu::request(
+        let gpu = Arc::new(pollster::block_on(Gpu::request_for(
             &self.instance,
             Some(&surface),
+            self.options.rendering_path,
         ))?);
         log::info!("GPU: {:?}", gpu.adapter.get_info());
         let caps = surface.get_capabilities(&gpu.adapter);
@@ -424,14 +431,20 @@ impl App {
             }
             Core::Plain(runtime) => self.audio.sync(runtime)?,
         }
-        let frame = match w.surface.get_current_texture() {
-            Ok(frame) => frame,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+        let (frame, reconfigure) = match w.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost => {
+                w.surface = self.instance.create_surface(w.window.clone())?;
                 w.surface.configure(&w.renderer.gpu.device, &w.config);
                 return Ok(());
             }
-            Err(wgpu::SurfaceError::Timeout) => return Ok(()),
-            Err(e) => bail!("surface error: {e}"),
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                w.surface.configure(&w.renderer.gpu.device, &w.config);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return Ok(()),
+            wgpu::CurrentSurfaceTexture::Validation => bail!("surface acquisition validation failed"),
         };
         let view = frame.texture.create_view(&Default::default());
         let rt = self.core.rt();
@@ -452,6 +465,7 @@ impl App {
         )?;
         w.window.pre_present_notify();
         frame.present();
+        if reconfigure { w.surface.configure(&w.renderer.gpu.device, &w.config); }
         self.presented += 1;
         if self
             .options

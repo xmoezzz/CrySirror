@@ -49,6 +49,7 @@ struct Frame {
     gi_center: vec4<f32>,
     gi_extent: vec4<f32>,
     gi_counts: vec4<f32>,
+    rt_shadow: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;

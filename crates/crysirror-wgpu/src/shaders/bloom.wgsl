@@ -27,7 +27,8 @@ fn fs_bloom_down(i: FsOut) -> @location(0) vec4<f32> {
         + textureSampleLevel(bloom_src, bloom_sampler, uv + t * vec2<f32>(0.0, 2.0), 0.0).rgb) * 0.0625;
     if bloom_step.params.z > 0.5 {
         // Karis average against fireflies on the first mip; drop non-finite input.
-        c = select(c, vec3<f32>(0.0), c != c || c > vec3<f32>(60000.0));
+        c = select(c, vec3<f32>(0.0), c != c);
+        c = select(c, vec3<f32>(0.0), c > vec3<f32>(60000.0));
         c = c / (1.0 + max(c.r, max(c.g, c.b)));
     }
     return vec4<f32>(c, 1.0);

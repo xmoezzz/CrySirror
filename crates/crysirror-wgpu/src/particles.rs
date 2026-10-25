@@ -96,18 +96,18 @@ impl Particles {
         });
         let layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("particles"),
-            bind_group_layouts: &[frame_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(frame_bgl)],
+            immediate_size: 0,
         });
         const ATTRS: [wgpu::VertexAttribute; 3] =
             wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32, 2 => Float32x4];
         let make = |entry: &str, blend: wgpu::BlendState| {
-            d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            d.create_render_pipeline(&wgpu::RenderPipelineDescriptor { cache: None,
                 label: Some("particles"),
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &module,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: 32,
                         step_mode: wgpu::VertexStepMode::Instance,
@@ -117,7 +117,7 @@ impl Particles {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: entry,
+                    entry_point: Some(entry),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: wgpu::TextureFormat::Rgba16Float,
                         blend: Some(blend),
@@ -131,8 +131,8 @@ impl Particles {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
@@ -140,7 +140,7 @@ impl Particles {
                     count: msaa,
                     ..Default::default()
                 },
-                multiview: None,
+                multiview_mask: None,
             })
         };
         let add = wgpu::BlendState {

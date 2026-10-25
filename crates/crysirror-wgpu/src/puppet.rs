@@ -65,8 +65,8 @@ impl PuppetRenderer {
         });
         let layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("puppet"),
-            bind_group_layouts: &[texture_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(texture_layout)],
+            immediate_size: 0,
         });
         let vertex = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as u64,
@@ -76,21 +76,21 @@ impl PuppetRenderer {
         let face = |compare, pass_op| wgpu::StencilFaceState { compare, fail_op: wgpu::StencilOperation::Keep, depth_fail_op: wgpu::StencilOperation::Keep, pass_op };
         let depth = |compare, pass_op| wgpu::DepthStencilState {
             format: STENCIL,
-            depth_write_enabled: false,
-            depth_compare: wgpu::CompareFunction::Always,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
             stencil: wgpu::StencilState { front: face(compare, pass_op), back: face(compare, pass_op), read_mask: 0xff, write_mask: 0xff },
             bias: Default::default(),
         };
         let pipeline = |label: &str, fs: &str, target: wgpu::ColorTargetState, ds: wgpu::DepthStencilState| {
-            d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            d.create_render_pipeline(&wgpu::RenderPipelineDescriptor { cache: None,
                 label: Some(label),
                 layout: Some(&layout),
-                vertex: wgpu::VertexState { module: &shader, entry_point: "vs_part", buffers: &[vertex.clone()], compilation_options: Default::default() },
-                fragment: Some(wgpu::FragmentState { module: &shader, entry_point: fs, targets: &[Some(target)], compilation_options: Default::default() }),
+                vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_part"), buffers: &[vertex.clone()], compilation_options: Default::default() },
+                fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some(fs), targets: &[Some(target)], compilation_options: Default::default() }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: Some(ds),
                 multisample: Default::default(),
-                multiview: None,
+                multiview_mask: None,
             })
         };
         let mut parts = HashMap::new();
@@ -110,15 +110,15 @@ impl PuppetRenderer {
             wgpu::ColorTargetState { format: PREMUL, blend: None, write_mask: wgpu::ColorWrites::empty() },
             depth(wgpu::CompareFunction::Always, wgpu::StencilOperation::Replace),
         );
-        let resolve = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let resolve = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor { cache: None,
             label: Some("puppet resolve"),
             layout: Some(&layout),
-            vertex: wgpu::VertexState { module: &shader, entry_point: "vs_full", buffers: &[], compilation_options: Default::default() },
-            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: "fs_unpremultiply", targets: &[Some(output.into())], compilation_options: Default::default() }),
+            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), buffers: &[], compilation_options: Default::default() },
+            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_unpremultiply"), targets: &[Some(output.into())], compilation_options: Default::default() }),
             primitive: Default::default(),
             depth_stencil: None,
             multisample: Default::default(),
-            multiview: None,
+            multiview_mask: None,
         });
         Self { parts, mask, resolve, targets: HashMap::new() }
     }
@@ -209,9 +209,9 @@ impl PuppetRenderer {
         let parts = frame.map_or(&[][..], |f| &f.parts[..]);
         let mut first = true;
         loop {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor { multiview_mask: None,
                 label: Some("puppet parts"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { depth_slice: None,
                     view: &target.premul,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -271,9 +271,9 @@ impl PuppetRenderer {
             }
         }
         {
-            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor { multiview_mask: None,
                 label: Some("puppet resolve"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { depth_slice: None,
                     view: output,
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },

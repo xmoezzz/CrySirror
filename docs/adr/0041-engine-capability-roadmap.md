@@ -66,7 +66,8 @@ Priorities:
 | Transparency, materials, shader effects | partial | 0015, 0016 | material graph and editor, OIT, refraction | P1 |
 | Decals, terrain, foliage | partial | 0014 | deferred decals, foliage instancing and wind | P1 |
 | Post FX (DOF, motion blur, color grading LUT) | missing | — | per-camera post stack | P1 |
-| Upscaling (FSR-class), hardware RT | missing | 0007 | open upscaler; wgpu RT when available | P2 |
+| Upscaling (FSR-class) | missing | 0007 | open upscaler | P2 |
+| Hardware RT | partial | 0051 | native opaque primary queries and PBR sun shadows; alpha candidates, per-mesh instancing/refit, RT reflections/GI, Vulkan/DX12 device validation remain | P1 |
 | 2D layers, filters, transitions, puppets, video | done | 0020–0022, 0029 | — | |
 
 ### Animation

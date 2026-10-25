@@ -66,18 +66,18 @@ impl RayTracer {
         });
         let pl = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("raytrace pipeline layout"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("software ray/triangle queries"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/raytrace.wgsl").into()),
         });
-        let pipeline = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let pipeline = d.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { cache: None,
             label: Some("compute raytrace"),
             layout: Some(&pl),
             module: &shader,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: Default::default(),
         });
         Self { pipeline, layout }

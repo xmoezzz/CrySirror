@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Real wgpu 0.20 backend, independent of winit and native VM instruction sets.
-#![forbid(unsafe_code)]
+//! wgpu backend, independent of winit and native VM instruction sets.
+#![deny(unsafe_code)]
 pub mod geometry;
 mod glyph_run;
+mod hardware_rt;
 pub mod lights;
 pub mod particles;
 pub mod pbr;
 pub mod probes;
 mod puppet;
+mod ray_geometry;
 mod raytrace;
+pub mod rt_capabilities;
 pub mod text;
 mod transition;
 pub mod vsm;
@@ -33,6 +36,15 @@ pub struct Gpu {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
 }
+// The only unsafe operation in this renderer is the upstream experimental-API
+// consent token. It never bypasses shader/AS validation or introduces pointers.
+#[allow(unsafe_code)]
+fn experimental_ray_query_token() -> wgpu::ExperimentalFeatures {
+    // SAFETY: explicit hardware-RT selection opts into wgpu's experimental
+    // ray-query contract. Only advertised features and validated bounds are
+    // requested; all AS construction/query calls use wgpu's checked APIs.
+    unsafe { wgpu::ExperimentalFeatures::enabled() }
+}
 impl Gpu {
     pub fn capabilities(&self) -> GraphicsCapabilities {
         GraphicsCapabilities {
@@ -44,39 +56,103 @@ impl Gpu {
                 .contains(wgpu::DownlevelFlags::COMPUTE_SHADERS)
                 && self.device.limits().max_storage_buffers_per_shader_stage >= 1
                 && self.device.limits().max_storage_textures_per_shader_stage >= 1,
-            hardware_raytrace: false,
+            hardware_raytrace: rt_capabilities::report(&self.adapter, Some(&self.device)).enabled,
         }
+    }
+    pub fn hardware_rt_report(&self) -> rt_capabilities::HardwareRtReport {
+        rt_capabilities::report(&self.adapter, Some(&self.device))
     }
     pub async fn request(
         instance: &wgpu::Instance,
         surface: Option<&wgpu::Surface<'_>>,
     ) -> Result<Self> {
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: surface,
-                force_fallback_adapter: false,
-            })
-            .await
-            .context("no suitable GPU adapter (headless Linux needs Vulkan/Mesa)")?;
-        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        Self::request_for(instance, surface, RenderingPath::Raster).await
+    }
+    /// Negotiate the explicitly requested path across compatible adapters. RT
+    /// features are never enabled as a side effect of a raster/compute request.
+    pub async fn request_for(
+        instance: &wgpu::Instance,
+        surface: Option<&wgpu::Surface<'_>>,
+        path: RenderingPath,
+    ) -> Result<Self> {
+        let adapter = if path == RenderingPath::HardwareRaytrace {
+            let all = instance.enumerate_adapters(wgpu::Backends::all()).await;
+            let mut diagnostics = Vec::new();
+            let mut candidates = Vec::new();
+            for adapter in all {
+                let report = rt_capabilities::report(&adapter, None);
+                let compatible = surface.is_none_or(|s| adapter.is_surface_supported(s));
+                diagnostics.push(format!(
+                    "{} [{}]: {}",
+                    report.adapter_name,
+                    report.backend,
+                    if !compatible {
+                        "surface incompatible"
+                    } else {
+                        report.reason.as_deref().unwrap_or("available")
+                    }
+                ));
+                if report.available && compatible {
+                    candidates.push(adapter);
+                }
+            }
+            candidates.sort_by_key(|a| match a.get_info().device_type {
+                wgpu::DeviceType::DiscreteGpu => 0,
+                wgpu::DeviceType::IntegratedGpu => 1,
+                wgpu::DeviceType::VirtualGpu => 2,
+                _ => 3,
+            });
+            candidates.into_iter().next().with_context(|| {
+                format!(
+                    "hardware ray tracing unavailable; {}",
+                    diagnostics.join("; ")
+                )
+            })?
+        } else {
+            instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: surface,
+                    force_fallback_adapter: false,
+                })
+                .await
+                .context("no suitable GPU adapter")?
+        };
+        let rt = path == RenderingPath::HardwareRaytrace;
+        let limits = if rt {
+            rt_capabilities::negotiate_limits(&adapter.limits())?
+        } else {
+            wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits())
+        };
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("CrySirror"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: limits,
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("CrySirror"),
+                required_features: if rt {
+                    wgpu::Features::EXPERIMENTAL_RAY_QUERY
+                } else {
+                    wgpu::Features::empty()
                 },
-                None,
-            )
+                required_limits: limits,
+                experimental_features: if rt {
+                    experimental_ray_query_token()
+                } else {
+                    wgpu::ExperimentalFeatures::disabled()
+                },
+                ..Default::default()
+            })
             .await?;
-        Ok(Self {
+        let gpu = Self {
             adapter,
             device,
             queue,
-        })
+        };
+        gpu.capabilities()
+            .require(path)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(gpu)
     }
 }
+
 struct Texture {
     bind: wgpu::BindGroup,
     view: wgpu::TextureView,
@@ -178,6 +254,7 @@ pub struct Renderer {
     depth: Option<Depth>,
     path: RenderingPath,
     raytracer: Option<raytrace::RayTracer>,
+    hardware_rt: Option<hardware_rt::HardwareRt>,
     /// Physically based path (ADR 0010); created on first use.
     pbr: Option<pbr::PbrRenderer>,
     transitions: transition::Transitions,
@@ -211,8 +288,8 @@ impl Renderer {
         });
         let quad_layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("quad layout"),
-            bind_group_layouts: &[&texture_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&texture_layout)],
+            immediate_size: 0,
         });
         let camera_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("camera layout"),
@@ -229,8 +306,8 @@ impl Renderer {
         });
         let mesh_layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mesh layout"),
-            bind_group_layouts: &[&camera_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&camera_layout)],
+            immediate_size: 0,
         });
         let quad_shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("quad shader"),
@@ -279,8 +356,8 @@ impl Renderer {
         });
         let filtered_layout = d.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("filtered quad layout"),
-            bind_group_layouts: &[&texture_layout, &filter_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&texture_layout), Some(&filter_layout)],
+            immediate_size: 0,
         });
         const MESH_ATTR: [wgpu::VertexAttribute; 3] =
             wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x4];
@@ -316,6 +393,7 @@ impl Renderer {
                 },
             };
             d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                cache: None,
                 label: Some("layer compositing"),
                 layout: Some(if filtered {
                     &filtered_layout
@@ -324,7 +402,7 @@ impl Renderer {
                 }),
                 vertex: wgpu::VertexState {
                     module: &quad_shader,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<Vertex2d>() as u64,
@@ -334,13 +412,14 @@ impl Renderer {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &quad_shader,
-                    entry_point: match (filtered, matches!(blend, Blend::Multiply | Blend::Screen))
-                    {
-                        (false, true) => "fs_premultiply",
-                        (false, false) => "fs_main",
-                        (true, true) => "fs_filtered_premultiply",
-                        (true, false) => "fs_filtered",
-                    },
+                    entry_point: Some(
+                        match (filtered, matches!(blend, Blend::Multiply | Blend::Screen)) {
+                            (false, true) => "fs_premultiply",
+                            (false, false) => "fs_main",
+                            (true, true) => "fs_filtered_premultiply",
+                            (true, false) => "fs_filtered",
+                        },
+                    ),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
@@ -354,17 +433,18 @@ impl Renderer {
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
-                multiview: None,
+                multiview_mask: None,
             })
         };
         let quad_pipelines: Vec<_> = blends.iter().map(|b| quad_pipeline(*b, false)).collect();
         let filtered_pipelines: Vec<_> = blends.iter().map(|b| quad_pipeline(*b, true)).collect();
         let mesh_pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            cache: None,
             label: Some("3D opaque"),
             layout: Some(&mesh_layout),
             vertex: wgpu::VertexState {
                 module: &mesh_shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex3d>() as u64,
@@ -374,7 +454,7 @@ impl Renderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -385,20 +465,21 @@ impl Renderer {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
         });
         let ray_composite_pipeline = d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            cache: None,
             label: Some("replace raytraced color"),
             layout: Some(&quad_layout),
             vertex: wgpu::VertexState {
                 module: &quad_shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex2d>() as u64,
@@ -408,7 +489,7 @@ impl Renderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &quad_shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
@@ -419,7 +500,7 @@ impl Renderer {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
         });
         let camera_buffer = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera"),
@@ -466,6 +547,7 @@ impl Renderer {
             depth: None,
             path: RenderingPath::Raster,
             raytracer: None,
+            hardware_rt: None,
             pbr: None,
             transitions: transition::Transitions::new(&gpu.device, &gpu.queue, format),
             transition: None,
@@ -536,6 +618,7 @@ impl Renderer {
             self.pbr = Some(pbr::PbrRenderer::new(self.gpu.clone(), self.format)?);
         }
         if let Some(p) = &mut self.pbr {
+            p.set_hardware_rt(self.path == RenderingPath::HardwareRaytrace)?;
             p.set_scene(scene);
         }
         Ok(())
@@ -543,10 +626,26 @@ impl Renderer {
     fn pbr_active(&self) -> bool {
         self.pbr.as_ref().is_some_and(|p| p.active())
     }
+    pub fn hardware_rt_stats(&self) -> Option<serde_json::Value> {
+        let stats = if self.pbr_active() {
+            self.pbr.as_ref()?.hardware_rt_stats()?
+        } else {
+            self.hardware_rt.as_ref()?.stats()
+        };
+        Some(
+            serde_json::json!({"builds_encoded":stats.builds_encoded,"primary_dispatches":stats.primary_dispatches,"shadow_dispatches":stats.shadow_dispatches,"triangles":stats.triangles}),
+        )
+    }
     pub fn set_rendering_path(&mut self, path: RenderingPath) -> Result<()> {
         self.gpu.capabilities().require(path).map_err(|e| {
-            anyhow::anyhow!("{e}; hardware ray tracing is not wired in this backend")
+            anyhow::anyhow!(
+                "{e}; {}",
+                self.gpu.hardware_rt_report().reason.unwrap_or_default()
+            )
         })?;
+        if let Some(p) = &mut self.pbr {
+            p.set_hardware_rt(path == RenderingPath::HardwareRaytrace)?;
+        }
         if path == RenderingPath::ComputeRaytrace && self.raytracer.is_none() {
             self.raytracer = Some(raytrace::RayTracer::new(&self.gpu));
         }
@@ -626,14 +725,14 @@ impl Renderer {
             view_formats: &[],
         });
         self.gpu.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             rgba,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
                 rows_per_image: Some(height),
@@ -737,7 +836,11 @@ impl Renderer {
                 assets.key(ClientId(owner), asset)?,
                 s.revision
             ),
-            None => format!("image:{}@{}", assets.key(ClientId(owner), asset)?,assets.revision(ClientId(owner))),
+            None => format!(
+                "image:{}@{}",
+                assets.key(ClientId(owner), asset)?,
+                assets.revision(ClientId(owner))
+            ),
         })
     }
     fn ensure_image(
@@ -755,10 +858,14 @@ impl Renderer {
                 .surface(ClientId(owner), asset)
                 .context("surface vanished")?
                 .clone();
-            self.upload(key.to_owned(), s.width, s.height, &s.rgba)?;return Ok(true);
+            self.upload(key.to_owned(), s.width, s.height, &s.rgba)?;
+            return Ok(true);
         }
-        let Some(image)=assets.image_for(ClientId(owner),asset)? else {return Ok(false)};
-        self.upload(key.to_owned(),image.width,image.height,&image.rgba)?;Ok(true)
+        let Some(image) = assets.image_for(ClientId(owner), asset)? else {
+            return Ok(false);
+        };
+        self.upload(key.to_owned(), image.width, image.height, &image.rgba)?;
+        Ok(true)
     }
     fn prepare(
         &mut self,
@@ -923,7 +1030,11 @@ impl Renderer {
         for (((p, key), fkeys), tex_keys) in
             frame.iter().zip(keys).zip(filter_keys).zip(puppet_textures)
         {
-            if fkeys.as_ref().is_some_and(|(a,b)| !self.textures.contains_key(a)||!self.textures.contains_key(b)){continue;}
+            if fkeys.as_ref().is_some_and(|(a, b)| {
+                !self.textures.contains_key(a) || !self.textures.contains_key(b)
+            }) {
+                continue;
+            }
             let color = match &p.paint {
                 Paint::Solid { color } => {
                     if !self.textures.contains_key(&key) {
@@ -931,15 +1042,26 @@ impl Renderer {
                     }
                     *color
                 }
-                Paint::Image { asset,tint }=>{if !self.ensure_image(assets,p.owner,asset,&key)?{continue;}*tint}
+                Paint::Image { asset, tint } => {
+                    if !self.ensure_image(assets, p.owner, asset, &key)? {
+                        continue;
+                    }
+                    *tint
+                }
                 Paint::Puppet { tint, .. } => {
                     let size = Self::puppet_size(p);
                     if !self.textures.contains_key(&key) {
                         self.render_texture(key.clone(), size)?;
                     }
-                    let mut ready=true;
-                    if let Some(f) = &p.puppet {for (t,k) in f.textures.iter().zip(&tex_keys){ready&=self.ensure_image(assets,p.owner,t,k)?;}}
-                    if !ready {continue;}
+                    let mut ready = true;
+                    if let Some(f) = &p.puppet {
+                        for (t, k) in f.textures.iter().zip(&tex_keys) {
+                            ready &= self.ensure_image(assets, p.owner, t, k)?;
+                        }
+                    }
+                    if !ready {
+                        continue;
+                    }
                     let textures = &self.textures;
                     self.puppets.render(
                         &self.gpu.device,
@@ -1129,10 +1251,34 @@ impl Renderer {
         // Compose into a retained frame; `transitions.finish` presents it.
         let frame_view = self.transitions.begin(&self.gpu.device, target.size);
         ensure!(
-            !(pbr_active && self.path != RenderingPath::Raster),
+            !(pbr_active && self.path == RenderingPath::ComputeRaytrace),
             "the PBR scene renders on the raster path only; compute ray tracing of PBR materials is not implemented"
         );
-        let ray_texture = if self.path == RenderingPath::ComputeRaytrace {
+        let ray_texture = if self.path == RenderingPath::HardwareRaytrace && !pbr_active {
+            let scene = self
+                .scene3d
+                .as_ref()
+                .context("hardware RT requires a 3D scene")?;
+            let triangles = ray_geometry::simple(scene)?;
+            let inverse =
+                glam::Mat4::from_cols_array_2d(&geometry::camera(scene, canvas)).inverse();
+            if self.hardware_rt.is_none() {
+                self.hardware_rt = Some(hardware_rt::HardwareRt::new(&self.gpu)?);
+            }
+            Some(
+                self.hardware_rt
+                    .as_mut()
+                    .context("hardware RT missing")?
+                    .encode_primary(
+                        &self.gpu,
+                        &triangles,
+                        inverse.to_cols_array_2d(),
+                        canvas,
+                        color,
+                        &mut encoder,
+                    )?,
+            )
+        } else if self.path == RenderingPath::ComputeRaytrace {
             Some(
                 self.raytracer
                     .as_ref()
@@ -1152,8 +1298,10 @@ impl Renderer {
         };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 label: Some("3D/background"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    depth_slice: None,
                     view: frame_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -1236,8 +1384,10 @@ impl Renderer {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 label: Some("raytrace composite"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    depth_slice: None,
                     view: frame_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -1257,8 +1407,10 @@ impl Renderer {
         }
         if let Some(buffer) = &quad_buffer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                multiview_mask: None,
                 label: Some("2D overlay"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    depth_slice: None,
                     view: frame_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -1331,8 +1483,15 @@ impl Renderer {
             canvas,
         );
         self.gpu.queue.submit(Some(encoder.finish()));
-        if let Some(p) = &mut self.pbr {
-            p.after_submit();
+        if self.path == RenderingPath::HardwareRaytrace && !pbr_active {
+            if let Some(rt) = &mut self.hardware_rt {
+                rt.mark_submitted();
+            }
+        }
+        if pbr_active {
+            if let Some(p) = &mut self.pbr {
+                p.after_submit();
+            }
         }
         Ok(())
     }
@@ -1397,15 +1556,15 @@ impl Renderer {
         });
         let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(stride),
                     rows_per_image: Some(height),
@@ -1417,14 +1576,28 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
-        self.gpu.queue.submit(Some(encoder.finish()));
+        // Track this readback, rather than whichever submission another engine
+        // task may enqueue before this thread polls the shared device.
+        let submission = self.gpu.queue.submit(Some(encoder.finish()));
         let slice = buffer.slice(..);
         let (tx, rx) = mpsc::channel();
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = tx.send(result);
         });
-        self.gpu.device.poll(wgpu::Maintain::Wait);
-        rx.recv().context("GPU map callback missing")??;
+        self.gpu
+            .device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(std::time::Duration::from_secs(20)),
+            })
+            .with_context(|| {
+                format!(
+                    "GPU capture {:?} did not finish within 20 seconds",
+                    self.path
+                )
+            })?;
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .context("GPU capture map callback missing")??;
         let data = slice.get_mapped_range();
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for row in data.chunks_exact(stride as usize).take(height as usize) {

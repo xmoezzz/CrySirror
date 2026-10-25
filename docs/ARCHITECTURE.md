@@ -134,9 +134,20 @@ replacement, hot reload and global/volumetric fog remain outside this interface.
 
 The optional compute-raytrace path traces primary and directional shadow rays
 against the extracted transformed triangles and composites the same overlays afterward.
-Hardware ray tracing is a separate unsupported capability. Selection is explicit
-in CLI/host state; a VM/save never stores device-specific handles. See ADR 0003
-for the bounded prototype's limits and actual Metal execution evidence.
+Native hardware ray queries are a separate capability, negotiated through actual
+Vulkan/DX12/Metal adapter features and limits (ADR 0051). The renderer builds
+BLAS/TLAS for opaque triangles and offers simple primary/hard-shadow rays or
+hybrid PBR sun visibility. PBR uses the same world transforms, current skin pose
+and material ownership; immutable CPU snapshots are prepared on bounded workers.
+The AO/visibility texture preserves the existing material binding budget.
+Changed positions rebuild the AS, material metadata updates do not, and removed
+geometry clears it. Only successful submission commits the cache build state.
+Masked/transparent casters and custom fragment-discard shaders fail visibly.
+Raster/compute remain independent selections and need no experimental RT opt-in.
+Selection is explicit in CLI/host state; a VM/save never stores device-specific
+handles. Native API eligibility, enabled device features, encoded commands and
+physically verified pixels are separate evidence. See ADR 0003 for the bounded
+compute prototype, ADR 0051 for native RT limits, and STATUS.md for actual GPUs.
 
 The legacy service text contract accepts simple-horizontal-v1. The newer engine
 Text API uses shared shaping/bidi, rich styles, ruby/vertical layout and reveal
