@@ -1,8 +1,9 @@
 # 0049: Bounded engine workers and asynchronous resources
 
-Date: 2026-10-26. Status: implemented; compilation/behavior evidence is recorded
-separately in STATUS.md. This is the first multithreaded engine execution layer,
-not a claim that every subsystem or GPU operation runs asynchronously.
+Date: 2026-10-26. Status: implemented **stage one only**; compilation/behavior
+evidence is recorded separately in STATUS.md. [ADR 0050](0050-engine-wide-async-execution.md)
+requires asynchronous/multithreaded support across the entire engine. This
+worker/asset/pose implementation does not complete that requirement.
 
 ## Ownership
 

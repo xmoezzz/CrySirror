@@ -222,3 +222,13 @@ script and fixed-step physics state retain their ordered execution.
 
 See [ADR 0049](adr/0049-multithreaded-tasks-and-async-assets.md) for cancellation,
 backpressure, revision invalidation, API usage and remaining synchronous paths.
+
+## Engine-wide asynchronous execution requirement (2026-10-26)
+
+[ADR 0050](adr/0050-engine-wide-async-execution.md) is the accepted target for
+all engine subsystems, including World, physics, rendering, text/UI, audio/video,
+scripts/native VMs, save/restore and MCP. The current worker pools and asset/pose
+paths are stage one. Present owner-thread limitations are migration work, not
+permanent exemptions. Thread affinity and native ordering remain explicit graph
+dependencies/commit boundaries. Validation is local; GitHub CI was removed at
+the owner's request and must not be restored without explicit authorization.

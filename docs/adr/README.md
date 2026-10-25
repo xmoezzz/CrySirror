@@ -62,6 +62,7 @@ moves to `done` only with recorded behavior evidence.
 | R9 | Load Blender models | 0007, 0010 | glTF 2.0 import incl. textured PBR; .blend via Blender CLI export |
 | R10 | Ray tracing | 0003, 0007 | compute RT exists; hardware RT needs wgpu upgrade |
 | R11 | DLSS-class upscaling | 0007 | capability contract only; vendor SDKs not distributed |
+| R12 | Asynchronous/multithreaded execution across every engine subsystem | 0049, 0050 | required; only initial assets/pose stage implemented |
 
 ## Parallel service work (Codex, 2026-10-25)
 
@@ -81,4 +82,5 @@ moves to `done` only with recorded behavior evidence.
 | [0045](0045-rapier-shared-physics.md) | Persistent Rapier 3D physics shared by data projects, native clients and engine APIs | rigid-body simulation and integration validation |
 | [0046](0046-native-image-resource-pipeline.md) | All pinned image decoder IDs through the shared runtime, object API and renderer | 96 image IDs, per-variant limits and actual Metal archive-render evidence |
 | [0048](0048-reallive-vm-engine-apis.md) | Pure RealLive VM and semantic adapter over reusable retained Canvas/GlyphRun/UI/audio/Media APIs | API bridge implemented; opening-profile evidence separate |
-| [0049](0049-multithreaded-tasks-and-async-assets.md) | Bounded CPU/asset workers, awaitable reads, asynchronous image/model imports and parallel poses | implemented; validation in STATUS |
+| [0049](0049-multithreaded-tasks-and-async-assets.md) | Bounded CPU/asset workers, awaitable reads, asynchronous image/model imports and parallel poses | stage one implemented; engine-wide requirement in 0050 |
+| [0050](0050-engine-wide-async-execution.md) | Engine-wide asynchronous/multithreaded execution and explicit subsystem migration; local validation, no unsolicited GitHub CI | accepted requirement; partially implemented |

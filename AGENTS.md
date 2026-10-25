@@ -12,6 +12,12 @@ Read STATUS.md, docs/ARCHITECTURE.md and docs/NATIVE_ADAPTERS.md before editing.
   that VM. A running game, matching screenshot or registered factory alone
   does not establish capability extraction or completed integration.
 
+- Async/multithreaded execution is an engine-wide requirement (ADR 0050).
+  Asset loading and pose workers in ADR 0049 are only stage one; every subsystem
+  needs explicit task/dependency, completion and ownership boundaries.
+- Do not add, restore or enable GitHub CI/workflows or remote build automation
+  without a new explicit owner request. Run validation locally by default.
+
 - Default host: wgpu + winit. Switch and PS Vita are deferred; no other console.
 - RFVP and Siglus remain separate original VMs, never aliases for the data VM.
 - Preserve opcode, value, wait, resource and original-save semantics in adapters.

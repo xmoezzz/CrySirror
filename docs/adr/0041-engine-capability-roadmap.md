@@ -38,7 +38,7 @@ Priorities:
 | Virtual file system, capability roots | done | 0006 | async I/O and streaming reads | P1 |
 | Save/load of engine state | partial | SAVE_FORMAT | versioned migrations of saves across schema changes | P0 |
 | Generated API docs and change log | done | docs/api | — | |
-| Job system / multithreaded frame (simulation ∥ render) | partial | 0049 | bounded CPU/asset workers, async imports and parallel poses implemented; general frame task graph and simulation/render overlap remain | P1 |
+| Engine-wide async / multithreaded frame (simulation ∥ render) | partial; mandatory across all subsystems | 0049, 0050 | stage one covers assets/poses only; frame graph, completion boundaries and every subsystem migration remain | P0 |
 | Deterministic fixed step, replay | partial | 0012 | input recording and replay files | P2 |
 
 ### Assets and pipeline
@@ -113,7 +113,7 @@ Priorities:
 | Debug draw, console, in-game stats | missing | — | debug-draw API, command console | P1 |
 | MCP/automation tools | done | MCP.md | — | |
 | Networking (replication, RPC) | missing | — | client/server replication of world state | P2 |
-| Platforms (Windows/macOS/Linux desktop) | partial | — | CI matrix; mobile and web are out of scope for now | P1 |
+| Platforms (Windows/macOS/Linux desktop) | partial | — | local platform validation; no GitHub CI without owner request; mobile and web remain deferred | P1 |
 | Consoles (Switch, Vita) | deferred | AGENTS.md | — | |
 
 ### Compatibility targets (secondary, ADR 0010)

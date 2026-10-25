@@ -92,9 +92,8 @@ cargo run --locked -p crysirror-desktop -- run examples/desktop/project.json --n
 ```
 
 On Debian/Ubuntu, desktop builds typically need native development packages for
-ALSA, X11/XKB and Wayland. The CI workflow lists the exact installation commands
-it proposes to use. Build without audio when those audio libraries are not
-available:
+ALSA, X11/XKB and Wayland. Validate against the local platform libraries.
+Build without audio when those audio libraries are not available:
 
 ```sh
 cargo run -p crysirror-desktop --no-default-features -- run examples/desktop/project.json --no-audio
@@ -198,9 +197,13 @@ python3 tools/verify.py --gpu
 ```
 
 `verify.py` exits with an error if cargo is absent. Python tests are never
-reported as Rust or GPU tests. The GitHub Actions definition covers Linux,
-Windows and macOS build/test jobs plus real Linux pixel/window smoke tests;
-**that workflow has not been run for this snapshot**.
+reported as Rust or GPU tests. Validation is local by default. GitHub CI has
+been removed at the owner's request; do not add or enable remote build automation
+without explicit authorization. Cross-platform results require actual evidence.
+
+[ADR 0050](docs/adr/0050-engine-wide-async-execution.md) requires asynchronous,
+multithreaded support throughout the engine. Current asset/pose workers are
+only stage one.
 
 ## Connecting the original VMs
 

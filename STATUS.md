@@ -1080,3 +1080,23 @@ extraction. ADR 0038 records this delivered capability increment.
 - Evidence: target/verification/async-{workspace-check.log,workspace-tests.log,
   final-desktop-check.log,python-tests.log,gpu-tests.log,probe-regression.log};
   the new focused tests and ADR 0049 are committed without external game data.
+
+## 2026-10-26 — Owner scope: no GitHub CI, engine-wide async requirement
+
+- Removed `.github/workflows/ci.yml`. GitHub workflow `desktop-and-contracts`
+  (396111179) was disabled; run 40221613250 was cancelled and subsequently
+  verified as completed with conclusion `cancelled`. No other active workflow
+  was returned by the repository workflow listing. Existing historical run
+  records were not deleted.
+- Added accepted ADR 0050: asynchronous/multithreaded execution is required
+  across every engine subsystem. It defines task/dependency, completion,
+  ownership, backpressure and cancellation boundaries plus subsystem migration
+  and acceptance criteria. ADR 0049 is explicitly stage one; the present
+  asset/pose work does not complete the engine-wide requirement.
+- Recorded the owner's no-unsolicited-CI policy in AGENTS.md and ADR 0050;
+  validation stays local unless the owner explicitly requests remote automation.
+  Updated architecture, roadmap and README references to match.
+- Validation: local Python tooling passed 165 tests; Markdown links and absence
+  of workflow files were checked. No Rust/API implementation changed, so no new
+  compilation or engine/hardware behavior is claimed for this documentation
+  and workflow-removal change.

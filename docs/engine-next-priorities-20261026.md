@@ -67,7 +67,7 @@ Runtime 已有 staged restore 和 schema/identity 校验；物理逻辑状态可
 
 ### 7. 把已跑通的本机切片变成桌面发布回归
 
-Windows/Linux/macOS 的 CI matrix 已写在 `.github/workflows/ci.yml`，但配置存在不是三平台通过的证据。当前公开行为记录以本机 macOS/Metal 为主，声卡／手柄、长时间运行、device loss、打包后相对路径和资源恢复仍需实际结果。硬件 RT 仍是明确未支持能力；已有 compute raytrace prototype 不等同硬件 RT。
+GitHub CI 已按所有者要求删除，验证默认在本地执行；未经明确要求不得恢复。Windows/Linux/macOS 的支持分别需要实际运行证据。当前公开行为记录以本机 macOS/Metal 为主，声卡／手柄、长时间运行、device loss、打包后相对路径和资源恢复仍需实际结果。硬件 RT 仍是明确未支持能力；已有 compute raytrace prototype 不等同硬件 RT。
 
 **验收：** 在三个实际 runner 上各跑同一自造 2D 原生服务切片与一个 3D playable slice，核对图像/输入/存档、声卡与注入 PCM 分别验证、无设备 headless 路径、renderer/device 重建和独立安装包。保留 ignored 与显式运行结果的区别，不把物理微基准或单张图片 capture 当作整机帧率。
 
@@ -76,3 +76,5 @@ Windows/Linux/macOS 的 CI matrix 已写在 `.github/workflows/ci.yml`，但配�
 共享机制包括：受限文件与随机读流、图片 entropy/像素解码、glyph raster、已对照的 bitmap 数学、PCM resample/mix、logical surface publication、engine clock/input delivery。原生政策包括：NLS 字节扫描、FOLDNAME/扩展名优先级与 case-insensitive 查找、G00 pattern 原点、消息窗口固定网格与禁则、DC/transition/manual-refresh、long-op/wait/read/savepoint，以及 voice archive 的 sample 和 loop 定义。
 
 BGI 的共享桥证明前一类可以在 CrySirror 内完成，并不证明后一类可以跨 VM 复用。RealLive 首个 profile 完成后，应把实际保留的原生模块、已共享的调用点和拒绝的功能逐项列出，而不是只写“RealLive 已接入”。
+
+全引擎异步／多线程是 ADR 0050 的强制架构要求；ADR 0049 的资源加载和姿态计算只是第一阶段，不代表已经完成全引擎改造。
