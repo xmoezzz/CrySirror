@@ -243,3 +243,21 @@ paths are stage one. Present owner-thread limitations are migration work, not
 permanent exemptions. Thread affinity and native ordering remain explicit graph
 dependencies/commit boundaries. Validation is local; GitHub CI was removed at
 the owner's request and must not be restored without explicit authorization.
+
+## Frame pipeline, profiling and streamed cells (2026-10-26)
+
+[ADR 0052](adr/0052-frame-pipeline-streaming-and-profiling.md) adds a bounded
+dependency graph for immutable PBR/simple/layer extraction. Desktop polls one
+pending snapshot and retains one ready snapshot while owner simulation advances.
+Restore and resource-store identity invalidate stale snapshots. Simulation/VM
+ordering remains on its owner; this is partial progress on ADR 0050.
+
+Streaming cells prepare entity hierarchies and PBR resources on workers, publish
+at most two ready cells per frame, and use resource leases for cancellation and
+unload. Offline tools have an explicit readiness fence without another logical
+tick. GPU uploads and collision cooking still need asynchronous budgets.
+
+The shared Profiler exports bounded CPU traces, stage percentiles and optional
+completed GPU durations with separate clocks. Native PBR RT now shares local
+mesh BLAS across TLAS instances and retains unchanged CPU geometry. See
+[FRAME_PIPELINE.md](FRAME_PIPELINE.md) for public showcase commands and limits.

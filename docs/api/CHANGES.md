@@ -4,6 +4,19 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `e3a0831acf720cb7` (2026-10-26): frame task graph, streaming resources and profiler
+
+- Add the `Profiler` class and `profiler` singleton with `snapshot`, `trace` and
+  `clear`. CPU traces include worker threads/frame IDs; GPU durations retain a
+  separate uncalibrated clock and completed-sample semantics.
+- Extend asset kinds with `scene` (baked entities) and `level` (PBR hierarchy and
+  decoded model), backed by the same scoped background resource service.
+- Rust callers with exhaustive `AssetKind` matches must handle the new variants.
+- **Breaking behavior:** streaming volumes publish ready hierarchies on a later
+  owner frame. Callers must observe readiness rather than assume immediate load
+  after crossing a radius. Existing hierarchy, placement, collision and save
+  data remain ordinary engine state. Resource leases/jobs are never saved.
+
 ## `df17e49431e56860` (2026-10-26): asynchronous assets and shared CPU workers
 
 - Add `Assets.load/status/cancel/release/stats` and the `assets` script global.

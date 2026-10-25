@@ -22,7 +22,7 @@ use crate::{
     object::{Class, ClassRegistry, ObjectTable},
     script::ScriptHost,
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::service::InputFrame;
 use crysirror_runtime::Runtime;
 use std::{collections::VecDeque, sync::Arc};
@@ -99,6 +99,7 @@ impl App {
         builtin::register(&mut classes)?;
         Ok(Self {
             cx: EngineContext::new(EngineState {
+                streaming: Default::default(),
                 runtime,
                 client,
                 classes,
@@ -155,6 +156,11 @@ impl App {
     }
     pub fn runtime(&self) -> Result<&Runtime> {
         Ok(&self.cx.state_ref()?.runtime)
+    }
+    /// Explicit offline tool fence; publishes ready streaming cells without a
+    /// second simulation/script tick. Live hosts keep polling ordinary frames.
+    pub fn prepare_render_offline(&mut self) -> Result<()> {
+        crate::systems::finish_streaming_offline(&mut self.cx)
     }
     pub fn quit_requested(&self) -> bool {
         self.cx
@@ -275,6 +281,8 @@ impl App {
     }
     fn run_frame(&mut self, dt_ms: u64, input: InputFrame) -> Result<()> {
         ensure!(dt_ms <= 60_000, "frame delta exceeds 60 s");
+        let profiler = self.runtime()?.profiler();
+        let _span = profiler.span(profiler.frame() + 1, "engine.frame");
         let step = {
             let s = self.cx.state()?;
             s.input = input;

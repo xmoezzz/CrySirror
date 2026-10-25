@@ -150,7 +150,7 @@ pub fn negotiate_limits(adapter_limits: &wgpu::Limits) -> Result<wgpu::Limits> {
         .max_blas_primitive_count
         .min(MAX_RT_PRIMITIVES);
     limits.max_blas_geometry_count = 1;
-    limits.max_tlas_instance_count = 1;
+    limits.max_tlas_instance_count = adapter_limits.max_tlas_instance_count.min(4096);
     limits.max_acceleration_structures_per_shader_stage = 1;
     ensure!(
         limits.check_limits(adapter_limits),
@@ -281,7 +281,10 @@ mod tests {
         let request = negotiate_limits(&adapter).unwrap();
         assert_eq!(request.max_blas_primitive_count, 17);
         assert_eq!(request.max_blas_geometry_count, 1);
-        assert_eq!(request.max_tlas_instance_count, 1);
+        assert_eq!(
+            request.max_tlas_instance_count,
+            adapter.max_tlas_instance_count.min(4096)
+        );
         assert_eq!(request.max_acceleration_structures_per_shader_stage, 1);
         assert!(request.check_limits(&adapter));
         assert_eq!(

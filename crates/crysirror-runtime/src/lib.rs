@@ -2,6 +2,7 @@
 //! Shared desktop runtime. Native engine adapters are registered explicitly.
 #![forbid(unsafe_code)]
 pub mod assets;
+pub mod frame;
 pub mod media;
 pub mod model;
 pub mod physics;

@@ -5,6 +5,8 @@ hardware behavior must be recorded separately in STATUS.md. This decision
 introduces an initial hardware ray-query path, not a completed path tracer or
 blanket compatibility with every PBR material/geometry variant.
 
+The initial single-world-BLAS profile below is extended by [ADR 0052](0052-frame-pipeline-streaming-and-profiling.md): PBR shadows now share local mesh BLAS across TLAS instances. The simple primary profile retains its original bounds.
+
 ## Decision
 
 Use CrySirror's shared scene/material ownership and the native ray-query API

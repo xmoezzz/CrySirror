@@ -6,14 +6,14 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `df17e49431e56860`
+API fingerprint: `e3a0831acf720cb7`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
 ## Contents
 
 - [Globals](#globals)
-- Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [World](#class-world)
+- Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [World](#class-world)
 - [Commands](#commands)
 - Data: [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
 - [Adapter configs](#adapter-configs)
@@ -39,6 +39,7 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 | `canvases` | [Canvases](#class-canvases) |
 | `media` | [Media](#class-media) |
 | `assets` | [Assets](#class-assets) |
+| `profiler` | [Profiler](#class-profiler) |
 
 ## Class Assets
 
@@ -48,7 +49,7 @@ Script global: `assets`.
 
 | Method | Returns | Description |
 |---|---|---|
-| `load(path: string, kind: string)` | `number` | Queue bytes, image or model import without blocking. Returns a client-owned request id; duplicate requests share a job. |
+| `load(path: string, kind: string)` | `number` | Queue bytes, image, model or baked scene or PBR level import without blocking. Returns a client-owned request id; duplicate requests share a job. |
 | `status(id: number)` | `Record<string, any>` | Poll loading/ready/failed/cancelled status and error. This never waits for disk or decoding. |
 | `cancel(id: number)` | `void` | Request cooperative cancellation of a loading asset. Late worker results cannot publish. |
 | `release(id: number)` | `void` | Release a request and its CPU cache entry; cancel work if pending. Does not remove existing scene entities or GPU copies. |
@@ -377,6 +378,19 @@ Client-scoped generational joint declaration; native solver handles remain priva
 | `destroy(—)` | `void` | Remove this joint; stale calls fail. |
 
 
+## Class Profiler
+
+Bounded engine CPU timings and optional completed GPU timestamp samples. Diagnostics never serialize device state into project saves.
+
+Script global: `profiler`.
+
+| Method | Returns | Description |
+|---|---|---|
+| `snapshot(—)` | `Record<string, any>` | Stage sample counts, mean/p50/p95/max microseconds and dropped-sample counts. GPU and CPU clocks are not calibrated. |
+| `trace(—)` | `Record<string, any>` | Export retained CPU spans as Chrome trace JSON, including worker threads and frame IDs. GPU durations are reported separately by snapshot. |
+| `clear(—)` | `void` | Clear retained diagnostics without resetting the engine frame identity or simulation. |
+
+
 ## Class Puppets
 
 2D deformable puppets on layers whose paint is {kind:'puppet', asset} (engine rig JSON; import E-mote with `crysirror puppet-import`).
@@ -606,6 +620,8 @@ Used by: `Assets.load(path, kind)`.
 | `bytes` | — | — |
 | `image` | — | — |
 | `model` | — | — |
+| `scene` | — | Baked CPU world entities for non-PBR level streaming. |
+| `level` | — | PBR level hierarchy and decoded model prepared together. |
 
 ### AssetState
 

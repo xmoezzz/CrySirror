@@ -253,3 +253,8 @@ dirty worktree, does not force-push, and defaults to private visibility.
 New code and self-authored demo assets: MPL-2.0. See [LICENSE](LICENSE) and
 [NOTICE.md](NOTICE.md). Upstream/third-party code and user assets keep their own
 licenses. No proprietary console SDK or game material is bundled.
+
+The [frame pipeline and profiling guide](docs/FRAME_PIPELINE.md) includes public
+Khronos showcase recipes for shared RT mesh instances and asynchronous level
+streaming. `run --profile PATH` exports a CPU Chrome trace and GPU timing
+diagnostics. This advances ADR 0050; engine-wide async migration remains partial.

@@ -88,9 +88,7 @@ fn hardware_primary_matches_compute_geometry_and_composes_engine_overlay() {
     );
     eprintln!("hardware encoded stats {}", hw_stats.unwrap());
     std::fs::create_dir_all(artifact_dir()).unwrap();
-    images[1]
-        .save(artifact_dir().join("primary.png"))
-        .unwrap();
+    images[1].save(artifact_dir().join("primary.png")).unwrap();
 }
 fn pbr(root: &std::path::Path, shadow: bool) -> Runtime {
     std::fs::create_dir(root.join("assets")).unwrap();
@@ -127,6 +125,54 @@ fn pbr_hardware_sun_shadows_change_actual_pixels_and_reject_masked_materials() {
         assert!(stats["shadow_dispatches"].as_u64().unwrap() > 0);
         assert_eq!(stats["primary_dispatches"], 0);
         eprintln!("PBR shadow stats {stats}");
+        assert_eq!(
+            stats["resident_blas"], 1,
+            "identical cube topology shares one BLAS"
+        );
+        assert_eq!(stats["instances"], 2);
+        if shadows {
+            renderer
+                .capture(
+                    &rt.host.scene,
+                    &mut rt.assets,
+                    [192, 128],
+                    rt.project.background,
+                )
+                .unwrap();
+            assert_eq!(
+                renderer.hardware_rt_stats().unwrap()["tlas_builds_encoded"],
+                stats["tlas_builds_encoded"],
+                "static frame must reuse TLAS"
+            );
+            let moved=serde_json::from_value(json!({"world":[{"op":"set_transform","id":2,"transform":{"translation":[0.8,0.5,0]}}]})).unwrap();
+            rt.host.engine.submit(ClientId(1), &moved).unwrap();
+            renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
+            let moved_image = renderer
+                .capture(
+                    &rt.host.scene,
+                    &mut rt.assets,
+                    [192, 128],
+                    rt.project.background,
+                )
+                .unwrap();
+            let moved_stats = renderer.hardware_rt_stats().unwrap();
+            assert_eq!(
+                moved_stats["blas_builds_encoded"], stats["blas_builds_encoded"],
+                "rigid move rebuilds only TLAS"
+            );
+            assert!(
+                moved_stats["tlas_builds_encoded"].as_u64().unwrap()
+                    > stats["tlas_builds_encoded"].as_u64().unwrap()
+            );
+            assert!(
+                image
+                    .pixels()
+                    .zip(moved_image.pixels())
+                    .filter(|(a, b)| a != b)
+                    .count()
+                    > 100
+            );
+        }
         shots.push(image);
         let mask = serde_json::from_value(
             json!({"world":[{"op":"set_material","id":2,"material":{"alpha_mode":"mask"}}]}),
@@ -143,6 +189,19 @@ fn pbr_hardware_sun_shadows_change_actual_pixels_and_reject_masked_materials() {
             )
             .unwrap_err();
         assert!(format!("{error:#}").contains("opaque casters"));
+        renderer.set_rendering_path(RenderingPath::Raster).unwrap();
+        renderer
+            .capture(
+                &rt.host.scene,
+                &mut rt.assets,
+                [192, 128],
+                rt.project.background,
+            )
+            .unwrap();
+        assert!(
+            renderer.hardware_rt_stats().is_none(),
+            "explicit raster selection releases RT state and accepts masked materials"
+        );
     }
     let darkened = shots[0]
         .pixels()

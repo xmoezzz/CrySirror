@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Background scoped reads/imports. Only poll/resolve commits results to Assets.
 use super::Assets;
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::ClientStorage,
@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 static NEXT_STORE: AtomicU64 = AtomicU64::new(1);
@@ -23,6 +23,10 @@ pub enum AssetKind {
     Bytes,
     Image,
     Model,
+    /// Baked CPU world entities for non-PBR level streaming.
+    Scene,
+    /// PBR level hierarchy and decoded model prepared together.
+    Level,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -48,6 +52,12 @@ pub struct AssetStatus {
     pub bytes: usize,
 }
 enum Prepared {
+    Level(
+        Arc<crysirror_asset::ImportedModel>,
+        Arc<crysirror_asset::pbr::PbrModel>,
+        usize,
+    ),
+    Scene(Arc<crysirror_asset::ImportedModel>, usize),
     Bytes(Arc<[u8]>),
     Image(Arc<crysirror_image::ImageSurface>),
     Model(Arc<crysirror_asset::pbr::PbrModel>, usize),
@@ -57,16 +67,36 @@ impl Prepared {
         match self {
             Self::Bytes(b) => b.len(),
             Self::Image(i) => i.rgba.len(),
-            Self::Model(_, bytes) => *bytes,
+            Self::Model(_, bytes) | Self::Scene(_, bytes) | Self::Level(_, _, bytes) => *bytes,
         }
     }
 }
+/// A scoped pin; releasing the final pin allows managed streaming cache eviction.
+pub struct AssetLease {
+    ticket: AssetTicket,
+    pins: Arc<AtomicUsize>,
+}
+impl AssetLease {
+    pub fn ticket(&self) -> AssetTicket {
+        self.ticket
+    }
+}
+impl Drop for AssetLease {
+    fn drop(&mut self) {
+        self.pins.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 struct Entry {
+    pins: Arc<AtomicUsize>,
+    automatic: bool,
+    leased: bool,
+    touched: std::time::Instant,
     status: AssetStatus,
     job: Option<Task<Prepared>>,
     value: Option<Prepared>,
 }
 pub(super) struct AsyncAssets {
+    budget: usize,
     store: u64,
     next: u64,
     io: TaskPool,
@@ -84,6 +114,7 @@ impl AsyncAssets {
             .saturating_sub(2)
             .clamp(2, 4);
         Ok(Self {
+            budget: 256 * 1024 * 1024,
             store: NEXT_STORE.fetch_add(1, Ordering::Relaxed),
             next: 1,
             io: TaskPool::new("assets", 2, 64)?,
@@ -100,21 +131,26 @@ impl AsyncAssets {
             t.store == self.store && t.client == client.0,
             "foreign asset ticket"
         );
-        self.entries.get(&t.id).context("asset ticket released")
+        let entry = self.entries.get(&t.id).context("asset ticket released")?;
+        ensure!(entry.status.ticket == t, "foreign asset ticket");
+        Ok(entry)
     }
     fn finish(&mut self, id: u64, result: Result<Prepared>) {
         let e = self.entries.get_mut(&id).unwrap();
         match result {
             Ok(value) => {
                 let bytes = value.bytes();
-                if bytes > 256 * 1024 * 1024
+                if bytes > self.budget
                     || self
                         .resident
                         .checked_add(bytes)
-                        .is_none_or(|n| n > 256 * 1024 * 1024)
+                        .is_none_or(|n| n > self.budget)
                 {
                     e.status.state = AssetState::Failed;
-                    e.status.error = Some("prepared assets exceed 256 MiB".into());
+                    e.status.error = Some(format!(
+                        "prepared assets exceed {} MiB budget",
+                        self.budget / (1024 * 1024)
+                    ));
                 } else {
                     self.resident += bytes;
                     e.status.bytes = bytes;
@@ -207,6 +243,36 @@ impl Source {
         Ok(Arc::from(bytes))
     }
 }
+fn load_model(
+    source: &Source,
+    name: &str,
+    bytes: &[u8],
+    cancel: &Cancellation,
+    decoders: &crysirror_image::DecoderRegistry,
+) -> Result<crysirror_asset::pbr::PbrModel> {
+    let dir = name
+        .rsplit_once('/')
+        .map(|(d, _)| format!("{d}/"))
+        .unwrap_or_default();
+    let model = crysirror_asset::pbr::load_pbr_with_decoder(
+        bytes,
+        |uri| {
+            source
+                .read(&format!("{dir}{uri}"), cancel)
+                .map(|b| b.to_vec())
+        },
+        |uri, data| {
+            let dependency = |p: &str| {
+                source
+                    .read(p, cancel)
+                    .map(|b| b.to_vec())
+                    .map_err(|e| crysirror_core::Error::Io(format!("{e:#}")))
+            };
+            decoders.decode_with(&format!("{dir}{uri}"), data, Some(&dependency), None, None)
+        },
+    )?;
+    Ok(model)
+}
 impl Assets {
     /// Desktop uses nonblocking loading; captures/offline tools explicitly wait.
     pub fn set_nonblocking(&mut self, value: bool) {
@@ -214,6 +280,19 @@ impl Assets {
     }
     pub fn is_nonblocking(&self) -> bool {
         self.asynchronous.nonblocking
+    }
+    /// Host policy only: bounded CPU prepared-cache budget, not total RAM/VRAM.
+    pub fn set_prepared_budget(&mut self, bytes: usize) -> Result<()> {
+        ensure!(
+            (16 * 1024 * 1024..=4u64 * 1024 * 1024 * 1024).contains(&(bytes as u64))
+                && bytes >= self.asynchronous.resident,
+            "invalid prepared asset budget or below live residency"
+        );
+        self.asynchronous.budget = bytes;
+        Ok(())
+    }
+    pub fn store_id(&self) -> u64 {
+        self.asynchronous.store
     }
     pub fn cpu_tasks(&self) -> TaskPool {
         self.asynchronous.cpu.clone()
@@ -255,11 +334,35 @@ impl Assets {
         path: &str,
         kind: AssetKind,
     ) -> Result<AssetTicket> {
+        self.request_inner(client, path, kind, true)
+    }
+    pub fn lease(&mut self, client: ClientId, path: &str, kind: AssetKind) -> Result<AssetLease> {
+        let ticket = self.request_inner(client, path, kind, false)?;
+        let e = self.asynchronous.entries.get_mut(&ticket.id).unwrap();
+        e.leased = true;
+        e.pins.fetch_add(1, Ordering::AcqRel);
+        Ok(AssetLease {
+            ticket,
+            pins: e.pins.clone(),
+        })
+    }
+    fn request_inner(
+        &mut self,
+        client: ClientId,
+        path: &str,
+        kind: AssetKind,
+        explicit: bool,
+    ) -> Result<AssetTicket> {
         let path = VfsPath::new(Mount::Asset, path)?.relative().to_owned();
         self.key(client, &path)?;
         let key = (client, kind, path.clone());
         if let Some(id) = self.asynchronous.keys.get(&key) {
-            return Ok(self.asynchronous.entries[id].status.ticket);
+            let entry = self.asynchronous.entries.get_mut(id).unwrap();
+            entry.touched = std::time::Instant::now();
+            if explicit {
+                entry.automatic = false;
+            }
+            return Ok(entry.status.ticket);
         }
         ensure!(
             self.asynchronous.entries.len() < 4096,
@@ -278,7 +381,10 @@ impl Assets {
         let source = self.source(client)?;
         let decoders = self.decoders.clone();
         let name = path.clone();
+        let profiler = self.profiler.clone();
+        let frame = profiler.frame();
         let job = self.asynchronous.io.spawn(move |cancel| {
+            let _span = profiler.span(frame, format!("asset.{kind:?}.read_prepare"));
             let bytes = source.read(&name, &cancel)?;
             match kind {
                 AssetKind::Bytes => Ok(Prepared::Bytes(bytes)),
@@ -294,34 +400,32 @@ impl Assets {
                     cancel.check()?;
                     Ok(Prepared::Image(Arc::new(image)))
                 }
-                AssetKind::Model => {
+                AssetKind::Scene | AssetKind::Level => {
                     let dir = name
                         .rsplit_once('/')
                         .map(|(d, _)| format!("{d}/"))
                         .unwrap_or_default();
-                    let model = crysirror_asset::pbr::load_pbr_with_decoder(
-                        &bytes,
-                        |uri| {
-                            source
-                                .read(&format!("{dir}{uri}"), &cancel)
-                                .map(|b| b.to_vec())
-                        },
-                        |uri, data| {
-                            let dependency = |p: &str| {
-                                source
-                                    .read(p, &cancel)
-                                    .map(|b| b.to_vec())
-                                    .map_err(|e| crysirror_core::Error::Io(format!("{e:#}")))
-                            };
-                            decoders.decode_with(
-                                &format!("{dir}{uri}"),
-                                data,
-                                Some(&dependency),
-                                None,
-                                None,
-                            )
-                        },
-                    )?;
+                    let options = crysirror_asset::ImportOptions {
+                        reference_asset: (kind == AssetKind::Level).then(|| name.clone()),
+                        ..Default::default()
+                    };
+                    let scene = crysirror_asset::import_gltf(&bytes, &options, |uri| {
+                        source
+                            .read(&format!("{dir}{uri}"), &cancel)
+                            .map(|b| b.to_vec())
+                    })?;
+                    cancel.check()?;
+                    let accounted = serde_json::to_vec(&scene.entities)?.len();
+                    if kind == AssetKind::Level {
+                        let model = load_model(&source, &name, &bytes, &cancel, &decoders)?;
+                        let size = accounted + model_bytes(&model);
+                        Ok(Prepared::Level(Arc::new(scene), Arc::new(model), size))
+                    } else {
+                        Ok(Prepared::Scene(Arc::new(scene), accounted))
+                    }
+                }
+                AssetKind::Model => {
+                    let model = load_model(&source, &name, &bytes, &cancel, &decoders)?;
                     cancel.check()?;
                     let accounted = model_bytes(&model);
                     Ok(Prepared::Model(Arc::new(model), accounted))
@@ -338,6 +442,10 @@ impl Assets {
         self.asynchronous.entries.insert(
             id,
             Entry {
+                pins: Arc::new(AtomicUsize::new(0)),
+                automatic: !explicit,
+                leased: false,
+                touched: std::time::Instant::now(),
                 status: AssetStatus {
                     ticket,
                     path,
@@ -365,6 +473,22 @@ impl Assets {
     }
     pub fn poll_tasks(&mut self) {
         self.asynchronous.poll()
+    }
+    /// Explicit offline readiness fence. Interactive hosts use task_status.
+    pub fn wait_task(&mut self, client: ClientId, ticket: AssetTicket) -> Result<AssetStatus> {
+        self.asynchronous.entry(client, ticket)?;
+        if let Some(job) = self
+            .asynchronous
+            .entries
+            .get_mut(&ticket.id)
+            .unwrap()
+            .job
+            .take()
+        {
+            let result = job.wait();
+            self.asynchronous.finish(ticket.id, result);
+        }
+        self.task_status(client, ticket)
     }
     pub fn task_status(&mut self, client: ClientId, ticket: AssetTicket) -> Result<AssetStatus> {
         self.poll_tasks();
@@ -396,6 +520,13 @@ impl Assets {
     }
     pub fn release_task(&mut self, client: ClientId, ticket: AssetTicket) -> Result<()> {
         self.asynchronous.entry(client, ticket)?;
+        ensure!(
+            self.asynchronous.entries[&ticket.id]
+                .pins
+                .load(Ordering::Acquire)
+                == 0,
+            "asset is pinned by a streaming lease"
+        );
         let e = self.asynchronous.entries.remove(&ticket.id).unwrap();
         self.asynchronous.resident -= e.status.bytes;
         self.asynchronous
@@ -436,10 +567,10 @@ impl Assets {
         client: ClientId,
         path: &str,
     ) -> Result<Option<Arc<crysirror_image::ImageSurface>>> {
-        let ticket = match self.request(client, path, AssetKind::Image) {
+        let ticket = match self.request_inner(client, path, AssetKind::Image, false) {
             Ok(t) => t,
             Err(e) if self.is_nonblocking() && e.is::<crysirror_tasks::CapacityExceeded>() => {
-                return Ok(None)
+                return Ok(None);
             }
             Err(e) => return Err(e),
         };
@@ -454,10 +585,21 @@ impl Assets {
         client: ClientId,
         path: &str,
     ) -> Result<Option<Arc<crysirror_asset::pbr::PbrModel>>> {
-        let ticket = match self.request(client, path, AssetKind::Model) {
+        self.poll_tasks();
+        if let Some(id) = self
+            .asynchronous
+            .keys
+            .get(&(client, AssetKind::Level, path.to_owned()))
+        {
+            if let Some(Prepared::Level(_, model, _)) = self.asynchronous.entries[id].value.as_ref()
+            {
+                return Ok(Some(model.clone()));
+            }
+        }
+        let ticket = match self.request_inner(client, path, AssetKind::Model, false) {
             Ok(t) => t,
             Err(e) if self.is_nonblocking() && e.is::<crysirror_tasks::CapacityExceeded>() => {
-                return Ok(None)
+                return Ok(None);
             }
             Err(e) => return Err(e),
         };
@@ -467,8 +609,55 @@ impl Assets {
             _ => unreachable!(),
         }
     }
+    /// Consume only a ready CPU import; this never joins a worker.
+    pub fn ready_scene(
+        &mut self,
+        client: ClientId,
+        ticket: AssetTicket,
+    ) -> Result<Arc<crysirror_asset::ImportedModel>> {
+        self.poll_tasks();
+        let entry = self.asynchronous.entry(client, ticket)?;
+        match entry.value.as_ref() {
+            Some(Prepared::Scene(v, _)) | Some(Prepared::Level(v, _, _)) => Ok(v.clone()),
+            _ => anyhow::bail!("scene import not ready"),
+        }
+    }
+    /// Evict only automatically managed, unpinned and unshared payloads.
+    /// Explicit request IDs remain owned until their caller releases them.
+    pub fn collect_unused(&mut self) -> usize {
+        let ids: Vec<_> = self
+            .asynchronous
+            .entries
+            .iter()
+            .filter(|(_, e)| {
+                let shared = match &e.value {
+                    Some(Prepared::Bytes(v)) => Arc::strong_count(v) > 1,
+                    Some(Prepared::Image(v)) => Arc::strong_count(v) > 1,
+                    Some(Prepared::Model(v, _)) => Arc::strong_count(v) > 1,
+                    Some(Prepared::Scene(v, _)) => Arc::strong_count(v) > 1,
+                    Some(Prepared::Level(v, m, _)) => {
+                        Arc::strong_count(v) > 1 || Arc::strong_count(m) > 1
+                    }
+                    None => false,
+                };
+                e.automatic
+                    && e.pins.load(Ordering::Acquire) == 0
+                    && !shared
+                    && (e.leased
+                        || (e.status.state != AssetState::Loading
+                            && e.touched.elapsed().as_secs() >= 5))
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        let count = ids.len();
+        for id in ids {
+            let ticket = self.asynchronous.entries[&id].status.ticket;
+            let _ = self.release_task(ClientId(ticket.client), ticket);
+        }
+        count
+    }
     pub fn tasks_inspect(&self) -> serde_json::Value {
-        serde_json::json!({"nonblocking":self.asynchronous.nonblocking,"resident_bytes":self.asynchronous.resident,"io":self.asynchronous.io.stats(),"cpu":self.asynchronous.cpu.stats(),"assets":self.asynchronous.entries.values().map(|e|&e.status).collect::<Vec<_>>()})
+        serde_json::json!({"budget_bytes":self.asynchronous.budget,"nonblocking":self.asynchronous.nonblocking,"resident_bytes":self.asynchronous.resident,"io":self.asynchronous.io.stats(),"cpu":self.asynchronous.cpu.stats(),"assets":self.asynchronous.entries.values().map(|e|&e.status).collect::<Vec<_>>()})
     }
 }
 

@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MPL-2.0
 use crysirror_core::{
+    Error,
     path::{Mount, VfsPath},
     service::{ClientStorage, InputFrame},
     state::ClientId,
-    Error,
 };
 use crysirror_runtime::{
-    assets::{AssetKind, AssetState, Assets},
     Runtime,
+    assets::{AssetKind, AssetState, Assets},
 };
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Condvar, Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -133,25 +133,31 @@ fn reads_are_real_futures_scoped_deduplicated_and_failures_are_visible() {
     );
     let other = a.request(ClientId(2), "same", AssetKind::Bytes).unwrap();
     assert!(a.task_status(ClientId(2), first).is_err());
+    let forged = crysirror_runtime::assets::AssetTicket { client: 1, ..other };
+    assert!(a.task_status(ClientId(1), forged).is_err());
+    assert!(a.release_task(ClientId(1), forged).is_err());
     assert_eq!(ready(&mut a, other).state, AssetState::Ready);
     assert_eq!(a.read_for(ClientId(2), "same").unwrap().as_ref(), b"two");
     let bad = a.request(ClientId(1), "missing", AssetKind::Image).unwrap();
     let status = ready(&mut a, bad);
     assert_eq!(status.state, AssetState::Failed);
     assert!(status.error.is_some());
-    assert!(a
-        .request(ClientId(1), "../escape", AssetKind::Bytes)
-        .is_err());
+    assert!(
+        a.request(ClientId(1), "../escape", AssetKind::Bytes)
+            .is_err()
+    );
     a.release_task(ClientId(1), bad).unwrap();
     assert!(a.task_status(ClientId(1), bad).is_err());
 }
 struct Decoder(Arc<AtomicUsize>);
 impl crysirror_image::ImageDecoder for Decoder {
     fn decode(&self, _: &[u8]) -> anyhow::Result<crysirror_image::ImageSurface> {
-        assert!(std::thread::current()
-            .name()
-            .unwrap_or("")
-            .starts_with("crysirror-assets-"));
+        assert!(
+            std::thread::current()
+                .name()
+                .unwrap_or("")
+                .starts_with("crysirror-assets-")
+        );
         self.0.fetch_add(1, Ordering::Relaxed);
         Ok(crysirror_image::ImageSurface {
             width: 1,
@@ -235,14 +241,102 @@ fn renderer_defers_backpressure_and_ready_tickets_do_not_consume_loading_quota()
         );
     }
     rx.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert!(a
-        .request(ClientId(1), "extra", AssetKind::Bytes)
-        .unwrap_err()
-        .is::<crysirror_tasks::CapacityExceeded>());
+    assert!(
+        a.request(ClientId(1), "extra", AssetKind::Bytes)
+            .unwrap_err()
+            .is::<crysirror_tasks::CapacityExceeded>()
+    );
     assert!(a.image_for(ClientId(1), "later.png").unwrap().is_none());
     release(&gate);
     for ticket in tickets {
         assert_eq!(ready(&mut a, ticket).state, AssetState::Ready);
     }
     assert!(a.request(ClientId(1), "extra", AssetKind::Bytes).is_ok());
+}
+
+#[test]
+fn streaming_leases_pin_shared_models_and_evict_only_after_gpu_style_references_drop() {
+    let t = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/engine/assets/lantern.glb"),
+        t.path().join("lantern.glb"),
+    )
+    .unwrap();
+    let mut assets = Assets::new(t.path()).unwrap();
+    assets.register(ClientId(1), "").unwrap();
+    let lease = assets
+        .lease(ClientId(1), "lantern.glb", AssetKind::Level)
+        .unwrap();
+    let ticket = lease.ticket();
+    assert_eq!(ready(&mut assets, ticket).state, AssetState::Ready);
+    assert!(assets.release_task(ClientId(1), ticket).is_err());
+    let model = assets
+        .model_for(ClientId(1), "lantern.glb")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        assets.tasks_inspect()["assets"].as_array().unwrap().len(),
+        1,
+        "level shares decoded model with renderer"
+    );
+    drop(lease);
+    assert_eq!(assets.collect_unused(), 0, "renderer still holds the model");
+    drop(model);
+    assert_eq!(assets.collect_unused(), 1);
+    assert!(assets.task_status(ClientId(1), ticket).is_err());
+    let lease = assets
+        .lease(ClientId(1), "lantern.glb", AssetKind::Bytes)
+        .unwrap();
+    let explicit = assets
+        .request(ClientId(1), "lantern.glb", AssetKind::Bytes)
+        .unwrap();
+    ready(&mut assets, explicit);
+    drop(lease);
+    assert_eq!(
+        assets.collect_unused(),
+        0,
+        "explicit caller retains its request"
+    );
+    assets.release_task(ClientId(1), explicit).unwrap();
+}
+
+#[test]
+fn released_streaming_lease_cancels_pending_publication() {
+    let t = tempfile::tempdir().unwrap();
+    let mut a = Assets::new(t.path()).unwrap();
+    a.register(ClientId(1), "").unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let guard = Release(gate.clone());
+    a.refresh_storage(
+        ClientId(1),
+        Arc::new(Slow {
+            started: Mutex::new(Some(tx)),
+            gate,
+        }),
+    )
+    .unwrap();
+    let lease = a.lease(ClientId(1), "slow", AssetKind::Bytes).unwrap();
+    let ticket = lease.ticket();
+    rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    drop(lease);
+    assert_eq!(a.collect_unused(), 1);
+    assert!(a.task_status(ClientId(1), ticket).is_err());
+    drop(guard);
+}
+
+#[test]
+fn host_asset_budget_is_bounded_and_cannot_drop_below_live_residency() {
+    let t = tempfile::tempdir().unwrap();
+    std::fs::write(t.path().join("blob"), vec![7u8; 17 * 1024 * 1024]).unwrap();
+    let mut a = Assets::new(t.path()).unwrap();
+    a.register(ClientId(1), "").unwrap();
+    assert!(a.set_prepared_budget(1).is_err());
+    a.set_prepared_budget(32 * 1024 * 1024).unwrap();
+    let t = a.request(ClientId(1), "blob", AssetKind::Bytes).unwrap();
+    assert_eq!(ready(&mut a, t).state, AssetState::Ready);
+    assert!(a.set_prepared_budget(16 * 1024 * 1024).is_err());
+    a.release_task(ClientId(1), t).unwrap();
+    a.set_prepared_budget(16 * 1024 * 1024).unwrap();
 }

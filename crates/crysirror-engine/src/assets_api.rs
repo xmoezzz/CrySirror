@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Nonblocking asset requests shared by Rust, scripts and the renderer.
 use crate::{
-    object::{Class, ClassInfo, ClassRegistry, MethodInfo, ObjectId, TypeHint as T},
     EngineContext, Value,
+    object::{Class, ClassInfo, ClassRegistry, MethodInfo, ObjectId, TypeHint as T},
 };
 use anyhow::{Context, Result};
 use crysirror_runtime::assets::AssetKind;
@@ -15,7 +15,7 @@ impl Class for AssetsClass {
     fn info(&self) -> &ClassInfo {
         static INFO: OnceLock<ClassInfo> = OnceLock::new();
         INFO.get_or_init(||ClassInfo{name:"Assets",doc:"Client-scoped asynchronous resource loading on bounded engine workers. Ready models/images feed the normal renderer.",properties:vec![],methods:vec![
-  MethodInfo{name:"load",params:vec![("path",T::String),("kind",T::String)],returns:T::Int,doc:"Queue bytes, image or model import without blocking. Returns a client-owned request id; duplicate requests share a job."},
+  MethodInfo{name:"load",params:vec![("path",T::String),("kind",T::String)],returns:T::Int,doc:"Queue bytes, image, model or baked scene or PBR level import without blocking. Returns a client-owned request id; duplicate requests share a job."},
   MethodInfo{name:"status",params:vec![("id",T::Int)],returns:T::Map,doc:"Poll loading/ready/failed/cancelled status and error. This never waits for disk or decoding."},
   MethodInfo{name:"cancel",params:vec![("id",T::Int)],returns:T::Void,doc:"Request cooperative cancellation of a loading asset. Late worker results cannot publish."},
   MethodInfo{name:"release",params:vec![("id",T::Int)],returns:T::Void,doc:"Release a request and its CPU cache entry; cancel work if pending. Does not remove existing scene entities or GPU copies."},
@@ -42,7 +42,9 @@ impl Class for AssetsClass {
                     "bytes" => AssetKind::Bytes,
                     "image" => AssetKind::Image,
                     "model" => AssetKind::Model,
-                    _ => anyhow::bail!("asset kind must be bytes, image or model"),
+                    "scene" => AssetKind::Scene,
+                    "level" => AssetKind::Level,
+                    _ => anyhow::bail!("asset kind must be bytes, image, model, scene or level"),
                 };
                 Ok(Value::Int(i64::try_from(
                     assets.request(client, path, kind)?.id,

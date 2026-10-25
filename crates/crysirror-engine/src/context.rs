@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 
 /// Everything the OOP API can reach. Device handles never live here.
 pub struct EngineState {
+    pub streaming: crate::systems::StreamingRuntime,
     /// Project/VM scheduler: shared World/Layer/UI, VFS and native VM sessions.
     pub runtime: Runtime,
     /// The project client that engine-level code (Rust behaviours, scripts)
@@ -35,13 +36,17 @@ pub struct EngineState {
     /// Resource formats and client-scoped decode profiles (no game keys saved).
     pub resources: crate::resource_api::ResourceRuntime,
     /// Arcade vehicles by entity (ADR 0043); not saved yet.
-    pub vehicles: std::collections::HashMap<(u32, u32), (crate::vehicle::VehicleSpec, crate::vehicle::VehicleState)>,
+    pub vehicles: std::collections::HashMap<
+        (u32, u32),
+        (crate::vehicle::VehicleSpec, crate::vehicle::VehicleState),
+    >,
 }
 impl EngineState {
     /// Sync derived physics with the current world and return it.
     pub fn physics(&mut self) -> anyhow::Result<&crate::physics::Physics> {
         self.runtime.physics.set_query_client(self.client.0);
-        self.runtime.physics
+        self.runtime
+            .physics
             .sync(&self.runtime.host.engine.world, &mut self.runtime.host.fs)?;
         Ok(&self.runtime.physics)
     }

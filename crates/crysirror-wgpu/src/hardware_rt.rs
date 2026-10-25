@@ -52,6 +52,31 @@ pub(crate) struct HardwareRtStats {
     pub primary_dispatches: u64,
     pub shadow_dispatches: u64,
     pub triangles: usize,
+    pub blas_builds_encoded: u64,
+    pub tlas_builds_encoded: u64,
+    pub resident_blas: usize,
+    pub instances: usize,
+    pub cpu_geometry_hits: u64,
+    pub cpu_geometry_misses: u64,
+}
+#[derive(Clone)]
+pub(crate) struct RtInstance {
+    pub triangles: std::sync::Arc<Vec<RtTriangle>>,
+    pub transform: [[f32; 4]; 4],
+}
+struct CachedMesh {
+    positions: Vec<[f32; 3]>,
+    vertices: wgpu::Buffer,
+    blas: wgpu::Blas,
+    submitted: bool,
+}
+#[derive(Default)]
+struct InstanceScene {
+    lookup: std::collections::HashMap<usize, (u64, std::sync::Weak<Vec<RtTriangle>>)>,
+    meshes: std::collections::BTreeMap<u64, CachedMesh>,
+    tlas: Option<wgpu::Tlas>,
+    signature: Vec<(u64, [u32; 12])>,
+    submitted: bool,
 }
 struct AccelerationScene {
     hash: u64,
@@ -65,6 +90,9 @@ struct AccelerationScene {
 /// and PBR directional visibility. Geometry changes rebuild native AS; material
 /// metadata changes do not. All work is encoded into the caller's GPU graph.
 pub(crate) struct HardwareRt {
+    instanced: InstanceScene,
+    pending_world: bool,
+    pending_instances: bool,
     primary: wgpu::ComputePipeline,
     primary_layout: wgpu::BindGroupLayout,
     shadow: wgpu::ComputePipeline,
@@ -164,6 +192,9 @@ impl HardwareRt {
             "clear",
         );
         Ok(Self {
+            instanced: Default::default(),
+            pending_world: false,
+            pending_instances: false,
             clear_shadow,
             clear_shadow_layout,
             primary,
@@ -174,6 +205,14 @@ impl HardwareRt {
             stats: HardwareRtStats::default(),
         })
     }
+    pub fn clear(&mut self) {
+        self.scene = None;
+        self.instanced = Default::default();
+        self.pending_world = false;
+        self.pending_instances = false;
+        self.stats.instances = 0;
+        self.stats.resident_blas = 0;
+    }
     pub fn stats(&self) -> HardwareRtStats {
         self.stats
     }
@@ -182,9 +221,200 @@ impl HardwareRt {
     /// A dropped/error encoder leaves `submitted=false` and the next encode
     /// rebuilds instead of incorrectly assuming that the GPU saw the build.
     pub fn mark_submitted(&mut self) {
-        if let Some(scene) = &mut self.scene {
-            scene.submitted = true;
+        if self.pending_world {
+            if let Some(scene) = &mut self.scene {
+                scene.submitted = true;
+            }
         }
+        if self.pending_instances {
+            for mesh in self.instanced.meshes.values_mut() {
+                mesh.submitted = true;
+            }
+            self.instanced.submitted = true;
+        }
+        self.pending_world = false;
+        self.pending_instances = false;
+    }
+    fn prepare_instances(
+        &mut self,
+        gpu: &Gpu,
+        instances: &[RtInstance],
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<()> {
+        use std::collections::BTreeSet;
+        self.pending_instances = true;
+        self.pending_world = false;
+        ensure!(
+            instances.len() <= gpu.device.limits().max_tlas_instance_count as usize,
+            "hardware RT instance budget exceeded"
+        );
+        let mut used = BTreeSet::new();
+        let mut used_ptrs = BTreeSet::new();
+        let mut signature = Vec::with_capacity(instances.len());
+        let mut total = 0usize;
+        for instance in instances {
+            let matrix = glam::Mat4::from_cols_array_2d(&instance.transform);
+            check_matrix(instance.transform)?;
+            ensure!(
+                matrix.x_axis.w == 0.
+                    && matrix.y_axis.w == 0.
+                    && matrix.z_axis.w == 0.
+                    && matrix.w_axis.w == 1.,
+                "RT instance transform must be affine"
+            );
+            if instance.triangles.is_empty() {
+                continue;
+            }
+            total = total
+                .checked_add(instance.triangles.len())
+                .context("RT triangle count overflow")?;
+            let ptr = std::sync::Arc::as_ptr(&instance.triangles) as usize;
+            used_ptrs.insert(ptr);
+            let cached = self.instanced.lookup.get(&ptr).and_then(|(hash, weak)| {
+                weak.upgrade()
+                    .filter(|a| std::sync::Arc::ptr_eq(a, &instance.triangles))
+                    .map(|_| *hash)
+            });
+            let hash = if let Some(hash) = cached {
+                hash
+            } else {
+                let positions = checked_positions(&instance.triangles, &gpu.device.limits())?;
+                let hash = geometry_hash(&positions);
+                if let Some(mesh) = self.instanced.meshes.get(&hash) {
+                    ensure!(mesh.positions == positions, "RT geometry hash collision");
+                } else {
+                    let retained = self
+                        .instanced
+                        .meshes
+                        .iter()
+                        .filter(|(h, _)| used.contains(*h))
+                        .map(|(_, m)| m.positions.len() / 3)
+                        .sum::<usize>();
+                    ensure!(
+                        retained + positions.len() / 3
+                            <= crate::rt_capabilities::MAX_RT_PRIMITIVES as usize
+                            && used.len() < 1024,
+                        "RT unique mesh budget exceeded"
+                    );
+                    let vertices =
+                        gpu.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("RT local mesh vertices"),
+                                contents: bytemuck::cast_slice(&positions),
+                                usage: wgpu::BufferUsages::BLAS_INPUT,
+                            });
+                    let blas = gpu.device.create_blas(
+                        &wgpu::CreateBlasDescriptor {
+                            label: Some("RT shared mesh BLAS"),
+                            flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+                            update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+                        },
+                        wgpu::BlasGeometrySizeDescriptors::Triangles {
+                            descriptors: vec![geometry_size(positions.len())?],
+                        },
+                    );
+                    self.instanced.meshes.insert(
+                        hash,
+                        CachedMesh {
+                            positions,
+                            vertices,
+                            blas,
+                            submitted: false,
+                        },
+                    );
+                }
+                self.instanced
+                    .lookup
+                    .insert(ptr, (hash, std::sync::Arc::downgrade(&instance.triangles)));
+                hash
+            };
+            used.insert(hash);
+            let cols = instance.transform;
+            let transform = [
+                cols[0][0], cols[1][0], cols[2][0], cols[3][0], cols[0][1], cols[1][1], cols[2][1],
+                cols[3][1], cols[0][2], cols[1][2], cols[2][2], cols[3][2],
+            ];
+            signature.push((hash, transform.map(f32::to_bits)));
+        }
+        self.instanced.meshes.retain(|h, _| used.contains(h));
+        self.instanced
+            .lookup
+            .retain(|ptr, _| used_ptrs.contains(ptr));
+        let unique = self
+            .instanced
+            .meshes
+            .values()
+            .map(|m| m.positions.len() / 3)
+            .sum::<usize>();
+        ensure!(
+            unique <= crate::rt_capabilities::MAX_RT_PRIMITIVES as usize && used.len() <= 1024,
+            "RT unique mesh/primitive budget exceeded"
+        );
+        self.stats.instances = signature.len();
+        self.stats.resident_blas = used.len();
+        self.stats.triangles = total;
+        if signature.is_empty() {
+            self.instanced.tlas = None;
+            self.instanced.signature.clear();
+            self.instanced.submitted = false;
+            return Ok(());
+        }
+        let rebuild = signature != self.instanced.signature
+            || !self.instanced.submitted
+            || self.instanced.meshes.values().any(|m| !m.submitted);
+        if rebuild {
+            self.instanced.submitted = false;
+            let mut tlas = gpu.device.create_tlas(&wgpu::CreateTlasDescriptor {
+                label: Some("RT mesh instances TLAS"),
+                max_instances: signature.len() as u32,
+                flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
+                update_mode: wgpu::AccelerationStructureUpdateMode::Build,
+            });
+            for (i, (hash, transform)) in signature.iter().enumerate() {
+                tlas[i] = Some(wgpu::TlasInstance::new(
+                    &self.instanced.meshes[hash].blas,
+                    transform.map(f32::from_bits),
+                    0,
+                    0xff,
+                ));
+            }
+            let meshes: Vec<_> = self
+                .instanced
+                .meshes
+                .values()
+                .filter(|m| !m.submitted)
+                .collect();
+            let sizes: Vec<_> = meshes
+                .iter()
+                .map(|m| geometry_size(m.positions.len()))
+                .collect::<Result<_>>()?;
+            let entries: Vec<_> = meshes
+                .iter()
+                .zip(&sizes)
+                .map(|(m, size)| wgpu::BlasBuildEntry {
+                    blas: &m.blas,
+                    geometry: wgpu::BlasGeometries::TriangleGeometries(vec![
+                        wgpu::BlasTriangleGeometry {
+                            size,
+                            vertex_buffer: &m.vertices,
+                            first_vertex: 0,
+                            vertex_stride: 12,
+                            index_buffer: None,
+                            first_index: None,
+                            transform_buffer: None,
+                            transform_buffer_offset: None,
+                        },
+                    ]),
+                })
+                .collect();
+            encoder.build_acceleration_structures(entries.iter(), [&tlas]);
+            self.stats.blas_builds_encoded += entries.len() as u64;
+            self.stats.tlas_builds_encoded += 1;
+            self.stats.builds_encoded += 1;
+            self.instanced.tlas = Some(tlas);
+            self.instanced.signature = signature;
+        }
+        Ok(())
     }
     fn prepare(
         &mut self,
@@ -192,6 +422,10 @@ impl HardwareRt {
         triangles: &[RtTriangle],
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<()> {
+        self.pending_world = true;
+        self.pending_instances = false;
+        self.stats.instances = usize::from(!triangles.is_empty());
+        self.stats.resident_blas = usize::from(!triangles.is_empty());
         let positions = checked_positions(triangles, &gpu.device.limits())?;
         self.stats.triangles = triangles.len();
         if positions.is_empty() {
@@ -258,6 +492,8 @@ impl HardwareRt {
             };
             encoder.build_acceleration_structures([&entry], [&scene.tlas]);
             self.stats.builds_encoded += 1;
+            self.stats.blas_builds_encoded += 1;
+            self.stats.tlas_builds_encoded += 1;
         }
         Ok(())
     }
@@ -383,6 +619,7 @@ impl HardwareRt {
         Ok(texture)
     }
     #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
     pub fn encode_sun_shadows_into(
         &mut self,
         gpu: &Gpu,
@@ -396,6 +633,65 @@ impl HardwareRt {
         ao: &wgpu::TextureView,
         output_view: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<()> {
+        self.encode_sun_shadows_impl(
+            gpu,
+            triangles,
+            inverse_view_projection,
+            inverse_view,
+            sun_direction,
+            canvas,
+            depth,
+            normals,
+            ao,
+            output_view,
+            encoder,
+            None,
+        )
+    }
+    pub fn encode_instance_shadows_into(
+        &mut self,
+        gpu: &Gpu,
+        instances: &[RtInstance],
+        inverse_view_projection: [[f32; 4]; 4],
+        inverse_view: [[f32; 4]; 4],
+        sun_direction: [f32; 3],
+        canvas: [u32; 2],
+        depth: &wgpu::TextureView,
+        normals: &wgpu::TextureView,
+        ao: &wgpu::TextureView,
+        output_view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<()> {
+        self.encode_sun_shadows_impl(
+            gpu,
+            &[],
+            inverse_view_projection,
+            inverse_view,
+            sun_direction,
+            canvas,
+            depth,
+            normals,
+            ao,
+            output_view,
+            encoder,
+            Some(instances),
+        )
+    }
+    fn encode_sun_shadows_impl(
+        &mut self,
+        gpu: &Gpu,
+        triangles: &[RtTriangle],
+        inverse_view_projection: [[f32; 4]; 4],
+        inverse_view: [[f32; 4]; 4],
+        sun_direction: [f32; 3],
+        canvas: [u32; 2],
+        depth: &wgpu::TextureView,
+        normals: &wgpu::TextureView,
+        ao: &wgpu::TextureView,
+        output_view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        instances: Option<&[RtInstance]>,
     ) -> Result<()> {
         check_canvas(gpu, canvas)?;
         let output_texture = output_view.texture();
@@ -418,8 +714,17 @@ impl HardwareRt {
             "hardware shadow sun direction must be finite and nonzero"
         );
         let light = light.normalize();
-        self.prepare(gpu, triangles, encoder)?;
-        if triangles.is_empty() {
+        if let Some(instances) = instances {
+            self.prepare_instances(gpu, instances, encoder)?;
+        } else {
+            self.prepare(gpu, triangles, encoder)?;
+        }
+        let tlas = if instances.is_some() {
+            self.instanced.tlas.as_ref()
+        } else {
+            self.scene.as_ref().map(|s| &s.tlas)
+        };
+        if tlas.is_none() {
             let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("empty hardware shadow bind"),
                 layout: &self.clear_shadow_layout,
@@ -460,7 +765,7 @@ impl HardwareRt {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: self.scene.as_ref().unwrap().tlas.as_binding(),
+                    resource: tlas.unwrap().as_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,

@@ -1174,3 +1174,80 @@ extraction. ADR 0038 records this delivered capability increment.
   Core/compat remain device-free and forbid unsafe code; the renderer isolates
   wgpu's required unsafe experimental-consent token at explicit device opt-in.
   No game data, fonts, proprietary SDKs or GitHub workflows were added.
+
+## 2026-10-26 — Frame DAG, profiler, leased streaming and instanced RT
+
+- Implementation: ADR 0052 adds a bounded dependency executor over immutable
+  results. Independent PBR/simple/layer extraction runs on workers; desktop
+  polls one pending snapshot while retaining one ready snapshot. World/VM/input
+  ordering stays on its owner. Dynamic surface generations and transition state
+  freeze with snapshots; scoped resource lookup restores live access on error
+  or unwind. Restore/store identity rejects stale results.
+- Implementation: shared Profiler class/global exports bounded CPU traces and
+  stage percentiles. GPU timing uses four asynchronous slots, pass-boundary
+  markers, frame-completion callbacks, a later resolve/map submission and
+  validated nonzero samples. Capture/shutdown have explicit bounded completion
+  fences. CPU/GPU clocks remain uncalibrated; capture wall time is not FPS.
+- Implementation: streaming volumes prepare hierarchy/PBR data on workers,
+  atomically publish ready cells, reject obsolete work and hold scoped resource
+  leases. The renderer shares decoded models and releases unused model/RT
+  caches. Explicit caller-owned asset requests retain their lifetime. Host CPU
+  prepared-cache budgets default to 256 MiB and are explicitly configurable
+  from 16 to 4096 MiB; this is not a total RAM/VRAM limit. Offline readiness
+  fences commit resources without another script/physics/time step. Ticket
+  validation also rejects forged client fields on another client's request ID.
+- Implementation: PBR shadows share local-space BLAS and use affine TLAS
+  instances. Cached source/pose data avoids repeated rigid-mesh preparation;
+  source Arcs prevent pointer-ID reuse. Static frames reuse TLAS; rigid moves
+  rebuild only TLAS. Budgets are 4096 instances/1024 unique meshes/1M unique
+  triangles, bounded by device limits. The simple primary path stays separate.
+- Compilation/CPU validation: workspace all-target check passed. Default
+  workspace tests passed 590, failed zero, ignored 56. Focused tests cover real
+  concurrent graph execution/dependencies, pressure retry/failure cancellation,
+  delayed workers with advancing simulation, immutable geometry/surface data,
+  restore rejection, leased/shared cache reclamation, budget policy, forged
+  tickets, streaming hierarchy/collision/save behavior and offline clock fences.
+  Python tooling passed 165 tests. Generated API checks passed five tests;
+  fingerprint changed `df17e49431e56860` → `e3a0831acf720cb7`, logged with the
+  streaming readiness migration in docs/api/CHANGES.md.
+- GPU validation: explicit Apple M5 / Metal primary/PBR integration and GPU
+  profiler tests passed (2 + 1). Assertions cover matching primary pixels and
+  overlays, shared BLAS, static TLAS reuse, moved-instance pixels without BLAS
+  rebuild, opaque-profile rejection, explicit raster recovery and actual
+  nonzero timestamps. The final profiler run recorded eight valid samples,
+  zero failed/dropped/pending. Earlier immediate timestamp resolution produced
+  invalid/zero samples; those were rejected and are not successful measurements.
+- Public showcase behavior: existing Khronos resource files matched all local
+  manifest hashes (2 helmet/HDR files; 73 Fox/Sponza/HDR files). Nine textured
+  helmets plus floor rendered as 10 native RT instances/2 BLAS, 139,080
+  instance-expanded triangles; eight rotating captures built BLAS only twice
+  and TLAS eight times. All eight final GPU timing samples were valid. The
+  streaming movie produced entity counts 1 → 3 → 1 → 3 at the expected logical
+  radii/time, reclaimed prepared data to zero after unload and reloaded it.
+  The prepared cell was 112,737,441 bytes; no game VM/renderer was hosted.
+- Public larger-scene behavior: Sponza failed visibly under the default
+  256 MiB prepared budget. With an explicit 1024 MiB host budget it rendered
+  through CrySirror's raster material path, retaining 392,730,673 prepared bytes.
+  Four final GPU samples were valid, with no failed/dropped/pending samples.
+  Source alpha-tested materials were not forced into the opaque RT profile.
+- Window behavior: an earlier 1800-presented-frame run completed with actual
+  10-instance/2-BLAS window rendering and a trace spanning owner/worker threads.
+  Its profiler trace predates the final completion-order fix and includes
+  rejected samples; use the final GPU tests/offscreen reports for timing
+  evidence. A later repeat did not reach its presentation count and was stopped;
+  sampling showed continuing owner/surface-acquisition activity. That repeat
+  is not a pass. Window visibility/surface timing is not an offscreen result.
+- Evidence: target/verification/frame-pipeline-{workspace-check-final.log,
+  workspace-tests-final.log,api-docs-final.log,python-tests.log,
+  lifecycle-final.log,gpu-final.log}; frame-pipeline/{helmet-report.json,
+  streaming-report.json,sponza-report.json,*.png,
+  interactive-pre-completion-fix-trace.json,interactive-hang.sample.txt}.
+  Recipes/attribution links are in docs/FRAME_PIPELINE.md; downloaded assets,
+  captures and traces stay ignored.
+- Limits: ADR 0050 remains partial. General simulation parallelism, budgeted
+  GPU uploads/pipeline compilation, collision cooking, full resource GUID/cook
+  databases and chunk/mip/world-partition streaming remain. World freezing still
+  clones logical state; skinned geometry changes rebuild BLAS. RT alpha
+  candidates/refit/reflections/GI/denoising, an editor/profiler overlay, complete
+  GPU memory accounting and other desktop hardware/platform validation remain.
+  No new GitHub CI, proprietary data, fonts or SDKs were added.

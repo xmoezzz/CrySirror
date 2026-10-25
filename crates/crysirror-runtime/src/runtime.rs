@@ -506,6 +506,8 @@ struct Session {
     yielded: VmYield,
 }
 pub struct Runtime {
+    /// Bounded instrumentation; derived state, never serialized into saves.
+    pub profiler: crysirror_tasks::profile::Profiler,
     /// Persistent CPU simulation derived from saved World body/joint data.
     pub physics: crate::physics::Physics,
     pub project: Project,
@@ -651,6 +653,7 @@ impl Runtime {
                 decoders: assets.decoders.clone(),
                 image_dimensions: BTreeMap::new(),
             },
+            profiler: assets.profiler.clone(),
             assets,
             restored: 0,
             sessions,
@@ -723,7 +726,13 @@ impl Runtime {
         })
     }
     pub fn tick(&mut self, delta_ms: u64, input: InputFrame) -> Result<()> {
-        self.assets.poll_tasks();
+        let profile_frame = self.profiler.begin_frame();
+        let _tick_span = self.profiler.span(profile_frame, "runtime.tick");
+        {
+            let _span = self.profiler.span(profile_frame, "assets.poll");
+            self.assets.poll_tasks();
+            self.assets.collect_unused();
+        }
         // PCM is frame output, like the current render product. A headless
         // caller may leave it unread; never replay it during a later frame.
         self.host.pcm.clear();
@@ -733,6 +742,7 @@ impl Runtime {
             .checked_add(delta_ms)
             .context("clock overflow")?;
         let consumed = {
+            let _span = self.profiler.span(profile_frame, "world.physics_ui");
             let physics = &mut self.physics;
             let SharedHost { engine, fs, .. } = &mut self.host;
             match engine.tick_with(delta_ms, input, self.project.canvas, |world, dt| {
@@ -756,6 +766,7 @@ impl Runtime {
             input
         };
         self.host.decoders = self.assets.decoders.clone();
+        let vm_span = self.profiler.span(profile_frame, "vm.step");
         for s in &mut self.sessions {
             if s.yielded == VmYield::Halted {
                 continue;
@@ -763,6 +774,8 @@ impl Runtime {
             s.yielded = core(s.vm.step(&mut self.host, input, 1024))
                 .with_context(|| format!("VM {}", s.name))?;
         }
+        drop(vm_span);
+        let _outputs = self.profiler.span(profile_frame, "media.publish_audio");
         for (client, path, bytes) in std::mem::take(&mut self.host.generated) {
             self.assets.register_generated(client, &path, bytes)?;
         }
@@ -890,7 +903,7 @@ impl Runtime {
     pub fn inspect(&self) -> serde_json::Value {
         serde_json::json!({"name":self.project.name,"frame":self.host.scene.frame(),"time_ms":self.host.clock_ms,
             "visuals":self.host.scene.visuals().len(),"voices":self.host.scene.voices().len(),
-            "tasks":self.assets.tasks_inspect(),"channel_audio":self.host.channel_audio.mixer.stats(),"media":self.host.media.inspect(),
+            "profile":self.profiler.snapshot(),"tasks":self.assets.tasks_inspect(),"channel_audio":self.host.channel_audio.mixer.stats(),"media":self.host.media.inspect(),
             "engine":self.host.engine,
             "adapters":self.registry.names(),"sessions":self.sessions.iter().map(|s|serde_json::json!({
                 "name":s.name,"client":s.id.0,"engine":s.vm.engine_id(),"yield":format!("{:?}",s.yielded),"native":serde_json::from_slice::<serde_json::Value>(&s.vm.diagnostics()).ok()

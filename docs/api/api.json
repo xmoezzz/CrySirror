@@ -67,7 +67,7 @@
       "global": "assets",
       "methods": [
         {
-          "doc": "Queue bytes, image or model import without blocking. Returns a client-owned request id; duplicate requests share a job.",
+          "doc": "Queue bytes, image, model or baked scene or PBR level import without blocking. Returns a client-owned request id; duplicate requests share a job.",
           "name": "load",
           "params": [
             {
@@ -1998,6 +1998,32 @@
       ]
     },
     {
+      "doc": "Bounded engine CPU timings and optional completed GPU timestamp samples. Diagnostics never serialize device state into project saves.",
+      "global": "profiler",
+      "methods": [
+        {
+          "doc": "Stage sample counts, mean/p50/p95/max microseconds and dropped-sample counts. GPU and CPU clocks are not calibrated.",
+          "name": "snapshot",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Export retained CPU spans as Chrome trace JSON, including worker threads and frame IDs. GPU durations are reported separately by snapshot.",
+          "name": "trace",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Clear retained diagnostics without resetting the engine frame identity or simulation.",
+          "name": "clear",
+          "params": [],
+          "returns": "void"
+        }
+      ],
+      "name": "Profiler",
+      "properties": []
+    },
+    {
       "doc": "2D deformable puppets on layers whose paint is {kind:'puppet', asset} (engine rig JSON; import E-mote with `crysirror puppet-import`).",
       "global": "puppets",
       "methods": [
@@ -3294,6 +3320,18 @@
           "default": null,
           "doc": "",
           "name": "model",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Baked CPU world entities for non-PBR level streaming.",
+          "name": "scene",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "PBR level hierarchy and decoded model prepared together.",
+          "name": "level",
           "rust_type": ""
         }
       ],
@@ -7221,7 +7259,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "df17e49431e56860",
+  "fingerprint": "e3a0831acf720cb7",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {
@@ -7291,6 +7329,10 @@
     {
       "class": "Assets",
       "global": "assets"
+    },
+    {
+      "class": "Profiler",
+      "global": "profiler"
     }
   ]
 }

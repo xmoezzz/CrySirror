@@ -2,7 +2,7 @@
 type Vec3 = [number, number, number];
 /** Client-scoped asynchronous resource loading on bounded engine workers. Ready models/images feed the normal renderer. */
 declare class Assets {
-  /** Queue bytes, image or model import without blocking. Returns a client-owned request id; duplicate requests share a job. */
+  /** Queue bytes, image, model or baked scene or PBR level import without blocking. Returns a client-owned request id; duplicate requests share a job. */
   load(path: string, kind: string): number;
   /** Poll loading/ready/failed/cancelled status and error. This never waits for disk or decoding. */
   status(id: number): Record<string, any>;
@@ -388,6 +388,15 @@ declare class PhysicsJoint {
   /** Remove this joint; stale calls fail. */
   destroy(): void;
 }
+/** Bounded engine CPU timings and optional completed GPU timestamp samples. Diagnostics never serialize device state into project saves. */
+declare class Profiler {
+  /** Stage sample counts, mean/p50/p95/max microseconds and dropped-sample counts. GPU and CPU clocks are not calibrated. */
+  snapshot(): Record<string, any>;
+  /** Export retained CPU spans as Chrome trace JSON, including worker threads and frame IDs. GPU durations are reported separately by snapshot. */
+  trace(): Record<string, any>;
+  /** Clear retained diagnostics without resetting the engine frame identity or simulation. */
+  clear(): void;
+}
 /** 2D deformable puppets on layers whose paint is {kind:'puppet', asset} (engine rig JSON; import E-mote with `crysirror puppet-import`). */
 declare class Puppets {
   /** Puppet layers owned by this client. */
@@ -565,3 +574,4 @@ declare const physics: Physics;
 declare const canvases: Canvases;
 declare const media: Media;
 declare const assets: Assets;
+declare const profiler: Profiler;

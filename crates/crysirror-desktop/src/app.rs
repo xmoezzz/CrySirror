@@ -56,10 +56,15 @@ pub struct RunOptions {
     pub muted: bool,
     pub frames: Option<u64>,
     pub capture: Option<PathBuf>,
+    pub profile_path: Option<PathBuf>,
     pub state_dir: PathBuf,
     pub rendering_path: RenderingPath,
 }
 struct WindowState {
+    pending_snapshot: Option<crysirror_runtime::frame::PendingFrame>,
+    render_snapshot: Option<crysirror_runtime::frame::RenderSnapshot>,
+    snapshot_store: u64,
+    snapshot_restored: u64,
     surface: wgpu::Surface<'static>,
     window: Arc<Window>,
     renderer: Renderer,
@@ -103,6 +108,9 @@ pub fn load_fonts(rt: &mut Runtime, override_font: Option<&Path>) -> Result<()> 
 /// App whose scripts keep running.
 pub trait MovieSource {
     fn advance(&mut self, step_ms: u64) -> Result<()>;
+    fn prepare_capture(&mut self) -> Result<()> {
+        Ok(())
+    }
     fn runtime(&mut self) -> &mut Runtime;
 }
 impl MovieSource for Runtime {
@@ -133,21 +141,33 @@ pub fn movie_on(
     renderer.set_rendering_path(rendering_path)?;
     load_fonts(source.runtime(), font)?;
     let mut last = None;
+    let mut frame_samples = std::collections::VecDeque::new();
     for i in 0..frames {
         if i > 0 {
             source.advance(step_ms)?;
         }
+        source.prepare_capture()?;
         let rt = source.runtime();
-        renderer.set_scene3d(rt.render_scene3d()?.as_ref())?;
-        renderer.set_pbr_scene(rt.render_pbr()?)?;
-        renderer.set_engine_frame(rt.host.engine.frame(rt.project.canvas)?)?;
-        renderer.set_transition(rt.render_transition()?)?;
-        let image = renderer.capture(
-            &rt.host.scene,
-            &mut rt.assets,
-            rt.project.canvas,
-            rt.project.background,
-        )?;
+        let snapshot = rt.schedule_render_snapshot()?.wait(rt)?;
+        renderer.set_profiler(rt.profiler.clone(), snapshot.frame);
+        renderer.set_scene3d(snapshot.simple.as_ref())?;
+        renderer.set_pbr_scene(snapshot.pbr)?;
+        renderer.set_engine_frame(snapshot.layers)?;
+        renderer.set_transition(snapshot.transition)?;
+        let capture_start = Instant::now();
+        let image = rt.assets.with_frame_surfaces(snapshot.surfaces, |assets| {
+            renderer.capture(
+                &snapshot.scene,
+                assets,
+                rt.project.canvas,
+                rt.project.background,
+            )
+        })?;
+        let capture_ms = capture_start.elapsed().as_secs_f64() * 1000.;
+        if frame_samples.len() == 256 {
+            frame_samples.pop_front();
+        }
+        frame_samples.push_back(serde_json::json!({"frame":i,"time_ms":rt.now_ms(),"capture_wall_ms":capture_ms,"world_entities":rt.host.engine.world.len(),"cpu_asset_bytes":rt.assets.tasks_inspect()["resident_bytes"],"rt":renderer.hardware_rt_stats()}));
         image
             .save_with_format(
                 dir.join(format!("frame_{i:05}.png")),
@@ -159,9 +179,11 @@ pub fn movie_on(
     if let Some(image) = last {
         image.save_with_format(output, image::ImageFormat::Png)?;
     }
-    Ok(serde_json::json!({"movie_frames": frames, "movie_dir": dir, "step_ms": step_ms,
+    Ok(
+        serde_json::json!({"movie_frames": frames, "movie_dir": dir, "step_ms": step_ms,
         "hardware_rt_report":renderer.gpu.hardware_rt_report(),
-        "hardware_rt_stats":renderer.hardware_rt_stats()}))
+        "hardware_rt_stats":renderer.hardware_rt_stats(),"frame_samples":frame_samples,"frame_samples_dropped":frames.saturating_sub(256),"profile":renderer.profile_report_offline()?}),
+    )
 }
 pub fn capture_on(
     gpu: Arc<Gpu>,
@@ -170,19 +192,36 @@ pub fn capture_on(
     path: &Path,
     rendering_path: RenderingPath,
 ) -> Result<serde_json::Value> {
+    let previous = rt.assets.is_nonblocking();
+    rt.assets.set_nonblocking(false);
+    let result = capture_ready(gpu, rt, font, path, rendering_path);
+    rt.assets.set_nonblocking(previous);
+    result
+}
+fn capture_ready(
+    gpu: Arc<Gpu>,
+    rt: &mut Runtime,
+    font: Option<&Path>,
+    path: &Path,
+    rendering_path: RenderingPath,
+) -> Result<serde_json::Value> {
     let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
     renderer.set_rendering_path(rendering_path)?;
-    renderer.set_scene3d(rt.render_scene3d()?.as_ref())?;
-    renderer.set_pbr_scene(rt.render_pbr()?)?;
-    renderer.set_engine_frame(rt.host.engine.frame(rt.project.canvas)?)?;
-    renderer.set_transition(rt.render_transition()?)?;
+    let snapshot = rt.schedule_render_snapshot()?.wait(rt)?;
+    renderer.set_profiler(rt.profiler.clone(), snapshot.frame);
+    renderer.set_scene3d(snapshot.simple.as_ref())?;
+    renderer.set_pbr_scene(snapshot.pbr)?;
+    renderer.set_engine_frame(snapshot.layers)?;
+    renderer.set_transition(snapshot.transition)?;
     load_fonts(rt, font)?;
-    let image = renderer.capture(
-        &rt.host.scene,
-        &mut rt.assets,
-        rt.project.canvas,
-        rt.project.background,
-    )?;
+    let image = rt.assets.with_frame_surfaces(snapshot.surfaces, |assets| {
+        renderer.capture(
+            &snapshot.scene,
+            assets,
+            rt.project.canvas,
+            rt.project.background,
+        )
+    })?;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;
@@ -206,8 +245,11 @@ pub fn capture_on(
         }
         None => serde_json::json!({}),
     };
+    stats["profile"] = renderer.profile_report_offline()?;
     stats["hardware_rt_report"] = serde_json::to_value(renderer.gpu.hardware_rt_report())?;
-    stats["hardware_rt_stats"] = renderer.hardware_rt_stats().unwrap_or(serde_json::Value::Null);
+    stats["hardware_rt_stats"] = renderer
+        .hardware_rt_stats()
+        .unwrap_or(serde_json::Value::Null);
     Ok(stats)
 }
 impl App {
@@ -239,6 +281,30 @@ impl App {
             error: None,
         };
         event_loop.run_app(&mut app)?;
+        if let Some(path) = &app.options.profile_path {
+            let mut report = match &mut app.window {
+                Some(w) => {
+                    let mut r = w.renderer.profile_report_offline()?;
+                    r["hardware_rt_stats"] = w
+                        .renderer
+                        .hardware_rt_stats()
+                        .unwrap_or(serde_json::Value::Null);
+                    r
+                }
+                None => serde_json::json!({"timings":app.core.rt().profiler.snapshot()}),
+            };
+            let mut trace = report
+                .as_object_mut()
+                .and_then(|m| m.remove("cpu_trace"))
+                .unwrap_or_else(|| app.core.rt().profiler.chrome_trace());
+            trace["engine_profile"] = report;
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)?;
+                }
+            }
+            std::fs::write(path, serde_json::to_vec(&trace)?)?;
+        }
         match app.error {
             Some(e) => Err(e),
             None => Ok(()),
@@ -267,7 +333,13 @@ impl App {
         }
         // Native adapters retain their first-use resource/wait contract until
         // they explicitly integrate asynchronous readiness fences.
-        let progressive=self.core.rt().project.clients.iter().all(|client|client.adapter=="crysirror-script-v1");
+        let progressive = self
+            .core
+            .rt()
+            .project
+            .clients
+            .iter()
+            .all(|client| client.adapter == "crysirror-script-v1");
         self.core.rt().assets.set_nonblocking(progressive);
         let canvas = self.core.rt().project.canvas;
         let window = Arc::new(
@@ -310,6 +382,10 @@ impl App {
         renderer.set_rendering_path(self.options.rendering_path)?;
         load_fonts(self.core.rt(), self.options.font.as_deref())?;
         self.window = Some(WindowState {
+            pending_snapshot: None,
+            render_snapshot: None,
+            snapshot_store: 0,
+            snapshot_restored: 0,
             surface,
             window,
             renderer,
@@ -431,6 +507,26 @@ impl App {
             }
             Core::Plain(runtime) => self.audio.sync(runtime)?,
         }
+        let rt = self.core.rt();
+        if w.snapshot_store != rt.assets.store_id() || w.snapshot_restored != rt.restored {
+            w.pending_snapshot = None;
+            w.render_snapshot = None;
+            w.snapshot_store = rt.assets.store_id();
+            w.snapshot_restored = rt.restored;
+        }
+        if w.pending_snapshot.is_none() {
+            w.pending_snapshot = Some(rt.schedule_render_snapshot()?);
+        }
+        if let Some(pending) = &mut w.pending_snapshot {
+            if let Some(snapshot) = pending.poll(rt)? {
+                w.render_snapshot = Some(snapshot);
+                w.pending_snapshot = None;
+            }
+        }
+        let Some(snapshot) = &w.render_snapshot else {
+            return Ok(());
+        };
+        w.renderer.set_profiler(rt.profiler.clone(), snapshot.frame);
         let (frame, reconfigure) = match w.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -443,29 +539,37 @@ impl App {
                 w.surface.configure(&w.renderer.gpu.device, &w.config);
                 return Ok(());
             }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return Ok(()),
-            wgpu::CurrentSurfaceTexture::Validation => bail!("surface acquisition validation failed"),
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                bail!("surface acquisition validation failed")
+            }
         };
         let view = frame.texture.create_view(&Default::default());
         let rt = self.core.rt();
-        w.renderer.set_scene3d(rt.render_scene3d()?.as_ref())?;
-        w.renderer.set_pbr_scene(rt.render_pbr()?)?;
-        w.renderer
-            .set_engine_frame(rt.host.engine.frame(rt.project.canvas)?)?;
-        w.renderer.set_transition(rt.render_transition()?)?;
-        w.renderer.render(
-            &rt.host.scene,
-            &mut rt.assets,
-            RenderTarget {
-                view: &view,
-                size: [w.config.width, w.config.height],
-            },
-            rt.project.canvas,
-            rt.project.background,
-        )?;
+        w.renderer.set_scene3d(snapshot.simple.as_ref())?;
+        w.renderer.set_pbr_scene(snapshot.pbr.clone())?;
+        w.renderer.set_engine_frame(snapshot.layers.clone())?;
+        w.renderer.set_transition(snapshot.transition.clone())?;
+        rt.assets
+            .with_frame_surfaces(snapshot.surfaces.clone(), |assets| {
+                w.renderer.render(
+                    &snapshot.scene,
+                    assets,
+                    RenderTarget {
+                        view: &view,
+                        size: [w.config.width, w.config.height],
+                    },
+                    rt.project.canvas,
+                    rt.project.background,
+                )
+            })?;
         w.window.pre_present_notify();
         frame.present();
-        if reconfigure { w.surface.configure(&w.renderer.gpu.device, &w.config); }
+        if reconfigure {
+            w.surface.configure(&w.renderer.gpu.device, &w.config);
+        }
         self.presented += 1;
         if self
             .options

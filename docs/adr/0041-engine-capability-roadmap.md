@@ -38,7 +38,7 @@ Priorities:
 | Virtual file system, capability roots | done | 0006 | async I/O and streaming reads | P1 |
 | Save/load of engine state | partial | SAVE_FORMAT | versioned migrations of saves across schema changes | P0 |
 | Generated API docs and change log | done | docs/api | — | |
-| Engine-wide async / multithreaded frame (simulation ∥ render) | partial; mandatory across all subsystems | 0049, 0050 | stage one covers assets/poses only; frame graph, completion boundaries and every subsystem migration remain | P0 |
+| Engine-wide async / multithreaded frame (simulation ∥ render) | partial; mandatory across all subsystems | 0049, 0050, 0052 | bounded render-extraction DAG and retained snapshots added; simulation parallelism, budgeted uploads and remaining subsystem migration remain | P0 |
 | Deterministic fixed step, replay | partial | 0012 | input recording and replay files | P2 |
 
 ### Assets and pipeline
@@ -67,7 +67,7 @@ Priorities:
 | Decals, terrain, foliage | partial | 0014 | deferred decals, foliage instancing and wind | P1 |
 | Post FX (DOF, motion blur, color grading LUT) | missing | — | per-camera post stack | P1 |
 | Upscaling (FSR-class) | missing | 0007 | open upscaler | P2 |
-| Hardware RT | partial | 0051 | native opaque primary queries and PBR sun shadows; alpha candidates, per-mesh instancing/refit, RT reflections/GI, Vulkan/DX12 device validation remain | P1 |
+| Hardware RT | partial | 0051, 0052 | native opaque primary queries and PBR sun shadows; alpha candidates, dynamic refit, RT reflections/GI, Vulkan/DX12 device validation remain | P1 |
 | 2D layers, filters, transitions, puppets, video | done | 0020–0022, 0029 | — | |
 
 ### Animation
@@ -93,7 +93,7 @@ Priorities:
 | Gameplay ability system, attributes, effects | done | 0014 | — | |
 | Behaviour trees, perception | done | 0014 | — | |
 | Navigation grid + A* | done | 0014 | navmesh polygons, dynamic obstacles, crowds | P1 |
-| Streaming levels | partial | 0014 | async loading, world partition | P1 |
+| Streaming levels | partial | 0014, 0052 | async cell preparation/leases and offline readiness implemented; world partition, chunk paging and GPU upload budgets remain | P1 |
 
 ### Audio, input, UI, text
 
@@ -110,7 +110,7 @@ Priorities:
 | Capability | Status | ADR | Next step | P |
 |---|---|---|---|---|
 | Editor (scene view, inspector, gizmos, undo) | missing | — | an editor on the reflective API | P0 |
-| Profiler (CPU/GPU timings, memory) | missing | — | GPU timestamp queries and a frame-capture overlay | P0 |
+| Profiler (CPU/GPU timings, memory) | partial | 0052 | CPU trace, optional GPU duration ring and resource/queue diagnostics implemented; live overlay and comprehensive GPU memory accounting remain | P0 |
 | Debug draw, console, in-game stats | missing | — | debug-draw API, command console | P1 |
 | MCP/automation tools | done | MCP.md | — | |
 | Networking (replication, RPC) | missing | — | client/server replication of world state | P2 |

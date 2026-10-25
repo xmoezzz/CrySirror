@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: MPL-2.0
 use crate::vfs::read_limited;
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use cap_std::{ambient_authority, fs::Dir};
 use crysirror_core::{
     path::{Mount, VfsPath},
-    state::ClientId, service::ClientStorage,
+    service::ClientStorage,
+    state::ClientId,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 #[path = "assets_async.rs"]
 mod asynchronous;
-pub use asynchronous::{AssetKind, AssetState, AssetTicket, AssetStatus};
+pub use asynchronous::{AssetKind, AssetLease, AssetState, AssetStatus, AssetTicket};
 
 /// Immutable assets with a capability root per client, not merely a string prefix.
 /// Explicit reload constructs a new store/runtime. This is not a native-code sandbox.
 pub struct Assets {
+    frame_surfaces: Option<SurfaceSnapshot>,
+    pub profiler: crysirror_tasks::profile::Profiler,
     asynchronous: asynchronous::AsyncAssets,
     /// CPU text resources belong to engine resources, not a GPU/device lifetime.
     pub text: crysirror_text::TextSystem,
@@ -35,15 +38,23 @@ pub struct Surface {
     pub rgba: Arc<[u8]>,
     pub revision: u64,
 }
+/// Immutable dynamic texture generations retained by a render snapshot.
+#[derive(Clone)]
+pub struct SurfaceSnapshot {
+    store: u64,
+    surfaces: BTreeMap<(ClientId, u32), Surface>,
+}
 pub const SURFACE_PREFIX: &str = "__surface/";
 pub const MAX_SURFACES_PER_CLIENT: usize = 16;
 impl Assets {
     pub fn new(path: &Path) -> Result<Self> {
         #[allow(unused_mut)]
-        let mut decoders=crysirror_image::DecoderRegistry::default();
-        #[cfg(feature="arc-formats")]
+        let mut decoders = crysirror_image::DecoderRegistry::default();
+        #[cfg(feature = "arc-formats")]
         crysirror_formats_arc::register_images(&mut decoders)?;
         Ok(Self {
+            frame_surfaces: None,
+            profiler: Default::default(),
             asynchronous: asynchronous::AsyncAssets::new()?,
             text: Default::default(),
             decoders,
@@ -58,18 +69,36 @@ impl Assets {
     }
     /// Decode through the same registry and scoped dependency resolver used by
     /// Bitmap, UI and renderer texture uploads.
-    pub fn decode_image(&self,client:ClientId,path:&str,bytes:&[u8])->Result<crysirror_image::ImageSurface>{
-        self.decode_image_with(client,path,bytes,None,None)
+    pub fn decode_image(
+        &self,
+        client: ClientId,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<crysirror_image::ImageSurface> {
+        self.decode_image_with(client, path, bytes, None, None)
     }
-    pub fn decode_image_with(&self,client:ClientId,path:&str,bytes:&[u8],resources:Option<&crysirror_resource::DecodeContext>,format:Option<&str>)->Result<crysirror_image::ImageSurface>{
-        let source=|name:&str|->crysirror_core::Result<Vec<u8>>{
-            let logical=VfsPath::new(Mount::Asset,name)?;
-            if let Some(storage)=self.storage.get(&client){storage.read(&logical)}
-            else if let Some(dir)=self.clients.get(&client){read_limited(dir,logical.relative())}
-            else if client.0==0 {read_limited(&self.root,logical.relative())}
-            else{Err(crysirror_core::Error::NotFound)}
+    pub fn decode_image_with(
+        &self,
+        client: ClientId,
+        path: &str,
+        bytes: &[u8],
+        resources: Option<&crysirror_resource::DecodeContext>,
+        format: Option<&str>,
+    ) -> Result<crysirror_image::ImageSurface> {
+        let source = |name: &str| -> crysirror_core::Result<Vec<u8>> {
+            let logical = VfsPath::new(Mount::Asset, name)?;
+            if let Some(storage) = self.storage.get(&client) {
+                storage.read(&logical)
+            } else if let Some(dir) = self.clients.get(&client) {
+                read_limited(dir, logical.relative())
+            } else if client.0 == 0 {
+                read_limited(&self.root, logical.relative())
+            } else {
+                Err(crysirror_core::Error::NotFound)
+            }
         };
-        self.decoders.decode_with(path,bytes,Some(&source),resources,format)
+        self.decoders
+            .decode_with(path, bytes, Some(&source), resources, format)
     }
     fn insert(&mut self, key: String, bytes: Vec<u8>) -> Result<Arc<[u8]>> {
         ensure!(
@@ -121,10 +150,14 @@ impl Assets {
             return Ok(bytes.clone());
         }
         self.poll_tasks();
-        if let Some(bytes)=self.prepared_bytes(client,path){return Ok(bytes);}
-        let bytes = if let Some(storage)=self.storage.get(&client) {
-            let logical=VfsPath::new(Mount::Asset,path).map_err(|e|anyhow::anyhow!("{e}"))?;
-            storage.read(&logical).map_err(|e|anyhow::anyhow!("client asset {path}: {e}"))?
+        if let Some(bytes) = self.prepared_bytes(client, path) {
+            return Ok(bytes);
+        }
+        let bytes = if let Some(storage) = self.storage.get(&client) {
+            let logical = VfsPath::new(Mount::Asset, path).map_err(|e| anyhow::anyhow!("{e}"))?;
+            storage
+                .read(&logical)
+                .map_err(|e| anyhow::anyhow!("client asset {path}: {e}"))?
         } else {
             let dir = self.clients.get(&client).context("unknown asset client")?;
             read_limited(dir, path).map_err(|e| anyhow::anyhow!("client asset {path}: {e}"))?
@@ -134,17 +167,25 @@ impl Assets {
     /// Refresh the same capability namespace used by native services after a
     /// mount. Ordinary cached files are invalidated; generated assets retain
     /// their separate immutable namespace.
-    pub fn refresh_storage(&mut self,client:ClientId,storage:Arc<dyn ClientStorage>)->Result<()> {
-        ensure!(self.clients.contains_key(&client),"unknown asset client");
-        let prefix=format!("client:{}:",client.0);
-        let generated=format!("{prefix}__crysirror/");
-        self.bytes.retain(|key,bytes|{
+    pub fn refresh_storage(
+        &mut self,
+        client: ClientId,
+        storage: Arc<dyn ClientStorage>,
+    ) -> Result<()> {
+        ensure!(self.clients.contains_key(&client), "unknown asset client");
+        let prefix = format!("client:{}:", client.0);
+        let generated = format!("{prefix}__crysirror/");
+        self.bytes.retain(|key, bytes| {
             if key.starts_with(&prefix) && !key.starts_with(&generated) {
-                self.total-=bytes.len();false
-            } else {true}
+                self.total -= bytes.len();
+                false
+            } else {
+                true
+            }
         });
         self.asynchronous.invalidate(client);
-        self.storage.insert(client,storage);Ok(())
+        self.storage.insert(client, storage);
+        Ok(())
     }
     pub fn register_generated(
         &mut self,
@@ -170,7 +211,10 @@ impl Assets {
     /// Read an already-published immutable engine resource, scoped to its owner.
     /// Unlike read_for this never falls back to disk or bypasses provider mounts.
     pub fn generated_for(&self, client: ClientId, path: &str) -> Result<Option<Arc<[u8]>>> {
-        ensure!(path.starts_with("__crysirror/"), "generated resource namespace");
+        ensure!(
+            path.starts_with("__crysirror/"),
+            "generated resource namespace"
+        );
         let key = self.key(client, path)?;
         Ok(self.bytes.get(&key).cloned())
     }
@@ -235,11 +279,48 @@ impl Assets {
     /// Resolve an image asset path that names a surface.
     pub fn surface(&self, client: ClientId, asset: &str) -> Option<&Surface> {
         let slot = asset.strip_prefix(SURFACE_PREFIX)?.parse().ok()?;
-        self.surfaces.get(&(client, slot))
+        match &self.frame_surfaces {
+            Some(frame) => frame.surfaces.get(&(client, slot)),
+            None => self.surfaces.get(&(client, slot)),
+        }
+    }
+    pub fn freeze_surfaces(&self) -> SurfaceSnapshot {
+        SurfaceSnapshot {
+            store: self.store_id(),
+            surfaces: self.surfaces.clone(),
+        }
+    }
+    /// Scope a renderer to frozen surfaces, restoring live lookup on error/unwind.
+    pub fn with_frame_surfaces<T>(
+        &mut self,
+        frame: SurfaceSnapshot,
+        work: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        ensure!(
+            frame.store == self.store_id(),
+            "foreign dynamic surface snapshot"
+        );
+        struct Restore<'a> {
+            assets: &'a mut Assets,
+            previous: Option<SurfaceSnapshot>,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.assets.frame_surfaces = self.previous.take();
+            }
+        }
+        let previous = self.frame_surfaces.replace(frame);
+        let guard = Restore {
+            assets: self,
+            previous,
+        };
+        work(guard.assets)
     }
     pub fn clear(&mut self) {
         let clients: Vec<_> = self.clients.keys().copied().collect();
-        for client in clients { self.asynchronous.invalidate(client); }
+        for client in clients {
+            self.asynchronous.invalidate(client);
+        }
         self.bytes.clear();
         self.total = 0;
         self.surfaces.clear();

@@ -62,7 +62,7 @@ moves to `done` only with recorded behavior evidence.
 | R9 | Load Blender models | 0007, 0010 | glTF 2.0 import incl. textured PBR; .blend via Blender CLI export |
 | R10 | Ray tracing | 0003, 0007, 0051 | native opaque primary queries and hybrid PBR sun shadows; broader RT effects and multi-device validation remain |
 | R11 | DLSS-class upscaling | 0007 | capability contract only; vendor SDKs not distributed |
-| R12 | Asynchronous/multithreaded execution across every engine subsystem | 0049, 0050 | required; only initial assets/pose stage implemented |
+| R12 | Asynchronous/multithreaded execution across every engine subsystem | 0049, 0050, 0052 | required; assets/poses and extraction DAG exist; remaining subsystem migration is partial |
 
 ## Parallel service work (Codex, 2026-10-25)
 
@@ -85,3 +85,4 @@ moves to `done` only with recorded behavior evidence.
 | [0049](0049-multithreaded-tasks-and-async-assets.md) | Bounded CPU/asset workers, awaitable reads, asynchronous image/model imports and parallel poses | stage one implemented; engine-wide requirement in 0050 |
 | [0050](0050-engine-wide-async-execution.md) | Engine-wide asynchronous/multithreaded execution and explicit subsystem migration; local validation, no unsolicited GitHub CI | accepted requirement; partially implemented |
 | [0051](0051-hardware-ray-query.md) | Native BLAS/TLAS ray queries, capability negotiation across Vulkan/DX12/Metal, opaque primary rays and hybrid PBR sun visibility | initial implementation; validation recorded in STATUS.md |
+| [0052](0052-frame-pipeline-streaming-and-profiling.md) | Immutable frame extraction DAG, CPU/GPU profiling, asynchronous leased streaming cells and mesh RT instancing | implemented slice; engine-wide async migration remains partial |

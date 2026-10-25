@@ -8,6 +8,7 @@ pub mod lights;
 pub mod particles;
 pub mod pbr;
 pub mod probes;
+mod profile;
 mod puppet;
 mod ray_geometry;
 mod raytrace;
@@ -127,11 +128,12 @@ impl Gpu {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("CrySirror"),
-                required_features: if rt {
-                    wgpu::Features::EXPERIMENTAL_RAY_QUERY
-                } else {
-                    wgpu::Features::empty()
-                },
+                required_features: profile::features(&adapter)
+                    | if rt {
+                        wgpu::Features::EXPERIMENTAL_RAY_QUERY
+                    } else {
+                        wgpu::Features::empty()
+                    },
                 required_limits: limits,
                 experimental_features: if rt {
                     experimental_ray_query_token()
@@ -231,6 +233,9 @@ fn filter_gpu(f: &crysirror_scene::layer::LayerFilter) -> FilterGpu {
     }
 }
 pub struct Renderer {
+    profiler: crysirror_tasks::profile::Profiler,
+    profile_frame: u64,
+    gpu_timings: profile::GpuTimings,
     pub gpu: Arc<Gpu>,
     pub format: wgpu::TextureFormat,
     quad_pipelines: Vec<wgpu::RenderPipeline>,
@@ -525,6 +530,9 @@ impl Renderer {
         let puppets =
             puppet::PuppetRenderer::new(d, &texture_layout, wgpu::TextureFormat::Rgba8UnormSrgb);
         Self {
+            gpu_timings: profile::GpuTimings::new(&gpu),
+            profiler: Default::default(),
+            profile_frame: 0,
             puppets,
             format,
             quad_pipelines,
@@ -614,10 +622,14 @@ impl Renderer {
     }
     /// Select the PBR path with an extracted scene, or the legacy path with `None`.
     pub fn set_pbr_scene(&mut self, scene: Option<crysirror_scene::view::PbrScene>) -> Result<()> {
+        let _span = self
+            .profiler
+            .span(self.profile_frame, "renderer.scene_pipelines");
         if scene.is_some() && self.pbr.is_none() {
             self.pbr = Some(pbr::PbrRenderer::new(self.gpu.clone(), self.format)?);
         }
         if let Some(p) = &mut self.pbr {
+            p.set_profiler(self.profiler.clone(), self.profile_frame);
             p.set_hardware_rt(self.path == RenderingPath::HardwareRaytrace)?;
             p.set_scene(scene);
         }
@@ -626,6 +638,23 @@ impl Renderer {
     fn pbr_active(&self) -> bool {
         self.pbr.as_ref().is_some_and(|p| p.active())
     }
+    pub fn set_profiler(&mut self, profiler: crysirror_tasks::profile::Profiler, frame: u64) {
+        self.profiler = profiler;
+        self.profile_frame = frame;
+        if let Some(p) = &mut self.pbr {
+            p.set_profiler(self.profiler.clone(), frame);
+        }
+    }
+    pub fn profile_report(&mut self) -> Result<serde_json::Value> {
+        self.gpu_timings.poll(&self.gpu)?;
+        Ok(
+            serde_json::json!({"timings":self.profiler.snapshot(),"cpu_trace":self.profiler.chrome_trace(),"gpu_timestamps_enabled":self.gpu_timings.enabled(),"gpu_samples_pending":self.gpu_timings.pending(),"gpu_samples_dropped":self.gpu_timings.dropped,"gpu_samples_failed":self.gpu_timings.failures}),
+        )
+    }
+    /// Explicit capture/shutdown completion; interactive frames use profile_report.
+    pub fn profile_report_offline(&mut self)->Result<serde_json::Value> {
+        self.gpu_timings.finish_offline(&self.gpu)?;self.profile_report()
+    }
     pub fn hardware_rt_stats(&self) -> Option<serde_json::Value> {
         let stats = if self.pbr_active() {
             self.pbr.as_ref()?.hardware_rt_stats()?
@@ -633,7 +662,7 @@ impl Renderer {
             self.hardware_rt.as_ref()?.stats()
         };
         Some(
-            serde_json::json!({"builds_encoded":stats.builds_encoded,"primary_dispatches":stats.primary_dispatches,"shadow_dispatches":stats.shadow_dispatches,"triangles":stats.triangles}),
+            serde_json::json!({"builds_encoded":stats.builds_encoded,"primary_dispatches":stats.primary_dispatches,"shadow_dispatches":stats.shadow_dispatches,"triangles":stats.triangles,"blas_builds_encoded":stats.blas_builds_encoded,"tlas_builds_encoded":stats.tlas_builds_encoded,"resident_blas":stats.resident_blas,"instances":stats.instances,"cpu_geometry_hits":stats.cpu_geometry_hits,"cpu_geometry_misses":stats.cpu_geometry_misses}),
         )
     }
     pub fn set_rendering_path(&mut self, path: RenderingPath) -> Result<()> {
@@ -1239,6 +1268,10 @@ impl Renderer {
                     }),
             )
         };
+        self.gpu_timings.poll(&self.gpu)?;
+        let _profile_span = self
+            .profiler
+            .span(self.profile_frame, "renderer.prepare_encode_submit");
         let vp = Viewport::fit(canvas, target.size);
         let color = geometry::tint(background);
         let mut encoder = self
@@ -1247,6 +1280,9 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        let gpu_sample =
+            self.gpu_timings
+                .begin(&mut encoder, self.profiler.clone(), self.profile_frame);
         let pbr_active = self.pbr_active();
         // Compose into a retained frame; `transitions.finish` presents it.
         let frame_view = self.transitions.begin(&self.gpu.device, target.size);
@@ -1482,7 +1518,9 @@ impl Renderer {
             self.transition.as_ref(),
             canvas,
         );
+        self.gpu_timings.end(&mut encoder, gpu_sample);
         self.gpu.queue.submit(Some(encoder.finish()));
+        self.gpu_timings.submitted(&self.gpu,gpu_sample);
         if self.path == RenderingPath::HardwareRaytrace && !pbr_active {
             if let Some(rt) = &mut self.hardware_rt {
                 rt.mark_submitted();

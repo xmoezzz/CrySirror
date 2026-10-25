@@ -145,8 +145,20 @@ fn levels_stream_in_and_out_with_hysteresis_and_survive_save_load() {
     app.frame(16, InputFrame::default()).unwrap();
     assert_eq!(count(&mut app), 0, "far away: not loaded");
     camera(&mut app, [35., 2., 0.]);
-    app.frame(16, InputFrame::default()).unwrap();
-    assert_eq!(count(&mut app), 4, "root + lantern hierarchy loaded");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while count(&mut app) == 0 {
+        app.frame(16, InputFrame::default()).unwrap();
+        assert!(
+            std::time::Instant::now() < deadline,
+            "asynchronous level did not become ready"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        count(&mut app),
+        4,
+        "root + lantern hierarchy loaded atomically"
+    );
     // A raycast hits the streamed level's collision.
     let cx = app.context();
     let w = cx.singleton("World").unwrap();
@@ -264,4 +276,39 @@ fn vertical_raycasts_hit_terrain_everywhere() {
     assert_eq!(misses, 0);
     let nav = cx.call(world, "buildNavigation", &[v(serde_json::json!({"min": [-58, -2, -58], "max": [58, 30, 58], "cell": 0.5, "max_step": 0.6, "max_slope": 50}))]).unwrap();
     assert_eq!(nav.field("walkable").unwrap().as_i64().unwrap(), 232 * 232);
+}
+
+#[test]
+fn offline_streaming_fence_preserves_logical_clock_and_lifecycle_count() {
+    let (_t, mut app) = app();
+    let cx = app.context();
+    let world = cx.singleton("World").unwrap();
+    cx.call(world,"streamLevel",&[Value::Str("offline".into()),v(serde_json::json!({"source":"lantern.glb","center":[0,0,0],"load_radius":20,"unload_radius":30,"pbr":true}))]).unwrap();
+    camera(&mut app, [0., 2., 0.]);
+    app.init().unwrap();
+    app.start().unwrap();
+    app.frame(16, InputFrame::default()).unwrap();
+    let time = app.runtime().unwrap().now_ms();
+    let frame = app.engine().unwrap().frame;
+    app.prepare_render_offline().unwrap();
+    assert_eq!(app.runtime().unwrap().now_ms(), time);
+    assert_eq!(app.engine().unwrap().frame, frame);
+    assert_eq!(app.runtime().unwrap().host.engine.world.len(), 4);
+    let cx = app.context();
+    let profiler = cx.singleton("Profiler").unwrap();
+    let report = cx.call(profiler, "snapshot", &[]).unwrap().to_json();
+    assert!(
+        report["stages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["name"] == "cpu:asset.Level.read_prepare")
+    );
+    let trace = cx.call(profiler, "trace", &[]).unwrap().to_json();
+    assert!(trace["traceEvents"].as_array().unwrap().len() > 0);
+    cx.call(profiler, "clear", &[]).unwrap();
+    assert_eq!(
+        cx.call(profiler, "snapshot", &[]).unwrap().to_json()["retained_samples"],
+        0
+    );
 }

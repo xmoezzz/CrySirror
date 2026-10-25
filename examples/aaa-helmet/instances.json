@@ -1,0 +1,315 @@
+{
+  "schema": 2,
+  "name": "Khronos DamagedHelmet shared BLAS showcase",
+  "content_revision": "instancing-1",
+  "canvas": [
+    960,
+    540
+  ],
+  "background": [
+    20,
+    25,
+    40,
+    255
+  ],
+  "assets": "assets",
+  "scene3d": {
+    "camera": {
+      "eye": [
+        11,
+        7,
+        12
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "fov_y_degrees": 48,
+      "near": 0.1,
+      "far": 100,
+      "up": [
+        0,
+        1,
+        0
+      ]
+    },
+    "meshes": []
+  },
+  "clients": [
+    {
+      "name": "game",
+      "adapter": "crysirror-script-v1",
+      "game": "helmet-instances",
+      "systems": {
+        "entities": [
+          {
+            "id": 1,
+            "name": "floor",
+            "geometry": {
+              "kind": "cube"
+            },
+            "transform": {
+              "translation": [
+                0,
+                -1.1,
+                0
+              ],
+              "scale": [
+                14,
+                0.2,
+                14
+              ]
+            },
+            "color": [
+              155,
+              160,
+              175,
+              255
+            ]
+          },
+          {
+            "id": 2,
+            "name": "helmet_0",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                -3,
+                0,
+                -3
+              ],
+              "rotation_degrees": [
+                0,
+                0,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          },
+          {
+            "id": 3,
+            "name": "helmet_1",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                0,
+                0,
+                -3
+              ],
+              "rotation_degrees": [
+                0,
+                20,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          },
+          {
+            "id": 4,
+            "name": "helmet_2",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                3,
+                0,
+                -3
+              ],
+              "rotation_degrees": [
+                0,
+                40,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          },
+          {
+            "id": 5,
+            "name": "helmet_3",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                -3,
+                0,
+                0
+              ],
+              "rotation_degrees": [
+                0,
+                60,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          },
+          {
+            "id": 6,
+            "name": "helmet_4",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                0,
+                0,
+                0
+              ],
+              "rotation_degrees": [
+                0,
+                80,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          },
+          {
+            "id": 7,
+            "name": "helmet_5",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                3,
+                0,
+                0
+              ],
+              "rotation_degrees": [
+                0,
+                100,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          },
+          {
+            "id": 8,
+            "name": "helmet_6",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                -3,
+                0,
+                3
+              ],
+              "rotation_degrees": [
+                0,
+                120,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          },
+          {
+            "id": 9,
+            "name": "helmet_7",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                0,
+                0,
+                3
+              ],
+              "rotation_degrees": [
+                0,
+                140,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          },
+          {
+            "id": 10,
+            "name": "helmet_8",
+            "geometry": {
+              "kind": "scene",
+              "asset": "DamagedHelmet.glb"
+            },
+            "transform": {
+              "translation": [
+                3,
+                0,
+                3
+              ],
+              "rotation_degrees": [
+                0,
+                160,
+                0
+              ]
+            },
+            "angular_velocity": [
+              0,
+              12,
+              0
+            ]
+          }
+        ],
+        "environment": {
+          "hdr": "royal_esplanade_2k.hdr",
+          "intensity": 0.4,
+          "sun": {
+            "direction": [
+              0.7,
+              -1,
+              0.4
+            ],
+            "intensity": 5,
+            "shadows": true
+          },
+          "temporal_aa": false,
+          "bloom": 0.02
+        }
+      }
+    }
+  ]
+}

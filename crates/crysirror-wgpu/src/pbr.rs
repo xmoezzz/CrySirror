@@ -591,6 +591,9 @@ fn halton(mut i: u32, base: u32) -> f32 {
 }
 
 pub struct PbrRenderer {
+    profiler: crysirror_tasks::profile::Profiler,
+    profile_frame: u64,
+    ray_cache: crate::ray_geometry::InstanceGeometryCache,
     hardware_rt: Option<crate::hardware_rt::HardwareRt>,
     hardware_encoded: bool,
     exposure: AutoExposureState,
@@ -1652,6 +1655,9 @@ impl PbrRenderer {
             None,
         )?;
         Ok(Self {
+            profiler: Default::default(),
+            profile_frame: 0,
+            ray_cache: Default::default(),
             hardware_rt: None,
             hardware_encoded: false,
             exposure: AutoExposureState {
@@ -1820,6 +1826,7 @@ impl PbrRenderer {
         self.hardware_rt = if enabled {
             Some(crate::hardware_rt::HardwareRt::new(&self.gpu)?)
         } else {
+            self.ray_cache.clear();
             None
         };
         self.hardware_encoded = false;
@@ -1827,9 +1834,26 @@ impl PbrRenderer {
         Ok(())
     }
     pub(crate) fn hardware_rt_stats(&self) -> Option<crate::hardware_rt::HardwareRtStats> {
-        self.hardware_rt.as_ref().map(|rt| rt.stats())
+        self.hardware_rt.as_ref().map(|rt| {
+            let mut stats = rt.stats();
+            stats.cpu_geometry_hits = self.ray_cache.hits;
+            stats.cpu_geometry_misses = self.ray_cache.misses;
+            stats
+        })
+    }
+    pub(crate) fn set_profiler(&mut self, p: crysirror_tasks::profile::Profiler, frame: u64) {
+        self.profiler = p;
+        self.profile_frame = frame;
     }
     pub fn set_scene(&mut self, scene: Option<PbrScene>) {
+        if scene.is_none() {
+            self.models.clear();
+            self.overrides.clear();
+            self.ray_cache.clear();
+            if let Some(rt) = &mut self.hardware_rt {
+                rt.clear();
+            }
+        }
         self.scene = scene;
     }
     /// Frames a single still capture should accumulate for TAA to converge.
@@ -2245,6 +2269,7 @@ impl PbrRenderer {
         Ok(())
     }
     fn load_model(&mut self, assets: &mut Assets, client: u32, asset: &str) -> Result<bool> {
+        let _span = self.profiler.span(self.profile_frame, "pbr.model_upload");
         let key = format!("{client}@{}:{asset}", assets.revision(ClientId(client)));
         let want_lod = self
             .scene
@@ -2566,6 +2591,7 @@ impl PbrRenderer {
         canvas: [u32; 2],
         vp: [f32; 4],
     ) -> Result<()> {
+        let _span = self.profiler.span(self.profile_frame, "pbr.encode");
         self.hardware_encoded = false;
         let use_rt = self.hardware_rt.is_some();
         assets.poll_tasks();
@@ -2577,6 +2603,20 @@ impl PbrRenderer {
             env.hdr.as_deref(),
             encoder,
         )?;
+        let active_models: std::collections::HashSet<String> = scene
+            .instances
+            .iter()
+            .filter_map(|i| match &i.drawable {
+                PbrDrawable::Model { client, asset, .. }
+                | PbrDrawable::Scene { client, asset, .. } => Some(format!(
+                    "{client}@{}:{asset}",
+                    assets.revision(ClientId(*client))
+                )),
+                PbrDrawable::Terrain { client, spec } => Some(Self::terrain_key(*client, spec)),
+                _ => None,
+            })
+            .collect();
+        self.models.retain(|key, _| active_models.contains(key));
         let mut ready_models = std::collections::HashSet::new();
         for inst in &scene.instances {
             match &inst.drawable {
@@ -2903,6 +2943,9 @@ impl PbrRenderer {
             }
         }
         let rt_triangles = if use_rt {
+            let _span = self
+                .profiler
+                .span(self.profile_frame, "rt.geometry.prepare");
             let mut requests = Vec::with_capacity(draws.len());
             for draw in &draws {
                 let (source, material) = if draw.kind == 0 {
@@ -2952,10 +2995,7 @@ impl PbrRenderer {
                     palette,
                 });
             }
-            Some(crate::ray_geometry::prepare(
-                &assets.cpu_tasks(),
-                &requests,
-            )?)
+            Some(self.ray_cache.prepare(&assets.cpu_tasks(), &requests)?)
         } else {
             None
         };
@@ -4579,7 +4619,7 @@ impl PbrRenderer {
             simple_pass(encoder, "ssao blur", &t.ao, &self.blur_pipe, &blur);
         }
         if let Some(rt) = &mut self.hardware_rt {
-            rt.encode_sun_shadows_into(
+            rt.encode_instance_shadows_into(
                 &self.gpu,
                 rt_triangles.as_deref().unwrap_or(&[]),
                 view_proj.inverse().to_cols_array_2d(),

@@ -1257,6 +1257,7 @@ dependencies = [
  "crysirror-runtime",
  "crysirror-scene",
  "crysirror-siglus-vm",
+ "crysirror-tasks",
  "crysirror-text",
  "glam 0.27.0",
  "intl_pluralrules",
@@ -1452,6 +1453,7 @@ dependencies = [
  "crossbeam-channel",
  "futures",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -73,8 +73,14 @@ enum Command {
         frames: Option<u64>,
         #[arg(long)]
         capture: Option<PathBuf>,
+        /// Export CPU Chrome trace and completed GPU timing diagnostics on exit.
+        #[arg(long)]
+        profile: Option<PathBuf>,
         #[arg(long, value_enum, default_value = "raster")]
         renderer: RenderChoice,
+        /// Prepared CPU asset-cache budget, separate from total RAM/VRAM.
+        #[arg(long,default_value_t=256,value_parser=clap::value_parser!(u32).range(16..=4096))]
+        asset_cache_mib: u32,
         /// JS/TS sources run by the engine App (playable games).
         #[arg(long)]
         script: Vec<PathBuf>,
@@ -101,6 +107,9 @@ enum Command {
         data_dir: Option<PathBuf>,
         #[arg(long, value_enum, default_value = "raster")]
         renderer: RenderChoice,
+        /// Prepared CPU asset-cache budget, separate from total RAM/VRAM.
+        #[arg(long,default_value_t=256,value_parser=clap::value_parser!(u32).range(16..=4096))]
+        asset_cache_mib: u32,
         /// JS/TS sources run by the engine App before capture (repeatable).
         #[arg(long)]
         script: Vec<PathBuf>,
@@ -222,6 +231,7 @@ fn scripted(
     for line in &app.engine()?.log {
         log::info!("script: {line}");
     }
+    app.prepare_render_offline()?;
     app.into_runtime()
 }
 #[cfg(feature = "scripting")]
@@ -248,6 +258,9 @@ fn start_app(rt: Runtime, scripts: &[PathBuf], client: &str) -> Result<crysirror
 struct ScriptedMovie(crysirror_engine::App);
 #[cfg(feature = "scripting")]
 impl app::MovieSource for ScriptedMovie {
+    fn prepare_capture(&mut self) -> Result<()> {
+        self.0.prepare_render_offline()
+    }
     fn advance(&mut self, step_ms: u64) -> Result<()> {
         self.0.frame(step_ms, InputFrame::default())
     }
@@ -312,12 +325,16 @@ fn run() -> Result<()> {
             no_audio,
             frames,
             capture,
+            profile,
             renderer,
+            asset_cache_mib,
             script,
             script_client,
         } => {
             let state_dir = state_dir(&project, data_dir)?;
-            let rt = load_runtime(&project, &state_dir)?;
+            let mut rt = load_runtime(&project, &state_dir)?;
+            rt.assets
+                .set_prepared_budget(usize::try_from(u64::from(asset_cache_mib) * 1024 * 1024)?)?;
             let core = if script.is_empty() {
                 app::Core::Plain(rt)
             } else {
@@ -330,6 +347,7 @@ fn run() -> Result<()> {
                     muted: no_audio,
                     frames,
                     capture,
+                    profile_path: profile,
                     state_dir,
                     rendering_path: renderer.into(),
                 },
@@ -345,6 +363,7 @@ fn run() -> Result<()> {
             font,
             data_dir,
             renderer,
+            asset_cache_mib,
             script,
             script_client,
             movie_frames,
@@ -357,6 +376,8 @@ fn run() -> Result<()> {
             );
             let dir = state_dir(&project, data_dir)?;
             let mut rt = load_runtime(&project, &dir)?;
+            rt.assets
+                .set_prepared_budget(usize::try_from(u64::from(asset_cache_mib) * 1024 * 1024)?)?;
             let track = input_track::InputTrack::load(input_track.as_deref())?;
             let input = |frame: u32| {
                 let mut input = track.at(frame);
@@ -367,8 +388,8 @@ fn run() -> Result<()> {
             let path: RenderingPath = renderer.into();
             let gpu = Arc::new(pollster::block_on(Gpu::request_for(&instance, None, path))?);
             let adapter = format!("{:?}", gpu.adapter.get_info());
-            let hardware_raytracing = path == RenderingPath::HardwareRaytrace
-                && gpu.capabilities().hardware_raytrace;
+            let hardware_raytracing =
+                path == RenderingPath::HardwareRaytrace && gpu.capabilities().hardware_raytrace;
             let hardware_rt_report = gpu.hardware_rt_report();
             #[cfg(feature = "scripting")]
             if let (false, Some(dir)) = (script.is_empty(), &movie_dir) {
@@ -504,10 +525,11 @@ fn run() -> Result<()> {
             let instance = wgpu::Instance::default();
             // Inspect every available backend/adapter without requesting experimental
             // features. The default device below remains a normal raster device.
-            let all_adapters: Vec<_> = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
-                .iter()
-                .map(|adapter| crysirror_wgpu::rt_capabilities::report(adapter, None))
-                .collect();
+            let all_adapters: Vec<_> =
+                pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()))
+                    .iter()
+                    .map(|adapter| crysirror_wgpu::rt_capabilities::report(adapter, None))
+                    .collect();
             let gpu = pollster::block_on(Gpu::request(&instance, None))?;
             let caps = gpu.capabilities();
             let features = gpu.adapter.features();

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Bounded CPU workers and awaitable, cooperatively cancellable jobs. No devices.
 #![forbid(unsafe_code)]
-use anyhow::{ensure, Result};
-use crossbeam_channel::{bounded, Sender};
+pub mod graph;
+pub mod profile;
+use anyhow::{Result, ensure};
+use crossbeam_channel::{Sender, bounded};
 use futures::channel::oneshot;
 use serde::Serialize;
 use std::{
@@ -10,8 +12,8 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     task::{Context, Poll},
     thread::{self, JoinHandle},
@@ -299,11 +301,12 @@ mod tests {
         assert_eq!(a.wait().unwrap(), 1);
         assert!(b.wait().is_err());
         assert!(!ran.load(Ordering::Relaxed));
-        assert!(pool
-            .spawn::<()>(|_| panic!("fixture"))
-            .unwrap()
-            .wait()
-            .is_err());
+        assert!(
+            pool.spawn::<()>(|_| panic!("fixture"))
+                .unwrap()
+                .wait()
+                .is_err()
+        );
         assert_eq!(pool.spawn(|_| Ok(4)).unwrap().wait().unwrap(), 4);
         assert_eq!(pool.stats().outstanding, 0);
     }
@@ -311,10 +314,11 @@ mod tests {
     fn nested_wait_is_rejected_instead_of_deadlocking() {
         let pool = TaskPool::new("test", 1, 4).unwrap();
         let nested = pool.clone();
-        assert!(pool
-            .spawn(move |_| nested.spawn(|_| Ok(1))?.wait())
-            .unwrap()
-            .wait()
-            .is_err());
+        assert!(
+            pool.spawn(move |_| nested.spawn(|_| Ok(1))?.wait())
+                .unwrap()
+                .wait()
+                .is_err()
+        );
     }
 }

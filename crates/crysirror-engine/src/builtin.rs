@@ -41,6 +41,7 @@ pub const GLOBALS: &[(&str, &str)] = &[
     ("canvases", "Canvases"),
     ("media", "Media"),
     ("assets", "Assets"),
+    ("profiler", "Profiler"),
 ];
 
 pub fn register(r: &mut ClassRegistry) -> Result<()> {
@@ -53,6 +54,7 @@ pub fn register(r: &mut ClassRegistry) -> Result<()> {
     crate::physics_api::register(r)?;
     crate::canvas_api::register(r)?;
     crate::assets_api::register(r)?;
+    crate::profiler_api::register(r)?;
     Ok(())
 }
 

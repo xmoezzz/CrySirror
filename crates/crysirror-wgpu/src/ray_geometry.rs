@@ -79,6 +79,7 @@ impl Primitive {
         Ok(out)
     }
 }
+#[cfg(test)]
 pub(crate) fn prepare(
     pool: &crysirror_tasks::TaskPool,
     requests: &[Primitive],
@@ -110,6 +111,106 @@ pub(crate) fn prepare(
         }
     }
     Ok(out)
+}
+type GeometryKey = (usize, usize, usize, Vec<u32>);
+#[derive(Default)]
+pub(crate) struct InstanceGeometryCache {
+    entries: std::collections::HashMap<GeometryKey, (Source, Arc<Vec<RtTriangle>>)>,
+    pub hits: u64,
+    pub misses: u64,
+}
+impl InstanceGeometryCache {
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+    /// Keep local geometry immutable and shared across rigid transforms/frames.
+    /// Source Arcs are retained with cache entries, preventing pointer-ID reuse.
+    pub fn prepare(
+        &mut self,
+        pool: &crysirror_tasks::TaskPool,
+        requests: &[Primitive],
+    ) -> Result<Vec<crate::hardware_rt::RtInstance>> {
+        use std::collections::{HashMap, HashSet};
+        let key = |r: &Primitive| {
+            let (ptr, mesh, primitive) = match &r.source {
+                Source::Model {
+                    model,
+                    mesh,
+                    primitive,
+                } => (Arc::as_ptr(model) as usize, *mesh, *primitive),
+                Source::Owned(p) => (Arc::as_ptr(p) as usize, usize::MAX, 0),
+            };
+            let pose: Vec<u32> = r
+                .palette
+                .as_ref()
+                .map(|p| {
+                    p.iter()
+                        .flat_map(|m| m.to_cols_array().map(f32::to_bits))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (ptr, mesh, primitive, pose)
+        };
+        let keys: Vec<_> = requests.iter().map(key).collect();
+        let used: HashSet<_> = keys.iter().cloned().collect();
+        self.entries.retain(|k, _| used.contains(k));
+        let mut unique = HashMap::new();
+        for (r, k) in requests.iter().zip(&keys) {
+            unique.entry(k.clone()).or_insert(r);
+        }
+        let total = unique
+            .values()
+            .map(|r| r.source().map(|p| p.indices.len() / 3))
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .sum::<usize>();
+        ensure!(
+            total <= crate::rt_capabilities::MAX_RT_PRIMITIVES as usize && unique.len() <= 1024,
+            "RT unique geometry preparation budget exceeded"
+        );
+        let missing: Vec<_> = unique
+            .into_iter()
+            .filter_map(|(k, r)| {
+                if self.entries.contains_key(&k) {
+                    self.hits += 1;
+                    None
+                } else {
+                    self.misses += 1;
+                    let mut r = r.clone();
+                    r.matrix = Mat4::IDENTITY;
+                    Some((k, r))
+                }
+            })
+            .collect();
+        for batch in missing.chunks(pool.stats().workers.max(1) * 2) {
+            let jobs = batch
+                .iter()
+                .map(|(k, r)| {
+                    let source = r.source.clone();
+                    let p = r.clone();
+                    Ok((
+                        k.clone(),
+                        source,
+                        pool.spawn(move |c| {
+                            c.check()?;
+                            p.triangles().map(Arc::new)
+                        })?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            for (k, source, job) in jobs {
+                self.entries.insert(k, (source, job.wait()?));
+            }
+        }
+        Ok(requests
+            .iter()
+            .zip(keys)
+            .map(|(r, k)| crate::hardware_rt::RtInstance {
+                triangles: self.entries[&k].1.clone(),
+                transform: r.matrix.to_cols_array_2d(),
+            })
+            .collect())
+    }
 }
 pub(crate) fn simple(scene: &crysirror_runtime::model::Scene3d) -> Result<Vec<RtTriangle>> {
     let vertices = geometry::triangles(scene)?;
@@ -164,5 +265,41 @@ mod tests {
         assert_eq!(triangles[0].a, [10., 2., 0.]);
         assert_eq!(triangles[0].b, [11., 2., 0.]);
         assert_eq!(triangles[0].c, [10., 3., 0.]);
+        let source = Source::Owned(Arc::new(PbrPrimitive {
+            vertices: vec![
+                crysirror_asset::pbr::PbrVertex {
+                    position: [0., 0., 0.],
+                    ..Default::default()
+                },
+                crysirror_asset::pbr::PbrVertex {
+                    position: [1., 0., 0.],
+                    ..Default::default()
+                },
+                crysirror_asset::pbr::PbrVertex {
+                    position: [0., 1., 0.],
+                    ..Default::default()
+                },
+            ],
+            indices: vec![0, 1, 2],
+            skin_attrs: None,
+            material: 0,
+            bounds: ([0.; 3], [1.; 3]),
+        }));
+        let one = Primitive {
+            source,
+            matrix: Mat4::IDENTITY,
+            palette: None,
+        };
+        let mut two = one.clone();
+        two.matrix = Mat4::from_translation(Vec3::X);
+        let mut cache = InstanceGeometryCache::default();
+        let frame = cache.prepare(&pool, &[one.clone(), two.clone()]).unwrap();
+        assert!(Arc::ptr_eq(&frame[0].triangles, &frame[1].triangles));
+        assert_eq!(cache.misses, 1);
+        two.matrix = Mat4::from_translation(Vec3::Y);
+        let next = cache.prepare(&pool, &[one, two]).unwrap();
+        assert!(Arc::ptr_eq(&frame[0].triangles, &next[0].triangles));
+        assert_eq!(cache.misses, 1);
+        assert_eq!(cache.hits, 1);
     }
 }

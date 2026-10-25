@@ -7,5 +7,6 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 crossbeam-channel = "=0.5.17"
 futures = "=0.3.34"
