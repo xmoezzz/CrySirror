@@ -38,7 +38,7 @@ Priorities:
 | Virtual file system, capability roots | done | 0006 | async I/O and streaming reads | P1 |
 | Save/load of engine state | partial | SAVE_FORMAT | versioned migrations of saves across schema changes | P0 |
 | Generated API docs and change log | done | docs/api | — | |
-| Job system / multithreaded frame (simulation ∥ render) | missing | — | task graph; parallel culling and animation | P1 |
+| Job system / multithreaded frame (simulation ∥ render) | partial | 0049 | bounded CPU/asset workers, async imports and parallel poses implemented; general frame task graph and simulation/render overlap remain | P1 |
 | Deterministic fixed step, replay | partial | 0012 | input recording and replay files | P2 |
 
 ### Assets and pipeline

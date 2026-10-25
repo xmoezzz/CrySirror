@@ -53,6 +53,8 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-scene/src/canvas.rs",
         "crates/crysirror-core/src/service.rs",
         "crates/crysirror-runtime/src/media.rs",
+        "crates/crysirror-runtime/src/assets_async.rs",
+        "crates/crysirror-tasks/src/lib.rs",
         "crates/crysirror-scene/src/ui.rs",
         "crates/crysirror-scene/src/material.rs",
         "crates/crysirror-scene/src/sequence.rs",
@@ -70,6 +72,11 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("AssetKind", "`Assets.load(path, kind)`", Some(json!("model"))),
+        d("AssetState", "`Assets.status(id)`", None),
+        d("AssetTicket", "Rust async asset handle; store/client checked", None),
+        d("AssetStatus", "`Assets.status(id)`", None),
+        d("TaskStats", "`Assets.stats()` CPU and I/O pools", None),
         d(
             "Environment",
             "`World.setEnvironment`, `world.set_environment`",

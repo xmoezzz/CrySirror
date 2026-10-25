@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -192,8 +193,15 @@ class BoundaryTests(unittest.TestCase):
         ignore=(ROOT/".gitignore").read_text()
         self.assertIn("/local/",ignore)
         self.assertIn("/images/third-party/",ignore)
-        self.assertFalse([p for p in ROOT.rglob("*") if p.is_file() and p.suffix.lower() in forbidden
-                          and not any(p.is_relative_to(d) for d in local)])
+        # Prune private/generated trees before traversing: rustc creates and
+        # removes temporary directories concurrently during workspace builds.
+        excluded=local | {ROOT/"target", ROOT/".git"}
+        found=[]
+        for parent, dirs, files in os.walk(ROOT):
+            parent=Path(parent)
+            dirs[:]=[name for name in dirs if parent/name not in excluded]
+            found.extend(parent/name for name in files if Path(name).suffix.lower() in forbidden)
+        self.assertFalse(found)
 
 if __name__=="__main__":
     unittest.main()

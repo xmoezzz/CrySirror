@@ -2060,25 +2060,13 @@ impl PbrRenderer {
         );
         Ok(())
     }
-    fn load_model(&mut self, assets: &mut Assets, client: u32, asset: &str) -> Result<()> {
-        let key = format!("{client}:{asset}");
+    fn load_model(&mut self, assets: &mut Assets, client: u32, asset: &str) -> Result<bool> {
+        let key = format!("{client}@{}:{asset}",assets.revision(ClientId(client)));
         let want_lod = self.scene.as_ref().is_some_and(|s| s.environment.geometry_lod.is_some());
         if self.models.get(&key).is_some_and(|m| m.lod_built || !want_lod) {
-            return Ok(());
+            return Ok(true);
         }
-        let c = ClientId(client);
-        let bytes = assets.read_for(c, asset)?;
-        let dir = asset
-            .rsplit_once('/')
-            .map(|(d, _)| format!("{d}/"))
-            .unwrap_or_default();
-        let model = {
-            let shared=std::cell::RefCell::new(&mut *assets);
-            cpu::load_pbr_with_decoder(&bytes,|uri| {
-                Ok(shared.borrow_mut().read_for(c,&format!("{dir}{uri}"))?.to_vec())
-            },|uri,data| shared.borrow().decode_image(c,&format!("{dir}{uri}"),data))
-        }
-        .with_context(|| format!("PBR model {asset}"))?;
+        let Some(model) = assets.model_for(ClientId(client),asset)? else {return Ok(false)};
         let shader_keys = model
             .materials
             .iter()
@@ -2125,26 +2113,17 @@ impl PbrRenderer {
             .iter()
             .map(|m| m.iter().map(|p| self.prim_lod(p, lod_built)).collect())
             .collect();
-        let mut cpu_model = model;
-        cpu_model.images.clear();
-        for m in &mut cpu_model.meshes {
-            for p in m {
-                p.vertices = Vec::new();
-                p.indices = Vec::new();
-                p.skin_attrs = None;
-            }
-        }
         self.models.insert(
             key,
             GpuModel {
                 lod_built,
-                cpu: Arc::new(cpu_model),
+                cpu: model,
                 meshes,
                 materials,
                 _textures: textures,
             },
         );
-        Ok(())
+        Ok(true)
     }
 
     fn terrain_key(client: u32, spec: &crysirror_scene::terrain::TerrainSpec) -> String {
@@ -2376,7 +2355,8 @@ impl PbrRenderer {
         canvas: [u32; 2],
         vp: [f32; 4],
     ) -> Result<()> {
-        let scene = self.scene.clone().context("no PBR scene")?;
+        assets.poll_tasks();
+        let mut scene = self.scene.clone().context("no PBR scene")?;
         let env = scene.environment.clone();
         self.load_env(
             assets,
@@ -2384,11 +2364,12 @@ impl PbrRenderer {
             env.hdr.as_deref(),
             encoder,
         )?;
+        let mut ready_models=std::collections::HashSet::new();
         for inst in &scene.instances {
             match &inst.drawable {
                 PbrDrawable::Model { client, asset, .. }
                 | PbrDrawable::Scene { client, asset, .. } => {
-                    self.load_model(assets, *client, asset)?
+                    if self.load_model(assets, *client, asset)? {ready_models.insert((*client,asset.clone()));}
                 }
                 PbrDrawable::Terrain { client, spec } => {
                     self.load_terrain(assets, *client, spec)?
@@ -2396,6 +2377,15 @@ impl PbrRenderer {
                 PbrDrawable::Triangles { .. } => {}
             }
         }
+        let models_complete=scene.instances.iter().all(|instance|match &instance.drawable{PbrDrawable::Model{client,asset,..}|PbrDrawable::Scene{client,asset,..}=>ready_models.contains(&(*client,asset.clone())),_=>true});
+        // Do not bake an empty reflection capture while model imports are pending.
+        if !models_complete {scene.probes.retain(|probe|probe.source.is_some());}
+        let resource_stamp={use std::hash::{Hash,Hasher};let mut keys:Vec<_>=ready_models.iter().collect();keys.sort();let mut hash=std::collections::hash_map::DefaultHasher::new();for(client,path)in keys{client.hash(&mut hash);path.hash(&mut hash);assets.revision(ClientId(*client)).hash(&mut hash);}hash.finish()};
+        scene.instances.retain(|instance| match &instance.drawable {PbrDrawable::Model{client,asset,..}|PbrDrawable::Scene{client,asset,..}=>ready_models.contains(&(*client,asset.clone())),_=>true});
+        let mut pose_keys=Vec::new();let mut pose_requests=Vec::new();
+        for instance in &scene.instances {if let PbrDrawable::Scene{client,asset,animation}=&instance.drawable {let key=format!("{client}@{}:{asset}",assets.revision(ClientId(*client)));let model=self.models[&key].cpu.clone();let layers=animation.iter().map(|l|crysirror_asset::anim::clip_index(&model,&l.clip).map(|clip|crysirror_asset::anim::Layer{clip,time:l.time,weight:l.weight}).with_context(||format!("{asset}: no animation clip '{}'",l.clip))).collect::<Result<Vec<_>>>()?;pose_keys.push(instance.key);pose_requests.push((model,layers));}}
+        let poses=crysirror_asset::anim::poses_parallel(&assets.cpu_tasks(),&pose_requests)?;
+        let mut poses:HashMap<_,_>=pose_keys.into_iter().zip(poses).collect();
         let used: std::collections::HashSet<String> = scene
             .instances
             .iter()
@@ -2472,7 +2462,7 @@ impl PbrRenderer {
                     asset,
                     mesh,
                 } => {
-                    let key = format!("{client}:{asset}");
+                    let key = format!("{client}@{}:{asset}",assets.revision(ClientId(*client)));
                     let model = &self.models[&key];
                     let prims = model
                         .meshes
@@ -2516,23 +2506,11 @@ impl PbrRenderer {
                 PbrDrawable::Scene {
                     client,
                     asset,
-                    animation,
+                    animation: _,
                 } => {
-                    let key = format!("{client}:{asset}");
+                    let key = format!("{client}@{}:{asset}",assets.revision(ClientId(*client)));
                     let model = self.models[&key].cpu.clone();
-                    let layers: Vec<crysirror_asset::anim::Layer> = animation
-                        .iter()
-                        .map(|l| {
-                            crysirror_asset::anim::clip_index(&model, &l.clip)
-                                .map(|clip| crysirror_asset::anim::Layer {
-                                    clip,
-                                    time: l.time,
-                                    weight: l.weight,
-                                })
-                                .with_context(|| format!("{asset}: no animation clip '{}'", l.clip))
-                        })
-                        .collect::<Result<_>>()?;
-                    let global = crysirror_asset::anim::pose(&model, &layers);
+                    let global=poses.remove(&inst.key).context("prepared animation pose missing")?;
                     for (ni, node) in model.nodes.iter().enumerate() {
                         let Some(mesh) = node.mesh else { continue };
                         let world = m * global[ni];
@@ -2958,6 +2936,7 @@ impl PbrRenderer {
                 format!("{:?}", scene.lights).hash(&mut h);
                 for d in draws.iter().filter(|d| !d.skinned) {
                     d.key.hash(&mut h);
+                    d.model.hash(&mut h);
                     d.override_key.hash(&mut h);
                     bytemuck::bytes_of(&objects[d.object as usize].model).hash(&mut h);
                 }
@@ -3098,7 +3077,7 @@ impl PbrRenderer {
             self.vsm.depth = None;
         }
         // Reflection probe slots: nearest probes first, slots kept per key.
-        let env_key = e.key.clone();
+        let env_key = format!("{}:assets:{resource_stamp}",e.key);
         let mut wanted: Vec<&crysirror_scene::view::PbrProbe> = scene.probes.iter().collect();
         let eye = Vec3::from_array(cam.eye);
         wanted.sort_by(|a, b| {

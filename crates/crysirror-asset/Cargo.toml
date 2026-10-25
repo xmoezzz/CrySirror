@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Device-free asset importers (glTF 2.0 / Blender exports) into engine world data"
 
 [dependencies]
+crysirror-tasks.workspace = true
 crysirror-scene.workspace = true
 crysirror-image.workspace = true
 anyhow.workspace = true

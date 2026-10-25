@@ -259,6 +259,10 @@ impl App {
         if self.window.is_some() {
             return Ok(());
         }
+        // Native adapters retain their first-use resource/wait contract until
+        // they explicitly integrate asynchronous readiness fences.
+        let progressive=self.core.rt().project.clients.iter().all(|client|client.adapter=="crysirror-script-v1");
+        self.core.rt().assets.set_nonblocking(progressive);
         let canvas = self.core.rt().project.canvas;
         let window = Arc::new(
             el.create_window(

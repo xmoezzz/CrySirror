@@ -1,0 +1,11 @@
+[package]
+name = "crysirror-tasks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+crossbeam-channel = "=0.5.17"
+futures = "=0.3.34"

@@ -723,6 +723,7 @@ impl Runtime {
         })
     }
     pub fn tick(&mut self, delta_ms: u64, input: InputFrame) -> Result<()> {
+        self.assets.poll_tasks();
         // PCM is frame output, like the current render product. A headless
         // caller may leave it unread; never replay it during a later frame.
         self.host.pcm.clear();
@@ -889,7 +890,7 @@ impl Runtime {
     pub fn inspect(&self) -> serde_json::Value {
         serde_json::json!({"name":self.project.name,"frame":self.host.scene.frame(),"time_ms":self.host.clock_ms,
             "visuals":self.host.scene.visuals().len(),"voices":self.host.scene.voices().len(),
-            "channel_audio":self.host.channel_audio.mixer.stats(),"media":self.host.media.inspect(),
+            "tasks":self.assets.tasks_inspect(),"channel_audio":self.host.channel_audio.mixer.stats(),"media":self.host.media.inspect(),
             "engine":self.host.engine,
             "adapters":self.registry.names(),"sessions":self.sessions.iter().map(|s|serde_json::json!({
                 "name":s.name,"client":s.id.0,"engine":s.vm.engine_id(),"yield":format!("{:?}",s.yielded),"native":serde_json::from_slice::<serde_json::Value>(&s.vm.diagnostics()).ok()

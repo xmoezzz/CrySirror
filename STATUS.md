@@ -1034,3 +1034,49 @@ extraction. ADR 0038 records this delivered capability increment.
   ignored logs in target/verification/reallive-api-{acceptance.log,
   workspace-tests-final.log,python-final.log}. Private captures and before/after
   engine inspection are in images/third-party/reallive-api/.
+
+## 2026-10-26 — Engine CPU workers and asynchronous assets
+
+- Implementation: added device-free `crysirror-tasks` with bounded worker
+  queues, wakeable Rust Futures, cooperative cancellation, panic reporting,
+  worker counters and same-pool blocking-wait rejection. Runtime Assets shares
+  an asset lane and a CPU lane across clients; no thread is spawned per asset.
+- Actual integration: scoped image decoding and glTF dependency/model imports
+  execute on asset workers and publish on the owner thread. Desktop data-VM
+  projects defer pending draws while continuing frames. Offline capture and
+  native compatibility projects retain explicit first-use waits. Independent
+  PBR scene poses execute in bounded CPU batches and are collected in instance
+  order before GPU writes. Loaded-resource revisions invalidate stale tickets
+  and GPU keys; late cancelled results cannot overwrite refreshed resources.
+- API: Rust awaitable reads and `Assets.load/status/cancel/release/stats` with
+  the `assets` global. Requests are client/store scoped, deduplicated and
+  bounded; renderer overload defers work rather than growing unbounded queues.
+  API docs regenerated, fingerprint `df17e49431e56860` logged. ADR 0049 records
+  thread ownership, limits and remaining synchronous work.
+- Compilation: workspace check and the final desktop check passed.
+- Automated behavior: `cargo test --workspace` exited 0, **571 passed / zero
+  failed / 49 ignored**. Python tooling passed **165 tests**. Its source-data
+  boundary scan now prunes private/generated directories before walking them,
+  preventing races with rustc temporary directories during parallel validation.
+- Explicit GPU behavior: **2/2** async tests passed on Apple M5/Metal. A blocked
+  image provider did not block frame capture or logical ticks; completed pixels
+  matched offline resolution. A glTF scene used CPU pose workers and matched
+  blocking-mode GPU pixels. A separately executed reflection-probe regression
+  passed **1/1**. Pending model imports do not bake empty reflection probes;
+  resource-generation changes invalidate capture/GI identities. These explicit
+  GPU executions are separate from ignored workspace tests.
+- Other behavior: two barrier-synchronized jobs ran on distinct workers;
+  Future wakeup, bounded admission, cancellation, failure/panic recovery and
+  nested-wait rejection passed. Tests cover slow I/O with advancing Runtime,
+  stale-generation rejection, client isolation, shared decode/import caches,
+  overload deferral and 37 animated pose results matching serial evaluation.
+- Limits: World/VM/script/fixed-step physics remain ordered on their owner
+  thread. This is not a general frame task graph or complete simulation/render
+  overlap. GPU uploads/compilation, cluster-LOD construction, collision cooking,
+  HDR/probe loading and some shader/material/puppet/native paths retain
+  synchronous work. Cancellation cannot forcibly interrupt a provider syscall;
+  prepared-cache accounting does not bound all transient or GPU memory. No
+  whole-engine speedup, other-OS hardware result or hardware-RT result is claimed.
+- Evidence: target/verification/async-{workspace-check.log,workspace-tests.log,
+  final-desktop-check.log,python-tests.log,gpu-tests.log,probe-regression.log};
+  the new focused tests and ADR 0049 are committed without external game data.

@@ -63,6 +63,68 @@
   ],
   "classes": [
     {
+      "doc": "Client-scoped asynchronous resource loading on bounded engine workers. Ready models/images feed the normal renderer.",
+      "global": "assets",
+      "methods": [
+        {
+          "doc": "Queue bytes, image or model import without blocking. Returns a client-owned request id; duplicate requests share a job.",
+          "name": "load",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Poll loading/ready/failed/cancelled status and error. This never waits for disk or decoding.",
+          "name": "status",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Request cooperative cancellation of a loading asset. Late worker results cannot publish.",
+          "name": "cancel",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Release a request and its CPU cache entry; cancel work if pending. Does not remove existing scene entities or GPU copies.",
+          "name": "release",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Inspect shared worker activity, bounded queue counts, CPU cache bytes and only this client's requests.",
+          "name": "stats",
+          "params": [],
+          "returns": "Record<string, any>"
+        }
+      ],
+      "name": "Assets",
+      "properties": []
+    },
+    {
       "doc": "Scoped voice pool, streaming music and deterministic CPU mixing; classic channels share this output.",
       "global": "audio",
       "methods": [
@@ -3213,6 +3275,185 @@
     }
   ],
   "data": [
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "bytes",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "image",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "model",
+          "rust_type": ""
+        }
+      ],
+      "name": "AssetKind",
+      "used_by": "`Assets.load(path, kind)`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "loading",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "ready",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "failed",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "cancelled",
+          "rust_type": ""
+        }
+      ],
+      "name": "AssetState",
+      "used_by": "`Assets.status(id)`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "store",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "AssetTicket",
+      "used_by": "Rust async asset handle; store/client checked"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "ticket",
+          "rust_type": "AssetTicket"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "path",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "kind",
+          "rust_type": "AssetKind"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "state",
+          "rust_type": "AssetState"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "error",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "bytes",
+          "rust_type": "usize"
+        }
+      ],
+      "name": "AssetStatus",
+      "used_by": "`Assets.status(id)`"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "workers",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "capacity",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "outstanding",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "running",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "completed",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "cancelled",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "panicked",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "rejected",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "TaskStats",
+      "used_by": "`Assets.stats()` CPU and I/O pools"
+    },
     {
       "doc": "",
       "fields": [
@@ -6980,7 +7221,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "8d83111697a3c377",
+  "fingerprint": "df17e49431e56860",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {
@@ -7046,6 +7287,10 @@
     {
       "class": "Media",
       "global": "media"
+    },
+    {
+      "class": "Assets",
+      "global": "assets"
     }
   ]
 }

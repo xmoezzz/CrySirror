@@ -81,3 +81,4 @@ moves to `done` only with recorded behavior evidence.
 | [0045](0045-rapier-shared-physics.md) | Persistent Rapier 3D physics shared by data projects, native clients and engine APIs | rigid-body simulation and integration validation |
 | [0046](0046-native-image-resource-pipeline.md) | All pinned image decoder IDs through the shared runtime, object API and renderer | 96 image IDs, per-variant limits and actual Metal archive-render evidence |
 | [0048](0048-reallive-vm-engine-apis.md) | Pure RealLive VM and semantic adapter over reusable retained Canvas/GlyphRun/UI/audio/Media APIs | API bridge implemented; opening-profile evidence separate |
+| [0049](0049-multithreaded-tasks-and-async-assets.md) | Bounded CPU/asset workers, awaitable reads, asynchronous image/model imports and parallel poses | implemented; validation in STATUS |

@@ -1123,6 +1123,7 @@ dependencies = [
  "anyhow",
  "crysirror-image",
  "crysirror-scene",
+ "crysirror-tasks",
  "glam 0.27.0",
  "gltf",
  "image",
@@ -1341,6 +1342,7 @@ dependencies = [
  "crysirror-resource",
  "crysirror-scene",
  "crysirror-siglus-vm",
+ "crysirror-tasks",
  "crysirror-text",
  "crysirror-video",
  "glam 0.27.0",
@@ -1408,6 +1410,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crysirror-tasks"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "crossbeam-channel",
+ "futures",
+ "serde",
+]
+
+[[package]]
 name = "crysirror-text"
 version = "0.2.0"
 dependencies = [
@@ -1461,6 +1473,7 @@ dependencies = [
  "crysirror-scene",
  "crysirror-siglus",
  "crysirror-siglus-vm",
+ "crysirror-tasks",
  "crysirror-text",
  "glam 0.27.0",
  "half",

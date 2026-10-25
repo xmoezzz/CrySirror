@@ -8,9 +8,14 @@ use crysirror_core::{
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
+#[path = "assets_async.rs"]
+mod asynchronous;
+pub use asynchronous::{AssetKind, AssetState, AssetTicket, AssetStatus};
+
 /// Immutable assets with a capability root per client, not merely a string prefix.
 /// Explicit reload constructs a new store/runtime. This is not a native-code sandbox.
 pub struct Assets {
+    asynchronous: asynchronous::AsyncAssets,
     /// CPU text resources belong to engine resources, not a GPU/device lifetime.
     pub text: crysirror_text::TextSystem,
     pub decoders: crysirror_image::DecoderRegistry,
@@ -39,6 +44,7 @@ impl Assets {
         #[cfg(feature="arc-formats")]
         crysirror_formats_arc::register_images(&mut decoders)?;
         Ok(Self {
+            asynchronous: asynchronous::AsyncAssets::new()?,
             text: Default::default(),
             decoders,
             root: Dir::open_ambient_dir(path, ambient_authority()).context("open asset root")?,
@@ -114,6 +120,8 @@ impl Assets {
         if let Some(bytes) = self.bytes.get(&key) {
             return Ok(bytes.clone());
         }
+        self.poll_tasks();
+        if let Some(bytes)=self.prepared_bytes(client,path){return Ok(bytes);}
         let bytes = if let Some(storage)=self.storage.get(&client) {
             let logical=VfsPath::new(Mount::Asset,path).map_err(|e|anyhow::anyhow!("{e}"))?;
             storage.read(&logical).map_err(|e|anyhow::anyhow!("client asset {path}: {e}"))?
@@ -135,6 +143,7 @@ impl Assets {
                 self.total-=bytes.len();false
             } else {true}
         });
+        self.asynchronous.invalidate(client);
         self.storage.insert(client,storage);Ok(())
     }
     pub fn register_generated(
@@ -229,6 +238,8 @@ impl Assets {
         self.surfaces.get(&(client, slot))
     }
     pub fn clear(&mut self) {
+        let clients: Vec<_> = self.clients.keys().copied().collect();
+        for client in clients { self.asynchronous.invalidate(client); }
         self.bytes.clear();
         self.total = 0;
         self.surfaces.clear();

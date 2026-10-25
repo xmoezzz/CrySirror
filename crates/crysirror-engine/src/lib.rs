@@ -13,6 +13,7 @@
 pub mod ai;
 pub mod api_doc;
 pub mod audio_api;
+pub mod assets_api;
 pub mod bitmap_api;
 pub mod builtin;
 pub mod canvas_api;

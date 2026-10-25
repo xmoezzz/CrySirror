@@ -40,6 +40,7 @@ pub const GLOBALS: &[(&str, &str)] = &[
     ("physics", "Physics"),
     ("canvases", "Canvases"),
     ("media", "Media"),
+    ("assets", "Assets"),
 ];
 
 pub fn register(r: &mut ClassRegistry) -> Result<()> {
@@ -51,6 +52,7 @@ pub fn register(r: &mut ClassRegistry) -> Result<()> {
     crate::services::register(r)?;
     crate::physics_api::register(r)?;
     crate::canvas_api::register(r)?;
+    crate::assets_api::register(r)?;
     Ok(())
 }
 

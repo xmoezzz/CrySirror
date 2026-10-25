@@ -737,7 +737,7 @@ impl Renderer {
                 assets.key(ClientId(owner), asset)?,
                 s.revision
             ),
-            None => format!("image:{}", assets.key(ClientId(owner), asset)?),
+            None => format!("image:{}@{}", assets.key(ClientId(owner), asset)?,assets.revision(ClientId(owner))),
         })
     }
     fn ensure_image(
@@ -746,20 +746,19 @@ impl Renderer {
         owner: u32,
         asset: &str,
         key: &str,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if self.textures.contains_key(key) {
-            return Ok(());
+            return Ok(true);
         }
         if key.starts_with("surface:") {
             let s = assets
                 .surface(ClientId(owner), asset)
                 .context("surface vanished")?
                 .clone();
-            return self.upload(key.to_owned(), s.width, s.height, &s.rgba);
+            self.upload(key.to_owned(), s.width, s.height, &s.rgba)?;return Ok(true);
         }
-        let bytes = assets.read_for(ClientId(owner), asset)?;
-        let image = assets.decode_image(ClientId(owner), asset, bytes.as_ref())?;
-        self.upload(key.to_owned(), image.width, image.height, &image.rgba)
+        let Some(image)=assets.image_for(ClientId(owner),asset)? else {return Ok(false)};
+        self.upload(key.to_owned(),image.width,image.height,&image.rgba)?;Ok(true)
     }
     fn prepare(
         &mut self,
@@ -924,6 +923,7 @@ impl Renderer {
         for (((p, key), fkeys), tex_keys) in
             frame.iter().zip(keys).zip(filter_keys).zip(puppet_textures)
         {
+            if fkeys.as_ref().is_some_and(|(a,b)| !self.textures.contains_key(a)||!self.textures.contains_key(b)){continue;}
             let color = match &p.paint {
                 Paint::Solid { color } => {
                     if !self.textures.contains_key(&key) {
@@ -931,32 +931,15 @@ impl Renderer {
                     }
                     *color
                 }
-                Paint::Image { asset, tint } => {
-                    if !self.textures.contains_key(&key) && key.starts_with("surface:") {
-                        let s = assets
-                            .surface(ClientId(p.owner), asset)
-                            .context("surface vanished")?
-                            .clone();
-                        self.upload(key.clone(), s.width, s.height, &s.rgba)?;
-                    }
-                    if !self.textures.contains_key(&key) {
-                        let bytes = assets.read_for(ClientId(p.owner), asset)?;
-                        let image =
-                            assets.decode_image(ClientId(p.owner), asset, bytes.as_ref())?;
-                        self.upload(key.clone(), image.width, image.height, &image.rgba)?;
-                    }
-                    *tint
-                }
+                Paint::Image { asset,tint }=>{if !self.ensure_image(assets,p.owner,asset,&key)?{continue;}*tint}
                 Paint::Puppet { tint, .. } => {
                     let size = Self::puppet_size(p);
                     if !self.textures.contains_key(&key) {
                         self.render_texture(key.clone(), size)?;
                     }
-                    if let Some(f) = &p.puppet {
-                        for (t, k) in f.textures.iter().zip(&tex_keys) {
-                            self.ensure_image(assets, p.owner, t, k)?;
-                        }
-                    }
+                    let mut ready=true;
+                    if let Some(f) = &p.puppet {for (t,k) in f.textures.iter().zip(&tex_keys){ready&=self.ensure_image(assets,p.owner,t,k)?;}}
+                    if !ready {continue;}
                     let textures = &self.textures;
                     self.puppets.render(
                         &self.gpu.device,

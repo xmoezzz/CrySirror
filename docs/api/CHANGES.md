@@ -4,6 +4,17 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `df17e49431e56860` (2026-10-26): asynchronous assets and shared CPU workers
+
+- Add `Assets.load/status/cancel/release/stats` and the `assets` script global.
+  Requests are scoped to the calling client; ready image/model imports feed the
+  ordinary renderer. Failures and cancellation are explicit states.
+- Document `AssetKind`, `AssetState`, `AssetTicket`, `AssetStatus` and `TaskStats`.
+  Tickets, jobs and CPU/GPU caches are runtime resources, never saved pointers.
+- Add Rust awaitable reads and bounded worker pools. Desktop image/model loading
+  is nonblocking; offline captures explicitly resolve pending work. Independent
+  3D poses run on CPU workers with ordered deterministic result collection.
+
 ## `8d83111697a3c377` (2026-10-26): shared native drawing, text, media and RealLive API adapter
 
 - Add engine-owned `Canvases.apply/get`, logical canvas surface/node/command

@@ -20,7 +20,8 @@ and a test keeps it current.
   `LayerCommand`, `CanvasCommand` and `UiCommand` to the API member that issues it.
   `tests/api_coverage.rs` fails on an unmapped variant.
 - **Data specs.** Field names and Rust types come from the `pub struct` and
-  `pub enum` declarations in `crysirror-scene`, plus shared media declarations in core/runtime. Descriptions come from their
+  `pub enum` declarations in `crysirror-scene`, plus shared media/asset declarations in core/runtime and task statistics in
+  `crysirror-tasks`. Descriptions come from their
   `///` comments. Defaults come from serde: a minimal value is parsed and
   then serialized again.
 - **Adapter configs.** The `Config` structs of the Siglus and native RealLive

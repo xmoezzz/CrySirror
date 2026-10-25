@@ -245,3 +245,30 @@ mod tests {
         assert_eq!(clip_index(&m, "bend"), Some(0));
     }
 }
+
+/// Evaluate independent character poses on engine CPU workers. Results preserve
+/// request order; hierarchy/blend evaluation within a character is unchanged.
+pub fn poses_parallel(
+    pool: &crysirror_tasks::TaskPool,
+    requests: &[(std::sync::Arc<PbrModel>, Vec<Layer>)],
+) -> anyhow::Result<Vec<Vec<Mat4>>> {
+    let mut out = Vec::with_capacity(requests.len());
+    let batch = pool.stats().workers.max(1) * 2;
+    for chunk in requests.chunks(batch) {
+        let jobs = chunk
+            .iter()
+            .map(|(model, layers)| {
+                let model = model.clone();
+                let layers = layers.clone();
+                pool.spawn(move |cancel| {
+                    cancel.check()?;
+                    Ok(pose(&model, &layers))
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        for job in jobs {
+            out.push(job.wait()?);
+        }
+    }
+    Ok(out)
+}

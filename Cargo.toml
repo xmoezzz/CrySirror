@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/crysirror-tasks",
     "crates/crysirror-core",
     "crates/crysirror-compat",
     "crates/crysirror-host",
@@ -40,6 +41,7 @@ license = "MPL-2.0"
 rust-version = "1.89"
 
 [workspace.dependencies]
+crysirror-tasks = { path = "crates/crysirror-tasks" }
 crysirror-core = { path = "crates/crysirror-core" }
 crysirror-compat = { path = "crates/crysirror-compat" }
 crysirror-host = { path = "crates/crysirror-host" }

@@ -6,16 +6,16 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `8d83111697a3c377`
+API fingerprint: `df17e49431e56860`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
 ## Contents
 
 - [Globals](#globals)
-- Classes: [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [World](#class-world)
+- Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [World](#class-world)
 - [Commands](#commands)
-- Data: [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
+- Data: [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -38,6 +38,22 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 | `physics` | [Physics](#class-physics) |
 | `canvases` | [Canvases](#class-canvases) |
 | `media` | [Media](#class-media) |
+| `assets` | [Assets](#class-assets) |
+
+## Class Assets
+
+Client-scoped asynchronous resource loading on bounded engine workers. Ready models/images feed the normal renderer.
+
+Script global: `assets`.
+
+| Method | Returns | Description |
+|---|---|---|
+| `load(path: string, kind: string)` | `number` | Queue bytes, image or model import without blocking. Returns a client-owned request id; duplicate requests share a job. |
+| `status(id: number)` | `Record<string, any>` | Poll loading/ready/failed/cancelled status and error. This never waits for disk or decoding. |
+| `cancel(id: number)` | `void` | Request cooperative cancellation of a loading asset. Late worker results cannot publish. |
+| `release(id: number)` | `void` | Release a request and its CPU cache entry; cancel work if pending. Does not remove existing scene entities or GPU copies. |
+| `stats(—)` | `Record<string, any>` | Inspect shared worker activity, bounded queue counts, CPU cache bytes and only this client's requests. |
+
 
 ## Class Audio
 
@@ -580,6 +596,65 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 ## Data
 
 Field defaults are the serde defaults (`—`: required, or absent when unset).
+
+### AssetKind
+
+Used by: `Assets.load(path, kind)`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `bytes` | — | — |
+| `image` | — | — |
+| `model` | — | — |
+
+### AssetState
+
+Used by: `Assets.status(id)`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `loading` | — | — |
+| `ready` | — | — |
+| `failed` | — | — |
+| `cancelled` | — | — |
+
+### AssetTicket
+
+Used by: Rust async asset handle; store/client checked.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `store` | `u64` | — | — |
+| `client` | `u32` | — | — |
+| `id` | `u64` | — | — |
+
+### AssetStatus
+
+Used by: `Assets.status(id)`.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `ticket` | `AssetTicket` | — | — |
+| `path` | `String` | — | — |
+| `kind` | `AssetKind` | — | — |
+| `state` | `AssetState` | — | — |
+| `error` | `Option<String>` | — | — |
+| `bytes` | `usize` | — | — |
+
+### TaskStats
+
+Used by: `Assets.stats()` CPU and I/O pools.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `workers` | `usize` | — | — |
+| `capacity` | `usize` | — | — |
+| `outstanding` | `usize` | — | — |
+| `running` | `usize` | — | — |
+| `completed` | `u64` | — | — |
+| `cancelled` | `u64` | — | — |
+| `panicked` | `u64` | — | — |
+| `rejected` | `u64` | — | — |
 
 ### Environment
 

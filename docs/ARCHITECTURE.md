@@ -147,9 +147,10 @@ native page/read/wait/save policies require a tested adapter bridge. See
 NATIVE_ADAPTERS.md and ADR 0034–0036 for executable coverage.
 
 Textures and assets are bounded. Unsupported dimensions/formats/layouts report
-errors. This snapshot has no asynchronous asset streaming or device-loss rebuild
-beyond surface reconfiguration. These are implementation limitations, not
-performance claims.
+errors. Scoped image/model reads and imports now run asynchronously on engine workers
+(ADR 0049). Demand-paged streaming and device-loss rebuild beyond surface
+reconfiguration remain unimplemented. These are implementation boundaries,
+not whole-engine performance claims.
 
 ## Save and restore
 
@@ -208,3 +209,16 @@ operations fail instead of reviving a private engine implementation. Native
 save files/snapshots, DLLs, complete-game behavior and other platform/device
 results remain outside current claims. See [ADR 0048](adr/0048-reallive-vm-engine-apis.md)
 and [REALLIVE.md](REALLIVE.md) for current limits and separated evidence.
+
+## Multithreaded tasks and asynchronous loading (2026-10-26)
+
+`crysirror-tasks` owns bounded worker pools and wakeable Rust task Futures.
+Assets captures only scoped storage, immutable bytes and CPU decoders for its
+background reads/imports; the owner thread publishes completed resources.
+Desktop image/model rendering defers pending resources. Offline capture waits
+explicitly. PBR character poses run in bounded parallel batches, with results
+collected in stable instance order before owner-thread GPU writes. World, VM,
+script and fixed-step physics state retain their ordered execution.
+
+See [ADR 0049](adr/0049-multithreaded-tasks-and-async-assets.md) for cancellation,
+backpressure, revision invalidation, API usage and remaining synchronous paths.
