@@ -36,6 +36,12 @@ pub struct IrradianceVolumeSpec {
     /// Bump to restart accumulation.
     #[serde(default)]
     pub revision: u32,
+    /// On the hardware ray-tracing path, update probes with ray queries
+    /// against the scene instead of six raster face captures (ADR 0059).
+    /// Ray-traced updates light hits by the sun, emission and the volume
+    /// itself; local lights are not included in their bounce yet.
+    #[serde(default)]
+    pub ray_traced: bool,
 }
 fn volume_counts() -> [u32; 3] {
     [8, 4, 8]

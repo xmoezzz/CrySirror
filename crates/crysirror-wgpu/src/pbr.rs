@@ -1882,15 +1882,17 @@ impl PbrRenderer {
         if env.reflections.is_some() {
             frames = frames.max(2);
         }
-        // Every probe gets three refreshes (bounces accumulate per refresh).
+        // Every probe gets three refreshes (bounces accumulate per refresh);
+        // ray-traced updates blend with hysteresis and need about twelve.
         if let Some(v) = s.volumes.iter().min_by_key(|v| v.key) {
             let v = &v.spec;
+            let refreshes = if v.ray_traced && self.hardware_rt.is_some() { 12 } else { 3 };
             frames = frames.max(
-                (3 * v
-                    .counts
-                    .iter()
-                    .product::<u32>()
-                    .div_ceil(v.probes_per_frame))
+                (refreshes
+                    * v.counts
+                        .iter()
+                        .product::<u32>()
+                        .div_ceil(v.probes_per_frame))
                 .clamp(3, 64),
             );
         }
@@ -3460,6 +3462,8 @@ impl PbrRenderer {
         // change, the rate drops to `idle_probes_per_frame`.
         let mut gi_jobs: Vec<(u32, Vec3)> = Vec::new();
         let mut gi_max_distance = 0f32;
+        // Ray-traced probe updates replace raster face captures (ADR 0059).
+        let mut rt_gi_jobs: Vec<u32> = Vec::new();
         self.gi.stats.refreshed = 0;
         let e_key_for_gi = e.key.clone();
         if let Some(v) = scene.volumes.iter().min_by_key(|v| v.key) {
@@ -3508,7 +3512,9 @@ impl PbrRenderer {
                 // The sweep in progress started before the change.
                 self.gi.order.truncate(self.gi.cursor);
             }
-            let converged = self.gi.stats.sweeps >= 3;
+            // Ray-traced updates blend with hysteresis: more sweeps to converge.
+            let sweeps_to_converge = if use_rt && v.spec.ray_traced { 12 } else { 3 };
+            let converged = self.gi.stats.sweeps >= sweeps_to_converge;
             let budget = if converged {
                 v.spec.idle_probes_per_frame
             } else {
@@ -3540,10 +3546,13 @@ impl PbrRenderer {
                 self.gi.order.clear();
                 self.gi.cursor = 0;
             }
+            if use_rt && v.spec.ray_traced {
+                rt_gi_jobs = gi_jobs.drain(..).map(|(i, _)| i).collect();
+            }
             self.gi.stats.probes = total;
-            self.gi.stats.refreshed = gi_jobs.len() as u32;
-            self.gi.stats.total_refreshed += gi_jobs.len() as u64;
-            self.gi.stats.converged = self.gi.stats.sweeps >= 3;
+            self.gi.stats.refreshed = (gi_jobs.len() + rt_gi_jobs.len()) as u32;
+            self.gi.stats.total_refreshed += (gi_jobs.len() + rt_gi_jobs.len()) as u64;
+            self.gi.stats.converged = self.gi.stats.sweeps >= sweeps_to_converge;
             gi_max_distance = 2. * (2. * e / cells).length();
             fu.gi_center = [c.x, c.y, c.z, v.spec.intensity];
             fu.gi_extent = [e.x, e.y, e.z, 1.];
@@ -4840,6 +4849,31 @@ impl PbrRenderer {
                 encoder,
             )?;
             self.hardware_encoded = true;
+            if !rt_gi_jobs.is_empty() {
+                let e = self.env.as_ref().context("environment for RT probes")?;
+                let gi_view = crate::rt_pbr::GiView {
+                    sun_dir: fu.sun_dir,
+                    sun_color: fu.sun_color,
+                    env_intensity: fu.env[0],
+                    env_rotation: fu.env[1],
+                    gi_center: fu.gi_center,
+                    gi_extent: fu.gi_extent,
+                    gi_counts: fu.gi_counts,
+                    gi_offset: (GI_OFFSET / 16) as u32,
+                    visibility_offset: (GI_VIS_OFFSET / 16) as u32,
+                    max_distance: gi_max_distance,
+                    backface_limit: GI_BACKFACE_LIMIT,
+                };
+                rt.encode_gi(
+                    &self.gpu,
+                    &gi_view,
+                    &rt_gi_jobs,
+                    &e.source,
+                    &self.env_sampler,
+                    &self.local_shadows.matrices,
+                    encoder,
+                )?;
+            }
         }
         // 3b. Reflections: ray traced against the scene on the hardware RT
         // path when requested (ADR 0058), otherwise screen space against the

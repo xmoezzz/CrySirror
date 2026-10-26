@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `1c634e6ea9b9c676`
+API fingerprint: `3ff1c210d5f93836`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -963,6 +963,7 @@ Dynamic diffuse global illumination volume (ADR 0028): a grid of irradiance prob
 | `idle_probes_per_frame` | `u32` | `0` | Probes refreshed per frame once every probe has been refreshed three times and no light, static object, material override, sun or environment changed (0 = stop refreshing until something changes). |
 | `visibility` | `bool` | `true` | Chebyshev visibility from per-probe distance moments against light leaking through walls (false: interpolate without occlusion). |
 | `revision` | `u32` | `0` | Bump to restart accumulation. |
+| `ray_traced` | `bool` | `false` | On the hardware ray-tracing path, update probes with ray queries against the scene instead of six raster face captures (ADR 0059). Ray-traced updates light hits by the sun, emission and the volume itself; local lights are not included in their bounce yet. |
 
 ### ColliderSpec
 

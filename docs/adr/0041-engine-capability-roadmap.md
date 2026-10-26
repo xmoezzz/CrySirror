@@ -63,12 +63,12 @@ Priorities:
 | SSR, reflection probes | partial | 0023–0025 | glossy SSR, Hi-Z, realtime probes | P1 |
 | Virtual geometry (cluster LOD, GPU culling) | partial | 0026 | HZB occlusion, software raster | P1 |
 | Virtual shadow maps | partial | 0027 | GPU page allocation, local lights | P1 |
-| Dynamic GI | partial | 0028 | surface cache or SDF/RT tracing, specular GI | P1 |
+| Dynamic GI | partial | 0028, 0059 | ray-traced probe updates (opt-in); local lights in RT bounces, specular GI | P1 |
 | Transparency, materials, shader effects | partial | 0015, 0016 | material graph and editor, OIT, refraction | P1 |
 | Decals, terrain, foliage | partial | 0014 | deferred decals, foliage instancing and wind | P1 |
 | Post FX (DOF, motion blur, color grading LUT) | missing | — | per-camera post stack | P1 |
 | Upscaling (FSR-class) | missing | 0007 | open upscaler | P2 |
-| Hardware RT | partial | 0051, 0052, 0055 | GPU-stream BLAS, dynamic BLAS (rebuild; wgpu 29 has no refit), alpha-tested shadows done; soft/local-light shadows, RT reflections/GI, denoising, Vulkan/DX12 device validation remain | P1 |
+| Hardware RT | partial | 0051, 0052, 0055–0059 | GPU-stream/dynamic BLAS, alpha-tested, soft sun and local-light shadows with denoising, mirror reflections, RT irradiance probes done; glossy reflections, per-pixel GI, refit (wgpu), Vulkan/DX12 device validation remain | P1 |
 | 2D layers, filters, transitions, puppets, video | done | 0020–0022, 0029 | — | |
 
 ### Animation

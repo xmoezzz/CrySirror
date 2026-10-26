@@ -3,6 +3,17 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## RT step 6: ray-traced irradiance probes (ADR 0059)
+
+- `irradiance_volume.ray_traced`: probes refreshed by 256 rays each against
+  the RT scene (sun + RT shadow, emission, volume multi-bounce, environment
+  on misses) into the same SH/visibility data as raster captures.
+- Behaviour (Apple M5, Metal): closed red-emissive room floor black without
+  GI, (245, 60, 60) raster probes, (211, 50, 50) ray-traced probes. Hardware
+  RT GPU tests **8 passed**; whole `crysirror-wgpu` ignored GPU suite
+  `--test-threads=1` **43 passed**. Cost relative to raster captures not
+  measured.
+
 ## RT step 5: ray-traced reflections (ADR 0058)
 
 - `reflections.ray_traced`: mirror rays traced on the hardware path; hits

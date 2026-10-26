@@ -502,3 +502,60 @@ fn pbr_hardware_reflections_show_offscreen_objects() {
     assert!(counts[0] < 20 && counts[1] < 20, "the box itself must be off screen: {counts:?}");
     assert!(counts[2] > 300, "ray-traced reflections must show the off-screen box: {counts:?}");
 }
+
+/// The closed red-emissive room of the raster GI test: ray-traced probe
+/// updates bounce the emissive wall's light onto the floor like the raster
+/// face captures do.
+#[test]
+#[ignore = "requires native ray-query GPU; execute explicitly"]
+fn pbr_hardware_ray_traced_irradiance_probes_bounce_emissive_light() {
+    let gpu = gpu();
+    let mut floors = vec![];
+    for (gi, traced) in [(false, false), (true, false), (true, true)] {
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path();
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        let white = json!({"base_color_factor":[0.8,0.8,0.8,1],"roughness_factor":0.9});
+        let slab = |id: u32, t: [f32; 3], s: [f32; 3], m: &serde_json::Value| json!({"id":id,"name":format!("slab{id}"),
+            "geometry":{"kind":"cube"},"transform":{"translation":t,"scale":s},"material":m});
+        let mut entities = vec![
+            slab(1, [0., -0.1, 0.], [10., 0.2, 10.], &white),
+            slab(2, [0., 4.1, 0.], [10., 0.2, 10.], &white),
+            slab(3, [5.1, 2., 0.], [0.2, 4., 10.], &white),
+            slab(4, [0., 2., 5.1], [10., 4., 0.2], &white),
+            slab(5, [0., 2., -5.1], [10., 4., 0.2], &white),
+            slab(6, [-5.1, 2., 0.], [0.2, 4., 10.], &json!({"base_color_factor":[0,0,0,1],"emissive_factor":[1,0.05,0.05],"emissive_strength":4})),
+        ];
+        if gi {
+            entities.push(json!({"id":7,"name":"gi","transform":{"translation":[0,2,0]},
+                "irradiance_volume":{"extent":[4.9,1.95,4.9],"counts":[6,3,6],"probes_per_frame":108,"ray_traced":traced}}));
+        }
+        let p = json!({"schema":2,"name":"gi","content_revision":"1","canvas":[160,90],"assets":"assets",
+            "clients":[{"name":"game","adapter":"crysirror-script-v1","game":"gi","systems":{"entities":entities}}]});
+        std::fs::write(dir.join("project.json"), serde_json::to_vec(&p).unwrap()).unwrap();
+        let mut rt = Runtime::load(&dir.join("project.json"), &dir.join("state")).unwrap();
+        let batch: crysirror_scene::ServiceBatch = serde_json::from_value(json!({"world":[
+            {"op":"set_camera","camera":{"eye":[3,3,3],"target":[-2,0,0],"up":[0,1,0],"fov_y_degrees":60,"near":0.05,"far":100}},
+            {"op":"set_environment","environment":{"sun":{"direction":[0,-1,0],"intensity":0,"shadows":false},"intensity":0,"bloom":0,
+                "ambient_occlusion":0,"temporal_aa":false,"tonemap":"none","show_sky":false}}]})).unwrap();
+        rt.host.engine.submit(rt.client_id("game").unwrap(), &batch).unwrap();
+        rt.tick(0, InputFrame::default()).unwrap();
+        let mut renderer = Renderer::new(gpu.clone(), wgpu::TextureFormat::Rgba8UnormSrgb);
+        renderer.set_rendering_path(RenderingPath::HardwareRaytrace).unwrap();
+        renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
+        let image = renderer.capture(&rt.host.scene, &mut rt.assets, rt.project.canvas, rt.project.background).unwrap();
+        let stats = renderer.hardware_rt_stats().unwrap();
+        eprintln!("gi {gi} traced {traced}: floor {:?} probe updates {}", image.get_pixel(80, 70).0, stats["gi_probe_updates"]);
+        if traced {
+            assert!(stats["gi_probe_updates"].as_u64().unwrap() >= 108, "{stats}");
+        }
+        std::fs::create_dir_all(artifact_dir()).unwrap();
+        image.save(artifact_dir().join(format!("pbr-gi-{gi}-{traced}.png"))).unwrap();
+        floors.push(image.get_pixel(80, 70).0);
+    }
+    let [off, raster, traced] = [floors[0], floors[1], floors[2]];
+    assert!(off[0] < 5, "no GI: the floor stays dark {off:?}");
+    assert!(traced[0] > 40 && traced[0] as i32 > traced[1] as i32 + 25, "RT GI: floor lit red {traced:?}");
+    let ratio = f32::from(traced[0]) / f32::from(raster[0].max(1));
+    assert!((0.5..2.0).contains(&ratio), "RT and raster probe updates agree within 2x: raster {raster:?} traced {traced:?}");
+}

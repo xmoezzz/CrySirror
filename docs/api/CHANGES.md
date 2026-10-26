@@ -4,6 +4,17 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `3ff1c210d5f93836` (2026-10-26): ray-traced irradiance probes
+
+- `IrradianceVolumeSpec.ray_traced` (bool, default `false`): on the
+  hardware ray-tracing path, probes are updated with ray queries instead of
+  six raster face captures (ADR 0059). Hits are lit by the sun, emission
+  and the volume itself; local lights are not part of the bounce yet.
+  `hardware_rt_stats.gi_probe_updates` reports ray-traced updates.
+- Ray-traced volumes converge after 12 sweeps (raster: 3) before dropping
+  to `idle_probes_per_frame`.
+- Not breaking: optional field.
+
 ## `1c634e6ea9b9c676` (2026-10-26): ray-traced reflections
 
 - `ScreenSpaceReflections.ray_traced` (bool, default `false`): on the

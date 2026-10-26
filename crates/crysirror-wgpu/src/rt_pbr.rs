@@ -170,6 +170,7 @@ pub(crate) struct PbrRtStats {
     pub alpha_bakes: u64,
     pub denoised_frames: u64,
     pub reflection_dispatches: u64,
+    pub gi_probe_updates: u64,
 }
 
 pub(crate) struct PbrRt {
@@ -202,6 +203,8 @@ pub(crate) struct PbrRt {
     clear: wgpu::ComputePipeline,
     reflect_layout: wgpu::BindGroupLayout,
     reflect: wgpu::ComputePipeline,
+    gi_layout: wgpu::BindGroupLayout,
+    gi: wgpu::ComputePipeline,
     /// Instance table and material slots of this frame's scene.
     tables: Option<(wgpu::Buffer, wgpu::Buffer)>,
     denoise_layout: wgpu::BindGroupLayout,
@@ -311,6 +314,44 @@ struct ReflectParams {
     reflection: [f32; 4],
 }
 
+/// Probe update source.
+pub(crate) fn gi_source() -> String {
+    format!("{}\n{}", include_str!("shaders/rt_common.wgsl"), include_str!("shaders/rt_gi.wgsl"))
+}
+/// Probe updates per dispatch (`jobs` uniform capacity).
+pub const MAX_GI_JOBS: usize = 64;
+/// Weight of the previous probe value in each ray-traced update.
+pub const GI_HYSTERESIS: f32 = 0.85;
+
+/// Lighting and volume layout for ray-traced irradiance probe updates.
+pub(crate) struct GiView {
+    pub sun_dir: [f32; 4],
+    pub sun_color: [f32; 4],
+    pub env_intensity: f32,
+    pub env_rotation: f32,
+    pub gi_center: [f32; 4],
+    pub gi_extent: [f32; 4],
+    pub gi_counts: [f32; 4],
+    /// First vec4 of the GI and visibility sections in `data`.
+    pub gi_offset: u32,
+    pub visibility_offset: u32,
+    pub max_distance: f32,
+    pub backface_limit: f32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct GiParams {
+    sun_dir: [f32; 4],
+    sun_color: [f32; 4],
+    env: [f32; 4],
+    gi_center: [f32; 4],
+    gi_extent: [f32; 4],
+    gi_counts: [f32; 4],
+    offsets: [u32; 4],
+    limits: [f32; 4],
+    jobs: [[u32; 4]; 16],
+}
+
 fn geometry_size(vertex_count: u32, index_count: u32) -> wgpu::BlasTriangleGeometrySizeDescriptor {
     wgpu::BlasTriangleGeometrySizeDescriptor {
         vertex_format: wgpu::VertexFormat::Float32x3,
@@ -340,6 +381,7 @@ impl PbrRt {
             ("RT geometry", include_str!("shaders/rt_geometry.wgsl")),
             ("RT PBR shadow", shadow_source().as_str()),
             ("RT reflections", reflect_source().as_str()),
+            ("RT irradiance probes", gi_source().as_str()),
         ] {
             crate::hardware_rt::validate_wgsl(source).with_context(|| label.to_owned())?;
         }
@@ -433,6 +475,37 @@ impl PbrRt {
             ],
         });
         let reflect = compute(d, &reflect_layout, "RT reflections", &reflect_source(), "main");
+        let gi_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("RT irradiance probes"),
+            entries: &[
+                uniform(0),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
+                    count: None,
+                },
+                texture(2, filtered),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                storage(5, false),
+                storage(6, true),
+                storage(7, true),
+                storage(8, true),
+                texture(9, filtered),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let gi = compute(d, &gi_layout, "RT irradiance probes", &gi_source(), "update");
         let clear_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("RT PBR empty visibility"),
             entries: &[
@@ -534,6 +607,8 @@ impl PbrRt {
             clear,
             reflect_layout,
             reflect,
+            gi_layout,
+            gi,
             tables: None,
             denoise_layout,
             temporal,
@@ -1200,6 +1275,68 @@ impl PbrRt {
         Ok(true)
     }
 
+    /// Refresh irradiance probes `jobs` in the shared GI `data` buffer with
+    /// ray queries against the scene prepared by this frame's `encode_shadows`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_gi(
+        &mut self,
+        gpu: &Gpu,
+        view: &GiView,
+        jobs: &[u32],
+        environment: &wgpu::TextureView,
+        environment_sampler: &wgpu::Sampler,
+        data: &wgpu::Buffer,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<bool> {
+        let (Some(tlas), Some((instances, slots))) = (&self.tlas, &self.tables) else {
+            return Ok(false);
+        };
+        for chunk in jobs.chunks(MAX_GI_JOBS) {
+            let mut packed = [[0u32; 4]; 16];
+            for (i, probe) in chunk.iter().enumerate() {
+                packed[i / 4][i % 4] = *probe;
+            }
+            let params = GiParams {
+                sun_dir: view.sun_dir,
+                sun_color: view.sun_color,
+                env: [view.env_intensity, view.env_rotation, GI_HYSTERESIS, (self.frame % 4096) as f32],
+                gi_center: view.gi_center,
+                gi_extent: view.gi_extent,
+                gi_counts: view.gi_counts,
+                offsets: [view.gi_offset, view.visibility_offset, chunk.len() as u32, 0],
+                limits: [view.max_distance, view.backface_limit, 0., 0.],
+                jobs: packed,
+            };
+            let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("RT irradiance probe jobs"),
+                contents: bytemuck::bytes_of(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("RT irradiance probes"),
+                layout: &self.gi_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: tlas.as_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(environment) },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(environment_sampler) },
+                    wgpu::BindGroupEntry { binding: 5, resource: data.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 6, resource: instances.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 7, resource: self.uv_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 8, resource: slots.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&self.atlas_view) },
+                    wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                ],
+            });
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("RT irradiance probes"), timestamp_writes: None });
+            pass.set_pipeline(&self.gi);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.dispatch_workgroups(chunk.len() as u32, 1, 1);
+        }
+        self.stats.gi_probe_updates += jobs.len() as u64;
+        Ok(true)
+    }
+
     pub fn stats_json(&self) -> serde_json::Value {
         let s = self.stats;
         serde_json::json!({
@@ -1216,6 +1353,7 @@ impl PbrRt {
             "material_bakes": s.alpha_bakes,
             "denoised_frames": s.denoised_frames,
             "reflection_dispatches": s.reflection_dispatches,
+            "gi_probe_updates": s.gi_probe_updates,
             "refit": "wgpu 29 implements PreferUpdate as a full rebuild",
         })
     }
@@ -1230,6 +1368,7 @@ mod tests {
             include_str!("shaders/rt_geometry.wgsl").to_owned(),
             shadow_source(),
             reflect_source(),
+            gi_source(),
             format!(
                 "{}\n{}\n{}",
                 crate::effect::shadow_material_prelude(),
@@ -1243,7 +1382,11 @@ mod tests {
         let common = include_str!("shaders/rt_common.wgsl");
         assert_eq!(common.matches("rayQueryProceed(").count(), 2, "visible() and closest()");
         assert!(!common.contains("while"));
-        for pass in [include_str!("shaders/rt_pbr_shadow.wgsl"), include_str!("shaders/rt_reflect.wgsl")] {
+        for pass in [
+            include_str!("shaders/rt_pbr_shadow.wgsl"),
+            include_str!("shaders/rt_reflect.wgsl"),
+            include_str!("shaders/rt_gi.wgsl"),
+        ] {
             assert!(!pass.contains("rayQueryProceed("), "passes query only through rt_common");
         }
     }
