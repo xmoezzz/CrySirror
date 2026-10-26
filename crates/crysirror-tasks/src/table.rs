@@ -43,6 +43,10 @@ struct Entry<T> {
     generation: u64,
     kind: &'static str,
     pending: Option<Task<T>>,
+    queued: Option<(
+        TaskPool,
+        Box<dyn FnOnce(crate::TaskPermit) -> Result<Task<T>> + Send>,
+    )>,
     result: Option<T>,
     error: Option<String>,
 }
@@ -104,6 +108,70 @@ impl<T> OperationTable<T> {
                 generation,
                 kind,
                 pending: Some(pending),
+                queued: None,
+                result: None,
+                error: None,
+            },
+        );
+        Ok(ticket)
+    }
+    /// Explicit offline/immediate product, retaining the same scoped receipt
+    /// and admission rules as worker results. No worker or wait is invented.
+    pub fn insert_ready(
+        &mut self,
+        owner: u32,
+        generation: u64,
+        kind: &'static str,
+        value: T,
+    ) -> Result<u64> {
+        self.admit(owner)?;
+        let ticket = next_operation_id()?;
+        self.entries.insert(
+            ticket,
+            Entry {
+                owner,
+                generation,
+                kind,
+                pending: None,
+                queued: None,
+                result: Some(value),
+                error: None,
+            },
+        );
+        Ok(ticket)
+    }
+    /// Retain bounded input while the shared pool is full. Owner polling retries
+    /// admission before moving the work into a task; cancellation drops queued
+    /// inputs without executing them. Ready/failed results retain normal limits.
+    pub fn submit_deferred(
+        &mut self,
+        owner: u32,
+        generation: u64,
+        kind: &'static str,
+        pool: &TaskPool,
+        work: impl FnOnce(Cancellation) -> Result<T> + Send + 'static,
+    ) -> Result<u64>
+    where
+        T: Send + 'static,
+    {
+        self.admit(owner)?;
+        let ticket = next_operation_id()?;
+        let start = Box::new(move |permit: crate::TaskPermit| {
+            permit.spawn(move |cancel| {
+                cancel.check()?;
+                let result = work(cancel.clone())?;
+                cancel.check()?;
+                Ok(result)
+            })
+        });
+        self.entries.insert(
+            ticket,
+            Entry {
+                owner,
+                generation,
+                kind,
+                pending: None,
+                queued: Some((pool.clone(), start)),
                 result: None,
                 error: None,
             },
@@ -123,6 +191,22 @@ impl<T> OperationTable<T> {
             entry.generation == generation,
             "operation result belongs to an obsolete generation"
         );
+        if let Some((pool, _)) = &entry.queued {
+            match pool.reserve() {
+                Ok(permit) => {
+                    let (_, start) = entry.queued.take().unwrap();
+                    match start(permit) {
+                        Ok(task) => entry.pending = Some(task),
+                        Err(e) => entry.error = Some(format!("{e:#}")),
+                    }
+                }
+                Err(error) if error.is::<crate::CapacityExceeded>() => {}
+                Err(error) => {
+                    entry.queued = None;
+                    entry.error = Some(format!("{error:#}"));
+                }
+            }
+        }
         if let Some(task) = &mut entry.pending {
             match task.try_take() {
                 Ok(None) => {}
@@ -143,7 +227,7 @@ impl<T> OperationTable<T> {
         Ok(OperationStatus {
             ticket,
             kind: entry.kind,
-            state: if entry.pending.is_some() {
+            state: if entry.pending.is_some() || entry.queued.is_some() {
                 OperationState::Pending
             } else if entry.error.is_some() {
                 OperationState::Failed

@@ -150,3 +150,15 @@ and companion paths stay under the same client capability. Codec availability
 alone does not establish VM/opcode, game, save or renderer compatibility. See
 [ADR 0065](adr/0065-native-resource-codecs-and-async-decode.md) and the explicit
 [resource](arc-resource-support.json)/[image](arc-image-support.json) ledgers.
+
+
+## Native audio readiness (2026-10-27)
+
+Mapped RealLive BGM/WAV calls and AVG32 music/wave/SE/voice events now submit
+AudioAsset paths through HostServices::begin_audio and retain their original
+pending events until audio_preparation reports owner publication. Opening,
+probing, intro/loop/startup preparation and streaming use shared ChannelAudio
+and BufferedSource workers. Admission is explicitly distinct from readiness.
+Failures do not acknowledge following native instructions. Offline fixtures
+retain immediate preparation behavior; original save/layout/opcode gaps remain.
+Resource discovery and boot reads are still synchronous. See [ADR 0070](adr/0070-native-channel-audio-readiness.md).

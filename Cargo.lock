@@ -1360,6 +1360,7 @@ dependencies = [
  "anyhow",
  "crysirror-acoustics",
  "crysirror-core",
+ "crysirror-io",
  "crysirror-tasks",
  "rodio",
  "serde",
@@ -1390,6 +1391,7 @@ dependencies = [
  "crysirror-core",
  "crysirror-runtime",
  "crysirror-scene",
+ "crysirror-tasks",
  "crysirror-text",
  "image",
  "serde",
@@ -1516,6 +1518,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "crysirror-io"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "crysirror-core",
+]
+
+[[package]]
 name = "crysirror-krkr"
 version = "0.2.0"
 dependencies = [
@@ -1570,6 +1580,7 @@ dependencies = [
  "crysirror-core",
  "crysirror-runtime",
  "crysirror-scene",
+ "crysirror-tasks",
  "encoding_rs",
  "serde",
  "serde_json",
@@ -1584,6 +1595,7 @@ dependencies = [
  "anyhow",
  "blowfish",
  "crysirror-core",
+ "crysirror-io",
  "crysirror-tasks",
  "ctr",
  "flate2",

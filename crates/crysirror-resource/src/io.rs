@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use crysirror_core::service::{AssetReader, MemoryAssetReader};
-use std::{
-    io::{Read, Seek, SeekFrom},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 pub fn memory(bytes: Vec<u8>) -> Arc<dyn AssetReader> {
     Arc::new(MemoryAssetReader(Arc::from(bytes)))
@@ -123,48 +120,4 @@ pub fn concat(sources: Vec<Arc<dyn AssetReader>>) -> Result<Arc<dyn AssetReader>
     }
     Ok(Arc::new(ConcatReader { parts, len }))
 }
-pub struct AssetIo {
-    source: Arc<dyn AssetReader>,
-    position: u64,
-    len: u64,
-}
-impl AssetIo {
-    pub fn new(source: Arc<dyn AssetReader>) -> Result<Self> {
-        let len = source.len().map_err(|e| anyhow::anyhow!("{e}"))?;
-        Ok(Self {
-            source,
-            position: 0,
-            len,
-        })
-    }
-}
-impl Read for AssetIo {
-    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-        let n = self
-            .source
-            .read_at(self.position, out)
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-        if n > out.len() {
-            return Err(std::io::Error::other("invalid asset read length"));
-        }
-        self.position = self
-            .position
-            .checked_add(n as u64)
-            .ok_or_else(|| std::io::Error::other("stream offset overflow"))?;
-        Ok(n)
-    }
-}
-impl Seek for AssetIo {
-    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
-        let n = match position {
-            SeekFrom::Start(n) => i128::from(n),
-            SeekFrom::Current(n) => i128::from(self.position) + i128::from(n),
-            SeekFrom::End(n) => i128::from(self.len) + i128::from(n),
-        };
-        if !(0..=i128::from(u64::MAX)).contains(&n) {
-            return Err(std::io::Error::other("invalid resource seek"));
-        }
-        self.position = n as u64;
-        Ok(self.position)
-    }
-}
+pub use crysirror_io::AssetIo;

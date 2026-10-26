@@ -137,3 +137,125 @@ fn native_name_dialog_reads_shared_text_field_and_resumes_only_on_submit() {
     assert_eq!(r.host.engine.ui.title.as_ref().unwrap().1, "submitted");
     assert!(r.host.engine.ui.get(1, 610000).is_none());
 }
+
+use crysirror_tasks::{Task, TaskPool};
+use std::{
+    sync::{Arc, Condvar, Mutex},
+    time::{Duration, Instant},
+};
+struct Gate {
+    gate: Arc<(Mutex<bool>, Condvar)>,
+    tasks: Vec<Task<()>>,
+}
+impl Gate {
+    fn block(p: &TaskPool) -> Self {
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let mut tasks = vec![];
+        let (tx, rx) = std::sync::mpsc::channel();
+        for _ in 0..p.stats().workers {
+            let g = gate.clone();
+            let tx = tx.clone();
+            tasks.push(
+                p.spawn(move |_| {
+                    tx.send(())?;
+                    let (v, _) = g
+                        .1
+                        .wait_timeout_while(g.0.lock().unwrap(), Duration::from_secs(5), |v| !*v)
+                        .unwrap();
+                    anyhow::ensure!(*v, "gate timeout");
+                    Ok(())
+                })
+                .unwrap(),
+            );
+        }
+        for _ in 0..tasks.len() {
+            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        Self { gate, tasks }
+    }
+}
+impl Drop for Gate {
+    fn drop(&mut self) {
+        *self.gate.0.lock().unwrap() = true;
+        self.gate.1.notify_all();
+        for t in self.tasks.drain(..) {
+            t.wait().unwrap();
+        }
+    }
+}
+
+fn tone() -> Vec<u8> {
+    let size = 9600u32;
+    let mut b = b"RIFF".to_vec();
+    b.extend((36 + size).to_le_bytes());
+    b.extend(b"WAVEfmt ");
+    b.extend(16u32.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(48000u32.to_le_bytes());
+    b.extend(96000u32.to_le_bytes());
+    b.extend(2u16.to_le_bytes());
+    b.extend(16u16.to_le_bytes());
+    b.extend(b"data");
+    b.extend(size.to_le_bytes());
+    for _ in 0..4800 {
+        b.extend(8192i16.to_le_bytes());
+    }
+    b
+}
+#[test]
+fn native_audio_event_stays_at_original_pc_until_shared_preparation_and_play_wait_complete() {
+    let mut code = command(21, 1, &[encode::quoted(b"tone"), encode::int(0)]);
+    code.extend(command(4, 0, &[encode::quoted(b"after native audio")]));
+    let (t, mut r) = fixture(code);
+    std::fs::create_dir(t.path().join("assets/WAV")).unwrap();
+    std::fs::write(t.path().join("assets/WAV/tone.wav"), tone()).unwrap();
+    r.assets.set_nonblocking(true);
+    let pool = r.assets.io_tasks();
+    let gate = Gate::block(&pool);
+    r.tick(0, InputFrame::default()).unwrap();
+    let first = r.inspect()["sessions"][0]["native"]["instructions"].clone();
+    assert!(!r.host.audio_playing(ClientId(1), 100).unwrap());
+    for _ in 0..3 {
+        r.tick(16, InputFrame::default()).unwrap();
+        assert_eq!(r.inspect()["sessions"][0]["native"]["instructions"], first);
+        assert!(r.host.engine.ui.title.is_none());
+    }
+    drop(gate);
+    let end = Instant::now() + Duration::from_secs(5);
+    while !r.host.audio_playing(ClientId(1), 100).unwrap() {
+        r.tick(0, InputFrame::default()).unwrap();
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    r.tick(99, InputFrame::default()).unwrap();
+    assert!(r.host.engine.ui.title.is_none());
+    r.tick(1, InputFrame::default()).unwrap();
+    r.tick(0, InputFrame::default()).unwrap();
+    assert_eq!(
+        r.host.engine.ui.title.as_ref().unwrap().1,
+        "after native audio"
+    );
+}
+#[test]
+fn native_audio_worker_failure_never_acknowledges_following_instruction() {
+    let mut code = command(21, 0, &[encode::quoted(b"bad"), encode::int(0)]);
+    code.extend(command(4, 0, &[encode::quoted(b"must not run")]));
+    let (t, mut r) = fixture(code);
+    std::fs::create_dir(t.path().join("assets/WAV")).unwrap();
+    std::fs::write(t.path().join("assets/WAV/bad.wav"), b"invalid wave").unwrap();
+    r.assets.set_nonblocking(true);
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        match r.tick(0, InputFrame::default()) {
+            Ok(()) => {}
+            Err(e) => {
+                assert!(format!("{e:#}").contains("shared audio preparation failed"));
+                break;
+            }
+        }
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(r.host.engine.ui.title.is_none());
+}

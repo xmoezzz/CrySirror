@@ -132,10 +132,21 @@ impl BufferedSource {
         Self::prepare_cancellable(source, pool, config, loop_start, &Cancellation::default())
     }
     pub fn prepare_cancellable(
+        source: Box<dyn AudioSource>,
+        pool: TaskPool,
+        config: StreamBufferSpec,
+        loop_start: Option<u64>,
+        cancel: &Cancellation,
+    ) -> Result<Self> {
+        Self::prepare_at_cancellable(source, pool, config, loop_start, 0, cancel)
+    }
+    /// Worker-only preparation with an exact initial decoded-frame prefix.
+    pub fn prepare_at_cancellable(
         mut source: Box<dyn AudioSource>,
         pool: TaskPool,
         config: StreamBufferSpec,
         loop_start: Option<u64>,
+        initial: u64,
         cancel: &Cancellation,
     ) -> Result<Self> {
         config.validate()?;
@@ -194,6 +205,45 @@ impl BufferedSource {
             pins.push(cache);
             source.seek(end)?;
         }
+        if initial > 0 {
+            ensure!(
+                frames.is_none_or(|n| initial <= n),
+                "initial audio frame outside source"
+            );
+            if let Some(cache) = pins.iter().find(|chunks| {
+                chunks.first().is_some_and(|b| initial >= b.start)
+                    && chunks.last().is_some_and(|b| initial < b.end())
+            }) {
+                queue = cache
+                    .iter()
+                    .filter(|b| b.end() > initial)
+                    .cloned()
+                    .collect();
+                end = queue.back().unwrap().end();
+                eof = frames == Some(end);
+            } else {
+                queue.clear();
+                source.seek(initial)?;
+                end = initial;
+                eof = false;
+                for _ in 0..config.prefetch_chunks.min(2) {
+                    let (block, ended) =
+                        fill(source.as_mut(), end, config.chunk_frames as usize, cancel)?;
+                    decoded += block.data.len() as u64;
+                    end = block.end();
+                    if !block.data.is_empty() {
+                        queue.push_back(block);
+                    }
+                    eof = ended;
+                    if eof {
+                        break;
+                    }
+                }
+                pins.push(queue.iter().cloned().collect());
+            }
+            cancel.check()?;
+            source.seek(end)?;
+        }
         Ok(Self {
             rate,
             frames,
@@ -206,7 +256,7 @@ impl BufferedSource {
             task: None,
             ready: queue,
             pins,
-            position: 0,
+            position: initial,
             decoder_position: end,
             generation: 1,
             seek: None,

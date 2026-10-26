@@ -12,8 +12,8 @@ use crysirror_core::{
     Error,
     path::{Mount, VfsPath},
     service::{
-        AudioParameters, AudioRequest, EncodedAudio, EngineQuery, HostServices, InputFrame, PcmBus,
-        buttons,
+        AudioAsset, AudioParameters, AudioPreparePhase, AudioRequest, EngineQuery, HostServices,
+        InputFrame, PcmBus, buttons,
     },
     state::ClientId,
     vm::{VmAdapter, VmYield},
@@ -161,6 +161,8 @@ struct Machine {
     system: System,
     clock_origin_ms: u64,
     pending: Option<Event>,
+    #[serde(skip)]
+    audio_ticket: Option<u64>,
     glyphs: Vec<PositionedGlyph>,
     cursor: CellCursor,
     visible: usize,
@@ -249,6 +251,7 @@ impl Avg32Vm {
             system,
             clock_origin_ms: host.now_ms(),
             pending: None,
+            audio_ticket: None,
             glyphs: Vec::new(),
             cursor: CellCursor::at_start(),
             visible: 0,
@@ -318,31 +321,49 @@ impl Avg32Vm {
         fade: u32,
         bus: PcmBus,
     ) -> Result<()> {
-        let p = VfsPath::new(Mount::Asset, path).map_err(error)?;
-        let bytes = host.read(client, &p).map_err(error)?;
-        ensure!(
-            bytes.len() <= 64 * 1024 * 1024,
-            "AVG32 audio resource budget"
-        );
         let _ = config;
-        host.submit_audio(
-            client,
-            AudioRequest::Play {
-                channel,
-                source: EncodedAudio {
-                    bytes: Arc::from(bytes),
-                    frame_limit: None,
-                },
-                intro: None,
-                parameters: AudioParameters {
-                    looping,
-                    fade_ms: fade as f32,
-                    bus,
-                    ..Default::default()
-                },
-            },
-        )
-        .map_err(error)?;
+        let ticket = match m.audio_ticket {
+            Some(ticket) => ticket,
+            None => {
+                let ticket = host
+                    .begin_audio(
+                        client,
+                        AudioRequest::PlayAsset {
+                            channel,
+                            source: AudioAsset {
+                                path: VfsPath::new(Mount::Asset, path).map_err(error)?,
+                                frame_limit: None,
+                            },
+                            intro: None,
+                            parameters: AudioParameters {
+                                looping,
+                                fade_ms: fade as f32,
+                                bus,
+                                ..Default::default()
+                            },
+                        },
+                    )
+                    .map_err(error)?;
+                m.audio_ticket = Some(ticket);
+                ticket
+            }
+        };
+        let status = host.audio_preparation(client, ticket).map_err(error)?;
+        match status.phase {
+            AudioPreparePhase::Pending => return Ok(()),
+            AudioPreparePhase::Ready => {
+                host.release_audio(client, ticket).map_err(error)?;
+                m.audio_ticket = None;
+            }
+            AudioPreparePhase::Failed => {
+                let _ = host.release_audio(client, ticket);
+                m.audio_ticket = None;
+                bail!(
+                    "shared audio preparation failed: {}",
+                    status.error.unwrap_or_default()
+                );
+            }
+        }
         m.api_calls += 1;
         Ok(())
     }
@@ -596,7 +617,9 @@ impl Avg32Vm {
                         0,
                         PcmBus::Sfx,
                     )?;
-                    m.waves.insert(*channel, handle);
+                    if m.audio_ticket.is_none() {
+                        m.waves.insert(*channel, handle);
+                    }
                 }
                 AudioEvent::Voice(id) => {
                     let asset = config
@@ -703,6 +726,9 @@ impl Avg32Vm {
             }
             if let Some(event) = m.pending.clone() {
                 Self::event(self.client, &self.config, m, host, &event)?;
+                if m.audio_ticket.is_some() {
+                    return Ok(VmYield::BudgetExhausted);
+                }
                 m.pending = None;
                 continue;
             }

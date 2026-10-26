@@ -1965,3 +1965,91 @@ Remaining boundaries:
 - Acoustic reflections, diffraction, near-field propagation and room reverb
   remain open. No GPU/device-output/Windows/Linux behavior or additional
   original VN compatibility is inferred from these offline results.
+
+## Native channel audio readiness (ADR 0070, 2026-10-27)
+
+Implementation:
+- Core now declares deferred AudioAsset/PlayAsset and explicit preparation
+  phases. HostServices begin_audio/audio_preparation/release_audio distinguish
+  request admission, owner publication and actual voice completion. Core and
+  compat retain their dependency-free/device-free boundaries.
+- Shared ChannelAudio opens and probes capabilities, prepares source/intro,
+  declared limits and exact startup/loop prefixes on bounded workers. It uses
+  the existing standard/NWA decoder, source wrappers, BufferedSource and mixer.
+  A native adapter owns no decoded PCM or private general audio algorithms.
+- Mapped RealLive BGM/WAV commands retain the original pending VmEvent/PC until
+  publication; AVG32 music/wave/SE/voice events retain the original portable
+  event. Both install/continue native sound waits after readiness. Failure
+  leaves later native instructions unacknowledged. VM parser/opcode source and
+  previous unsupported original-save/profile behavior remain unchanged.
+- Added OperationTable::insert_ready for explicit offline products and
+  submit_deferred for bounded queued inputs. Full shared pools retain Pending
+  requests and retry slot reservation on owner polling; cancellation before
+  admission performs no I/O. Retained-result/memory limits still fail visibly.
+- Channel preparation retains at most 16 receipts/client and 64/host. A separate
+  512 MiB estimated channel budget follows worker/stream storage. Encoded inputs
+  are bounded at 64 MiB per supplied memory segment and 512 MiB per streamed
+  segment, subject to provider limits. Estimates do not account all provider,
+  transient or codec memory and are not a process-memory sandbox.
+- Stop/supersession prevent unpublished playback. Failed preparation preserves
+  the old live voice. restart:false can reuse an active channel without asset
+  I/O. Restore clears channel voices, queued PCM and receipts after successful
+  state validation; late completions cannot revive prior runtime playback.
+- Fixed stale stopped/ended channel handles blocking later owner publication.
+  Added prepare_at_cancellable to prime exact nonzero startup positions, while
+  retaining intro and loop caches. Source frame units remain explicit.
+- Moved the existing common AssetIo cursor to crysirror-io (core + std, no
+  codecs/devices). Resource retains its reexport; modern and native audio use
+  decoder::open_asset over the same cursor, removing the engine-private wrapper.
+- Regenerated docs/api and logged fingerprint 2d945b181a39e802 ->
+  d36d62998490cf17, including the exhaustive AudioRequest enum migration.
+
+Compilation:
+- Local release workspace/all-target check passed with desktop krkr,
+  arc-formats and acoustics-obvhs features. Existing CBG/RealLive warnings
+  remain. Exact-file rustfmt and git diff checks passed. No CI ran.
+
+Behavior validation:
+- Shared I/O/task/audio/resource suites passed **79 tests**, with one owner NWA
+  fixture ignored. Native/engine/JS bridge suites passed **38 tests**, with
+  three font-dependent cases ignored. API documentation/signature checks
+  passed **six tests**. Total: **123 distinct Rust tests passed**, four ignored
+  cases excluded. The separately rerun six-case channel suite is not counted
+  twice. Python 3.11 tooling passed **189 tests**.
+- Synthetic capability readers record opening on workers. Gates verify pending
+  preparation leaves owner frames free, including when every pool slot is
+  reserved, without losing inputs. Tests verify cancellation before publication,
+  foreign receipts, result bounds, no reopen with restart:false, newer request
+  precedence, failed replacement, Stop invalidation and Ready receipts surviving
+  actual voice completion. Runtime restore invalidates pending channel work.
+- Authored PCM oracles verify intro/tail declared limits, decode/playback gain,
+  nonzero exact startup and native loop offsets at sample points. The new
+  cursor tests cover partial reads, end-relative seeks, underflow/overflow and
+  invalid provider read sizes. Existing resource transform/reader tests pass
+  through the preserved AssetIo reexport.
+- Original RealLive bytecode and AVG32 TPC32 fixtures verify unchanged instruction
+  counters while all I/O workers are blocked; following title/arithmetic state
+  remains untouched. Once ready, playback and native sound waits complete.
+  Invalid decoder input fails before following native instructions execute.
+  These are original instruction/event paths, not VM aliases or hosted engines.
+- Revalidated all 90 complete-reference RealLive Rust hashes at
+  5f358ef1360b0439e92aed2b749e8f25d8721954 and inventoried 31 AVG32 Rust files at
+  256c398e06fbcbae8e956eb046c831b3d6c8a593. Inspected native sound/event/wait
+  branches at those pins. This source review is not blanket opcode coverage.
+- Evidence in target/verification: channel-final-library-tests.log,
+  channel-final-bridges-tests.log, channel-final-coordinate-tests.log,
+  channel-api-tests.log, channel-final-workspace-check.log,
+  channel-python-tests.log and channel-native-source-review.json.
+
+Remaining boundaries:
+- Native resource-name directory discovery, boot/scenario and other unmigrated
+  image/video reads remain synchronous. SceneState/data-VM voice mirroring and
+  encoded media AudioRequest submission retain synchronous opening. The legacy
+  encoded submit API remains explicit; PlayAsset requires preparation.
+- Final mix/output, allocation/disposal and final pool destruction still have
+  owner/synchronous boundaries. No hard realtime, complete audio/engine async,
+  additional native opcode/save/game profile or commercial game boot is claimed.
+  No new device, GPU, hardware-RT or Windows/Linux behavior was measured.
+- Near-field propagation, diffraction, acoustic reflections and room reverb
+  remain open. These results advance the shared foundation without completing
+  the broader modern 3D engine/VN integration objective.

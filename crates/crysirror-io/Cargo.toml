@@ -1,0 +1,9 @@
+[package]
+name = "crysirror-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+[dependencies]
+crysirror-core.workspace = true
+anyhow.workspace = true

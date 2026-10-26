@@ -17,5 +17,6 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+crysirror-tasks.workspace = true
 tempfile = "3.12"
 image.workspace = true

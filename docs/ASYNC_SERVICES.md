@@ -104,3 +104,12 @@ seek freezes that voice, and cancellation realigns to its prior logical clock.
 A realtime host rejects cold synchronous SFX and synchronous music opening.
 Native SceneState/channel decoder paths, final mixing/output and teardown
 remain synchronous; this stage does not change original VM wait semantics.
+
+
+Native channel callers can submit AudioRequest::PlayAsset through
+HostServices::begin_audio and poll a scoped AudioPreparation receipt. They must
+keep their original event pending while Pending, acknowledge only after Ready,
+and release the receipt. Ready is successful publication, separate from the
+voice's current playing/ended state. RealLive and AVG32 now use this boundary
+for their mapped playback operations. See [ADR 0070](adr/0070-native-channel-audio-readiness.md)
+for loop/start/intro policy, cancellation and remaining synchronous paths.

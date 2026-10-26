@@ -371,3 +371,47 @@ fn stopping_a_voice_during_pending_seek_still_allows_ticket_release() {
     assert!(invoke(&mut app, "playbackStatus", &[t]).is_err());
     gate.finish();
 }
+
+#[test]
+fn runtime_restore_cancels_native_channel_preparation_before_publication() {
+    use crysirror_core::{
+        path::{Mount, VfsPath},
+        service::{AudioAsset, AudioParameters, AudioPreparePhase, AudioRequest, HostServices},
+    };
+    let (_dir, mut app) = app();
+    app.runtime_mut().unwrap().assets.set_nonblocking(true);
+    output(&mut app, 0);
+    let saved = app.runtime().unwrap().snapshot().unwrap();
+    let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
+    let r = app.runtime_mut().unwrap();
+    let t = r
+        .host
+        .begin_audio(
+            ClientId(1),
+            AudioRequest::PlayAsset {
+                channel: 123,
+                source: AudioAsset {
+                    path: VfsPath::new(Mount::Asset, "tone.wav").unwrap(),
+                    frame_limit: None,
+                },
+                intro: None,
+                parameters: AudioParameters::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        r.host.audio_preparation(ClientId(1), t).unwrap().phase,
+        AudioPreparePhase::Pending
+    );
+    r.restore(&saved).unwrap();
+    assert!(r.host.audio_preparation(ClientId(1), t).is_err());
+    gate.finish();
+    output(&mut app, 16);
+    assert!(
+        !app.runtime()
+            .unwrap()
+            .host
+            .audio_playing(ClientId(1), 123)
+            .unwrap()
+    );
+}

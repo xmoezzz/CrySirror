@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 CrySirror contributors.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Client channel service over the shared streaming decoder and PCM mixer.
 //! Adapters supply decoded container policy, never devices or ambient paths.
 use crate::{
@@ -49,9 +51,19 @@ impl AudioSource for Source {
         Ok(())
     }
 }
-fn source(encoded: EncodedAudio, gain: f32) -> Result<Box<dyn AudioSource>> {
-    let stream = crate::decoder::open_memory(encoded.bytes, None)?;
-    let limit = match (encoded.frame_limit, stream.frame_count()) {
+pub(super) fn source(encoded: EncodedAudio, gain: f32) -> Result<Box<dyn AudioSource>> {
+    wrap_source(
+        crate::decoder::open_memory(encoded.bytes, None)?,
+        encoded.frame_limit,
+        gain,
+    )
+}
+pub(super) fn wrap_source(
+    stream: Box<dyn AudioSource>,
+    frame_limit: Option<u64>,
+    gain: f32,
+) -> Result<Box<dyn AudioSource>> {
+    let limit = match (frame_limit, stream.frame_count()) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     };
@@ -113,12 +125,106 @@ impl AudioSource for Joined {
         Ok(())
     }
 }
+pub(crate) struct PreparedChannel {
+    pub source: Box<dyn AudioSource>,
+    pub spec: VoiceSpec,
+    pub start: u64,
+    pub pan: f32,
+}
+pub(super) fn prepare(
+    encoded: Box<dyn AudioSource>,
+    intro: Option<Box<dyn AudioSource>>,
+    p: AudioParameters,
+) -> Result<PreparedChannel> {
+    ensure!(
+        p.decode_gain.is_finite() && (0.0..=16.).contains(&p.decode_gain),
+        "invalid decoded audio gain"
+    );
+    ensure!(
+        p.pan.is_finite() && (0.0..=1.).contains(&p.pan),
+        "invalid stereo pan"
+    );
+    let mut tail = encoded;
+    let mut loop_start = p.loop_start;
+    if let Some(intro) = intro {
+        let intro = intro;
+        ensure!(
+            intro.sample_rate() == tail.sample_rate(),
+            "audio sequence rates differ"
+        );
+        let intro_len = intro
+            .frame_count()
+            .context("intro sample count unavailable")?;
+        let len = intro_len
+            .checked_add(
+                tail.frame_count()
+                    .context("loop sample count unavailable")?,
+            )
+            .context("audio sequence length overflow")?;
+        loop_start = intro_len
+            .checked_add(loop_start)
+            .context("loop offset overflow")?;
+        tail = Box::new(Joined {
+            intro,
+            tail,
+            intro_len,
+            len,
+            at: 0,
+        });
+    }
+    let loop_points = if p.looping && loop_start > 0 {
+        Some(LoopPoints {
+            start: loop_start,
+            end: tail
+                .frame_count()
+                .context("nonzero loop point needs a known sample count")?,
+        })
+    } else {
+        None
+    };
+    let bus = match p.bus {
+        PcmBus::Music => Bus::Music,
+        PcmBus::Sfx => Bus::Sfx,
+        PcmBus::Voice => Bus::Voice,
+        PcmBus::Ambient => Bus::Ambient,
+        PcmBus::Ui => Bus::Ui,
+    };
+    let spec = VoiceSpec {
+        bus,
+        gain: p.gain,
+        rate: p.rate,
+        looping: p.looping,
+        loop_points,
+        fade_in_ms: p.fade_ms,
+        ..Default::default()
+    };
+    spec.validate()?;
+    let start = p
+        .start_ms
+        .checked_mul(tail.sample_rate() as u64)
+        .context("audio start position overflow")?
+        / 1000;
+    ensure!(
+        tail.frame_count().is_none_or(|len| start <= len),
+        "audio start position exceeds source"
+    );
+    if start > 0 {
+        tail.seek(start)?;
+    }
+    Ok(PreparedChannel {
+        source: tail,
+        spec,
+        start,
+        pan: p.pan,
+    })
+}
 pub struct ChannelAudio {
     pub mixer: Mixer,
-    voices: BTreeMap<(u32, u32), VoiceHandle>,
-    clients: BTreeSet<u32>,
-    output: Vec<StereoFrame>,
-    remainder: u64,
+    pub(super) voices: BTreeMap<(u32, u32), VoiceHandle>,
+    pub(super) clients: BTreeSet<u32>,
+    pub(super) output: Vec<StereoFrame>,
+    pub(super) remainder: u64,
+    pub(super) jobs: super::channel_async::ChannelJobs,
 }
 impl Default for ChannelAudio {
     fn default() -> Self {
@@ -132,6 +238,7 @@ impl Default for ChannelAudio {
             clients: BTreeSet::new(),
             output: Vec::new(),
             remainder: 0,
+            jobs: Default::default(),
         }
     }
 }
@@ -162,7 +269,11 @@ impl ChannelAudio {
         }
         self.voices
             .retain(|_, h| self.mixer.is_playing(h.client, *h));
+        self.cancel_pending_control(client, &request)?;
         match request {
+            AudioRequest::PlayAsset { .. } => {
+                anyhow::bail!("asset channel playback requires begin preparation")
+            }
             AudioRequest::Play {
                 channel,
                 source: encoded,
@@ -226,82 +337,30 @@ impl ChannelAudio {
         intro: Option<EncodedAudio>,
         p: AudioParameters,
     ) -> Result<()> {
-        ensure!(
-            p.decode_gain.is_finite() && (0.0..=16.).contains(&p.decode_gain),
-            "invalid decoded audio gain"
-        );
-        ensure!(
-            p.pan.is_finite() && (0.0..=1.).contains(&p.pan),
-            "invalid stereo pan"
-        );
-        let mut tail = source(encoded, p.decode_gain)?;
-        let mut loop_start = p.loop_start;
-        if let Some(intro) = intro {
-            let intro = source(intro, p.decode_gain)?;
-            ensure!(
-                intro.sample_rate() == tail.sample_rate(),
-                "audio sequence rates differ"
-            );
-            let intro_len = intro
-                .frame_count()
-                .context("intro sample count unavailable")?;
-            let len = intro_len
-                .checked_add(
-                    tail.frame_count()
-                        .context("loop sample count unavailable")?,
-                )
-                .context("audio sequence length overflow")?;
-            loop_start = intro_len
-                .checked_add(loop_start)
-                .context("loop offset overflow")?;
-            tail = Box::new(Joined {
-                intro,
-                tail,
-                intro_len,
-                len,
-                at: 0,
-            });
-        }
-        let loop_points = if p.looping && loop_start > 0 {
-            Some(LoopPoints {
-                start: loop_start,
-                end: tail
-                    .frame_count()
-                    .context("nonzero loop point needs a known sample count")?,
-            })
-        } else {
-            None
-        };
-        let bus = match p.bus {
-            PcmBus::Music => Bus::Music,
-            PcmBus::Sfx => Bus::Sfx,
-            PcmBus::Voice => Bus::Voice,
-            PcmBus::Ambient => Bus::Ambient,
-            PcmBus::Ui => Bus::Ui,
-        };
-        let spec = VoiceSpec {
-            bus,
-            gain: p.gain,
-            rate: p.rate,
-            looping: p.looping,
-            loop_points,
-            fade_in_ms: p.fade_ms,
-            ..Default::default()
-        };
-        spec.validate()?;
-        let start = p
-            .start_ms
-            .checked_mul(tail.sample_rate() as u64)
-            .context("audio start position overflow")?
-            / 1000;
-        ensure!(
-            tail.frame_count().is_none_or(|len| start <= len),
-            "audio start position exceeds source"
-        );
-        if start > 0 {
-            tail.seek(start)?;
-        }
-        let previous = self.voices.get(&(client, channel)).copied();
+        let prepared = prepare(
+            source(encoded, p.decode_gain)?,
+            intro.map(|v| source(v, p.decode_gain)).transpose()?,
+            p,
+        )?;
+        self.publish(client, channel, prepared)
+    }
+    pub(crate) fn publish(
+        &mut self,
+        client: u32,
+        channel: u32,
+        prepared: PreparedChannel,
+    ) -> Result<()> {
+        let PreparedChannel {
+            source: tail,
+            spec,
+            start,
+            pan,
+        } = prepared;
+        let previous = self
+            .voices
+            .get(&(client, channel))
+            .copied()
+            .filter(|h| self.mixer.is_playing(client, *h));
         ensure!(
             previous.is_some() || self.mixer.stats().active < 256,
             "shared channel voice capacity"
@@ -311,13 +370,16 @@ impl ChannelAudio {
         }
         let h = self.mixer.play(client, tail, spec)?;
         if start > 0 {
-            self.mixer.seek(client, h, start)?;
+            if self.mixer.begin_seek(client, h, start).is_err() {
+                self.mixer.seek(client, h, start)?;
+            }
         }
-        self.mixer.set_pan(client, h, p.pan, 0.)?;
+        self.mixer.set_pan(client, h, pan, 0.)?;
         self.voices.insert((client, channel), h);
         Ok(())
     }
     pub fn render(&mut self, delta_ms: u64) -> Result<()> {
+        self.poll_preparations()?;
         if self.clients.is_empty() {
             self.output.clear();
             return Ok(());

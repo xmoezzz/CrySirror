@@ -240,3 +240,105 @@ fn native_text_uses_shared_grid_glyph_resources_and_native_clocked_reveal() {
     assert!(r.host.engine.layers.get(ClientId(1), 40_001).is_none());
     assert!(format!("{:#}", r.snapshot().unwrap_err()).contains("AVG32 portable checkpoints"));
 }
+
+use crysirror_tasks::{Task, TaskPool};
+use std::{
+    sync::{Arc, Condvar, Mutex},
+    time::{Duration, Instant},
+};
+struct Gate {
+    gate: Arc<(Mutex<bool>, Condvar)>,
+    tasks: Vec<Task<()>>,
+}
+impl Gate {
+    fn block(p: &TaskPool) -> Self {
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let mut tasks = vec![];
+        let (tx, rx) = std::sync::mpsc::channel();
+        for _ in 0..p.stats().workers {
+            let g = gate.clone();
+            let tx = tx.clone();
+            tasks.push(
+                p.spawn(move |_| {
+                    tx.send(())?;
+                    let (v, _) = g
+                        .1
+                        .wait_timeout_while(g.0.lock().unwrap(), Duration::from_secs(5), |v| !*v)
+                        .unwrap();
+                    anyhow::ensure!(*v, "gate timeout");
+                    Ok(())
+                })
+                .unwrap(),
+            );
+        }
+        for _ in 0..tasks.len() {
+            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        Self { gate, tasks }
+    }
+}
+impl Drop for Gate {
+    fn drop(&mut self) {
+        *self.gate.0.lock().unwrap() = true;
+        self.gate.1.notify_all();
+        for t in self.tasks.drain(..) {
+            t.wait().unwrap();
+        }
+    }
+}
+
+#[test]
+fn original_avg32_audio_event_waits_for_engine_workers_without_running_following_arithmetic() {
+    let mut code = vec![0x0e, 0x02];
+    code.extend(b"music\0");
+    code.push(0x3b);
+    code.extend(number(1));
+    code.extend(number(9));
+    code.extend([0x60, 0x20]);
+    let (_temp, mut r) = fixture(&code, json!({}));
+    r.assets.set_nonblocking(true);
+    let gate = Gate::block(&r.assets.io_tasks());
+    r.tick(0, InputFrame::default()).unwrap();
+    let first = diag(&r)["instructions"].clone();
+    for _ in 0..3 {
+        r.tick(16, InputFrame::default()).unwrap();
+        assert_eq!(diag(&r)["instructions"], first);
+        assert_eq!(diag(&r)["values"][1], 0);
+    }
+    drop(gate);
+    let end = Instant::now() + Duration::from_secs(5);
+    while !r.host.audio_playing(ClientId(1), 20_000).unwrap() {
+        r.tick(0, InputFrame::default()).unwrap();
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    r.tick(99, InputFrame::default()).unwrap();
+    assert_eq!(diag(&r)["values"][1], 0);
+    r.tick(1, InputFrame::default()).unwrap();
+    for _ in 0..3 {
+        r.tick(0, InputFrame::default()).unwrap();
+    }
+    assert_eq!(diag(&r)["values"][1], 9);
+}
+#[test]
+fn original_avg32_audio_failure_keeps_native_event_and_following_arithmetic_pending() {
+    let mut code = vec![0x0e, 0x01];
+    code.extend(b"music\0");
+    code.push(0x3b);
+    code.extend(number(1));
+    code.extend(number(9));
+    code.extend([0x60, 0x20]);
+    let (temp, mut r) = fixture(&code, json!({}));
+    std::fs::write(temp.path().join("assets/sound.wav"), b"invalid wave").unwrap();
+    r.assets.set_nonblocking(true);
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Err(e) = r.tick(0, InputFrame::default()) {
+            assert!(format!("{e:#}").contains("shared audio preparation failed"));
+            break;
+        }
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(diag(&r)["values"][1], 0);
+}

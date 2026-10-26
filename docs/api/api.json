@@ -4692,6 +4692,75 @@
   ],
   "data": [
     {
+      "doc": "Deferred, client-capability audio source. No bytes or device pointers in VM state.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Canonical read-only asset path under the submitting client.",
+          "name": "path",
+          "rust_type": "VfsPath"
+        },
+        {
+          "default": null,
+          "doc": "Optional native declared decoded-frame boundary.",
+          "name": "frame_limit",
+          "rust_type": "Option<u64>"
+        }
+      ],
+      "name": "AudioAsset",
+      "used_by": "HostServices::begin_audio / AudioRequest::PlayAsset"
+    },
+    {
+      "doc": "Acknowledgement of preparation and owner publication, separate from EOF.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Pending",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ready",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "AudioPreparePhase",
+      "used_by": "AudioPreparation.phase"
+    },
+    {
+      "doc": "Readiness is distinct from currently playing: short audio can finish before its caller consumes a successful preparation receipt.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Client-local channel targeted by the request.",
+          "name": "channel",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Ready means published; it does not mean the voice is still active.",
+          "name": "phase",
+          "rust_type": "AudioPreparePhase"
+        },
+        {
+          "default": null,
+          "doc": "Retained preparation/publication error.",
+          "name": "error",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "AudioPreparation",
+      "used_by": "HostServices::audio_preparation"
+    },
+    {
       "doc": "Read-ahead dimensions, independent of codec packet storage.",
       "fields": [
         {
@@ -11442,7 +11511,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "2d945b181a39e802",
+  "fingerprint": "d36d62998490cf17",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

@@ -92,10 +92,43 @@ impl Default for AudioParameters {
         }
     }
 }
+/// Deferred, client-capability audio source. No bytes or device pointers in VM state.
+#[derive(Clone, Debug)]
+pub struct AudioAsset {
+    /// Canonical read-only asset path under the submitting client.
+    pub path: VfsPath,
+    /// Optional native declared decoded-frame boundary.
+    pub frame_limit: Option<u64>,
+}
+/// Acknowledgement of preparation and owner publication, separate from EOF.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AudioPreparePhase {
+    Pending,
+    Ready,
+    Failed,
+}
+/// Readiness is distinct from currently playing: short audio can finish before
+/// its caller consumes a successful preparation receipt.
+#[derive(Clone, Debug)]
+pub struct AudioPreparation {
+    /// Client-local channel targeted by the request.
+    pub channel: u32,
+    /// Ready means published; it does not mean the voice is still active.
+    pub phase: AudioPreparePhase,
+    /// Retained preparation/publication error.
+    pub error: Option<String>,
+}
 /// Client-scoped channel commands for the shared decoder/mixer. Encoded bytes
 /// and decoder resources are not part of logical VM snapshots.
 #[derive(Clone, Debug)]
 pub enum AudioRequest {
+    /// Worker preparation only; synchronous submission must reject this variant.
+    PlayAsset {
+        channel: u32,
+        source: AudioAsset,
+        intro: Option<AudioAsset>,
+        parameters: AudioParameters,
+    },
     Play {
         channel: u32,
         source: EncodedAudio,
@@ -260,6 +293,23 @@ pub trait HostServices: FileSystem {
     }
     fn submit(&mut self, client: ClientId, commands: &[Command]) -> Result<()>;
     fn now_ms(&self) -> u64;
+    /// Begin resource preparation. A successful return admits work; adapters
+    /// must retain their native event until audio_preparation reports Ready.
+    fn begin_audio(&mut self, _client: ClientId, _request: AudioRequest) -> Result<u64> {
+        Err(crate::Error::Unsupported("channel audio preparation"))
+    }
+    fn audio_preparation(&mut self, _client: ClientId, _ticket: u64) -> Result<AudioPreparation> {
+        Err(crate::Error::Unsupported(
+            "channel audio preparation status",
+        ))
+    }
+    /// Cancel an unpublished request or release a ready receipt. Ready playback
+    /// remains alive; stale/foreign receipts never authorize another client.
+    fn release_audio(&mut self, _client: ClientId, _ticket: u64) -> Result<()> {
+        Err(crate::Error::Unsupported(
+            "channel audio preparation release",
+        ))
+    }
     fn submit_audio(&mut self, _client: ClientId, _request: AudioRequest) -> Result<()> {
         Err(crate::Error::Unsupported("shared channel audio"))
     }

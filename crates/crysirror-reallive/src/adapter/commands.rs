@@ -463,7 +463,6 @@ impl RealLiveVm {
                     }
                 }
                 let asset = self.resource(m, if module == 20 { "bgm" } else { "wav" }, &name)?;
-                let bytes = self.resources.as_ref().unwrap().read(&asset)?;
                 let fade = m
                     .int_param_or(c, if module == 20 { 1 } else { 2 }, 0)?
                     .max(0) as f32;
@@ -473,33 +472,37 @@ impl RealLiveVm {
                         || !h.audio_playing(self.client, channel).map_err(err)?,
                     "outgoing music fade needs shared queued replacement API"
                 );
-                h.submit_audio(
-                    self.client,
-                    AudioRequest::Play {
-                        channel,
-                        source: EncodedAudio {
-                            bytes: Arc::from(bytes),
-                            frame_limit,
-                        },
-                        intro: None,
-                        parameters: AudioParameters {
-                            looping: if module == 20 { op != 2 } else { op == 2 },
-                            loop_start,
-                            start_ms,
-                            fade_ms: fade,
-                            bus: if module == 20 {
-                                PcmBus::Music
-                            } else {
-                                PcmBus::Sfx
+                let ticket = h
+                    .begin_audio(
+                        self.client,
+                        AudioRequest::PlayAsset {
+                            channel,
+                            source: AudioAsset {
+                                path: VfsPath::new(Mount::Asset, &asset).map_err(err)?,
+                                frame_limit,
                             },
-                            ..Default::default()
+                            intro: None,
+                            parameters: AudioParameters {
+                                looping: if module == 20 { op != 2 } else { op == 2 },
+                                loop_start,
+                                start_ms,
+                                fade_ms: fade,
+                                bus: if module == 20 {
+                                    PcmBus::Music
+                                } else {
+                                    PcmBus::Sfx
+                                },
+                                ..Default::default()
+                            },
                         },
-                    },
-                )
-                .map_err(err)?;
-                if module == 20 && op == 1 || module == 21 && op == 1 {
-                    self.wait = Some(Wait::Audio { channel });
-                }
+                    )
+                    .map_err(err)?;
+                self.pending_audio = Some((
+                    ticket,
+                    ((module == 20 || module == 21) && op == 1).then_some(channel),
+                ));
+                self.poll_audio(h)?;
+                return Ok(());
             }
             (20 | 21, 3) => self.wait = Some(Wait::Audio { channel }),
             (20 | 21, 4 | 7) => {

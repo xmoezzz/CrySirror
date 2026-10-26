@@ -4,6 +4,23 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `d36d62998490cf17` (2026-10-27): native channel preparation receipts
+
+- Add core AudioAsset, AudioPreparePhase and AudioPreparation data. The typed
+  Rust HostServices boundary adds begin_audio/audio_preparation/release_audio;
+  admission is distinct from ready owner publication and from voice completion.
+- **Rust enum change:** AudioRequest gains PlayAsset. Exhaustive matches must
+  handle it; synchronous submission rejects this variant. Use preparation and
+  retain the original native event until Ready. Existing encoded offline
+  submission and modern Audio JS/TS helpers retain their interfaces.
+- RealLive's mapped BGM/WAV and AVG32 music/wave/SE/voice events use shared
+  channel workers and original pending continuations. Restore clears derived
+  channel state/tickets after successful validation. This is not additional
+  opcode or native-save coverage.
+- AssetIo moves to crysirror-io; the resource crate preserves its reexport.
+  Audio/modern preparation share decoder::open_asset over this cursor. See
+  ADR 0070 for startup/intro/loop coordinates, limits and remaining sync paths.
+
 ## `2d945b181a39e802` (2026-10-27): worker audio playback and seeks
 
 - Add Audio beginPreloadSfx/beginPlaySfx/beginPlayMusic/beginSeekVoice,

@@ -9,6 +9,7 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 
 | Crate | Role |
 |---|---|
+| crysirror-io | Shared capability read-at to standard I/O cursor; no codecs or device dependencies |
 | crysirror-core | no_std + alloc service contracts, logical state, save envelope, VM port |
 | crysirror-compat | Legacy path/behavior profiles and command translation boundary |
 | crysirror-host | Original in-memory reference host for contract tests |

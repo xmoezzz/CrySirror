@@ -9,16 +9,14 @@ use crate::{
 use anyhow::{Context, Result, ensure};
 use crysirror_audio::{
     buffered::{BufferedSource, StreamBufferSpec},
-    decoder::{self, AudioSource, Clip, MediaSource},
+    decoder::{self, AudioSource, Clip},
     mixer::{Bus, VoiceHandle, VoiceSpec},
 };
 use crysirror_core::path::{Mount, VfsPath};
-use crysirror_resource::AssetIo;
 use crysirror_tasks::table::{OperationState, OperationTable, next_operation_id};
 use serde_json::{Value as Json, json};
 use std::{
     collections::BTreeMap,
-    io::{Read, Seek, SeekFrom},
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -52,28 +50,6 @@ impl Charge {
 impl Drop for Charge {
     fn drop(&mut self) {
         self.budget.fetch_sub(self.bytes, Ordering::Relaxed);
-    }
-}
-struct Reader {
-    io: AssetIo,
-    len: u64,
-}
-impl Read for Reader {
-    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-        self.io.read(out)
-    }
-}
-impl Seek for Reader {
-    fn seek(&mut self, at: SeekFrom) -> std::io::Result<u64> {
-        self.io.seek(at)
-    }
-}
-impl MediaSource for Reader {
-    fn is_seekable(&self) -> bool {
-        true
-    }
-    fn byte_len(&self) -> Option<u64> {
-        Some(self.len)
     }
 }
 enum Product {
@@ -421,13 +397,7 @@ pub(crate) fn call(cx: &mut EngineContext, method: &str, args: &[Value]) -> Resu
                     len <= 512 * 1024 * 1024,
                     "encoded audio stream exceeds 512 MiB"
                 );
-                let source = decoder::open_reader(
-                    Box::new(Reader {
-                        io: AssetIo::new(reader)?,
-                        len,
-                    }),
-                    asset.rsplit_once('.').map(|v| v.1),
-                )?;
+                let source = decoder::open_asset(reader, asset.rsplit_once('.').map(|v| v.1))?;
                 cancel.check()?;
                 if music {
                     let loop_start = spec.as_ref().and_then(|s| s.loop_points.map(|p| p.start));

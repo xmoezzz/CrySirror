@@ -298,6 +298,39 @@ impl HostServices for SharedHost {
         })
     }
 
+    fn begin_audio(
+        &mut self,
+        client: ClientId,
+        request: crysirror_core::service::AudioRequest,
+    ) -> crysirror_core::Result<u64> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        let storage = self.fs.storage(client)?;
+        self.channel_audio
+            .begin_preparation(client.0, request, storage)
+            .map_err(|e| Error::Io(format!("shared audio preparation: {e:#}")))
+    }
+    fn audio_preparation(
+        &mut self,
+        client: ClientId,
+        ticket: u64,
+    ) -> crysirror_core::Result<crysirror_core::service::AudioPreparation> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .preparation(client.0, ticket)
+            .map_err(|e| Error::Io(format!("shared audio preparation: {e:#}")))
+    }
+    fn release_audio(&mut self, client: ClientId, ticket: u64) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .release_preparation(client.0, ticket)
+            .map_err(|e| Error::Io(format!("shared audio preparation: {e:#}")))
+    }
     fn submit_audio(
         &mut self,
         client: ClientId,
@@ -890,6 +923,10 @@ impl Runtime {
             input
         };
         self.host.decoders = self.assets.decoders.clone();
+        self.host
+            .channel_audio
+            .configure_preparation(self.assets.io_tasks(), self.assets.is_nonblocking());
+        self.host.channel_audio.poll_preparations()?;
         let vm_span = self.profiler.span(profile_frame, "vm.step");
         for s in &mut self.sessions {
             if s.yielded == VmYield::Halted {
@@ -1208,6 +1245,7 @@ impl Runtime {
         self.physics.invalidate();
         self.vfx.reset(self.host.clock_ms);
         self.host.trace.clear();
+        self.host.channel_audio.reset();
         self.restored = next_restored;
         Ok(())
     }

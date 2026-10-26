@@ -5,7 +5,7 @@
 //! or ambient filesystem access. File authority belongs to the host VFS.
 use anyhow::{Context, Result, bail, ensure};
 use std::{
-    io::{Cursor, Seek, SeekFrom},
+    io::{Cursor, Read, Seek, SeekFrom},
     sync::Arc,
 };
 use symphonia::core::{
@@ -18,6 +18,7 @@ use symphonia::core::{
     probe::Hint,
 };
 
+use crysirror_core::service::AssetReader;
 pub use symphonia::core::io::MediaSource;
 
 pub type StereoFrame = [f32; 2];
@@ -511,4 +512,36 @@ pub fn decode_clip(mut source: Box<dyn AudioSource>) -> Result<Clip> {
         samples.extend_from_slice(&block[..n]);
     }
     Clip::new(rate, samples)
+}
+
+impl MediaSource for AssetMedia {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.0.len())
+    }
+}
+/// Shared capability reader used by modern and native audio. Open/probe on a
+/// worker in realtime hosts; callers retain responsibility for admission.
+pub fn open_asset(
+    reader: Arc<dyn AssetReader>,
+    extension: Option<&str>,
+) -> Result<Box<dyn AudioSource>> {
+    open_reader(
+        Box::new(AssetMedia(crysirror_io::AssetIo::new(reader)?)),
+        extension,
+    )
+}
+
+struct AssetMedia(crysirror_io::AssetIo);
+impl Read for AssetMedia {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(out)
+    }
+}
+impl Seek for AssetMedia {
+    fn seek(&mut self, at: SeekFrom) -> std::io::Result<u64> {
+        self.0.seek(at)
+    }
 }

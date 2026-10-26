@@ -10,6 +10,7 @@ default = []
 rodio-output = ["dep:rodio"]
 
 [dependencies]
+crysirror-io.workspace = true
 crysirror-core.workspace = true
 crysirror-tasks.workspace = true
 crysirror-acoustics.workspace = true

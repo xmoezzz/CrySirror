@@ -14,8 +14,8 @@ use crysirror_core::{
     Error,
     path::{Mount, VfsPath},
     service::{
-        AudioParameters, AudioRequest, EncodedAudio, EngineQuery, HostServices, InputFrame,
-        MediaPhase, MediaRequest, PcmBus, buttons,
+        AudioAsset, AudioParameters, AudioPreparePhase, AudioRequest, EngineQuery, HostServices,
+        InputFrame, MediaPhase, MediaRequest, PcmBus, buttons,
     },
     state::ClientId,
     vm::{VmAdapter, VmYield},
@@ -93,6 +93,7 @@ pub struct RealLiveVm {
     machine: Option<Machine>,
     resources: Option<Resources>,
     wait: Option<Wait>,
+    pending_audio: Option<(u64, Option<u32>)>,
     width: u32,
     height: u32,
     last_down: u64,
@@ -126,6 +127,7 @@ impl RealLiveVm {
             machine: None,
             resources: None,
             wait: None,
+            pending_audio: None,
             width: 640,
             height: 480,
             last_down: 0,
@@ -430,6 +432,32 @@ impl RealLiveVm {
         }
         Ok(done)
     }
+    fn poll_audio(&mut self, h: &mut dyn HostServices) -> Result<bool> {
+        let Some((ticket, wait_channel)) = self.pending_audio else {
+            return Ok(true);
+        };
+        let status = h.audio_preparation(self.client, ticket).map_err(err)?;
+        match status.phase {
+            AudioPreparePhase::Pending => Ok(false),
+            AudioPreparePhase::Ready => {
+                h.release_audio(self.client, ticket).map_err(err)?;
+                self.pending_audio = None;
+                if let Some(channel) = wait_channel {
+                    self.wait = Some(Wait::Audio { channel });
+                }
+                self.api_calls += 1;
+                Ok(true)
+            }
+            AudioPreparePhase::Failed => {
+                let _ = h.release_audio(self.client, ticket);
+                self.pending_audio = None;
+                bail!(
+                    "shared audio preparation failed: {}",
+                    status.error.unwrap_or_default()
+                )
+            }
+        }
+    }
     fn execute(
         &mut self,
         h: &mut dyn HostServices,
@@ -467,6 +495,12 @@ impl RealLiveVm {
         let mut m = self.machine.take().unwrap();
         m.begin_frame();
         let result = (|| {
+            if self.pending_audio.is_some() {
+                if !self.poll_audio(h)? {
+                    return Ok(VmYield::BudgetExhausted);
+                }
+                m.ack(Next::Advance)?;
+            }
             if !self.tick_wait(&mut m, h, input)? {
                 return Ok(VmYield::BudgetExhausted);
             }
@@ -495,6 +529,9 @@ impl RealLiveVm {
                                 Next::Advance
                             }
                         };
+                        if self.pending_audio.is_some() {
+                            return Ok(VmYield::BudgetExhausted);
+                        }
                         m.ack(next)?;
                         if self.wait.is_some() && !self.tick_wait(&mut m, h, input)? {
                             break;

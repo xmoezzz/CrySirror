@@ -103,3 +103,4 @@ moves to `done` only with recorded behavior evidence.
 | [0067](0067-shared-acoustics-and-cpu-bvh.md) | Client-owned acoustic BVHs, frequency transmission and bounded background direct sound | direct-sound profile; HRTF/reflections/reverb pending |
 | [0068](0068-hrtf-resources-and-binaural-voices.md) | Client-owned SOFA/HRIR, worker filter preparation and engine binaural voices | implemented profile; full audio async and room acoustics pending |
 | [0069](0069-worker-audio-decoding-and-playback.md) | Worker-owned decoder read-ahead, owner-published SFX/music and exact asynchronous seeks | implemented profile; native channel and final mix/output migration remain open |
+| [0070](0070-native-channel-audio-readiness.md) | Shared channel preparation receipts, capability streams and original RealLive/AVG32 continuations | implemented profile; native discovery and final mix/output remain synchronous |

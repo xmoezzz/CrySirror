@@ -117,3 +117,16 @@ fn queued_cancellation_and_epoch_drop_do_not_run_or_retain_work() {
     fence.wait().unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn immediate_offline_products_share_owner_generation_and_retention_rules() {
+    let mut table = OperationTable::new(1, 2).unwrap();
+    let id = table.insert_ready(1, 7, "offline", 42).unwrap();
+    assert_eq!(table.status(1, 7, id).unwrap().state, OperationState::Ready);
+    assert!(table.status(2, 7, id).is_err());
+    assert!(table.status(1, 8, id).is_err());
+    assert!(table.admit(1).is_err());
+    assert_eq!(table.take(1, 7, id).unwrap(), Some(42));
+    assert!(table.status(1, 7, id).is_err());
+    assert!(table.admit(1).is_ok());
+}
