@@ -3,6 +3,26 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## RT step 2: GPU-stream BLAS, dynamic BLAS, alpha-tested shadows (ADR 0055)
+
+- PBR hardware RT builds BLAS from the renderer's GPU vertex/index streams
+  (no CPU triangle copies); skinned/morphed instances own resident BLAS fed
+  by a GPU skinning pass and rebuilt only when pose/morphs change. wgpu
+  29.0.x performs `PreferUpdate` as a full rebuild: no refit yet.
+- MASK casters: GPU-gathered UVs, a 2048² alpha atlas baked with the raster
+  coverage function, shadow rays re-traced past transparent hits (≤ 8
+  layers). Blended surfaces cast nothing. The old CPU triangle instance
+  path was removed.
+- Behaviour (Apple M5, Metal):
+  - Hardware RT GPU tests, release, `--test-threads=1`: **4 passed**
+    (instancing/rigid motion, uniform-alpha mask, checker-alpha texture
+    shadow 410 → 205 pixels, skinned dynamic BLAS reuse/rebuild).
+  - Whole `crysirror-wgpu` ignored GPU suite, `--test-threads=1`: **39
+    passed**.
+  - Khronos Sponza (local), `--renderer hardware-raytrace`: renders; 103
+    instances, 14 alpha-tested, 3 atlas tiles. Before this step hardware RT
+    rejected the scene's masked materials.
+
 ## Morph targets (ADR 0054, second step)
 
 - glTF/VRM morph targets load (sparse, `targetNames`); PMX vertex and

@@ -36,15 +36,6 @@ struct PrimaryParams {
     background: [f32; 4],
     size_count: [u32; 4],
 }
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct ShadowParams {
-    inverse_view_projection: [[f32; 4]; 4],
-    inverse_view: [[f32; 4]; 4],
-    towards_sun: [f32; 4],
-    size: [u32; 4],
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct HardwareRtStats {
     /// Encoded build commands, not GPU completion measurements.
@@ -59,25 +50,6 @@ pub(crate) struct HardwareRtStats {
     pub cpu_geometry_hits: u64,
     pub cpu_geometry_misses: u64,
 }
-#[derive(Clone)]
-pub(crate) struct RtInstance {
-    pub triangles: std::sync::Arc<Vec<RtTriangle>>,
-    pub transform: [[f32; 4]; 4],
-}
-struct CachedMesh {
-    positions: Vec<[f32; 3]>,
-    vertices: wgpu::Buffer,
-    blas: wgpu::Blas,
-    submitted: bool,
-}
-#[derive(Default)]
-struct InstanceScene {
-    lookup: std::collections::HashMap<usize, (u64, std::sync::Weak<Vec<RtTriangle>>)>,
-    meshes: std::collections::BTreeMap<u64, CachedMesh>,
-    tlas: Option<wgpu::Tlas>,
-    signature: Vec<(u64, [u32; 12])>,
-    submitted: bool,
-}
 struct AccelerationScene {
     hash: u64,
     positions: Vec<[f32; 3]>,
@@ -90,15 +62,9 @@ struct AccelerationScene {
 /// and PBR directional visibility. Geometry changes rebuild native AS; material
 /// metadata changes do not. All work is encoded into the caller's GPU graph.
 pub(crate) struct HardwareRt {
-    instanced: InstanceScene,
     pending_world: bool,
-    pending_instances: bool,
     primary: wgpu::ComputePipeline,
     primary_layout: wgpu::BindGroupLayout,
-    shadow: wgpu::ComputePipeline,
-    shadow_layout: wgpu::BindGroupLayout,
-    clear_shadow: wgpu::ComputePipeline,
-    clear_shadow_layout: wgpu::BindGroupLayout,
     scene: Option<AccelerationScene>,
     stats: HardwareRtStats,
 }
@@ -119,7 +85,6 @@ impl HardwareRt {
             "hardware RT acceleration-structure limits were not negotiated"
         );
         validate_shader(include_str!("shaders/hardware_rt.wgsl"))?;
-        validate_shader(include_str!("shaders/hardware_shadow.wgsl"))?;
         let d = &gpu.device;
         let primary_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("hardware RT primary resources"),
@@ -139,79 +104,19 @@ impl HardwareRt {
                 output(3),
             ],
         });
-        let shadow_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("hardware RT shadow resources"),
-            entries: &[
-                uniform(0),
-                acceleration(1),
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                output(4),
-                sampled(5),
-            ],
-        });
         let primary = pipeline(
             d,
             &primary_layout,
             "hardware primary and shadow rays",
             include_str!("shaders/hardware_rt.wgsl"),
         );
-        let shadow = pipeline(
-            d,
-            &shadow_layout,
-            "hardware PBR sun visibility",
-            include_str!("shaders/hardware_shadow.wgsl"),
-        );
-        let clear_shadow_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("empty RT visibility/AO resources"),
-            entries: &[output(4), sampled(5)],
-        });
-        let clear_shadow = pipeline_entry(
-            d,
-            &clear_shadow_layout,
-            "empty hardware visibility",
-            include_str!("shaders/hardware_shadow.wgsl"),
-            "clear",
-        );
         Ok(Self {
-            instanced: Default::default(),
             pending_world: false,
-            pending_instances: false,
-            clear_shadow,
-            clear_shadow_layout,
             primary,
             primary_layout,
-            shadow,
-            shadow_layout,
             scene: None,
             stats: HardwareRtStats::default(),
         })
-    }
-    pub fn clear(&mut self) {
-        self.scene = None;
-        self.instanced = Default::default();
-        self.pending_world = false;
-        self.pending_instances = false;
-        self.stats.instances = 0;
-        self.stats.resident_blas = 0;
     }
     pub fn stats(&self) -> HardwareRtStats {
         self.stats
@@ -226,195 +131,7 @@ impl HardwareRt {
                 scene.submitted = true;
             }
         }
-        if self.pending_instances {
-            for mesh in self.instanced.meshes.values_mut() {
-                mesh.submitted = true;
-            }
-            self.instanced.submitted = true;
-        }
         self.pending_world = false;
-        self.pending_instances = false;
-    }
-    fn prepare_instances(
-        &mut self,
-        gpu: &Gpu,
-        instances: &[RtInstance],
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<()> {
-        use std::collections::BTreeSet;
-        self.pending_instances = true;
-        self.pending_world = false;
-        ensure!(
-            instances.len() <= gpu.device.limits().max_tlas_instance_count as usize,
-            "hardware RT instance budget exceeded"
-        );
-        let mut used = BTreeSet::new();
-        let mut used_ptrs = BTreeSet::new();
-        let mut signature = Vec::with_capacity(instances.len());
-        let mut total = 0usize;
-        for instance in instances {
-            let matrix = glam::Mat4::from_cols_array_2d(&instance.transform);
-            check_matrix(instance.transform)?;
-            ensure!(
-                matrix.x_axis.w == 0.
-                    && matrix.y_axis.w == 0.
-                    && matrix.z_axis.w == 0.
-                    && matrix.w_axis.w == 1.,
-                "RT instance transform must be affine"
-            );
-            if instance.triangles.is_empty() {
-                continue;
-            }
-            total = total
-                .checked_add(instance.triangles.len())
-                .context("RT triangle count overflow")?;
-            let ptr = std::sync::Arc::as_ptr(&instance.triangles) as usize;
-            used_ptrs.insert(ptr);
-            let cached = self.instanced.lookup.get(&ptr).and_then(|(hash, weak)| {
-                weak.upgrade()
-                    .filter(|a| std::sync::Arc::ptr_eq(a, &instance.triangles))
-                    .map(|_| *hash)
-            });
-            let hash = if let Some(hash) = cached {
-                hash
-            } else {
-                let positions = checked_positions(&instance.triangles, &gpu.device.limits())?;
-                let hash = geometry_hash(&positions);
-                if let Some(mesh) = self.instanced.meshes.get(&hash) {
-                    ensure!(mesh.positions == positions, "RT geometry hash collision");
-                } else {
-                    let retained = self
-                        .instanced
-                        .meshes
-                        .iter()
-                        .filter(|(h, _)| used.contains(*h))
-                        .map(|(_, m)| m.positions.len() / 3)
-                        .sum::<usize>();
-                    ensure!(
-                        retained + positions.len() / 3
-                            <= crate::rt_capabilities::MAX_RT_PRIMITIVES as usize
-                            && used.len() < 1024,
-                        "RT unique mesh budget exceeded"
-                    );
-                    let vertices =
-                        gpu.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                                label: Some("RT local mesh vertices"),
-                                contents: bytemuck::cast_slice(&positions),
-                                usage: wgpu::BufferUsages::BLAS_INPUT,
-                            });
-                    let blas = gpu.device.create_blas(
-                        &wgpu::CreateBlasDescriptor {
-                            label: Some("RT shared mesh BLAS"),
-                            flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
-                            update_mode: wgpu::AccelerationStructureUpdateMode::Build,
-                        },
-                        wgpu::BlasGeometrySizeDescriptors::Triangles {
-                            descriptors: vec![geometry_size(positions.len())?],
-                        },
-                    );
-                    self.instanced.meshes.insert(
-                        hash,
-                        CachedMesh {
-                            positions,
-                            vertices,
-                            blas,
-                            submitted: false,
-                        },
-                    );
-                }
-                self.instanced
-                    .lookup
-                    .insert(ptr, (hash, std::sync::Arc::downgrade(&instance.triangles)));
-                hash
-            };
-            used.insert(hash);
-            let cols = instance.transform;
-            let transform = [
-                cols[0][0], cols[1][0], cols[2][0], cols[3][0], cols[0][1], cols[1][1], cols[2][1],
-                cols[3][1], cols[0][2], cols[1][2], cols[2][2], cols[3][2],
-            ];
-            signature.push((hash, transform.map(f32::to_bits)));
-        }
-        self.instanced.meshes.retain(|h, _| used.contains(h));
-        self.instanced
-            .lookup
-            .retain(|ptr, _| used_ptrs.contains(ptr));
-        let unique = self
-            .instanced
-            .meshes
-            .values()
-            .map(|m| m.positions.len() / 3)
-            .sum::<usize>();
-        ensure!(
-            unique <= crate::rt_capabilities::MAX_RT_PRIMITIVES as usize && used.len() <= 1024,
-            "RT unique mesh/primitive budget exceeded"
-        );
-        self.stats.instances = signature.len();
-        self.stats.resident_blas = used.len();
-        self.stats.triangles = total;
-        if signature.is_empty() {
-            self.instanced.tlas = None;
-            self.instanced.signature.clear();
-            self.instanced.submitted = false;
-            return Ok(());
-        }
-        let rebuild = signature != self.instanced.signature
-            || !self.instanced.submitted
-            || self.instanced.meshes.values().any(|m| !m.submitted);
-        if rebuild {
-            self.instanced.submitted = false;
-            let mut tlas = gpu.device.create_tlas(&wgpu::CreateTlasDescriptor {
-                label: Some("RT mesh instances TLAS"),
-                max_instances: signature.len() as u32,
-                flags: wgpu::AccelerationStructureFlags::PREFER_FAST_TRACE,
-                update_mode: wgpu::AccelerationStructureUpdateMode::Build,
-            });
-            for (i, (hash, transform)) in signature.iter().enumerate() {
-                tlas[i] = Some(wgpu::TlasInstance::new(
-                    &self.instanced.meshes[hash].blas,
-                    transform.map(f32::from_bits),
-                    0,
-                    0xff,
-                ));
-            }
-            let meshes: Vec<_> = self
-                .instanced
-                .meshes
-                .values()
-                .filter(|m| !m.submitted)
-                .collect();
-            let sizes: Vec<_> = meshes
-                .iter()
-                .map(|m| geometry_size(m.positions.len()))
-                .collect::<Result<_>>()?;
-            let entries: Vec<_> = meshes
-                .iter()
-                .zip(&sizes)
-                .map(|(m, size)| wgpu::BlasBuildEntry {
-                    blas: &m.blas,
-                    geometry: wgpu::BlasGeometries::TriangleGeometries(vec![
-                        wgpu::BlasTriangleGeometry {
-                            size,
-                            vertex_buffer: &m.vertices,
-                            first_vertex: 0,
-                            vertex_stride: 12,
-                            index_buffer: None,
-                            first_index: None,
-                            transform_buffer: None,
-                            transform_buffer_offset: None,
-                        },
-                    ]),
-                })
-                .collect();
-            encoder.build_acceleration_structures(entries.iter(), [&tlas]);
-            self.stats.blas_builds_encoded += entries.len() as u64;
-            self.stats.tlas_builds_encoded += 1;
-            self.stats.builds_encoded += 1;
-            self.instanced.tlas = Some(tlas);
-            self.instanced.signature = signature;
-        }
-        Ok(())
     }
     fn prepare(
         &mut self,
@@ -423,7 +140,6 @@ impl HardwareRt {
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<()> {
         self.pending_world = true;
-        self.pending_instances = false;
         self.stats.instances = usize::from(!triangles.is_empty());
         self.stats.resident_blas = usize::from(!triangles.is_empty());
         let positions = checked_positions(triangles, &gpu.device.limits())?;
@@ -583,212 +299,6 @@ impl HardwareRt {
         self.stats.primary_dispatches += 1;
         Ok(texture)
     }
-    /// Direction is TOWARDS the sun. Prepass normals are signed view-space xyz.
-    /// Output packs existing AO in R and hardware directional visibility in G,
-    /// with B=0/A=1. Sharing the AO slot preserves downlevel texture limits.
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn encode_sun_shadows(
-        &mut self,
-        gpu: &Gpu,
-        triangles: &[RtTriangle],
-        inverse_view_projection: [[f32; 4]; 4],
-        inverse_view: [[f32; 4]; 4],
-        sun_direction: [f32; 3],
-        canvas: [u32; 2],
-        depth: &wgpu::TextureView,
-        normals: &wgpu::TextureView,
-        ao: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<wgpu::Texture> {
-        let texture = target(gpu, canvas, "hardware RT combined AO/sun visibility")?;
-        let view = texture.create_view(&Default::default());
-        self.encode_sun_shadows_into(
-            gpu,
-            triangles,
-            inverse_view_projection,
-            inverse_view,
-            sun_direction,
-            canvas,
-            depth,
-            normals,
-            ao,
-            &view,
-            encoder,
-        )?;
-        Ok(texture)
-    }
-    #[allow(clippy::too_many_arguments)]
-    #[cfg(test)]
-    pub fn encode_sun_shadows_into(
-        &mut self,
-        gpu: &Gpu,
-        triangles: &[RtTriangle],
-        inverse_view_projection: [[f32; 4]; 4],
-        inverse_view: [[f32; 4]; 4],
-        sun_direction: [f32; 3],
-        canvas: [u32; 2],
-        depth: &wgpu::TextureView,
-        normals: &wgpu::TextureView,
-        ao: &wgpu::TextureView,
-        output_view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<()> {
-        self.encode_sun_shadows_impl(
-            gpu,
-            triangles,
-            inverse_view_projection,
-            inverse_view,
-            sun_direction,
-            canvas,
-            depth,
-            normals,
-            ao,
-            output_view,
-            encoder,
-            None,
-        )
-    }
-    pub fn encode_instance_shadows_into(
-        &mut self,
-        gpu: &Gpu,
-        instances: &[RtInstance],
-        inverse_view_projection: [[f32; 4]; 4],
-        inverse_view: [[f32; 4]; 4],
-        sun_direction: [f32; 3],
-        canvas: [u32; 2],
-        depth: &wgpu::TextureView,
-        normals: &wgpu::TextureView,
-        ao: &wgpu::TextureView,
-        output_view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-    ) -> Result<()> {
-        self.encode_sun_shadows_impl(
-            gpu,
-            &[],
-            inverse_view_projection,
-            inverse_view,
-            sun_direction,
-            canvas,
-            depth,
-            normals,
-            ao,
-            output_view,
-            encoder,
-            Some(instances),
-        )
-    }
-    fn encode_sun_shadows_impl(
-        &mut self,
-        gpu: &Gpu,
-        triangles: &[RtTriangle],
-        inverse_view_projection: [[f32; 4]; 4],
-        inverse_view: [[f32; 4]; 4],
-        sun_direction: [f32; 3],
-        canvas: [u32; 2],
-        depth: &wgpu::TextureView,
-        normals: &wgpu::TextureView,
-        ao: &wgpu::TextureView,
-        output_view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-        instances: Option<&[RtInstance]>,
-    ) -> Result<()> {
-        check_canvas(gpu, canvas)?;
-        let output_texture = output_view.texture();
-        ensure!(
-            output_texture.format() == wgpu::TextureFormat::Rgba16Float
-                && output_texture.width() >= canvas[0]
-                && output_texture.height() >= canvas[1]
-                && output_texture
-                    .usage()
-                    .contains(wgpu::TextureUsages::STORAGE_BINDING),
-            "hardware shadow output requires an RGBA16F storage view covering the canvas"
-        );
-        check_camera(inverse_view_projection)?;
-        check_matrix(inverse_view)?;
-        let light = glam::Vec3::from_array(sun_direction);
-        ensure!(
-            light.is_finite()
-                && light.length_squared().is_finite()
-                && light.length_squared() > 1e-12,
-            "hardware shadow sun direction must be finite and nonzero"
-        );
-        let light = light.normalize();
-        if let Some(instances) = instances {
-            self.prepare_instances(gpu, instances, encoder)?;
-        } else {
-            self.prepare(gpu, triangles, encoder)?;
-        }
-        let tlas = if instances.is_some() {
-            self.instanced.tlas.as_ref()
-        } else {
-            self.scene.as_ref().map(|s| &s.tlas)
-        };
-        if tlas.is_none() {
-            let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("empty hardware shadow bind"),
-                layout: &self.clear_shadow_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(output_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::TextureView(ao),
-                    },
-                ],
-            });
-            dispatch(encoder, &self.clear_shadow, &bind, canvas);
-            return Ok(());
-        }
-        let params = ShadowParams {
-            inverse_view_projection,
-            inverse_view,
-            towards_sun: [light.x, light.y, light.z, 0.],
-            size: [canvas[0], canvas[1], 0, 0],
-        };
-        let uniform = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("hardware shadow camera/light"),
-                contents: bytemuck::bytes_of(&params),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("hardware RT shadow bind"),
-            layout: &self.shadow_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: tlas.unwrap().as_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(depth),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::TextureView(normals),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: wgpu::BindingResource::TextureView(output_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 5,
-                    resource: wgpu::BindingResource::TextureView(ao),
-                },
-            ],
-        });
-        dispatch(encoder, &self.shadow, &bind, canvas);
-        self.stats.shadow_dispatches += 1;
-        Ok(())
-    }
 }
 fn check_matrix(matrix: [[f32; 4]; 4]) -> Result<()> {
     ensure!(
@@ -915,18 +425,6 @@ fn output(binding: u32) -> wgpu::BindGroupLayoutEntry {
         count: None,
     }
 }
-fn sampled(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Texture {
-            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-            view_dimension: wgpu::TextureViewDimension::D2,
-            multisampled: false,
-        },
-        count: None,
-    }
-}
 fn pipeline(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -1029,6 +527,9 @@ fn dispatch(
     pass.set_bind_group(0, bind, &[]);
     pass.dispatch_workgroups(canvas[0].div_ceil(8), canvas[1].div_ceil(8), 1);
 }
+pub(crate) fn validate_wgsl(source: &str) -> Result<()> {
+    validate_shader(source)
+}
 fn validate_shader(source: &str) -> Result<()> {
     let module = naga::front::wgsl::parse_str(source)
         .map_err(|e| anyhow::anyhow!("{}", e.emit_to_string(source)))?;
@@ -1060,7 +561,7 @@ mod tests {
     fn genuine_ray_query_shaders_parse_and_validate() {
         for shader in [
             include_str!("shaders/hardware_rt.wgsl"),
-            include_str!("shaders/hardware_shadow.wgsl"),
+            include_str!("shaders/rt_pbr_shadow.wgsl"),
         ] {
             validate_shader(shader).unwrap();
             assert!(shader.contains("rayQueryInitialize"));
@@ -1230,166 +731,5 @@ mod tests {
         let empty = shot(&mut rt, &[]);
         assert!((empty[2] - 0.03).abs() < 0.001);
         assert_eq!(rt.stats().triangles, 0);
-    }
-    #[test]
-    #[ignore = "requires actual hardware ray-query device; explicitly execute"]
-    fn hardware_sun_visibility_preserves_ao_and_empty_casters_clear_only_visibility() {
-        let gpu = pollster::block_on(Gpu::request_for(
-            &wgpu::Instance::default(),
-            None,
-            crate::RenderingPath::HardwareRaytrace,
-        ))
-        .unwrap();
-        let mut rt = HardwareRt::new(&gpu).unwrap();
-        let size = 16;
-        let depth = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("test prepass depth"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let normals = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("test prepass normals"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let ao = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("test AO"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let normal_data: Vec<u8> = (0..size * size)
-            .flat_map(|_| {
-                [0f32, 0., 1., 1.]
-                    .into_iter()
-                    .flat_map(|v| half::f16::from_f32(v).to_bits().to_le_bytes())
-            })
-            .collect();
-        for (texture, data, bpp) in [
-            (&normals, normal_data, 8),
-            (
-                &ao,
-                (0..size * size)
-                    .flat_map(|_| [64u8, 0, 0, 255])
-                    .collect::<Vec<_>>(),
-                4,
-            ),
-        ] {
-            gpu.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &data,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(size * bpp),
-                    rows_per_image: Some(size),
-                },
-                wgpu::Extent3d {
-                    width: size,
-                    height: size,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-        let view =
-            glam::Mat4::look_at_rh(glam::Vec3::new(0., 0., 2.), glam::Vec3::ZERO, glam::Vec3::Y);
-        let camera = glam::Mat4::perspective_rh(50f32.to_radians(), 1., 0.1, 10.) * view;
-        let plane = camera * glam::Vec4::new(0., 0., 0., 1.);
-        let plane_depth = plane.z / plane.w;
-        let depth_view = depth.create_view(&Default::default());
-        let normals_view = normals.create_view(&Default::default());
-        let ao_view = ao.create_view(&Default::default());
-        let shot = |rt: &mut HardwareRt, triangles: &[RtTriangle]| {
-            let mut encoder = gpu.device.create_command_encoder(&Default::default());
-            {
-                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("test plane depth"),
-                    color_attachments: &[],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &depth_view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(plane_depth),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-            }
-            let texture = rt
-                .encode_sun_shadows(
-                    &gpu,
-                    triangles,
-                    camera.inverse().to_cols_array_2d(),
-                    view.inverse().to_cols_array_2d(),
-                    [0., 0., 1.],
-                    [size, size],
-                    &depth_view,
-                    &normals_view,
-                    &ao_view,
-                    &mut encoder,
-                )
-                .unwrap();
-            read_output(&gpu, &texture, encoder, rt)[(size * size / 2 + size / 2) as usize]
-        };
-        let caster = RtTriangle {
-            a: [-0.8, -0.8, 1.],
-            b: [0.8, -0.8, 1.],
-            c: [0., 0.8, 1.],
-            normal: [0., 0., 1.],
-            color: [1.; 4],
-        };
-        let baseline = shot(&mut rt, &[]);
-        assert!((baseline[1] - 1.).abs() < 0.001);
-        eprintln!("hardware shadow empty-caster compute completed");
-        let mut build = gpu.device.create_command_encoder(&Default::default());
-        rt.prepare(&gpu, &[caster.clone()], &mut build).unwrap();
-        let build_output = target(&gpu, [size, size], "AS build probe").unwrap();
-        clear(&mut build, &build_output, [1.; 4]);
-        let built = read_output(&gpu, &build_output, build, &mut rt);
-        assert!((built[0][0] - 1.).abs() < 0.001);
-        eprintln!("hardware native BLAS/TLAS build completed");
-        let shadow = shot(&mut rt, &[caster]);
-        assert!(
-            (shadow[0] - 64. / 255.).abs() < 0.001 && shadow[1] < 0.01,
-            "packed AO/shadow {shadow:?}"
-        );
-        let empty = shot(&mut rt, &[]);
-        assert!(
-            (empty[0] - 64. / 255.).abs() < 0.001 && (empty[1] - 1.).abs() < 0.001,
-            "empty scene retains AO {empty:?}"
-        );
     }
 }

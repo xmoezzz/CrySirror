@@ -102,7 +102,7 @@ fn pbr(root: &std::path::Path, shadow: bool) -> Runtime {
 }
 #[test]
 #[ignore = "requires native ray-query GPU; execute explicitly"]
-fn pbr_hardware_sun_shadows_change_actual_pixels_and_reject_masked_materials() {
+fn pbr_hardware_sun_shadows_change_actual_pixels_and_alpha_test_masked_casters() {
     let gpu = gpu();
     let mut shots = vec![];
     for shadows in [true, false] {
@@ -122,13 +122,12 @@ fn pbr_hardware_sun_shadows_change_actual_pixels_and_reject_masked_materials() {
             )
             .unwrap();
         let stats = renderer.hardware_rt_stats().unwrap();
-        assert!(stats["shadow_dispatches"].as_u64().unwrap() > 0);
-        assert_eq!(stats["primary_dispatches"], 0);
         eprintln!("PBR shadow stats {stats}");
         assert_eq!(
-            stats["resident_blas"], 1,
+            stats["static_blas"], 1,
             "identical cube topology shares one BLAS"
         );
+        assert_eq!(stats["dynamic_blas"], 0);
         assert_eq!(stats["instances"], 2);
         if shadows {
             renderer
@@ -157,7 +156,7 @@ fn pbr_hardware_sun_shadows_change_actual_pixels_and_reject_masked_materials() {
                 .unwrap();
             let moved_stats = renderer.hardware_rt_stats().unwrap();
             assert_eq!(
-                moved_stats["blas_builds_encoded"], stats["blas_builds_encoded"],
+                moved_stats["static_builds_encoded"], stats["static_builds_encoded"],
                 "rigid move rebuilds only TLAS"
             );
             assert!(
@@ -173,22 +172,35 @@ fn pbr_hardware_sun_shadows_change_actual_pixels_and_reject_masked_materials() {
                     > 100
             );
         }
-        shots.push(image);
-        let mask = serde_json::from_value(
-            json!({"world":[{"op":"set_material","id":2,"material":{"alpha_mode":"mask"}}]}),
-        )
-        .unwrap();
-        rt.host.engine.submit(ClientId(1), &mask).unwrap();
-        renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
-        let error = renderer
-            .capture(
-                &rt.host.scene,
-                &mut rt.assets,
-                [192, 128],
-                rt.project.background,
-            )
-            .unwrap_err();
-        assert!(format!("{error:#}").contains("opaque casters"));
+        shots.push(image.clone());
+        if shadows {
+            // Alpha-tested caster: covered (alpha 1) still casts; cut out
+            // (alpha 0.2 < cutoff 0.5) casts nothing, like the raster shadow pass.
+            let mut masked = vec![];
+            for alpha in [1.0, 0.2] {
+                let mask = serde_json::from_value(json!({"world":[{"op":"set_material","id":2,
+                    "material":{"alpha_mode":"mask","base_color_factor":[0.9,0.25,0.15,alpha]}}]}))
+                .unwrap();
+                rt.host.engine.submit(ClientId(1), &mask).unwrap();
+                renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
+                masked.push(
+                    renderer
+                        .capture(&rt.host.scene, &mut rt.assets, [192, 128], rt.project.background)
+                        .unwrap(),
+                );
+                let s = renderer.hardware_rt_stats().unwrap();
+                assert_eq!(s["alpha_instances"], 1, "{s}");
+            }
+            // Floor pixels lit again once the box is cut out.
+            let relit = masked[0]
+                .pixels()
+                .zip(masked[1].pixels())
+                .filter(|(a, b)| i16::from(b[1]) - i16::from(a[1]) > 20)
+                .count();
+            assert!(relit > 30, "cut-out caster still shadows ({relit} pixels relit)");
+            std::fs::create_dir_all(artifact_dir()).unwrap();
+            masked[1].save(artifact_dir().join("pbr-mask-cutout.png")).unwrap();
+        }
         renderer.set_rendering_path(RenderingPath::Raster).unwrap();
         renderer
             .capture(
@@ -219,4 +231,128 @@ fn pbr_hardware_sun_shadows_change_actual_pixels_and_reject_masked_materials() {
     shots[1]
         .save(artifact_dir().join("pbr-no-shadows.png"))
         .unwrap();
+}
+
+/// Skinned geometry goes through the GPU skinning pass into a resident
+/// dynamic BLAS that is rebuilt only when the pose changes.
+#[test]
+#[ignore = "requires native ray-query GPU; execute explicitly"]
+fn pbr_hardware_skinned_caster_uses_resident_dynamic_blas() {
+    let gpu = gpu();
+    let t = tempfile::tempdir().unwrap();
+    std::fs::create_dir(t.path().join("assets")).unwrap();
+    std::fs::copy(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../crysirror-asset/tests/data/bar.fbx"),
+        t.path().join("assets/bar.fbx"),
+    )
+    .unwrap();
+    let p = t.path().join("project.json");
+    std::fs::write(&p, serde_json::to_vec(&json!({"schema":2,"name":"hardware-skin","content_revision":"1","canvas":[160,120],"assets":"assets",
+        "clients":[{"name":"game","adapter":"crysirror-script-v1","game":"fixture","systems":{"entities":[
+            {"id":1,"name":"floor","geometry":{"kind":"cube"},"transform":{"translation":[0,-0.05,0],"scale":[6,0.1,6]},"color":[200,200,200,255]},
+            {"id":2,"name":"bar","geometry":{"kind":"scene","asset":"bar.fbx"},"animation":{"layers":[{"clip":"Rig|RigAction","time":0.0,"speed":1.0,"weight":1.0,"target_weight":1.0,"fade":0.0,"looping":true}]}}]}}]})).unwrap()).unwrap();
+    let mut rt = Runtime::load(&p, &t.path().join("state")).unwrap();
+    let batch = serde_json::from_value(json!({"world":[{"op":"set_camera","camera":{"eye":[2.5,1.8,2.5],"target":[0,0.8,0],"up":[0,1,0],"fov_y_degrees":50,"near":0.05,"far":100}},
+        {"op":"set_environment","environment":{"sun":{"direction":[1,-1,0.3],"intensity":4,"shadows":true},"bloom":0,"temporal_aa":false}}]})).unwrap();
+    rt.host.engine.submit(ClientId(1), &batch).unwrap();
+    let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    renderer.set_rendering_path(RenderingPath::HardwareRaytrace).unwrap();
+    let mut shot = |rt: &mut Runtime, ms: u64| {
+        rt.tick(ms, InputFrame::default()).unwrap();
+        renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
+        let image = renderer.capture(&rt.host.scene, &mut rt.assets, [160, 120], rt.project.background).unwrap();
+        (image, renderer.hardware_rt_stats().unwrap())
+    };
+    let (start, s0) = shot(&mut rt, 0);
+    eprintln!("skinned RT stats {s0}");
+    assert_eq!(s0["dynamic_blas"], 1, "{s0}");
+    let (_, s1) = shot(&mut rt, 0);
+    assert_eq!(s1["dynamic_rebuilds_encoded"], s0["dynamic_rebuilds_encoded"], "unchanged pose reuses the dynamic BLAS: {s1}");
+    let (bent, s2) = shot(&mut rt, 900);
+    assert!(s2["dynamic_rebuilds_encoded"].as_u64() > s1["dynamic_rebuilds_encoded"].as_u64(), "{s2}");
+    let changed = start.pixels().zip(bent.pixels()).filter(|(a, b)| a != b).count();
+    assert!(changed > 100, "bent pose changed only {changed} pixels");
+    std::fs::create_dir_all(artifact_dir()).unwrap();
+    bent.save(artifact_dir().join("pbr-skinned-shadow.png")).unwrap();
+}
+
+/// A plane whose texture alpha is a 2x2 checker: with alpha testing about
+/// half of its ray-traced shadow disappears, following the texture via the
+/// gathered UVs and the baked alpha atlas.
+#[test]
+#[ignore = "requires native ray-query GPU; execute explicitly"]
+fn pbr_hardware_alpha_texture_cuts_holes_in_the_shadow() {
+    use crysirror_asset::interchange::glb;
+    let gpu = gpu();
+    let mut dark = vec![];
+    for (mode, name) in [("OPAQUE", "opaque"), ("MASK", "mask")] {
+        let mut checker = Vec::new();
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_fn(2, 2, |x, y| {
+            image::Rgba([255, 255, 255, if (x + y) % 2 == 0 { 255 } else { 0 }])
+        }))
+        .write_to(&mut std::io::Cursor::new(&mut checker), image::ImageFormat::Png)
+        .unwrap();
+        let mut doc = glb::Document { generator: "rt alpha test".into(), ..Default::default() };
+        doc.images.push((checker, "image/png"));
+        doc.materials.push(glb::Material {
+            base_color_texture: Some(0),
+            alpha_mode: mode,
+            double_sided: true,
+            ..Default::default()
+        });
+        doc.meshes.push((
+            "plane".into(),
+            vec![glb::Primitive {
+                positions: vec![[-0.6, 0., -0.6], [0.6, 0., -0.6], [0.6, 0., 0.6], [-0.6, 0., 0.6]],
+                normals: vec![[0., 1., 0.]; 4],
+                uvs: vec![[0., 0.], [1., 0.], [1., 1.], [0., 1.]],
+                indices: vec![0, 2, 1, 0, 3, 2],
+                material: Some(0),
+                ..Default::default()
+            }],
+        ));
+        let mut node = glb::Node::named("plane");
+        node.mesh = Some(0);
+        doc.nodes.push(node);
+        doc.roots.push(0);
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir(t.path().join("assets")).unwrap();
+        std::fs::write(t.path().join("assets/plane.glb"), doc.to_glb().unwrap()).unwrap();
+        let p = t.path().join("project.json");
+        std::fs::write(&p, serde_json::to_vec(&json!({"schema":2,"name":"hardware-alpha","content_revision":"1","canvas":[160,120],"assets":"assets",
+            "clients":[{"name":"game","adapter":"crysirror-script-v1","game":"fixture","systems":{"entities":[
+                {"id":1,"name":"floor","geometry":{"kind":"cube"},"transform":{"translation":[0,-0.05,0],"scale":[8,0.1,8]},"color":[220,220,220,255]},
+                {"id":2,"name":"plane","geometry":{"kind":"scene","asset":"plane.glb"},"transform":{"translation":[0,1.0,0]}}]}}]})).unwrap()).unwrap();
+        let mut rt = Runtime::load(&p, &t.path().join("state")).unwrap();
+        // Sun from straight above: the plane's shadow lies directly beneath it;
+        // the camera looks at the floor from the side.
+        let batch = serde_json::from_value(json!({"world":[{"op":"set_camera","camera":{"eye":[0,0.6,3.2],"target":[0,0.0,0],"up":[0,1,0],"fov_y_degrees":45,"near":0.05,"far":100}},
+            {"op":"set_environment","environment":{"sun":{"direction":[0.0,-1,0.0001],"intensity":4,"shadows":true},"bloom":0,"temporal_aa":false,"ambient_occlusion":0}}]})).unwrap();
+        rt.host.engine.submit(ClientId(1), &batch).unwrap();
+        rt.tick(0, InputFrame::default()).unwrap();
+        let mut renderer = Renderer::new(gpu.clone(), wgpu::TextureFormat::Rgba8UnormSrgb);
+        renderer.set_rendering_path(RenderingPath::HardwareRaytrace).unwrap();
+        renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
+        let image = renderer.capture(&rt.host.scene, &mut rt.assets, [160, 120], rt.project.background).unwrap();
+        let stats = renderer.hardware_rt_stats().unwrap();
+        eprintln!("{name} {stats}");
+        if mode == "MASK" {
+            assert_eq!(stats["alpha_instances"], 1);
+            assert_eq!(stats["alpha_slots"], 1);
+        }
+        // Floor pixels in shadow: well below the lit floor's brightness.
+        let lit = image.get_pixel(150, 110).0;
+        let lit = u32::from(lit[0]) + u32::from(lit[1]) + u32::from(lit[2]);
+        let count = image
+            .pixels()
+            .filter(|p| (u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2])) * 2 < lit)
+            .count();
+        std::fs::create_dir_all(artifact_dir()).unwrap();
+        image.save(artifact_dir().join(format!("pbr-alpha-texture-{name}.png"))).unwrap();
+        dark.push(count);
+    }
+    eprintln!("shadowed floor pixels: opaque {} masked {}", dark[0], dark[1]);
+    assert!(dark[0] > 200, "opaque plane must cast a shadow: {dark:?}");
+    let ratio = dark[1] as f32 / dark[0] as f32;
+    assert!((0.25..0.75).contains(&ratio), "checker alpha should remove about half the shadow: {dark:?}");
 }

@@ -11,6 +11,7 @@ pub mod probes;
 mod profile;
 mod puppet;
 mod ray_geometry;
+mod rt_pbr;
 mod raytrace;
 pub mod rt_capabilities;
 pub mod text;
@@ -656,11 +657,10 @@ impl Renderer {
         self.gpu_timings.finish_offline(&self.gpu)?;self.profile_report()
     }
     pub fn hardware_rt_stats(&self) -> Option<serde_json::Value> {
-        let stats = if self.pbr_active() {
-            self.pbr.as_ref()?.hardware_rt_stats()?
-        } else {
-            self.hardware_rt.as_ref()?.stats()
-        };
+        if self.pbr_active() {
+            return self.pbr.as_ref()?.hardware_rt_stats();
+        }
+        let stats = self.hardware_rt.as_ref()?.stats();
         Some(
             serde_json::json!({"builds_encoded":stats.builds_encoded,"primary_dispatches":stats.primary_dispatches,"shadow_dispatches":stats.shadow_dispatches,"triangles":stats.triangles,"blas_builds_encoded":stats.blas_builds_encoded,"tlas_builds_encoded":stats.tlas_builds_encoded,"resident_blas":stats.resident_blas,"instances":stats.instances,"cpu_geometry_hits":stats.cpu_geometry_hits,"cpu_geometry_misses":stats.cpu_geometry_misses}),
         )

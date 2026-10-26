@@ -53,6 +53,14 @@ pub(crate) fn common(hook: &str) -> String {
         include_str!("shaders/surface_sample.wgsl")
     )
 }
+/// Material bindings at group 0 with the built-in surface hook: the prelude
+/// of coverage-only passes outside the PBR pipeline (RT alpha baking).
+pub(crate) fn shadow_material_prelude() -> String {
+    format!(
+        "{}\n{SURFACE_ABI}\n{PRESETS}",
+        include_str!("shaders/material.wgsl").replace("@group(1)", "@group(0)")
+    )
+}
 pub(crate) fn modules(custom: Option<&str>) -> Result<[String; 3]> {
     if let Some(s) = custom {
         validate_custom(s)?;

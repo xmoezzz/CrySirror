@@ -372,6 +372,7 @@ struct GpuPrim {
     /// Joints (u16x4) + weights (f32x4) stream for skinned primitives.
     skin: Option<wgpu::Buffer>,
     vertices: wgpu::Buffer,
+    vertex_count: usize,
     indices: wgpu::Buffer,
     count: u32,
     material: usize,
@@ -519,6 +520,15 @@ struct GpuMaterial {
     alpha: AlphaMode,
     bind: wgpu::BindGroup,
     double_sided: bool,
+    /// Coverage inputs for ray-traced alpha testing (ADR 0055).
+    rt: RtCoverage,
+}
+#[derive(Clone, Copy, Default)]
+struct RtCoverage {
+    /// A preset effect varies with position/time, so its coverage cannot be baked.
+    effect: bool,
+    cutoff: f32,
+    uv_transform: [f32; 4],
 }
 struct CachedMaterial {
     material: GpuMaterial,
@@ -593,8 +603,7 @@ fn halton(mut i: u32, base: u32) -> f32 {
 pub struct PbrRenderer {
     profiler: crysirror_tasks::profile::Profiler,
     profile_frame: u64,
-    ray_cache: crate::ray_geometry::InstanceGeometryCache,
-    hardware_rt: Option<crate::hardware_rt::HardwareRt>,
+    hardware_rt: Option<crate::rt_pbr::PbrRt>,
     hardware_encoded: bool,
     exposure: AutoExposureState,
     light_bufs: crate::lights::LightBuffers,
@@ -813,6 +822,15 @@ fn upload_levels(gpu: &Gpu, label: &str, levels: &Levels) -> wgpu::Texture {
     src_tex
 }
 /// Mix an instance key with a sub-index into a stable draw identity.
+/// Native ray queries read renderer streams directly: BLAS input plus storage
+/// for GPU skinning and UV gathers (ADR 0055). Empty without the RT feature.
+fn rt_buffer_usage(d: &wgpu::Device) -> wgpu::BufferUsages {
+    if d.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY) {
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::BLAS_INPUT
+    } else {
+        wgpu::BufferUsages::empty()
+    }
+}
 fn draw_key(a: u64, b: u64) -> u64 {
     a.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(17) ^ b.wrapping_add(1)
 }
@@ -1659,7 +1677,6 @@ impl PbrRenderer {
         Ok(Self {
             profiler: Default::default(),
             profile_frame: 0,
-            ray_cache: Default::default(),
             hardware_rt: None,
             hardware_encoded: false,
             exposure: AutoExposureState {
@@ -1827,22 +1844,16 @@ impl PbrRenderer {
             return Ok(());
         }
         self.hardware_rt = if enabled {
-            Some(crate::hardware_rt::HardwareRt::new(&self.gpu)?)
+            Some(crate::rt_pbr::PbrRt::new(&self.gpu)?)
         } else {
-            self.ray_cache.clear();
             None
         };
         self.hardware_encoded = false;
         self.targets = None;
         Ok(())
     }
-    pub(crate) fn hardware_rt_stats(&self) -> Option<crate::hardware_rt::HardwareRtStats> {
-        self.hardware_rt.as_ref().map(|rt| {
-            let mut stats = rt.stats();
-            stats.cpu_geometry_hits = self.ray_cache.hits;
-            stats.cpu_geometry_misses = self.ray_cache.misses;
-            stats
-        })
+    pub(crate) fn hardware_rt_stats(&self) -> Option<serde_json::Value> {
+        self.hardware_rt.as_ref().map(|rt| rt.stats_json())
     }
     pub(crate) fn set_profiler(&mut self, p: crysirror_tasks::profile::Profiler, frame: u64) {
         self.profiler = p;
@@ -1852,7 +1863,6 @@ impl PbrRenderer {
         if scene.is_none() {
             self.models.clear();
             self.overrides.clear();
-            self.ray_cache.clear();
             if let Some(rt) = &mut self.hardware_rt {
                 rt.clear();
             }
@@ -2027,6 +2037,13 @@ impl PbrRenderer {
             entries: &entries,
         })
     }
+    fn rt_coverage<T>(m: &crysirror_scene::material::Material<T>) -> RtCoverage {
+        RtCoverage {
+            effect: m.effect.is_some(),
+            cutoff: m.alpha_cutoff,
+            uv_transform: [m.uv_scale[0], m.uv_scale[1], m.uv_offset[0], m.uv_offset[1]],
+        }
+    }
     fn material_uniform<T>(m: &crysirror_scene::material::Material<T>) -> MaterialUniform {
         MaterialUniform {
             base_color: m.base_color_factor,
@@ -2068,6 +2085,7 @@ impl PbrRenderer {
     }
     fn prim_lod(&self, p: &cpu::PbrPrimitive, lod: bool) -> GpuPrim {
         let d = &self.gpu.device;
+        let rt_usage = rt_buffer_usage(d);
         let lod = (lod
             && p.skin_attrs.is_none()
             && p.indices.len() / 3 > 2 * crysirror_asset::cluster::MAX_TRIS)
@@ -2166,20 +2184,21 @@ impl PbrRenderer {
                 d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("pbr skin"),
                     contents: &bytes,
-                    usage: wgpu::BufferUsages::VERTEX,
+                    usage: wgpu::BufferUsages::VERTEX | rt_usage,
                 })
             }),
             vertices: d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("pbr vertices"),
                 contents: &bytes_of_vertices(&p.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
+                usage: wgpu::BufferUsages::VERTEX | rt_usage,
             }),
             indices: d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("pbr indices"),
                 contents: bytemuck::cast_slice(&p.indices),
-                usage: wgpu::BufferUsages::INDEX,
+                usage: wgpu::BufferUsages::INDEX | rt_usage,
             }),
             count: p.indices.len() as u32,
+            vertex_count: p.vertices.len(),
             material: p.material,
             bounds: (Vec3::from_array(p.bounds.0), Vec3::from_array(p.bounds.1)),
         }
@@ -2265,6 +2284,7 @@ impl PbrRenderer {
                     bind,
                     double_sided: m.double_sided,
                     alpha: m.alpha_mode,
+                    rt: Self::rt_coverage(m),
                 },
                 _textures: textures,
             },
@@ -2310,6 +2330,7 @@ impl PbrRenderer {
                         .unwrap_or(&self.defaults[fallback])
                 };
                 GpuMaterial {
+                    rt: Self::rt_coverage(m),
                     shader: shader_keys[index].clone(),
                     bind: self.material_bind(
                         &Self::material_uniform(m),
@@ -2375,6 +2396,7 @@ impl PbrRenderer {
         let (tex, view) =
             Self::upload_rgba(&self.gpu, image.width, image.height, &image.levels, true);
         let mat = GpuMaterial {
+            rt: Self::rt_coverage(&material),
             shader: None,
             bind: self.material_bind(
                 &Self::material_uniform(&material),
@@ -2960,6 +2982,7 @@ impl PbrRenderer {
                             bind,
                             double_sided: false,
                             alpha: AlphaMode::Opaque,
+                            rt: RtCoverage::default(),
                         },
                     ));
                     draws.push(DrawRef {
@@ -2979,60 +3002,111 @@ impl PbrRenderer {
                 }
             }
         }
-        let rt_triangles = if use_rt {
+        // Native RT draws reference the renderer's own GPU streams (ADR 0055).
+        let rt_draws = if use_rt {
             let _span = self
                 .profiler
                 .span(self.profile_frame, "rt.geometry.prepare");
-            let mut requests = Vec::with_capacity(draws.len());
+            fn hash<T: std::hash::Hash>(value: T) -> u64 {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                value.hash(&mut h);
+                std::hash::Hasher::finish(&h)
+            }
+            let mut out = Vec::with_capacity(draws.len());
             for draw in &draws {
-                let (source, material) = if draw.kind == 0 {
-                    let model = &self.models[draw.model.as_ref().context("RT model key")?];
-                    let primitive = model
-                        .cpu
+                let (prim, material, material_id, source) = if draw.kind == 0 {
+                    let key = draw.model.as_ref().context("RT model key")?;
+                    let model = &self.models[key];
+                    let prim = model
                         .meshes
                         .get(draw.mesh as usize)
-                        .and_then(|p| p.get(draw.prim))
+                        .and_then(|m| m.get(draw.prim))
                         .context("RT model primitive missing")?;
                     (
-                        crate::ray_geometry::Source::Model {
-                            model: model.cpu.clone(),
-                            mesh: draw.mesh as usize,
-                            primitive: draw.prim,
-                        },
-                        &model.materials[primitive.material],
+                        prim,
+                        &model.materials[prim.material],
+                        format!("{key}#{}", prim.material),
+                        hash((key, draw.mesh, draw.prim)),
                     )
                 } else {
-                    (
-                        crate::ray_geometry::Source::Owned(flat_cpu[draw.flat].clone()),
-                        &flat[draw.flat].1,
-                    )
+                    // Flat primitives are rebuilt every frame; their identity is their content.
+                    let cpu_prim = &flat_cpu[draw.flat];
+                    let bits: Vec<u32> = cpu_prim
+                        .vertices
+                        .iter()
+                        .flat_map(|v| v.position.map(f32::to_bits))
+                        .chain(cpu_prim.indices.iter().copied())
+                        .collect();
+                    let (prim, material) = &flat[draw.flat];
+                    (prim, material, String::from("flat"), hash(("flat", &bits)))
                 };
-                let material = match &draw.override_key {
-                    Some(key) => &self.overrides[key].material,
-                    None => material,
+                let (material, material_id) = match &draw.override_key {
+                    Some(k) => (&self.overrides[k].material, format!("override:{k}")),
+                    None => (material, material_id),
                 };
+                // Blended surfaces cast no raster shadows either.
+                if material.alpha.transparent() {
+                    continue;
+                }
                 ensure!(
-                    material.alpha == AlphaMode::Opaque && material.shader.is_none(),
-                    "hardware RT currently requires opaque casters without custom fragment-discard shaders"
+                    material.shader.is_none(),
+                    "hardware RT cannot evaluate custom fragment-discard shaders"
                 );
-                let object = &objects[draw.object as usize];
-                let palette = if draw.skinned {
-                    Some(
-                        palettes[object.skin[0] as usize..object.skin[1] as usize]
-                            .iter()
-                            .map(Mat4::from_cols_array_2d)
-                            .collect(),
-                    )
+                let alpha = if material.alpha == AlphaMode::Mask {
+                    ensure!(
+                        !material.rt.effect,
+                        "hardware RT alpha testing cannot bake position/time-dependent effect coverage"
+                    );
+                    Some(crate::rt_pbr::AlphaSource {
+                        material: material_id,
+                        bind: material.bind.clone(),
+                        cutoff: material.rt.cutoff,
+                        uv_transform: material.rt.uv_transform,
+                    })
                 } else {
                     None
                 };
-                requests.push(crate::ray_geometry::Primitive {
-                    source,
-                    matrix: Mat4::from_cols_array_2d(&object.model),
-                    palette,
+                let object = &objects[draw.object as usize];
+                let morph = if draw.morph {
+                    self.morph_buffers.get(&draw.key)
+                } else {
+                    None
+                };
+                let dynamic = draw.skinned || morph.is_some();
+                let revision = if dynamic {
+                    let pose: &[[[f32; 4]; 4]] = if draw.skinned {
+                        &palettes[object.skin[0] as usize..object.skin[1] as usize]
+                    } else {
+                        &[]
+                    };
+                    let bits: Vec<u32> = pose.iter().flatten().flatten().map(|v| v.to_bits()).collect();
+                    hash((&bits, morph.map(|m| m.0)))
+                } else {
+                    0
+                };
+                out.push(crate::rt_pbr::PbrRtDraw {
+                    geometry: if dynamic { hash(("dynamic", draw.key)) } else { source },
+                    uv_key: source,
+                    vertices: morph.map_or_else(|| prim.vertices.clone(), |m| m.1.clone()),
+                    vertex_count: u32::try_from(prim.vertex_count)?,
+                    indices: prim.indices.clone(),
+                    index_count: prim.count,
+                    transform: object.model,
+                    dynamic,
+                    skin: draw
+                        .skinned
+                        .then(|| {
+                            prim.skin.clone().map(|stream| crate::rt_pbr::SkinSource {
+                                stream,
+                                palette_offset: object.skin[0],
+                            })
+                        })
+                        .flatten(),
+                    revision,
+                    alpha,
                 });
             }
-            Some(self.ray_cache.prepare(&assets.cpu_tasks(), &requests)?)
+            Some(out)
         } else {
             None
         };
@@ -3836,7 +3910,9 @@ impl PbrRenderer {
                     let buffer = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("pbr morphed vertices"),
                         contents: &bytes,
-                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        usage: wgpu::BufferUsages::VERTEX
+                            | wgpu::BufferUsages::COPY_DST
+                            | rt_buffer_usage(&self.gpu.device),
                     });
                     self.morph_buffers.insert(dk, (hash, buffer, vertices.len()));
                 }
@@ -4684,12 +4760,20 @@ impl PbrRenderer {
             simple_pass(encoder, "ssao blur", &t.ao, &self.blur_pipe, &blur);
         }
         if let Some(rt) = &mut self.hardware_rt {
-            rt.encode_instance_shadows_into(
+            let towards = (-l).normalize_or_zero();
+            ensure!(towards.length_squared() > 0.5, "hardware shadow sun direction must be nonzero");
+            let mut params = Vec::with_capacity(160);
+            for m in [view_proj.inverse(), view.inverse()] {
+                params.extend_from_slice(bytemuck::cast_slice(&m.to_cols_array()));
+            }
+            params.extend_from_slice(bytemuck::cast_slice(&[towards.x, towards.y, towards.z, 0.]));
+            params.extend_from_slice(bytemuck::cast_slice(&[canvas[0], canvas[1], 0, 0]));
+            rt.encode_shadows(
                 &self.gpu,
-                rt_triangles.as_deref().unwrap_or(&[]),
-                view_proj.inverse().to_cols_array_2d(),
-                view.inverse().to_cols_array_2d(),
-                (-l).to_array(),
+                rt_draws.as_deref().unwrap_or(&[]),
+                &self.material_bgl,
+                &self.palette_buf,
+                &params,
                 canvas,
                 &t.pre_depth,
                 &t.normal,

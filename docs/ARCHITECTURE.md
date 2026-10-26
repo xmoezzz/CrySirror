@@ -143,7 +143,7 @@ and material ownership; immutable CPU snapshots are prepared on bounded workers.
 The AO/visibility texture preserves the existing material binding budget.
 Changed positions rebuild the AS, material metadata updates do not, and removed
 geometry clears it. Only successful submission commits the cache build state.
-Masked/transparent casters and custom fragment-discard shaders fail visibly.
+Since ADR 0055 BLAS read the renderer's own GPU vertex/index streams, skinned/morphed instances own GPU-skinned dynamic BLAS, MASK casters are alpha-tested by re-tracing against a baked alpha atlas and blended surfaces do not cast; custom fragment-discard shaders fail visibly.
 Raster/compute remain independent selections and need no experimental RT opt-in.
 Selection is explicit in CLI/host state; a VM/save never stores device-specific
 handles. Native API eligibility, enabled device features, encoded commands and
