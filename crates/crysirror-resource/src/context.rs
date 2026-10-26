@@ -1,6 +1,7 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 use crate::{ArchiveEntry, KeyProvider, MemoryKeyProvider, TransformRegistry, TransformSpec};
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use crysirror_core::{
     service::{AssetReader, MemoryAssetReader},
     state::ClientId,
@@ -9,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
@@ -193,13 +194,18 @@ impl DecodeContext {
         self.open_dependency(&path)
     }
     pub fn memory(&self, bytes: Vec<u8>) -> Result<Arc<dyn AssetReader>> {
+        self.memory_shared(Arc::from(bytes))
+    }
+    /// Charge an already shared immutable buffer without copying its contents.
+    /// The returned reader keeps its charge until its last reference is dropped.
+    pub fn memory_shared(&self, bytes: Arc<[u8]>) -> Result<Arc<dyn AssetReader>> {
         ensure!(
             bytes.len() as u64 <= self.limits.max_entry_size,
             "decoded entry byte limit"
         );
         let reservation = self.reserve(bytes.len() as u64)?;
         Ok(Arc::new(Resident {
-            reader: MemoryAssetReader(Arc::from(bytes)),
+            reader: MemoryAssetReader(bytes),
             _reservation: reservation,
         }))
     }

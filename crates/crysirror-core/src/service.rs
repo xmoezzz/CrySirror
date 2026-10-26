@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Narrow host services. Backends implement these; legacy adapters consume them.
 use crate::{
     Result,
@@ -174,6 +175,7 @@ pub enum EngineQuery {
     Canvas(u32),
     UiWidget(u32),
     UiEvents,
+    MenuEvents,
 }
 
 /// A thread-safe capability handle to one client's namespaces, for engines

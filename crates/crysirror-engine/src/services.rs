@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Service classes: Layers (2D retained layers), Ui (widgets), Audio and
 //! Save. Specs are parsed with the engine's own serde types, so every field
 //! the runtime accepts is reachable from Rust and scripts alike.
@@ -7,13 +8,13 @@ use crate::{
     object::{Class, ClassInfo, ClassRegistry, MethodInfo, ObjectId, PropertyInfo, TypeHint as T},
     value::Value,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use crysirror_core::{
     path::{Mount, VfsPath},
-    service::{FileSystem, HostServices},
+    service::HostServices,
     state::{AudioVoice, Command},
 };
-use crysirror_scene::{layer::LayerCommand, ui::UiCommand, ServiceBatch};
+use crysirror_scene::{ServiceBatch, layer::LayerCommand, ui::UiCommand};
 use std::sync::{Arc, OnceLock};
 
 /// Every typed engine command and the API method that issues it.
@@ -71,6 +72,11 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("canvas", "copy", "Canvases.apply"),
     ("canvas", "present", "Canvases.apply"),
     ("canvas", "hide", "Canvases.apply"),
+    ("ui", "set_menu", "Ui.setMenu"),
+    ("ui", "remove_menu", "Ui.removeMenu"),
+    ("ui", "open_menu", "Ui.openMenu"),
+    ("ui", "close_menu", "Ui.closeMenu"),
+    ("ui", "set_menu_checked", "Ui.setMenuChecked"),
     ("ui", "put", "Ui.put"),
     ("ui", "remove", "Ui.remove"),
     ("ui", "set_visible", "Ui.setVisible"),
@@ -267,10 +273,16 @@ fn ui_info() -> &'static ClassInfo {
         name: "Ui",
         doc: "Retained widgets (panel/label/button/toggle/slider/text_field) with focus, capture and modal routing.",
         properties: vec![
-            PropertyInfo { name: "events", ty: T::List(Box::new(T::Map)), writable: false, doc: "Events produced by the last UI tick: {client, id, kind, value}." },
+            PropertyInfo { name: "events", ty: T::List(Box::new(T::Map)), writable: false, doc: "This client's retained UI events: {widget:{owner,id},kind,value,menu_bar?}. The last 256 events are retained globally; use drainEvents to consume them." },
             PropertyInfo { name: "focus", ty: T::Any, writable: false, doc: "Focused widget or null." },
         ],
         methods: vec![
+            m("drainEvents",vec![],T::List(Box::new(T::Map)),"Consume this client's retained events once, preserving other clients' events. Use this for action dispatch; events only reads a snapshot of the queue."),
+            m("setMenu",vec![("menu",T::Map)],T::Void,"Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state."),
+            m("removeMenu",vec![("id",T::Int)],T::Void,"Remove a client menu tree."),
+            m("openMenu",vec![("id",T::Int),("item",T::Optional(Box::new(T::Int))),("position",T::Optional(Box::new(T::List(Box::new(T::Number)))))],T::Void,"Open a root submenu or a context popup at a logical canvas position."),
+            m("closeMenu",vec![("id",T::Int)],T::Void,"Close this client's menu popups."),
+            m("setMenuChecked",vec![("id",T::Int),("item",T::Int),("checked",T::Bool)],T::Void,"Update checked state with shared sibling radio-group semantics."),
             m("put", vec![("widget", T::Map)], T::Void, "Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}."),
             m("remove", vec![("id", T::Int)], T::Void, "Remove a widget and its children."),
             m("setVisible", vec![("id", T::Int), ("visible", T::Bool)], T::Void, "Show/hide."),
@@ -290,10 +302,17 @@ impl Class for UiClass {
         ui_info()
     }
     fn get(&self, cx: &mut EngineContext, _: ObjectId, p: &str) -> Result<Value> {
-        let ui = &cx.state()?.runtime.host.engine.ui;
+        let state = cx.state()?;
+        let owner = state.client.0;
+        let ui = &state.runtime.host.engine.ui;
         Ok(Value::from_json(match p {
-            "events" => serde_json::to_value(&ui.events)?,
-            "focus" => serde_json::to_value(ui.focus)?,
+            "events" => serde_json::to_value(
+                ui.events
+                    .iter()
+                    .filter(|event| event.widget.owner == owner)
+                    .collect::<Vec<_>>(),
+            )?,
+            "focus" => serde_json::to_value(ui.focus.filter(|focus| focus.owner == owner))?,
             _ => unreachable!(),
         }))
     }
@@ -304,7 +323,41 @@ impl Class for UiClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if method == "drainEvents" {
+            let state = cx.state()?;
+            return Ok(Value::from_json(serde_json::to_value(
+                state
+                    .runtime
+                    .host
+                    .engine
+                    .ui
+                    .drain_events(state.client.0, false),
+            )?));
+        }
         let cmd = match method {
+            "setMenu" => UiCommand::SetMenu {
+                menu: json(arg(args, 0, "menu")?, "menu spec")?,
+            },
+            "removeMenu" => UiCommand::RemoveMenu { id: id(args)? },
+            "openMenu" => UiCommand::OpenMenu {
+                id: id(args)?,
+                item: args
+                    .get(1)
+                    .filter(|v| !matches!(v, Value::Null))
+                    .map(|v| u32::try_from(v.as_i64()?).context("menu item"))
+                    .transpose()?,
+                position: args
+                    .get(2)
+                    .filter(|v| !matches!(v, Value::Null))
+                    .map(|v| json(v, "menu position"))
+                    .transpose()?,
+            },
+            "closeMenu" => UiCommand::CloseMenu { id: id(args)? },
+            "setMenuChecked" => UiCommand::SetMenuChecked {
+                id: id(args)?,
+                item: u32::try_from(arg(args, 1, "item")?.as_i64()?)?,
+                checked: arg(args, 2, "checked")?.as_bool()?,
+            },
             "put" => UiCommand::Put {
                 widget: json(arg(args, 0, "widget")?, "widget spec")?,
             },
@@ -483,25 +536,12 @@ impl Class for AudioClass {
 
 // ---------------------------------------------------------------- Save
 pub struct SaveClass;
-fn save_info() -> &'static ClassInfo {
-    static I: OnceLock<ClassInfo> = OnceLock::new();
-    I.get_or_init(|| ClassInfo {
-        name: "Save",
-        doc: "Whole-runtime snapshots (world, layers, UI, clocks, every VM) in the client's save mount.",
-        properties: vec![],
-        methods: vec![
-            m("save", vec![("path", T::String)], T::Int, "Write a validated snapshot; returns its size in bytes."),
-            m("load", vec![("path", T::String)], T::Void, "Transactionally restore a snapshot (all-or-nothing). Entity objects from before are revalidated by generation."),
-            m("exists", vec![("path", T::String)], T::Bool, "Whether a snapshot file exists."),
-        ],
-    })
-}
 impl Class for SaveClass {
     fn info(&self) -> &ClassInfo {
-        save_info()
+        crate::save_api::info()
     }
-    fn get(&self, _: &mut EngineContext, _: ObjectId, p: &str) -> Result<Value> {
-        bail!("Save has no property {p}")
+    fn get(&self, _: &mut EngineContext, _: ObjectId, _: &str) -> Result<Value> {
+        unreachable!()
     }
     fn call(
         &self,
@@ -510,33 +550,7 @@ impl Class for SaveClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
-        let path = arg(args, 0, "path")?.as_str()?;
-        let p = VfsPath::new(Mount::Save, path).map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
-        let s = cx.state()?;
-        let client = s.client;
-        match method {
-            "save" => {
-                let bytes = s.runtime.snapshot()?;
-                s.runtime
-                    .host
-                    .fs
-                    .write_atomic(client, &p, &bytes)
-                    .map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
-                Ok((bytes.len() as u64).into())
-            }
-            "load" => {
-                let bytes = s
-                    .runtime
-                    .host
-                    .fs
-                    .read(client, &p)
-                    .map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
-                s.runtime.restore(&bytes)?;
-                Ok(Value::Null)
-            }
-            "exists" => Ok(s.runtime.host.fs.read(client, &p).is_ok().into()),
-            _ => unreachable!(),
-        }
+        crate::save_api::call(cx, method, args)
     }
 }
 

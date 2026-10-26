@@ -72,6 +72,13 @@ code dispatches through image services; it does not own G00 layout or VM policy.
 
 ## Canonical state
 
+[ADR 0066](adr/0066-awaitable-services-and-native-plugin-facades.md) adds bounded
+Text/Resources/Save preparation and JS/TS Promise subscriptions. CPU/I/O workers
+own immutable inputs/results; the engine owner publishes surfaces and atomically
+commits prepared saves. Native VM checkpoints remain ordered. Shared UI menus
+own their logical trees, input and paint; native MenuItem handles are adapters.
+See [ASYNC_SERVICES](ASYNC_SERVICES.md) for ticket lifetime and migration rules.
+
 Shared retained service state is logical: namespaced IDs, asset paths, text,
 rectangles, tint and voice settings. One `(ClientId, local_id)` pair identifies
 a visual or voice. Each client has a capability directory under the asset root;

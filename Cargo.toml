@@ -88,6 +88,16 @@ image = { version = "0.24.9", default-features = false, features = ["png", "jpeg
 blake3 = "1.5"
 cap-std = "3.4"
 
+# Local debug artifacts previously exceeded 300 GiB. Keep development builds
+# disposable and use release for validation/benchmarks (owner preference).
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

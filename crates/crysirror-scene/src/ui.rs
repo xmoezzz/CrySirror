@@ -1,6 +1,8 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Retained widgets/layout/focus/input and rendering. Button capture/release and
 //! letterbox mapping are ported from RFVP exit_confirm_ui.rs (see UPSTREAM.md).
+pub mod menu;
 use crate::{
     input::{InputState, VmKey, VmMouseButton},
     layer::{Paint, Primitive, intersect, rect_valid, rectangle},
@@ -128,10 +130,15 @@ pub struct UiEvent {
     pub widget: WidgetId,
     pub kind: String,
     pub value: f32,
+    /// Menu-bar namespace for a menu_activate event; absent on ordinary widgets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub menu_bar: Option<u32>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiSystem {
+    #[serde(default, skip_serializing_if = "menu::MenuSystem::is_empty")]
+    pub menus: menu::MenuSystem,
     #[serde(default)]
     pub cursor: Option<(u32, bool)>,
     #[serde(default)]
@@ -160,6 +167,27 @@ struct Layout {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiCommand {
+    SetMenu {
+        menu: menu::MenuSpec,
+    },
+    RemoveMenu {
+        id: u32,
+    },
+    OpenMenu {
+        id: u32,
+        #[serde(default)]
+        item: Option<u32>,
+        #[serde(default)]
+        position: Option<[f32; 2]>,
+    },
+    CloseMenu {
+        id: u32,
+    },
+    SetMenuChecked {
+        id: u32,
+        item: u32,
+        checked: bool,
+    },
     /// Append committed Unicode text to this client's focused TextField.
     InsertText {
         text: String,
@@ -208,6 +236,15 @@ impl UiSystem {
         let owner = staged.clients.entry(client.0).or_default();
         for command in commands {
             match command {
+                UiCommand::SetMenu { menu } => staged.menus.put(client.0, menu.clone())?,
+                UiCommand::RemoveMenu { id } => staged.menus.remove(client.0, *id)?,
+                UiCommand::OpenMenu { id, item, position } => {
+                    staged.menus.open(client.0, *id, *item, *position)?
+                }
+                UiCommand::CloseMenu { id } => staged.menus.close(client.0, *id)?,
+                UiCommand::SetMenuChecked { id, item, checked } => {
+                    staged.menus.checked(client.0, *id, *item, *checked)?
+                }
                 UiCommand::InsertText { text } => {
                     ensure!(
                         text.len() <= 1024 * 1024 && !text.chars().any(char::is_control),
@@ -325,6 +362,7 @@ impl UiSystem {
         })
     }
     pub fn reset_input_after_restore(&mut self) {
+        self.menus.reset_input();
         self.input = InputState::default();
         self.pressed = None;
         self.hover = None;
@@ -337,6 +375,23 @@ impl UiSystem {
             .copied()
             .chain(self.cursor.map(|v| v.0))
             .chain(self.title.as_ref().map(|v| v.0))
+            .chain(self.menus.client_ids())
+            .chain(self.focus.map(|v| v.owner))
+            .chain(self.events.iter().map(|v| v.widget.owner))
+    }
+    /// Consume only this client's retained UI events. Native menu adapters
+    /// can select menu events without stealing ordinary widget events.
+    pub fn drain_events(&mut self, owner: u32, menus_only: bool) -> Vec<UiEvent> {
+        let mut selected = Vec::new();
+        self.events.retain(|event| {
+            if event.widget.owner == owner && (!menus_only || event.kind == "menu_activate") {
+                selected.push(event.clone());
+                false
+            } else {
+                true
+            }
+        });
+        selected
     }
     pub fn install(&mut self, client: ClientId, specs: &[WidgetSpec]) -> Result<()> {
         let mut staged = self.clone();
@@ -357,6 +412,7 @@ impl UiSystem {
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {
+        self.menus.validate()?;
         ensure!(
             self.clients.len() <= 64
                 && self.clients.values().map(BTreeMap::len).sum::<usize>() <= 4096
@@ -526,6 +582,18 @@ impl UiSystem {
                 frame.buttons_pressed = 0;
             }
         }
+        let (menu_events, menu_consumed) = self.menus.tick(frame, canvas)?;
+        for event in menu_events {
+            // Same retained-last-256 policy as ordinary widget events.
+            if self.events.len() == 256 {
+                self.events.remove(0);
+            }
+            self.events.push(event);
+        }
+        if menu_consumed {
+            self.pressed = None;
+            return Ok((vec![], true));
+        }
         let layouts = self.layout(canvas)?;
         self.input.next_frame();
         self.input.on_mouse_move(frame.pointer_x, frame.pointer_y);
@@ -647,6 +715,7 @@ impl UiSystem {
                     self.events.remove(0);
                 }
                 self.events.push(UiEvent {
+                    menu_bar: None,
                     widget: id,
                     kind: if cancel { "cancel" } else { "submit" }.into(),
                     value: w.value,
@@ -718,6 +787,7 @@ impl UiSystem {
                 self.events.remove(0);
             }
             self.events.push(UiEvent {
+                menu_bar: None,
                 widget: id,
                 kind: if w.spec.kind == WidgetKind::Button {
                     "activate"
@@ -835,6 +905,7 @@ impl UiSystem {
                 ));
             }
         }
+        out.extend(self.menus.frame(canvas)?);
         Ok(out)
     }
 }

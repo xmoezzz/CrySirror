@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// Distributed under the GNU Affero General Public License, version 3 or
+// (at your option) any later version, https://www.gnu.org/licenses/agpl-3.0.html.
 //! Optional KiriKiri (吉里吉里) adapter (ADR 0053).
 //!
 //! Original TJS2 scripts run on the vendored Kirakira VM (`krkr-tjs2`,
@@ -12,7 +13,9 @@
 pub mod adapter;
 mod constants;
 pub mod host;
+mod menus;
 pub mod natives;
+mod plugins;
 pub mod storage;
 
 pub use adapter::{Config, KrkrFactory, KrkrVm, register};

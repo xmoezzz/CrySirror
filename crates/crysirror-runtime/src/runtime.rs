@@ -1,18 +1,19 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 use crate::{
     assets::Assets,
     model::{Action, ClientSpec, Project},
     script::ScriptVm,
     vfs::DiskVfs,
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
+    Error,
     path::VfsPath,
     save::{SaveEnvelope, SaveIdentity, SaveLimits},
     service::{FileSystem, HostServices, InputFrame},
     state::{ClientId, Command, Limits, SceneState},
     vm::{VmAdapter, VmYield},
-    Error,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -166,18 +167,11 @@ impl HostServices for SharedHost {
             Q::Layer(id) => serde_json::to_value(self.engine.layers.get(client, id)),
             Q::Canvas(id) => serde_json::to_value(self.engine.canvases.surface(client, id)),
             Q::UiWidget(id) => serde_json::to_value(self.engine.ui.get(client.0, id)),
-            Q::UiEvents => {
-                let mut selected = Vec::new();
-                self.engine.ui.events.retain(|e| {
-                    if e.widget.owner == client.0 {
-                        selected.push(e.clone());
-                        false
-                    } else {
-                        true
-                    }
-                });
-                serde_json::to_value(selected)
-            }
+            Q::UiEvents | Q::MenuEvents => serde_json::to_value(
+                self.engine
+                    .ui
+                    .drain_events(client.0, matches!(query, Q::MenuEvents)),
+            ),
         }
         .map_err(|e| Error::Io(e.to_string()))?;
         serde_json::to_vec(&result).map_err(|e| Error::Io(e.to_string()))
@@ -590,6 +584,111 @@ struct ServicesSave {
     engine: Option<crysirror_scene::EngineSystems>,
 }
 
+/// Immutable owner-thread capture. Serialization and envelope encoding may run
+/// on workers; original VM checkpoint semantics remain at the capture safepoint.
+pub struct SnapshotCapture {
+    identity: SaveIdentity,
+    services: ServicesSave,
+    machines: Vec<VmSave>,
+}
+impl SnapshotCapture {
+    pub fn encode(self) -> Result<Vec<u8>> {
+        core(
+            SaveEnvelope {
+                identity: self.identity,
+                services: serde_json::to_vec(&self.services)?,
+                vm: serde_json::to_vec(&self.machines)?,
+            }
+            .encode(SaveLimits::default()),
+        )
+    }
+}
+#[derive(Clone)]
+struct ExpectedSession {
+    name: String,
+    engine: String,
+    schema: u32,
+    client: ClientId,
+}
+/// Captures identity and generation, never live VM/device references.
+#[derive(Clone)]
+pub struct RestorePlan {
+    identity: SaveIdentity,
+    generation: u64,
+    sessions: Vec<ExpectedSession>,
+    needs_engine: bool,
+    canvas: [u32; 2],
+    base: Option<crysirror_scene::Scene3d>,
+}
+/// Validated worker output, published by Runtime::commit_restore at a safepoint.
+pub struct PreparedRestore {
+    plan: RestorePlan,
+    services: ServicesSave,
+    machines: Vec<VmSave>,
+    engine: crysirror_scene::EngineSystems,
+    scene: SceneState,
+}
+impl RestorePlan {
+    pub fn decode(self, bytes: &[u8]) -> Result<PreparedRestore> {
+        let envelope = core(SaveEnvelope::decode(
+            bytes,
+            &self.identity,
+            SaveLimits::default(),
+        ))?;
+        let mut services: ServicesSave = serde_json::from_slice(&envelope.services)?;
+        let machines: Vec<VmSave> = serde_json::from_slice(&envelope.vm)?;
+        ensure!(
+            !self.needs_engine || services.engine.is_some(),
+            "save missing engine systems state"
+        );
+        let engine = services.engine.take().unwrap_or_default();
+        engine.validate()?;
+        engine.validate_clients(&self.sessions.iter().map(|s| s.client.0).collect())?;
+        engine.world.render_scene(self.base.as_ref())?;
+        engine.frame(self.canvas)?;
+        ensure!(
+            services.clients.len() == self.sessions.len() && machines.len() == self.sessions.len(),
+            "save session count"
+        );
+        let mut scene = SceneState::default();
+        for ((expected, saved), visuals) in
+            self.sessions.iter().zip(&machines).zip(&services.clients)
+        {
+            ensure!(
+                saved.name == expected.name
+                    && saved.engine == expected.engine
+                    && saved.schema == expected.schema
+                    && visuals.client == expected.client.0,
+                "save session identity"
+            );
+            let (mut seen_visuals, mut seen_voices) = (BTreeSet::new(), BTreeSet::new());
+            let mut commands = Vec::new();
+            for action in &visuals.commands {
+                match action {
+                    Action::Sprite { id, .. } | Action::Text { id, .. } => {
+                        ensure!(seen_visuals.insert(*id), "duplicate saved visual")
+                    }
+                    Action::Play { channel, .. } => {
+                        ensure!(seen_voices.insert(*channel), "duplicate saved voice")
+                    }
+                    _ => bail!("save contains a non-state operation"),
+                }
+                commands.push(action.command()?.context("save command")?);
+            }
+            for chunk in commands.chunks(1024) {
+                core(scene.apply_batch(expected.client, chunk, Limits::default()))?;
+            }
+        }
+        Ok(PreparedRestore {
+            plan: self,
+            services,
+            machines,
+            engine,
+            scene,
+        })
+    }
+}
+
 pub fn asset_root(project_path: &Path, project: &Project) -> Result<PathBuf> {
     let root = project_path
         .canonicalize()?
@@ -960,7 +1059,7 @@ impl Runtime {
             },
         }
     }
-    pub fn snapshot(&self) -> Result<Vec<u8>> {
+    pub fn capture_snapshot(&self) -> Result<SnapshotCapture> {
         ensure!(
             !self.host.media.has_resources(),
             "engine media snapshot requires resource reconstruction support (including retained EOF frames)"
@@ -1001,84 +1100,80 @@ impl Runtime {
                 bytes: core(s.vm.snapshot())?,
             });
         }
-        let services = serde_json::to_vec(&ServicesSave {
-            clock_ms: self.host.clock_ms,
-            frame: self.host.scene.frame(),
-            clients,
-            engine: Some(self.host.engine.clone()),
-        })?;
-        let vm = serde_json::to_vec(&machines)?;
-        core(
-            SaveEnvelope {
-                identity: self.identity(),
-                services,
-                vm,
-            }
-            .encode(SaveLimits::default()),
-        )
+        Ok(SnapshotCapture {
+            identity: self.identity(),
+            services: ServicesSave {
+                clock_ms: self.host.clock_ms,
+                frame: self.host.scene.frame(),
+                clients,
+                engine: Some(self.host.engine.clone()),
+            },
+            machines,
+        })
+    }
+    pub fn snapshot(&self) -> Result<Vec<u8>> {
+        self.capture_snapshot()?.encode()
+    }
+    pub fn restore_plan(&self) -> RestorePlan {
+        RestorePlan {
+            identity: self.identity(),
+            generation: self.restored,
+            sessions: self
+                .sessions
+                .iter()
+                .map(|s| ExpectedSession {
+                    name: s.name.clone(),
+                    engine: s.vm.engine_id().into(),
+                    schema: s.vm.snapshot_schema(),
+                    client: s.id,
+                })
+                .collect(),
+            needs_engine: self
+                .project
+                .clients
+                .iter()
+                .any(|c| c.systems.is_some() || c.adapter == "siglus"),
+            canvas: self.project.canvas,
+            base: self.project.scene3d.clone(),
+        }
     }
     /// All VMs and service commands are reconstructed before any live state swap.
     /// Audio restarts at sample zero. GPU/audio handles are deliberately not saved.
     pub fn restore(&mut self, bytes: &[u8]) -> Result<()> {
-        let envelope = core(SaveEnvelope::decode(
-            bytes,
-            &self.identity(),
-            SaveLimits::default(),
-        ))?;
-        let mut services: ServicesSave = serde_json::from_slice(&envelope.services)?;
-        let machines: Vec<VmSave> = serde_json::from_slice(&envelope.vm)?;
+        let prepared = self.restore_plan().decode(bytes)?;
+        self.commit_restore(prepared)
+    }
+    pub fn commit_restore(&mut self, prepared: PreparedRestore) -> Result<()> {
         ensure!(
-            self.project
-                .clients
-                .iter()
-                .all(|c| c.systems.is_none() && c.adapter != "siglus")
-                || services.engine.is_some(),
-            "save missing engine systems state"
+            self.restored == prepared.plan.generation && self.identity() == prepared.plan.identity,
+            "obsolete prepared restore generation/identity"
         );
-        let mut engine = services.engine.take().unwrap_or_default();
-        engine.validate()?;
-        engine.validate_clients(&self.sessions.iter().map(|s| s.id.0).collect())?;
-        engine.world.render_scene(self.project.scene3d.as_ref())?;
-        engine.frame(self.project.canvas)?;
         ensure!(
-            services.clients.len() == self.sessions.len() && machines.len() == self.sessions.len(),
-            "save session count"
+            self.sessions.len() == prepared.plan.sessions.len(),
+            "restore session count changed"
         );
-        let mut staged_scene = SceneState::default();
+        let PreparedRestore {
+            services,
+            machines,
+            mut engine,
+            mut scene,
+            plan,
+        } = prepared;
         let mut staged_sessions = Vec::new();
-        for (((old, spec), saved), visuals) in self
+        for (((old, spec), saved), expected) in self
             .sessions
             .iter()
             .zip(&self.project.clients)
             .zip(&machines)
-            .zip(&services.clients)
+            .zip(&plan.sessions)
         {
             ensure!(
-                saved.name == old.name
-                    && saved.engine == old.vm.engine_id()
-                    && saved.schema == old.vm.snapshot_schema()
-                    && visuals.client == old.id.0,
-                "save session identity"
+                old.id == expected.client
+                    && old.name == expected.name
+                    && old.vm.engine_id() == expected.engine
+                    && old.vm.snapshot_schema() == expected.schema,
+                "restore session identity changed"
             );
-            let mut seen_visuals = BTreeSet::new();
-            let mut seen_voices = BTreeSet::new();
-            let mut commands = Vec::new();
-            for action in &visuals.commands {
-                match action {
-                    Action::Sprite { id, .. } | Action::Text { id, .. } => {
-                        ensure!(seen_visuals.insert(*id), "duplicate saved visual")
-                    }
-                    Action::Play { channel, .. } => {
-                        ensure!(seen_voices.insert(*channel), "duplicate saved voice")
-                    }
-                    _ => bail!("save contains a non-state operation"),
-                }
-                commands.push(action.command()?.context("save command")?);
-            }
-            // Saved state may exceed one command batch (visuals + voices).
-            for chunk in commands.chunks(1024) {
-                core(staged_scene.apply_batch(old.id, chunk, Limits::default()))?;
-            }
             let mut vm = self.registry.create(old.id, spec)?;
             core(vm.restore(&saved.bytes))?;
             staged_sessions.push(Session {
@@ -1104,9 +1199,9 @@ impl Runtime {
             self.assets.register_generated(client, &path, bytes)?;
         }
 
-        staged_scene.restore_frame(services.frame);
+        scene.restore_frame(services.frame);
         self.sessions = staged_sessions;
-        self.host.scene = staged_scene;
+        self.host.scene = scene;
         self.host.clock_ms = services.clock_ms;
         engine.ui.reset_input_after_restore();
         self.host.engine = engine;
@@ -1228,18 +1323,20 @@ mod tests {
     fn two_clients_share_services_but_not_ids() {
         let (_t, mut r) = runtime();
         r.tick(0, InputFrame::default()).unwrap();
-        assert!(r
-            .host
-            .scene
-            .visuals()
-            .keys()
-            .any(|id| id.client == ClientId(1) && id.local == 0));
-        assert!(r
-            .host
-            .scene
-            .visuals()
-            .keys()
-            .any(|id| id.client == ClientId(2) && id.local == 0));
+        assert!(
+            r.host
+                .scene
+                .visuals()
+                .keys()
+                .any(|id| id.client == ClientId(1) && id.local == 0)
+        );
+        assert!(
+            r.host
+                .scene
+                .visuals()
+                .keys()
+                .any(|id| id.client == ClientId(2) && id.local == 0)
+        );
     }
     #[test]
     fn roundtrip_rewinds_runtime() {
@@ -1441,11 +1538,12 @@ mod required_engine_save_test {
         data.as_object_mut().unwrap().remove("engine");
         envelope.services = serde_json::to_vec(&data).unwrap();
         let bad = core(envelope.encode(SaveLimits::default())).unwrap();
-        assert!(r
-            .restore(&bad)
-            .unwrap_err()
-            .to_string()
-            .contains("missing engine"));
+        assert!(
+            r.restore(&bad)
+                .unwrap_err()
+                .to_string()
+                .contains("missing engine")
+        );
         assert_eq!(r.snapshot().unwrap(), before);
     }
 }

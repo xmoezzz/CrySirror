@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Shared archive and image resources, decoded through client-scoped capabilities.
 use crate::{
-    object::{Class, ClassInfo, MethodInfo, ObjectId, TypeHint as T},
     EngineContext, EngineState, Value,
+    object::{Class, ClassInfo, MethodInfo, ObjectId, TypeHint as T},
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::AssetReader,
@@ -26,13 +27,16 @@ pub struct ResourceRuntime {
     pub formats: FormatRegistry,
     pub files: FileRegistry,
     pub jobs: crysirror_resource::ResourceTasks,
+    pub(crate) operations: crate::resource_async::ResourceJobs,
+    pub(crate) decode_generations: BTreeMap<u64, (crysirror_core::state::ClientId, u64)>,
     pub transforms: Arc<TransformRegistry>,
     /// Hosts supply key providers in Rust; keys never enter project/save JSON.
     pub keys: Arc<dyn KeyProvider>,
     image_formats: Vec<&'static str>,
     contexts: BTreeMap<(ClientId, String), DecodeContext>,
     // Stable owner for weak companion resolvers; mounted providers never own this map.
-    storage_authorities: BTreeMap<ClientId, Arc<dyn crysirror_core::service::ClientStorage>>,
+    pub(crate) storage_authorities:
+        BTreeMap<ClientId, Arc<dyn crysirror_core::service::ClientStorage>>,
 }
 impl Default for ResourceRuntime {
     fn default() -> Self {
@@ -53,6 +57,8 @@ impl Default for ResourceRuntime {
             formats,
             files,
             jobs: Default::default(),
+            operations: Default::default(),
+            decode_generations: Default::default(),
             transforms: Arc::new(TransformRegistry::default()),
             keys: Arc::new(MemoryKeyProvider::default()),
             image_formats: Vec::new(),
@@ -63,9 +69,9 @@ impl Default for ResourceRuntime {
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct Options {
-    format: Option<String>,
-    profile: Option<String>,
+pub(crate) struct Options {
+    pub(crate) format: Option<String>,
+    pub(crate) profile: Option<String>,
     offset: usize,
     limit: Option<usize>,
 }
@@ -199,7 +205,7 @@ fn open(
             .open(source, options.format.as_deref(), &context)?;
     Ok((format, archive, context))
 }
-fn scoped_context(
+pub(crate) fn scoped_context(
     state: &mut EngineState,
     path: &str,
     profile: Option<&str>,
@@ -295,7 +301,7 @@ fn mount_decoded(
 fn arg<'a>(args: &'a [Value], i: usize) -> Result<&'a Value> {
     args.get(i).context("missing resource argument")
 }
-fn options(args: &[Value], i: usize) -> Result<Options> {
+pub(crate) fn options(args: &[Value], i: usize) -> Result<Options> {
     match args.get(i) {
         None | Some(Value::Null) => Ok(Options::default()),
         Some(v) => Ok(serde_json::from_value(v.to_json())?),
@@ -355,6 +361,9 @@ impl Class for ResourcesClass {
                 method("detectFile",vec![("asset",T::String),("options",T::Optional(Box::new(T::Map)))],T::List(Box::new(T::Map)),"Offline probe of native file/audio decoders with per-plugin read budgets. Options {profile?}; live hosts use beginDecode with automatic detection, and ambiguous formats require an explicit decoder."),
                 method("readDecoded",vec![("asset",T::String),("options",T::Optional(Box::new(T::Map)))],T::Map,"Decode a file/audio resource and return metadata plus a bounded byte page. Options {format?,profile?,offset?,limit?}, default 4096 and maximum 65536 bytes. Decoding is CPU work; live callers should schedule it as an asset task."),
                 method("mountDecoded",vec![("asset",T::String),("target",T::String),("options",T::Optional(Box::new(T::Map)))],T::Map,"Decode once and publish a client-scoped VFS resource at target. Normal Bitmap/Assets/Audio calls can consume it. Options {format?,profile?}; retained output shares the client's decode budget and no extracted file is written."),
+                method("beginProbe",vec![("asset",T::String),("kind",T::String),("options",T::Optional(Box::new(T::Map)))],T::Int,"Probe archive/file/image formats on bounded workers. Poll decodeStatus and readDecode; no source opening or decoder runs on the owner."),
+                method("beginImage",vec![("asset",T::String),("options",T::Optional(Box::new(T::Map)))],T::Int,"Decode a native image and its scoped companions on workers. Options {format?,profile?}. publishImage commits ready immutable pixels without a main-thread copy. Retained results charge the client profile and a host-wide 256 MiB staging budget; cancelDecode releases the ticket."),
+                method("publishImage",vec![("ticket",T::Int),("slot",T::Int)],T::Map,"Publish a completed image into an engine surface slot. No decoding or pixel copy occurs during this owner commit."),
                 method("beginDecode",vec![("asset",T::String),("kind",T::String),("options",T::Optional(Box::new(T::Map)))],T::Int,"Schedule file/audio conversion (kind=file) or archive indexing (kind=archive) on the bounded CPU pool. Options {format?,profile?}. Returns a scoped ticket; owner calls never join. At most 64 retained tickets per client and 256 per host."),
                 method("decodeStatus",vec![("ticket",T::Int)],T::Map,"Poll pending/ready/failed resource work without blocking. A completed decoder failure remains visible until cancelled."),
                 method("readDecode",vec![("ticket",T::Int),("offset",T::Optional(Box::new(T::Int))),("limit",T::Optional(Box::new(T::Int)))],T::Map,"Read a ready file's bounded byte page (maximum 65536) or archive metadata page (maximum 1024 entries). Pending work fails visibly rather than waiting or returning fabricated data."),
@@ -384,6 +393,18 @@ impl Class for ResourcesClass {
         args: &[Value],
     ) -> Result<Value> {
         let state = cx.state()?;
+        if let Some(value) = crate::resource_async::call(state, name, args)? {
+            return Ok(value);
+        }
+        if matches!(
+            name,
+            "probe" | "list" | "mount" | "probeImage" | "decodeImage"
+        ) {
+            ensure!(
+                !state.runtime.assets.is_nonblocking(),
+                "synchronous resource inspection is offline-only; use beginProbe/beginDecode/beginImage"
+            );
+        }
         let out = match name {
             "beginDecode" => {
                 let path = arg(args, 0)?.as_str()?;
@@ -426,15 +447,29 @@ impl Class for ResourcesClass {
                         &pool,
                     )?
                 };
+                state
+                    .resources
+                    .decode_generations
+                    .insert(ticket, (state.client, state.runtime.restored));
                 json!(ticket)
             }
             "decodeStatus" | "cancelDecode" | "readDecode" | "mountDecode" => {
                 let ticket =
                     u64::try_from(arg(args, 0)?.as_i64()?).context("resource task ticket")?;
+                let (owner, generation) = state
+                    .resources
+                    .decode_generations
+                    .get(&ticket)
+                    .context("resource ticket unknown or obsolete")?;
+                ensure!(
+                    *owner == state.client && *generation == state.runtime.restored,
+                    "foreign or obsolete resource ticket"
+                );
                 if name == "decodeStatus" {
                     state.resources.jobs.status(state.client, ticket)?
                 } else if name == "cancelDecode" {
                     state.resources.jobs.cancel(state.client, ticket)?;
+                    state.resources.decode_generations.remove(&ticket);
                     json!(null)
                 } else {
                     let result = state
@@ -539,21 +574,31 @@ impl Class for ResourcesClass {
             "fileFormats" => json!(state.resources.files.formats(FileKind::File)),
             "audioFormats" => json!(state.resources.files.formats(FileKind::Audio)),
             "detectFile" => {
-                ensure!(!state.runtime.assets.is_nonblocking(),"synchronous file probing is offline-only in a live host; use beginDecode with automatic detection");
+                ensure!(
+                    !state.runtime.assets.is_nonblocking(),
+                    "synchronous file probing is offline-only in a live host; use beginDecode with automatic detection"
+                );
                 let path = arg(args, 0)?.as_str()?;
                 let opts = options(args, 1)?;
                 let input = source(state, path)?;
                 let context = scoped_context(state, path, opts.profile.as_deref())?;
-                json!(state
-                    .resources
-                    .files
-                    .probe(path, input, &context)?
-                    .into_iter()
-                    .map(|(format, probe)| json!({"format":format,"confidence":probe.confidence}))
-                    .collect::<Vec<_>>())
+                json!(
+                    state
+                        .resources
+                        .files
+                        .probe(path, input, &context)?
+                        .into_iter()
+                        .map(
+                            |(format, probe)| json!({"format":format,"confidence":probe.confidence})
+                        )
+                        .collect::<Vec<_>>()
+                )
             }
             "readDecoded" | "mountDecoded" => {
-                ensure!(!state.runtime.assets.is_nonblocking(),"synchronous resource conversion is offline-only in a live host; use beginDecode and poll completion");
+                ensure!(
+                    !state.runtime.assets.is_nonblocking(),
+                    "synchronous resource conversion is offline-only in a live host; use beginDecode and poll completion"
+                );
                 let path = arg(args, 0)?.as_str()?;
                 let opts = options(args, if name == "mountDecoded" { 2 } else { 1 })?;
                 let limit = opts.limit.unwrap_or(4096);
@@ -635,13 +680,17 @@ impl Class for ResourcesClass {
             "probe" => {
                 let src = source(state, arg(args, 0)?.as_str()?)?;
                 let context = state.resources.context(state.client, None)?;
-                json!(state
-                    .resources
-                    .formats
-                    .probe(src, &context)?
-                    .into_iter()
-                    .map(|(format, probe)| json!({"format":format,"confidence":probe.confidence}))
-                    .collect::<Vec<_>>())
+                json!(
+                    state
+                        .resources
+                        .formats
+                        .probe(src, &context)?
+                        .into_iter()
+                        .map(
+                            |(format, probe)| json!({"format":format,"confidence":probe.confidence})
+                        )
+                        .collect::<Vec<_>>()
+                )
             }
             "list" => {
                 let options = options(args, 1)?;

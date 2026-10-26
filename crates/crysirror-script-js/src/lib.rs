@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Default script host: JavaScript executed by Boa, TypeScript lowered by Oxc
 //! (ADR 0005). Scripts reach the engine only through the reflective object
 //! API; generated JS classes mirror every registered engine class.
@@ -11,13 +12,16 @@
 //! Not provided: modules/imports, a deterministic clock or RNG, persistence of
 //! the JS heap (scripts persist state through `fs.writeSave`), or type checking.
 #![forbid(unsafe_code)]
-use anyhow::{anyhow, ensure, Context as _, Result};
+mod async_jobs;
+use anyhow::{Context as _, Result, anyhow, ensure};
 use boa_engine::{
-    js_string, native_function::NativeFunction, Context, JsError, JsNativeError, JsResult, JsValue,
-    Source,
+    Context, JsError, JsNativeError, JsResult, JsValue, Source, js_string,
+    native_function::NativeFunction,
 };
-use crysirror_engine::{builtin::GLOBALS, EngineContext, Lifecycle, ObjectId, ScriptHost, Value};
-use std::{cell::RefCell, fmt::Write, path::Path};
+use boa_engine::{builtins::promise::PromiseState, job::JobQueue, object::builtins::JsPromise};
+use crysirror_engine::async_api::AsyncCalls;
+use crysirror_engine::{EngineContext, Lifecycle, ObjectId, ScriptHost, Value, builtin::GLOBALS};
+use std::{cell::RefCell, collections::BTreeMap, fmt::Write, path::Path, rc::Rc};
 
 thread_local! {
     static ENGINE: RefCell<EngineContext> = RefCell::new(EngineContext::vacant());
@@ -25,15 +29,38 @@ thread_local! {
 
 /// Move the engine state into the thread-local slot for the duration of `f`
 /// and always move it back, even if `f` panics.
-fn with_engine<T>(cx: &mut EngineContext, f: impl FnOnce() -> T) -> T {
-    struct Guard<'a>(&'a mut EngineContext);
+fn with_engine<T>(
+    cx: &mut EngineContext,
+    calls: &mut AsyncCalls,
+    owner: crysirror_core::state::ClientId,
+    f: impl FnOnce() -> T,
+) -> T {
+    struct Guard<'a>(
+        &'a mut EngineContext,
+        &'a mut AsyncCalls,
+        Option<crysirror_core::state::ClientId>,
+    );
     impl Drop for Guard<'_> {
         fn drop(&mut self) {
-            ENGINE.with(|slot| std::mem::swap(self.0, &mut slot.borrow_mut()));
+            ENGINE.with(|slot| {
+                let mut engine = slot.borrow_mut();
+                if let (Some(previous), Ok(state)) = (self.2, engine.state()) {
+                    state.client = previous;
+                }
+                std::mem::swap(self.0, &mut engine);
+            });
+            async_jobs::CALLS.with(|slot| std::mem::swap(self.1, &mut slot.borrow_mut()));
         }
     }
-    ENGINE.with(|slot| std::mem::swap(cx, &mut slot.borrow_mut()));
-    let guard = Guard(cx);
+    let previous = cx.state_ref().ok().map(|state| state.client);
+    ENGINE.with(|slot| {
+        std::mem::swap(cx, &mut slot.borrow_mut());
+        if let Ok(state) = slot.borrow_mut().state() {
+            state.client = owner;
+        }
+    });
+    async_jobs::CALLS.with(|slot| std::mem::swap(calls, &mut slot.borrow_mut()));
+    let guard = Guard(cx, calls, previous);
     let out = f();
     drop(guard);
     out
@@ -137,7 +164,11 @@ fn bindings(cx: &mut EngineContext) -> Result<String> {
     let s = cx.state()?;
     for info in s.classes.infos() {
         let n = info.name;
-        if let Some(p) = info.properties.iter().find(|p| info.methods.iter().any(|m| m.name == p.name)) {
+        if let Some(p) = info
+            .properties
+            .iter()
+            .find(|p| info.methods.iter().any(|m| m.name == p.name))
+        {
             anyhow::bail!("{n}.{} is both a property and a method", p.name);
         }
         let _ = writeln!(
@@ -169,6 +200,16 @@ fn bindings(cx: &mut EngineContext) -> Result<String> {
             id.0
         );
     }
+    js.push_str(async_jobs::PRELUDE);
+    for (index, spec) in crysirror_engine::async_api::BINDINGS.iter().enumerate() {
+        if cx.state_ref()?.classes.get(spec.class).is_ok() {
+            let _ = writeln!(
+                js,
+                "{}.prototype.{} = function(...args) {{ return __cs.awaitService(this.__id,{},args); }};",
+                spec.class, spec.name, index
+            );
+        }
+    }
     Ok(js)
 }
 
@@ -187,6 +228,13 @@ pub struct JsHost {
     name: String,
     context: Option<Context>,
     pending: Vec<(String, String)>,
+    calls: AsyncCalls,
+    jobs: Rc<async_jobs::Jobs>,
+    owner: Option<crysirror_core::state::ClientId>,
+    promises: BTreeMap<String, JsPromise>,
+    deferred_start: bool,
+    /// Controlled-shutdown drain deadline; ordinary frames never wait.
+    pub shutdown_timeout_ms: u64,
     /// Loop iterations allowed per entry into JS; exceeding it is an error.
     pub loop_limit: u64,
 }
@@ -196,6 +244,12 @@ impl JsHost {
             name: name.into(),
             context: None,
             pending: Vec::new(),
+            calls: Default::default(),
+            jobs: Rc::new(Default::default()),
+            owner: None,
+            promises: Default::default(),
+            deferred_start: false,
+            shutdown_timeout_ms: 5000,
             loop_limit: 10_000_000,
         }
     }
@@ -217,7 +271,7 @@ impl JsHost {
             .as_mut()
             .context("script host not initialized")?;
         let pending = std::mem::take(&mut self.pending);
-        with_engine(cx, || {
+        with_engine(cx, &mut self.calls, self.owner.unwrap(), || {
             for (unit, js) in pending {
                 ctx.eval(Source::from_bytes(js.as_bytes()))
                     .map_err(|e| Self::report(e, ctx))
@@ -226,8 +280,50 @@ impl JsHost {
             Ok(())
         })
     }
-    fn hook(&mut self, cx: &mut EngineContext, hook: &str, arg: Option<u64>) -> Result<()> {
-        debug_assert!(HOOKS.contains(&hook));
+    fn pump(&mut self, cx: &mut EngineContext) -> Result<()> {
+        let ctx = self
+            .context
+            .as_mut()
+            .context("script host not initialized")?;
+        let jobs = self.jobs.clone();
+        with_engine(
+            cx,
+            &mut self.calls,
+            self.owner.unwrap(),
+            || -> Result<()> {
+                ctx.eval(Source::from_bytes(b"__cs.pumpAsync()"))
+                    .map_err(|e| Self::report(e, ctx))?;
+                jobs.run_jobs(ctx);
+                if let Some(error) = jobs.take_error() {
+                    anyhow::bail!("{error}");
+                }
+                Ok(())
+            },
+        )?;
+        let finished = self
+            .promises
+            .iter()
+            .filter_map(|(name, promise)| match promise.state() {
+                PromiseState::Pending => None,
+                PromiseState::Fulfilled(_) => Some((name.clone(), None)),
+                PromiseState::Rejected(reason) => Some((name.clone(), Some(reason))),
+            })
+            .collect::<Vec<_>>();
+        for (name, error) in finished {
+            self.promises.remove(&name);
+            if let Some(error) = error {
+                anyhow::bail!(
+                    "async lifecycle {name} rejected: {}",
+                    error
+                        .to_string(ctx)
+                        .map_err(|e| Self::report(e, ctx))?
+                        .to_std_string_escaped()
+                );
+            }
+        }
+        Ok(())
+    }
+    fn invoke(&mut self, cx: &mut EngineContext, hook: &str, arg: Option<u64>) -> Result<()> {
         let ctx = self
             .context
             .as_mut()
@@ -239,13 +335,42 @@ impl JsHost {
         let Some(f) = f.as_callable().cloned() else {
             return Ok(());
         };
-        let args: Vec<JsValue> = arg.map(|a| JsValue::from(a as f64)).into_iter().collect();
-        with_engine(cx, || {
+        let args: Vec<JsValue> = arg.map(|n| JsValue::from(n as f64)).into_iter().collect();
+        let result = with_engine(cx, &mut self.calls, self.owner.unwrap(), || {
             f.call(&JsValue::undefined(), &args, ctx)
-                .map(|_| ())
                 .map_err(|e| Self::report(e, ctx))
         })
-        .with_context(|| hook.to_string())
+        .with_context(|| hook.to_owned())?;
+        if let Some(object) = result.as_object() {
+            if let Ok(promise) = JsPromise::from_object(object.clone()) {
+                self.promises.insert(hook.to_owned(), promise);
+            }
+        }
+        Ok(())
+    }
+    fn hook(&mut self, cx: &mut EngineContext, hook: &str, arg: Option<u64>) -> Result<()> {
+        debug_assert!(HOOKS.contains(&hook));
+        self.pump(cx)?;
+        if hook == "onStart" && self.promises.contains_key("onInit") {
+            self.deferred_start = true;
+            return Ok(());
+        }
+        if hook != "onInit" && hook != "onShutdown" {
+            if self.promises.contains_key("onInit") {
+                return Ok(());
+            }
+            if self.deferred_start {
+                self.deferred_start = false;
+                self.invoke(cx, "onStart", None)?;
+            }
+            if hook != "onStart" && self.promises.contains_key("onStart") {
+                return Ok(());
+            }
+        }
+        if !self.promises.contains_key(hook) {
+            self.invoke(cx, hook, arg)?;
+        }
+        self.pump(cx)
     }
 }
 impl Lifecycle for JsHost {
@@ -253,7 +378,11 @@ impl Lifecycle for JsHost {
         &self.name
     }
     fn on_init(&mut self, cx: &mut EngineContext) -> Result<()> {
-        let mut ctx = Context::default();
+        self.owner = Some(cx.state_ref()?.client);
+        let mut ctx = Context::builder()
+            .job_queue(self.jobs.clone())
+            .build()
+            .map_err(|e| anyhow!("{e}"))?;
         ctx.runtime_limits_mut()
             .set_loop_iteration_limit(self.loop_limit);
         ctx.runtime_limits_mut().set_recursion_limit(512);
@@ -265,6 +394,9 @@ impl Lifecycle for JsHost {
             ),
             ("__cs_get", 2, native_get),
             ("__cs_set", 3, native_set),
+            ("__cs_async_start", 3, async_jobs::start),
+            ("__cs_async_poll", 1, async_jobs::poll),
+            ("__cs_async_cancel", 1, async_jobs::cancel),
         ] {
             ctx.register_global_callable(js_string!(name), len, NativeFunction::from_fn_ptr(f))
                 .map_err(|e| anyhow!("{e}"))?;
@@ -298,7 +430,27 @@ impl Lifecycle for JsHost {
         if self.context.is_none() {
             return Ok(());
         }
-        self.hook(cx, "onShutdown", None)
+        let mut result = self.hook(cx, "onShutdown", None);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(self.shutdown_timeout_ms);
+        while result.is_ok() && self.promises.contains_key("onShutdown") {
+            if std::time::Instant::now() >= deadline {
+                result = Err(anyhow!("async onShutdown exceeded drain deadline"));
+                break;
+            }
+            result = self.pump(cx);
+            std::thread::yield_now();
+        }
+        self.promises.clear();
+        if let Some(ctx) = &mut self.context {
+            with_engine(cx, &mut self.calls, self.owner.unwrap(), || {
+                let _ = ctx.eval(Source::from_bytes(b"__cs.cancelAllAsync()"));
+            });
+        }
+        // Final cancellation is scoped to this host; no late continuation runs.
+        self.calls.cancel_all(cx);
+        self.jobs.clear();
+        result
     }
 }
 impl ScriptHost for JsHost {

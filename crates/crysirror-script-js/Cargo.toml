@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Default JS/TS script host (Boa + Oxc) bound to the engine object API (ADR 0005)"
 
 [dependencies]
+crysirror-core.workspace = true
 crysirror-engine.workspace = true
 crysirror-author.workspace = true
 anyhow.workspace = true
@@ -16,5 +17,7 @@ boa_engine = "=0.20.0"
 
 [dev-dependencies]
 crysirror-core.workspace = true
+crysirror-tasks.workspace = true
+crysirror-image.workspace = true
 crysirror-runtime.workspace = true
 tempfile = "3.12"

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! CrySirror's general-purpose engine API (ADR 0004, ADR 0005).
 //!
 //! * [`object`]: reflective classes, objects and values — the OOP API surface
@@ -13,6 +14,7 @@
 pub mod ai;
 pub mod api_doc;
 pub mod assets_api;
+pub mod async_api;
 pub mod audio_api;
 pub mod bitmap_api;
 pub mod builtin;
@@ -27,10 +29,13 @@ pub mod physics_api;
 pub mod profiler_api;
 pub mod puppet_api;
 pub mod resource_api;
+mod resource_async;
+pub mod save_api;
 pub mod script;
 pub mod services;
 pub mod systems;
 pub mod text_api;
+mod text_async;
 pub mod value;
 pub mod vehicle;
 pub mod vfx_api;

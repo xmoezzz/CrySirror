@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Reflective classes and the object table (ADR 0004).
 //!
 //! A [`Class`] is compiled Rust that implements properties and methods; an
@@ -7,7 +8,7 @@
 //! hosts and inspection tools share one validated path. Classes describe
 //! themselves ([`ClassInfo`]) so hosts can generate bindings and typings.
 use crate::{context::EngineContext, value::Value};
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use std::{collections::BTreeMap, fmt::Write, sync::Arc};
 
@@ -235,6 +236,7 @@ impl ClassRegistry {
         for (global, class) in singletons {
             let _ = writeln!(out, "declare const {global}: {class};");
         }
+        out.push_str(&crate::async_api::declarations(self));
         out
     }
 }

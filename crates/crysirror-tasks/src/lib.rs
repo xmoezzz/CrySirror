@@ -1,8 +1,10 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Bounded CPU workers and awaitable, cooperatively cancellable jobs. No devices.
 #![forbid(unsafe_code)]
 pub mod graph;
 pub mod profile;
+pub mod table;
 use anyhow::{Result, ensure};
 use crossbeam_channel::{Sender, bounded};
 use futures::channel::oneshot;

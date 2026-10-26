@@ -4,6 +4,35 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `5394949c5999cde6` (2026-10-27): awaitable services and engine menus
+
+- Add bounded client/generation-scoped Text preparation, Resources image/probe
+  jobs and phased Save jobs. `commitLoad` applies a validated ready restore at
+  an owner safepoint. Native VM checkpoint capture/reconstruction remain ordered.
+  Rust DecodeContext.memory_shared retains an immutable buffer's resident-byte
+  charge without copying it; image staging uses the same reservation contract.
+- JS/TS adds generated `CancellablePromise` helpers for Assets, Resources, Text
+  and Save. Async init/start preserve lifecycle order, pending hooks cannot
+  reenter, microtask turns are bounded and uncaught rejection faults the App.
+  Retained image/asset/decode tickets still require explicit release.
+- **Live-host migration:** synchronous Resources inspection/image decode,
+  Text.draw/restore and Save.save/load/exists now reject blocking use. Replace
+  these with begin/status/publish APIs or their async helpers. Large simple
+  measurements use beginMeasure; offline synchronous calls remain available.
+- Add Ui.setMenu/removeMenu/openMenu/closeMenu/setMenuChecked, MenuSpec and
+  MenuItemSpec: engine-owned layout, radio state, input and drawing. Ui.events
+  now returns only the active client's retained events. New `Ui.drainEvents`
+  consumes them once without stealing other clients' events; action loops must
+  consume rather than repeatedly dispatch the readonly queue. Menu activations include an
+  optional `menu_bar` namespace. **Rust:** UiEvent literals require this field,
+  and exhaustive UiCommand/EngineQuery matches need their new variants.
+- Export OperationStatus/OperationState and UiEvent/WidgetId data contracts,
+  plus the optional krkr native config and its explicit `plugin_shells` list.
+  Shells register only: no native exports or implemented capability are implied.
+- API task handles, Promise subscriptions and device state are not portable
+  save content. Text blocks require explicit Text.state/restoreAsync handling.
+  See [service boundaries](../ASYNC_SERVICES.md) and ADR 0066 for limits.
+
 ## `d4f4c6edc250ee72` (2026-10-26): shared native file/audio resources
 
 - Add `Resources.fileFormats`, `audioFormats`, `detectFile`, `readDecoded` and

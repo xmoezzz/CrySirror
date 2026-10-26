@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 use crate::vfs::read_limited;
 use anyhow::{Context, Result, ensure};
 use cap_std::{ambient_authority, fs::Dir};
@@ -43,6 +44,12 @@ pub struct Surface {
 pub struct SurfaceSnapshot {
     store: u64,
     surfaces: BTreeMap<(ClientId, u32), Surface>,
+}
+impl SurfaceSnapshot {
+    pub fn surface(&self, client: ClientId, asset: &str) -> Option<&Surface> {
+        let slot = asset.strip_prefix(SURFACE_PREFIX)?.parse::<u32>().ok()?;
+        self.surfaces.get(&(client, slot))
+    }
 }
 pub const SURFACE_PREFIX: &str = "__surface/";
 pub const MAX_SURFACES_PER_CLIENT: usize = 16;
@@ -226,6 +233,17 @@ impl Assets {
         height: u32,
         rgba: Vec<u8>,
     ) -> Result<String> {
+        self.put_surface_arc(client, slot, width, height, Arc::from(rgba))
+    }
+    /// Publish already shared worker output without copying pixels on the owner.
+    pub fn put_surface_arc(
+        &mut self,
+        client: ClientId,
+        slot: u32,
+        width: u32,
+        height: u32,
+        rgba: Arc<[u8]>,
+    ) -> Result<String> {
         ensure!(self.clients.contains_key(&client), "unknown asset client");
         ensure!(
             (1..=8192).contains(&width) && (1..=8192).contains(&height),
@@ -267,7 +285,7 @@ impl Assets {
             Surface {
                 width,
                 height,
-                rgba: Arc::from(rgba),
+                rgba,
                 revision,
             },
         );

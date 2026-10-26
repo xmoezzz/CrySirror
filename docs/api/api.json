@@ -76,6 +76,36 @@
       ]
     },
     {
+      "adapter": "krkr",
+      "config": [
+        {
+          "doc": "Game directory inside the client's asset root (\"\" is the root).",
+          "name": "root",
+          "rust_type": "String"
+        },
+        {
+          "doc": "First script executed, KiriKiri's `startup.tjs`.",
+          "name": "startup",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Project font alias used for every KiriKiri font face.",
+          "name": "font_alias",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Logical canvas size; must equal the project canvas.",
+          "name": "canvas",
+          "rust_type": "[u32; 2]"
+        },
+        {
+          "doc": "Explicit registration-only native modules, with no callable exports. Loading a shell does not establish implementation of that plugin.",
+          "name": "plugin_shells",
+          "rust_type": "Vec<String>"
+        }
+      ]
+    },
+    {
       "adapter": "reallive",
       "config": [
         {
@@ -139,6 +169,233 @@
           "rust_type": "Option<crate::MessageWindow>"
         }
       ]
+    }
+  ],
+  "async_bindings": [
+    {
+      "cancel": "release",
+      "class": "Assets",
+      "completion": "ticket",
+      "name": "loadAsync",
+      "params": [
+        {
+          "name": "path",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "optional": false,
+          "type": "string"
+        }
+      ],
+      "release_on_success": false,
+      "returns": "CancellablePromise<number>",
+      "start": "load",
+      "status": "status"
+    },
+    {
+      "cancel": "cancelDecode",
+      "class": "Resources",
+      "completion": "ticket",
+      "name": "decodeAsync",
+      "params": [
+        {
+          "name": "asset",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "options",
+          "optional": true,
+          "type": "Record<string, any> | null"
+        }
+      ],
+      "release_on_success": false,
+      "returns": "CancellablePromise<number>",
+      "start": "beginDecode",
+      "status": "decodeStatus"
+    },
+    {
+      "cancel": "cancelDecode",
+      "class": "Resources",
+      "completion": "ticket",
+      "name": "imageAsync",
+      "params": [
+        {
+          "name": "asset",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "options",
+          "optional": true,
+          "type": "Record<string, any> | null"
+        }
+      ],
+      "release_on_success": false,
+      "returns": "CancellablePromise<number>",
+      "start": "beginImage",
+      "status": "decodeStatus"
+    },
+    {
+      "cancel": "cancelDecode",
+      "class": "Resources",
+      "completion": "read",
+      "name": "probeAsync",
+      "params": [
+        {
+          "name": "asset",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "options",
+          "optional": true,
+          "type": "Record<string, any> | null"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginProbe",
+      "status": "decodeStatus"
+    },
+    {
+      "cancel": "cancel",
+      "class": "Text",
+      "completion": "result.surface",
+      "name": "drawAsync",
+      "params": [
+        {
+          "name": "name",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "markup",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "options",
+          "optional": true,
+          "type": "Record<string, any> | null"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<string>",
+      "start": "beginDraw",
+      "status": "status"
+    },
+    {
+      "cancel": "cancel",
+      "class": "Text",
+      "completion": "result.surface",
+      "name": "restoreAsync",
+      "params": [
+        {
+          "name": "name",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<string>",
+      "start": "beginRestore",
+      "status": "status"
+    },
+    {
+      "cancel": "cancel",
+      "class": "Text",
+      "completion": "result",
+      "name": "measureAsync",
+      "params": [
+        {
+          "name": "font",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "size",
+          "optional": false,
+          "type": "number"
+        },
+        {
+          "name": "text",
+          "optional": false,
+          "type": "string"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginMeasure",
+      "status": "status"
+    },
+    {
+      "cancel": "cancel",
+      "class": "Save",
+      "completion": "bytes",
+      "name": "saveAsync",
+      "params": [
+        {
+          "name": "path",
+          "optional": false,
+          "type": "string"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<number>",
+      "start": "beginSave",
+      "status": "status"
+    },
+    {
+      "cancel": "cancel",
+      "class": "Save",
+      "completion": "commit",
+      "name": "loadAsync",
+      "params": [
+        {
+          "name": "path",
+          "optional": false,
+          "type": "string"
+        }
+      ],
+      "release_on_success": false,
+      "returns": "CancellablePromise<void>",
+      "start": "beginLoad",
+      "status": "status"
+    },
+    {
+      "cancel": "cancel",
+      "class": "Save",
+      "completion": "exists",
+      "name": "existsAsync",
+      "params": [
+        {
+          "name": "path",
+          "optional": false,
+          "type": "string"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<boolean>",
+      "start": "beginExists",
+      "status": "status"
     }
   ],
   "classes": [
@@ -2422,6 +2679,55 @@
           "returns": "Record<string, any>"
         },
         {
+          "doc": "Probe archive/file/image formats on bounded workers. Poll decodeStatus and readDecode; no source opening or decoder runs on the owner.",
+          "name": "beginProbe",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Decode a native image and its scoped companions on workers. Options {format?,profile?}. publishImage commits ready immutable pixels without a main-thread copy. Retained results charge the client profile and a host-wide 256 MiB staging budget; cancelDecode releases the ticket.",
+          "name": "beginImage",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Publish a completed image into an engine surface slot. No decoding or pixel copy occurs during this owner commit.",
+          "name": "publishImage",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            },
+            {
+              "name": "slot",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
           "doc": "Schedule file/audio conversion (kind=file) or archive indexing (kind=archive) on the bounded CPU pool. Options {format?,profile?}. Returns a scoped ticket; owner calls never join. At most 64 retained tickets per client and 256 per host.",
           "name": "beginDecode",
           "params": [
@@ -2603,11 +2909,11 @@
       "properties": []
     },
     {
-      "doc": "Whole-runtime snapshots (world, layers, UI, clocks, every VM) in the client's save mount.",
+      "doc": "Client-capability snapshot operations. Captures preserve ordered VM safepoints; worker jobs perform encoding, disk I/O and validation, and prepared loads commit atomically.",
       "global": "save",
       "methods": [
         {
-          "doc": "Write a validated snapshot; returns its size in bytes.",
+          "doc": "Offline snapshot/write; realtime hosts use beginSave. Returns encoded byte size.",
           "name": "save",
           "params": [
             {
@@ -2618,7 +2924,7 @@
           "returns": "number"
         },
         {
-          "doc": "Transactionally restore a snapshot (all-or-nothing). Entity objects from before are revalidated by generation.",
+          "doc": "Offline read/restore; realtime hosts use beginLoad then commitLoad. A failed restore leaves the runtime unchanged.",
           "name": "load",
           "params": [
             {
@@ -2629,7 +2935,7 @@
           "returns": "void"
         },
         {
-          "doc": "Whether a snapshot file exists.",
+          "doc": "Offline existence query; realtime hosts use beginExists. Permission/read errors remain errors.",
           "name": "exists",
           "params": [
             {
@@ -2638,6 +2944,72 @@
             }
           ],
           "returns": "boolean"
+        },
+        {
+          "doc": "Capture logical state and native VM checkpoints at the current owner safepoint, then serialize and write on bounded CPU/I/O workers. Returns a client ticket. Native checkpoint capture itself remains ordered.",
+          "name": "beginSave",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Read, decode and validate a snapshot on workers. A ready result is prepared, not applied; commitLoad publishes it at an owner safepoint.",
+          "name": "beginLoad",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Query the save capability on the bounded I/O executor. Only NotFound becomes false.",
+          "name": "beginExists",
+          "params": [
+            {
+              "name": "path",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Poll pending/ready/failed without joining workers. Ready save returns bytes; exists returns exists; load returns prepared=true. All tickets are client/generation checked.",
+          "name": "status",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Atomically apply a prepared load, preserving native restore semantics. Reject pending, wrong-kind and obsolete results. Successful restore invalidates earlier-generation jobs.",
+          "name": "commitLoad",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Cancel/release retained work. Running atomic writes may already commit; cancellation cannot undo an existing disk write.",
+          "name": "cancel",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
         }
       ],
       "name": "Save",
@@ -2647,6 +3019,81 @@
       "doc": "CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed.",
       "global": "text",
       "methods": [
+        {
+          "doc": "Prepare markup, shaping, icon decoding and initial raster on bounded workers. Returns a client/generation ticket; the old block remains until successful publication.",
+          "name": "beginDraw",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "markup",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Prepare saved text and reveal state on workers, publishing only after validation.",
+          "name": "beginRestore",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "state",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Measure an arbitrarily sized bounded single line on a worker; status returns metrics after completion.",
+          "name": "beginMeasure",
+          "params": [
+            {
+              "name": "font",
+              "type": "string"
+            },
+            {
+              "name": "size",
+              "type": "number"
+            },
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Poll and publish completed text work without joining. Ready drawing includes surface metadata; errors and obsolete generations fail visibly.",
+          "name": "status",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Release a ticket and cancel pending preparation. Already published blocks remain owned by Text until remove.",
+          "name": "cancel",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
         {
           "doc": "Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface.",
           "name": "measureSimple",
@@ -2667,7 +3114,7 @@
           "returns": "Record<string, any>"
         },
         {
-          "doc": "Shape and rasterize rich text; returns __surface path for a layer. Optional typewriter rate advances with App frames.",
+          "doc": "Offline rich-text preparation; live hosts use beginDraw/drawAsync. Returns a shared surface path for a layer.",
           "name": "draw",
           "params": [
             {
@@ -2697,7 +3144,7 @@
           "returns": "Record<string, any>"
         },
         {
-          "doc": "Rebuild saved markup/options and restore reveal clock. Pending event queues are not replayed.",
+          "doc": "Offline rebuild of saved markup/options/reveal; live hosts use beginRestore/restoreAsync. Pending event queues are not replayed.",
           "name": "restore",
           "params": [
             {
@@ -2727,7 +3174,7 @@
           "returns": "void"
         },
         {
-          "doc": "Reveal remaining text and emit marker/finished events.",
+          "doc": "Reveal remaining text. In live hosts, marker/finished events are delivered only after the worker raster is published.",
           "name": "finish",
           "params": [
             {
@@ -2767,6 +3214,83 @@
       "doc": "Retained widgets (panel/label/button/toggle/slider/text_field) with focus, capture and modal routing.",
       "global": "ui",
       "methods": [
+        {
+          "doc": "Consume this client's retained events once, preserving other clients' events. Use this for action dispatch; events only reads a snapshot of the queue.",
+          "name": "drainEvents",
+          "params": [],
+          "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state.",
+          "name": "setMenu",
+          "params": [
+            {
+              "name": "menu",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove a client menu tree.",
+          "name": "removeMenu",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Open a root submenu or a context popup at a logical canvas position.",
+          "name": "openMenu",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "item",
+              "type": "number | null"
+            },
+            {
+              "name": "position",
+              "type": "number[] | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Close this client's menu popups.",
+          "name": "closeMenu",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Update checked state with shared sibling radio-group semantics.",
+          "name": "setMenuChecked",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "item",
+              "type": "number"
+            },
+            {
+              "name": "checked",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
         {
           "doc": "Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}.",
           "name": "put",
@@ -2912,7 +3436,7 @@
       "name": "Ui",
       "properties": [
         {
-          "doc": "Events produced by the last UI tick: {client, id, kind, value}.",
+          "doc": "This client's retained UI events: {widget:{owner,id},kind,value,menu_bar?}. The last 256 events are retained globally; use drainEvents to consume them.",
           "name": "events",
           "type": "Record<string, any>[]",
           "writable": false
@@ -3673,6 +4197,31 @@
       "api": "Canvases.apply",
       "op": "hide",
       "system": "canvas"
+    },
+    {
+      "api": "Ui.setMenu",
+      "op": "set_menu",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.removeMenu",
+      "op": "remove_menu",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.openMenu",
+      "op": "open_menu",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.closeMenu",
+      "op": "close_menu",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.setMenuChecked",
+      "op": "set_menu_checked",
+      "system": "ui"
     },
     {
       "api": "Ui.put",
@@ -9626,6 +10175,36 @@
       "fields": [
         {
           "default": null,
+          "doc": "",
+          "name": "set_menu",
+          "rust_type": "menu: menu::MenuSpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "remove_menu",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "open_menu",
+          "rust_type": "id: u32, item: Option<u32>, position: Option<[f32; 2]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "close_menu",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_menu_checked",
+          "rust_type": "id: u32, item: u32, checked: bool"
+        },
+        {
+          "default": null,
           "doc": "Append committed Unicode text to this client's focused TextField.",
           "name": "insert_text",
           "rust_type": "text: String"
@@ -9693,9 +10272,248 @@
       ],
       "name": "UiCommand",
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
+    },
+    {
+      "doc": "A retained menu bar or context menu, scoped to its owning client.",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "Menu ID, unique within the owning client (1..65535).",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            640.0,
+            24.0
+          ],
+          "doc": "Logical canvas rectangle anchoring the menu bar.",
+          "name": "rect",
+          "rust_type": "[f32; 4]"
+        },
+        {
+          "default": "default",
+          "doc": "Shared engine font alias.",
+          "name": "font",
+          "rust_type": "String"
+        },
+        {
+          "default": 18,
+          "doc": "Nominal font size in logical pixels.",
+          "name": "text_size",
+          "rust_type": "u16"
+        },
+        {
+          "default": 100.0,
+          "doc": "Width of a horizontal bar item.",
+          "name": "cell_width",
+          "rust_type": "f32"
+        },
+        {
+          "default": 240.0,
+          "doc": "Width of a vertical submenu.",
+          "name": "popup_width",
+          "rust_type": "f32"
+        },
+        {
+          "default": 24.0,
+          "doc": "Height of each bar item or submenu row.",
+          "name": "row_height",
+          "rust_type": "f32"
+        },
+        {
+          "default": true,
+          "doc": "Whether this menu can be drawn or receive input.",
+          "name": "visible",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "A context-only tree is hidden until open_menu is requested.",
+          "name": "context",
+          "rust_type": "bool"
+        },
+        {
+          "default": [],
+          "doc": "Root menu items.",
+          "name": "items",
+          "rust_type": "Vec<MenuItemSpec>"
+        }
+      ],
+      "name": "MenuSpec",
+      "used_by": "UI.setMenu / UiCommand.set_menu"
+    },
+    {
+      "doc": "One logical menu item; children and radio groups are engine-owned.",
+      "fields": [
+        {
+          "default": 2,
+          "doc": "Item ID, unique within this menu tree.",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": "File",
+          "doc": "Display text without native platform mnemonics.",
+          "name": "label",
+          "rust_type": "String"
+        },
+        {
+          "default": true,
+          "doc": "Whether this item participates in layout.",
+          "name": "visible",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "Whether input can activate or open this item.",
+          "name": "enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "Displayed check/radio state.",
+          "name": "checked",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "Selecting this item clears radio siblings in the same group.",
+          "name": "radio",
+          "rust_type": "bool"
+        },
+        {
+          "default": 0,
+          "doc": "Sibling radio group identity.",
+          "name": "group",
+          "rust_type": "u32"
+        },
+        {
+          "default": false,
+          "doc": "Render a noninteractive separator row.",
+          "name": "separator",
+          "rust_type": "bool"
+        },
+        {
+          "default": [],
+          "doc": "Nested menu items, at most sixteen levels.",
+          "name": "children",
+          "rust_type": "Vec<MenuItemSpec>"
+        }
+      ],
+      "name": "MenuItemSpec",
+      "used_by": "MenuSpec.items"
+    },
+    {
+      "doc": "A client-scoped ticket belongs to the restore generation that created it.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Opaque operation ID; another client cannot use it.",
+          "name": "ticket",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Service-defined operation kind.",
+          "name": "kind",
+          "rust_type": "&'static str"
+        },
+        {
+          "default": null,
+          "doc": "Pending, ready or failed; no implicit wait.",
+          "name": "state",
+          "rust_type": "OperationState"
+        },
+        {
+          "default": null,
+          "doc": "Failure text, retained until the ticket is released.",
+          "name": "error",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "OperationStatus",
+      "used_by": "Background Text/Save/Resources operation polling"
+    },
+    {
+      "doc": "Completion of a bounded service job, observed without blocking the owner.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "pending",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "ready",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "OperationState",
+      "used_by": "OperationStatus.state"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "widget",
+          "rust_type": "WidgetId"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "kind",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "value",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Menu-bar namespace for a menu_activate event; absent on ordinary widgets.",
+          "name": "menu_bar",
+          "rust_type": "Option<u32>"
+        }
+      ],
+      "name": "UiEvent",
+      "used_by": "Ui.events and native engine event queries"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "owner",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "WidgetId",
+      "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "d4f4c6edc250ee72",
+  "fingerprint": "5394949c5999cde6",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

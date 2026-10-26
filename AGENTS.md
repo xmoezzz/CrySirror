@@ -31,5 +31,6 @@ Read STATUS.md, docs/ARCHITECTURE.md and docs/NATIVE_ADAPTERS.md before editing.
 - Never distribute user game data, fonts, credentials or proprietary SDK files.
 - Document implementation, compilation and behavior validation separately.
 - Run Python tooling tests and cargo checks/tests when the environment permits.
+  Use `cargo check/test --release` for local validation (owner preference).
 - Update STATUS.md only from actual results. An ignored GPU test is not a pass.
 - After API changes, regenerate docs/api and log fingerprint changes (docs/api/README.md).

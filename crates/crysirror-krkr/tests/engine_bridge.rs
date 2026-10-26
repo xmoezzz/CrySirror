@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// Distributed under the GNU Affero General Public License, version 3 or
+// (at your option) any later version, https://www.gnu.org/licenses/agpl-3.0.html.
 //! Original-style TJS2 scripts -> public engine services. Self-authored
 //! scripts and generated images only; no game data, fonts or GPU.
 use crysirror_core::{
@@ -196,34 +197,49 @@ fn shift_jis_scripts_and_case_insensitive_storage() {
 
 #[test]
 fn nominal_font_height_uses_absolute_height_and_rejects_unmapped_styles() {
-    let (_t, mut r) = fixture(r#"
+    let (_t, mut r) = fixture(
+        r#"
         var w = new Window(); var l = new Layer(w, null);
         l.font.height = -37;
         Debug.message("heights", l.font.getTextHeight("A"), l.font.getTextHeight(""));
-    "#, &[]);
+    "#,
+        &[],
+    );
     r.tick(0, InputFrame::default()).unwrap();
     let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
     assert!(log.contains("heights 37 37"), "{log}");
-    let (_t, mut r) = fixture(r#"
+    let (_t, mut r) = fixture(
+        r#"
         var w = new Window(); var l = new Layer(w, null);
         l.font.bold = true; l.drawText(0, 0, "A", 0xffffff);
-    "#, &[]);
+    "#,
+        &[],
+    );
     assert!(failure(&mut r).contains("Font.bold"));
 }
 
 #[test]
 #[ignore = "requires licensed runtime font in CRYSIRROR_TEST_FONT; no font bundled"]
 fn font_width_and_canvas_text_share_engine_font_resources() {
-    let (_t, mut r) = fixture(r#"
+    let (_t, mut r) = fixture(
+        r#"
         var w = new Window(); var l = new Layer(w, null);
         l.font.height = 24;
         Debug.message("width", l.font.getTextWidth("AVATAR"), l.font.getTextWidth(""));
         l.drawText(5, 10, "AVATAR", 0xffffff);
-    "#, &[]);
+    "#,
+        &[],
+    );
     let bytes = std::fs::read(std::env::var_os("CRYSIRROR_TEST_FONT").unwrap()).unwrap();
     r.host.text.add_font("default", bytes.clone()).unwrap();
     r.assets.text.add_font("default", bytes).unwrap();
-    let expected = r.assets.text.measure_simple("default", 24., "AVATAR").unwrap().advance.ceil() as i64;
+    let expected = r
+        .assets
+        .text
+        .measure_simple("default", 24., "AVATAR")
+        .unwrap()
+        .advance
+        .ceil() as i64;
     r.tick(0, InputFrame::default()).unwrap();
     let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
     assert!(log.contains(&format!("width {expected} 0")), "{log}");
@@ -232,4 +248,77 @@ fn font_width_and_canvas_text_share_engine_font_resources() {
     assert!(nodes.contains("AVATAR"));
     assert!(nodes.contains("simple-horizontal-unwrapped-v1"));
     assert!(r.host.text_measurement(ClientId(999)).is_err());
+}
+
+#[test]
+fn menu_plugin_routes_native_objects_to_shared_ui_and_dispatches_clicks() {
+    let (_t, mut r) = fixture(
+        r#"
+        Plugins.link("plugin/MENU.dll"); Plugins.link("menu.dll");
+        Debug.message("plugin",Plugins.getStatus("menu.dll").kind,Plugins.getList().count);
+        var w=new Window();w.visible=true;
+        var root=new MenuItem(w,"File(&F)");w.menu.add(root);
+        class Choice extends MenuItem {
+            function Choice(w,c) {super.MenuItem(w,c);}
+            function onClick(){Debug.message("native_menu_click",caption,checked);}
+        }
+        var fast=new Choice(w,"Fast");fast.radio=true;fast.group=1;fast.checked=true;root.add(fast);
+        var slow=new Choice(w,"Slow");slow.radio=true;slow.group=1;root.add(slow);
+        var removed=new MenuItem(w,"Removed");root.add(removed);invalidate removed;
+        Debug.message("children",root.children.count);
+        Debug.message("unload",Plugins.unlink("menu.dll"));
+    "#,
+        &[],
+    );
+    r.tick(0, InputFrame::default()).unwrap();
+    let spec = r.host.engine.ui.menus.get(1, 1).unwrap();
+    assert_eq!(spec.items[0].label, "File");
+    assert!(spec.items[0].children[0].checked);
+    assert!(!spec.items[0].children[1].checked);
+    let click = |x, y| InputFrame {
+        pointer_x: x,
+        pointer_y: y,
+        buttons_pressed: buttons::MOUSE_LEFT,
+        ..Default::default()
+    };
+    r.tick(16, click(20, 10)).unwrap();
+    r.tick(32, InputFrame::default()).unwrap();
+    r.tick(48, click(20, 60)).unwrap();
+    r.tick(64, InputFrame::default()).unwrap();
+    let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log.contains("plugin engine_facade 1"), "{log}");
+    assert!(log.contains("children 2"), "{log}");
+    assert!(log.contains("native_menu_click Slow 1"), "{log}");
+    assert!(log.contains("unload 0"), "{log}");
+    let spec = r.host.engine.ui.menus.get(1, 1).unwrap();
+    assert!(!spec.items[0].children[0].checked);
+    assert!(spec.items[0].children[1].checked);
+}
+
+#[test]
+fn configured_plugin_shell_only_registers_and_never_exports_a_fake_capability() {
+    let (t, _) = fixture(
+        r#"
+        Debug.message("available",CanLoadPlugin("optional.dll"),CanLoadPlugin("unknown.dll"));
+        Plugins.link("optional.dll");
+        Debug.message("shell",Plugins.getStatus("optional.dll").kind,Plugins.getStatus("optional.dll").capability);
+        Debug.message("unlink",Plugins.unlink("optional.dll"),Plugins.unlink("optional.dll"));
+        Debug.message("export",typeof global.OptionalRenderer);
+    "#,
+        &[],
+    );
+    let path = t.path().join("project.json");
+    let mut p: crysirror_runtime::Project =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    p.clients[0].config["plugin_shells"] = json!(["OPTIONAL.dll"]);
+    std::fs::write(&path, serde_json::to_vec(&p).unwrap()).unwrap();
+    let mut registry = AdapterRegistry::default();
+    crysirror_krkr::register(&mut registry).unwrap();
+    let mut r = Runtime::with_registry(p, &path, &t.path().join("state2"), registry).unwrap();
+    r.tick(0, InputFrame::default()).unwrap();
+    let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log.contains("available 1 0"), "{log}");
+    assert!(log.contains("shell registration_only"), "{log}");
+    assert!(log.contains("unlink 1 0"), "{log}");
+    assert!(log.contains("export undefined"), "{log}");
 }

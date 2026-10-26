@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// Distributed under the GNU Affero General Public License, version 3 or
+// (at your option) any later version, https://www.gnu.org/licenses/agpl-3.0.html.
 //! KiriKiri native classes as thin translations onto engine services.
 //!
 //! Member names, defaults and argument conventions follow KiriKiri Z (as
@@ -22,6 +23,7 @@ pub fn install(rt: &mut Rt) {
     install_scripts(rt);
     install_plugins(rt);
     install_timer(rt);
+    crate::menus::install(rt);
     install_window(rt);
     install_layer(rt);
 }
@@ -34,7 +36,7 @@ pub fn unsupported(member: &str, capability: &str) -> TjsError {
     ))
 }
 
-fn this_of(rt: &Rt, this: Option<ObjectHandle>, what: &str) -> Result<ObjectHandle> {
+pub(crate) fn this_of(rt: &Rt, this: Option<ObjectHandle>, what: &str) -> Result<ObjectHandle> {
     let this = this.ok_or_else(|| TjsError::runtime(format!("{what} requires this")))?;
     Ok(rt.bound_this(this).unwrap_or(this))
 }
@@ -47,14 +49,14 @@ fn object_arg(v: &Variant) -> Option<ObjectHandle> {
     }
 }
 
-fn int(args: &[Variant], i: usize, default: i64) -> Result<i64> {
+pub(crate) fn int(args: &[Variant], i: usize, default: i64) -> Result<i64> {
     match args.get(i) {
         None | Some(Variant::Void) => Ok(default),
         Some(v) => v.to_integer(),
     }
 }
 
-fn need_int(args: &[Variant], i: usize, what: &str) -> Result<i64> {
+pub(crate) fn need_int(args: &[Variant], i: usize, what: &str) -> Result<i64> {
     match args.get(i) {
         None | Some(Variant::Void) => {
             Err(TjsError::runtime(format!("{what}: argument {i} required")))
@@ -63,7 +65,7 @@ fn need_int(args: &[Variant], i: usize, what: &str) -> Result<i64> {
     }
 }
 
-fn string(args: &[Variant], i: usize, what: &str) -> Result<String> {
+pub(crate) fn string(args: &[Variant], i: usize, what: &str) -> Result<String> {
     match args.get(i) {
         None | Some(Variant::Void) => {
             Err(TjsError::runtime(format!("{what}: argument {i} required")))
@@ -72,7 +74,7 @@ fn string(args: &[Variant], i: usize, what: &str) -> Result<String> {
     }
 }
 
-fn boolean(v: &Variant) -> bool {
+pub(crate) fn boolean(v: &Variant) -> bool {
     v.is_truthy()
 }
 
@@ -83,32 +85,32 @@ fn static_object(rt: &mut Rt, name: &str) -> ObjectHandle {
     h
 }
 
-type Native = fn(&mut Rt, Option<ObjectHandle>, Vec<Variant>) -> Result<Variant>;
-type Getter = fn(&mut Rt, Option<ObjectHandle>) -> Result<Variant>;
-type Setter = fn(&mut Rt, Option<ObjectHandle>, Variant) -> Result<()>;
+pub(crate) type Native = fn(&mut Rt, Option<ObjectHandle>, Vec<Variant>) -> Result<Variant>;
+pub(crate) type Getter = fn(&mut Rt, Option<ObjectHandle>) -> Result<Variant>;
+pub(crate) type Setter = fn(&mut Rt, Option<ObjectHandle>, Variant) -> Result<()>;
 
-fn methods(rt: &mut Rt, h: ObjectHandle, list: &[(&str, Native)]) {
+pub(crate) fn methods(rt: &mut Rt, h: ObjectHandle, list: &[(&str, Native)]) {
     for (name, f) in list {
         let f = *f;
         rt.register_object_native_with_arg_count(h, *name, NativeArgCount::Any, f);
     }
 }
 
-fn properties(rt: &mut Rt, h: ObjectHandle, list: &[(&str, Getter, Setter)]) {
+pub(crate) fn properties(rt: &mut Rt, h: ObjectHandle, list: &[(&str, Getter, Setter)]) {
     for (name, g, s) in list {
         let (g, s) = (*g, *s);
         rt.register_object_native_property(h, *name, g, s);
     }
 }
 
-fn read_only(_: &mut Rt, _: Option<ObjectHandle>, _: Variant) -> Result<()> {
+pub(crate) fn read_only(_: &mut Rt, _: Option<ObjectHandle>, _: Variant) -> Result<()> {
     Err(TjsError::runtime("property is read-only"))
 }
 
 /// Install a constructable native class. `init` runs on every constructor
 /// call, including the argument-less call TJS makes before a script subclass
 /// forwards its arguments with `super.Class(...)`.
-fn native_class(rt: &mut Rt, name: &'static str, init: Native) -> ObjectHandle {
+pub(crate) fn native_class(rt: &mut Rt, name: &'static str, init: Native) -> ObjectHandle {
     let class = rt.alloc_native_constructor(
         move |rt: &mut Rt, this: Option<ObjectHandle>, args: Vec<Variant>| {
             let existing = this
@@ -500,24 +502,7 @@ fn install_scripts(rt: &mut Rt) {
 
 fn install_plugins(rt: &mut Rt) {
     let h = static_object(rt, "Plugins");
-    methods(
-        rt,
-        h,
-        &[
-            ("link", |_, _, a| {
-                let name = a
-                    .first()
-                    .map(Variant::to_tjs_string)
-                    .transpose()?
-                    .unwrap_or_default();
-                Err(unsupported(
-                    &format!("Plugins.link(\"{name}\")"),
-                    "an engine implementation of that plugin; native DLLs are never loaded",
-                ))
-            }),
-            ("unlink", |_, _, _| Ok(Variant::Void)),
-        ],
-    );
+    crate::plugins::install(rt, h);
 }
 
 // ------------------------------------------------------------------ Timer
@@ -646,8 +631,11 @@ fn install_window(rt: &mut Rt) {
                 primary: None,
                 inner: [w as i64, height as i64],
                 visible: false,
+                menu: None,
             },
         );
+        let root = crate::menus::root(rt, h)?;
+        rt.host_mut().windows.get_mut(&h.0).unwrap().menu = Some(root.0);
         rt.set_object_member(h, "caption", Variant::String(String::new()));
         if let Variant::Object(class) = rt.global_member("Window") {
             rt.set_object_member(class, "mainWindow", Variant::self_bound(h));
@@ -706,6 +694,16 @@ fn install_window(rt: &mut Rt) {
         rt,
         class,
         &[
+            (
+                "menu",
+                |rt, t| {
+                    let menu = window_of(rt, t)?.menu;
+                    Ok(menu
+                        .map(|m| Variant::Object(ObjectHandle(m)))
+                        .unwrap_or(Variant::Void))
+                },
+                read_only,
+            ),
             ("innerWidth", inner_w, set_w),
             ("innerHeight", inner_h, set_h),
             ("width", inner_w, set_w),
@@ -780,7 +778,10 @@ fn font_size(rt: &Rt, font: ObjectHandle) -> Result<u64> {
             ));
         }
     }
-    let size = rt.object_member(font, "height").to_integer()?.unsigned_abs();
+    let size = rt
+        .object_member(font, "height")
+        .to_integer()?
+        .unsigned_abs();
     if !(1..=512).contains(&size) {
         return Err(TjsError::runtime("Font.height must have magnitude 1..512"));
     }
@@ -792,7 +793,9 @@ fn font_text_width(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     let text = string(&a, 0, "Font.getTextWidth")?;
     let size = font_size(rt, font)?;
     let host = rt.host();
-    let metrics = host.text_measurement.as_ref()
+    let metrics = host
+        .text_measurement
+        .as_ref()
         .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?
         .measure_simple(&host.font, size as f32, &text)
         .map_err(|e| TjsError::runtime(format!("Font.getTextWidth: {e}")))?;
@@ -848,8 +851,18 @@ fn install_layer(rt: &mut Rt) {
         rt.set_object_member(font, "bold", Variant::Integer(0));
         rt.set_object_member(font, "italic", Variant::Integer(0));
         rt.set_object_member(font, "angle", Variant::Integer(0));
-        rt.register_object_native_with_arg_count(font, "getTextWidth", NativeArgCount::AtLeast(1), font_text_width);
-        rt.register_object_native_with_arg_count(font, "getTextHeight", NativeArgCount::AtLeast(1), font_text_height);
+        rt.register_object_native_with_arg_count(
+            font,
+            "getTextWidth",
+            NativeArgCount::AtLeast(1),
+            font_text_width,
+        );
+        rt.register_object_native_with_arg_count(
+            font,
+            "getTextHeight",
+            NativeArgCount::AtLeast(1),
+            font_text_height,
+        );
         rt.set_object_member(h, "font", Variant::Object(font));
         rt.set_object_member(h, "__window", Variant::self_bound(window));
         rt.set_object_member(h, "name", Variant::String(String::new()));
@@ -1394,7 +1407,10 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     );
     let text = string(&a, 2, "Layer.drawText")?;
     if text.contains(['\n', '\r']) {
-        return Err(unsupported("multiline Layer.drawText", "native multiline text policy"));
+        return Err(unsupported(
+            "multiline Layer.drawText",
+            "native multiline text policy",
+        ));
     }
     let opa = int(&a, 4, 255)?;
     let color = argb(need_int(&a, 3, "Layer.drawText")?, Some(opa));

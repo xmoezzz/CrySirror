@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Rich text surfaces and reveal events, scoped to the current engine client.
 use crate::{
-    object::{Class, ClassInfo, MethodInfo, ObjectId, TypeHint as T},
     EngineContext, EngineState, Value,
+    object::{Class, ClassInfo, MethodInfo, ObjectId, TypeHint as T},
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::state::ClientId;
 use crysirror_text::{
     layout::{Layout, LayoutOptions},
@@ -15,7 +16,7 @@ use crysirror_text::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, VecDeque},
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
 };
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -26,18 +27,20 @@ pub struct TextOptions {
     pub raster: RasterOptions,
     pub graphemes_per_second: Option<f64>,
 }
-struct Block {
-    slot: u32,
-    markup: String,
-    options: TextOptions,
-    layout: Layout,
-    icons: BTreeMap<String, IconBitmap>,
-    writer: Option<Typewriter>,
-    events: VecDeque<serde_json::Value>,
+pub(crate) struct Block {
+    pub(crate) slot: u32,
+    pub(crate) markup: String,
+    pub(crate) options: TextOptions,
+    pub(crate) layout: Arc<Layout>,
+    pub(crate) icons: BTreeMap<String, Arc<IconBitmap>>,
+    pub(crate) writer: Option<Typewriter>,
+    pub(crate) events: VecDeque<serde_json::Value>,
+    pub(crate) render: crate::text_async::RenderState,
 }
 #[derive(Default)]
 pub struct TextRuntime {
-    blocks: BTreeMap<(u32, String), Block>,
+    pub(crate) blocks: BTreeMap<(u32, String), Block>,
+    pub(crate) asynchronous: crate::text_async::TextJobs,
 }
 const MAX_BLOCKS: usize = 8;
 const MAX_EVENTS: usize = 4096;
@@ -48,7 +51,7 @@ fn valid_name(name: &str) -> Result<()> {
     );
     Ok(())
 }
-fn enqueue(block: &mut Block, events: Vec<RevealEvent>) -> Result<()> {
+pub(crate) fn enqueue(block: &mut Block, events: Vec<RevealEvent>) -> Result<()> {
     ensure!(
         block.events.len() + events.len() <= MAX_EVENTS,
         "text event queue full; drainEvents before advancing"
@@ -87,15 +90,38 @@ fn publish(state: &mut EngineState, owner: ClientId, block: &Block) -> Result<St
         rgba,
     )
 }
-fn build(
-    state: &mut EngineState,
+fn build(state: &mut EngineState, markup: &str, options: TextOptions, slot: u32) -> Result<Block> {
+    let client = state.client;
+    let localizer = state.localization.client(client.0);
+    let fonts = localizer.fonts()?;
+    let locale = localizer.locale.clone();
+    let text = state.runtime.assets.text.clone();
+    build_from(&text, markup, options, slot, fonts, locale, |asset| {
+        if let Some(surface) = state.runtime.assets.surface(client, asset) {
+            return Ok(IconBitmap {
+                width: surface.width,
+                height: surface.height,
+                rgba: surface.rgba.to_vec(),
+            });
+        }
+        let bytes = state.runtime.assets.read_for(client, asset)?;
+        let surface = state.runtime.assets.decode_image(client, asset, &bytes)?;
+        Ok(IconBitmap {
+            width: surface.width,
+            height: surface.height,
+            rgba: surface.rgba,
+        })
+    })
+}
+pub(crate) fn build_from(
+    text: &crysirror_text::TextSystem,
     markup: &str,
     mut options: TextOptions,
     slot: u32,
+    mut fonts: Vec<String>,
+    locale: String,
+    mut icon: impl FnMut(&str) -> Result<IconBitmap>,
 ) -> Result<Block> {
-    let client = state.client;
-    let localizer = state.localization.client(client.0);
-    let mut fonts = localizer.fonts()?;
     if fonts.is_empty() {
         fonts.push("default".into());
     }
@@ -108,37 +134,19 @@ fn build(
         });
     }
     if options.layout.language.is_none() {
-        options.layout.language = Some(localizer.locale.clone());
+        options.layout.language = Some(locale);
     }
     options.layout.validate()?;
     options.raster.validate()?;
     let document = RichText::parse(markup, options.style.clone().unwrap())?;
-    let layout = state
-        .runtime
-        .assets
-        .text
-        .layout_rich(&document, &options.layout)?;
+    let layout = text.layout_rich(&document, &options.layout)?;
     let mut icons = BTreeMap::new();
     for node in &document.nodes {
         if let RichNode::Icon { asset, .. } = node {
             if icons.contains_key(asset) {
                 continue;
             }
-            let image = if let Some(surface) = state.runtime.assets.surface(client, asset) {
-                IconBitmap {
-                    width: surface.width,
-                    height: surface.height,
-                    rgba: surface.rgba.to_vec(),
-                }
-            } else {
-                let bytes = state.runtime.assets.read_for(client, asset)?;
-                let surface = state.runtime.assets.decode_image(client,asset,bytes.as_ref())?;
-                IconBitmap {
-                    width: surface.width,
-                    height: surface.height,
-                    rgba: surface.rgba,
-                }
-            };
+            let image = Arc::new(icon(asset)?);
             icons.insert(asset.clone(), image);
         }
     }
@@ -150,19 +158,24 @@ fn build(
         slot,
         markup: markup.into(),
         options,
-        layout,
+        layout: Arc::new(layout),
         icons,
         writer,
         events: VecDeque::new(),
+        render: Default::default(),
     })
 }
-fn summary(block: &Block) -> serde_json::Value {
-    serde_json::json!({"markup":block.markup,"options":block.options,"reveal":block.writer.as_ref().map(Typewriter::state),"surface":format!("__surface/{}",block.slot),"glyphs":block.layout.glyphs.len(),"lines":block.layout.lines.len(),"graphemes":block.layout.grapheme_count,"clipped":block.layout.clipped,"visible_text":block.writer.as_ref().map(Typewriter::visible_text).unwrap_or(&block.layout.text)})
+pub(crate) fn summary(block: &Block) -> serde_json::Value {
+    serde_json::json!({"markup":block.markup,"options":block.options,"reveal":block.writer.as_ref().map(Typewriter::state),"surface":format!("__surface/{}",block.slot),"glyphs":block.layout.glyphs.len(),"lines":block.layout.lines.len(),"graphemes":block.layout.grapheme_count,"clipped":block.layout.clipped,"visible_text":block.writer.as_ref().map(Typewriter::visible_text).unwrap_or(&block.layout.text),"render_pending":block.render.pending.is_some(),"render_error":block.render.error,"published_graphemes":if block.render.pending.is_some() || block.render.error.is_some(){block.render.published}else{block.writer.as_ref().map_or(block.layout.grapheme_count,|w|w.revealed())}})
 }
 /// Only changed reveal frames are rasterized. Explicit persistence is available
 /// through Text.state/restore; decoder, font and surface objects are never saved.
 pub fn update(cx: &mut EngineContext, delta_ms: u64) -> Result<()> {
     let state = cx.state()?;
+    crate::text_async::poll(state)?;
+    if state.runtime.assets.is_nonblocking() {
+        return crate::text_async::reveal(state, delta_ms);
+    }
     let mut blocks = std::mem::take(&mut state.rich_text.blocks);
     let result = (|| {
         for ((owner, _), block) in &mut blocks {
@@ -205,12 +218,17 @@ fn info() -> &'static ClassInfo {
     INFO.get_or_init(||{
         fn m(name:&'static str,params:Vec<(&'static str,T)>,returns:T,doc:&'static str)->MethodInfo {MethodInfo{name,params,returns,doc}}
         ClassInfo{name:"Text",doc:"CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed.",properties:vec![],methods:vec![
+            m("beginDraw",vec![("name",T::String),("markup",T::String),("options",T::Optional(Box::new(T::Map)))],T::Int,"Prepare markup, shaping, icon decoding and initial raster on bounded workers. Returns a client/generation ticket; the old block remains until successful publication."),
+            m("beginRestore",vec![("name",T::String),("state",T::Map)],T::Int,"Prepare saved text and reveal state on workers, publishing only after validation."),
+            m("beginMeasure",vec![("font",T::String),("size",T::Number),("text",T::String)],T::Int,"Measure an arbitrarily sized bounded single line on a worker; status returns metrics after completion."),
+            m("status",vec![("ticket",T::Int)],T::Map,"Poll and publish completed text work without joining. Ready drawing includes surface metadata; errors and obsolete generations fail visibly."),
+            m("cancel",vec![("ticket",T::Int)],T::Void,"Release a ticket and cancel pending preparation. Already published blocks remain owned by Text until remove."),
             m("measureSimple",vec![("font",T::String),("size",T::Number),("text",T::String)],T::Map,"Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface."),
-            m("draw",vec![("name",T::String),("markup",T::String),("options",T::Map)],T::String,"Shape and rasterize rich text; returns __surface path for a layer. Optional typewriter rate advances with App frames."),
+            m("draw",vec![("name",T::String),("markup",T::String),("options",T::Map)],T::String,"Offline rich-text preparation; live hosts use beginDraw/drawAsync. Returns a shared surface path for a layer."),
             m("state",vec![("name",T::String)],T::Map,"Read content/options/reveal state for explicit persistence."),
-            m("restore",vec![("name",T::String),("state",T::Map)],T::String,"Rebuild saved markup/options and restore reveal clock. Pending event queues are not replayed."),
+            m("restore",vec![("name",T::String),("state",T::Map)],T::String,"Offline rebuild of saved markup/options/reveal; live hosts use beginRestore/restoreAsync. Pending event queues are not replayed."),
             m("pause",vec![("name",T::String),("paused",T::Bool)],T::Void,"Pause/resume this block's reveal clock."),
-            m("finish",vec![("name",T::String)],T::Void,"Reveal remaining text and emit marker/finished events."),
+            m("finish",vec![("name",T::String)],T::Void,"Reveal remaining text. In live hosts, marker/finished events are delivered only after the worker raster is published."),
             m("drainEvents",vec![("name",T::String)],T::List(Box::new(T::Map)),"Drain grapheme, authored marker and finished events."),
             m("remove",vec![("name",T::String)],T::Void,"Remove block and release its dynamic surface."),
         ]}
@@ -230,11 +248,23 @@ impl Class for TextClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if let Some(value) = crate::text_async::call(cx.state()?, method, args)? {
+            return Ok(value);
+        }
         if method == "measureSimple" {
             let font = args.first().context("font alias")?.as_str()?;
             let size = args.get(1).context("font size")?.as_f32()?;
             let text = args.get(2).context("text")?.as_str()?;
-            let metrics = cx.state()?.runtime.assets.text.measure_simple(font, size, text)?;
+            ensure!(
+                !cx.state()?.runtime.assets.is_nonblocking() || text.len() <= 4096,
+                "large text measurement needs beginMeasure in a live host"
+            );
+            let metrics = cx
+                .state()?
+                .runtime
+                .assets
+                .text
+                .measure_simple(font, size, text)?;
             return Ok(Value::from_json(serde_json::json!({
                 "advance": metrics.advance, "line_height": metrics.line_height,
                 "ascent": metrics.ascent, "descent": metrics.descent,
@@ -246,6 +276,10 @@ impl Class for TextClass {
         let client = state.client;
         let key = (client.0, name);
         if method == "draw" || method == "restore" {
+            ensure!(
+                !state.runtime.assets.is_nonblocking(),
+                "synchronous text preparation is offline-only; use beginDraw/beginRestore"
+            );
             let existing = state.rich_text.blocks.get(&key).map(|b| b.slot);
             ensure!(
                 existing.is_some()
@@ -308,6 +342,7 @@ impl Class for TextClass {
             return Ok(Value::Str(path));
         }
         if method == "remove" {
+            crate::text_async::cancel_name(state, &key);
             let block = state
                 .rich_text
                 .blocks
@@ -333,6 +368,10 @@ impl Class for TextClass {
                     Value::Null
                 }
                 "finish" => {
+                    if state.runtime.assets.is_nonblocking() {
+                        crate::text_async::finish(state, &mut block)?;
+                        return Ok(Value::Null);
+                    }
                     let previous = block
                         .writer
                         .as_ref()

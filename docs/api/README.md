@@ -74,7 +74,7 @@ This API is a bounded modular VFX foundation, not full Niagara parity.
 `cargo test`:
 
 1. **Regenerate.** After changing a class, a command or a spec, run
-   `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs` and
+   `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs` and
    check the diff in `docs/api/`. A stale file fails the test.
 2. **Log signature changes.** The *fingerprint* hashes the signatures only:
    names, types, writability, spec fields and defaults, command variants and

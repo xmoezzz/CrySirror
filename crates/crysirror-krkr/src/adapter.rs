@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// Distributed under the GNU Affero General Public License, version 3 or
+// (at your option) any later version, https://www.gnu.org/licenses/agpl-3.0.html.
 //! `krkr` VmAdapter: runs original TJS2 scripts on the vendored Kirakira VM
 //! and translates KiriKiri native objects onto engine Layer/Canvas services.
 use crate::{
@@ -33,6 +34,10 @@ pub struct Config {
     pub font_alias: String,
     /// Logical canvas size; must equal the project canvas.
     pub canvas: [u32; 2],
+    /// Explicit registration-only native modules, with no callable exports.
+    /// Loading a shell does not establish implementation of that plugin.
+    #[serde(default)]
+    pub plugin_shells: Vec<String>,
 }
 fn startup() -> String {
     "startup.tjs".into()
@@ -57,6 +62,17 @@ impl Config {
             self.canvas.iter().all(|v| (1..=8192).contains(v)),
             "KiriKiri canvas size"
         );
+        ensure!(
+            self.plugin_shells.len() <= 128,
+            "KiriKiri plugin shell limit"
+        );
+        for name in &self.plugin_shells {
+            let name = crate::plugins::canonical(name).map_err(|e| anyhow::anyhow!("{e}"))?;
+            ensure!(
+                name != "menu.dll",
+                "engine facade cannot be replaced by a plugin shell"
+            );
+        }
         Ok(())
     }
 }
@@ -100,6 +116,12 @@ impl KrkrVm {
             self.config.startup
         );
         let mut host = KrkrHost::new(self.config.canvas, self.config.font_alias.clone());
+        host.plugin_shells = self
+            .config
+            .plugin_shells
+            .iter()
+            .map(|s| crate::plugins::canonical(s).expect("validated plugin name"))
+            .collect();
         host.storage = Some(storage);
         host.images = Some(h.image_metadata(self.client).map_err(err)?);
         host.text_measurement = Some(h.text_measurement(self.client).map_err(err)?);
@@ -118,12 +140,13 @@ impl KrkrVm {
     /// Submit queued engine commands in the order TJS issued them.
     fn flush(&mut self, h: &mut dyn HostServices) -> Result<()> {
         let rt = self.rt.as_mut().context("KiriKiri runtime absent")?;
-        rt.host_mut().sync();
+        rt.host_mut().sync().map_err(|e| anyhow::anyhow!("{e}"))?;
         let batches = std::mem::take(&mut rt.host_mut().batches);
         for batch in batches {
             let payload = match batch {
                 Batch::Layers(ops) => json!({"layers": ops}),
                 Batch::Canvases(ops) => json!({"canvases": ops}),
+                Batch::Ui(ops) => json!({"ui":ops}),
             };
             h.submit_engine(self.client, 1, &serde_json::to_vec(&payload)?)
                 .map_err(err)
@@ -297,6 +320,13 @@ impl KrkrVm {
         }
         let now = h.now_ms();
         self.rt.as_mut().unwrap().host_mut().now = now;
+        let menus = h
+            .query_engine(
+                self.client,
+                crysirror_core::service::EngineQuery::MenuEvents,
+            )
+            .map_err(err)?;
+        crate::menus::dispatch(self.rt.as_mut().unwrap(), &menus)?;
         self.input(input)?;
         self.timers(now)?;
         self.flush(h)?;
@@ -363,6 +393,8 @@ impl VmAdapter for KrkrVm {
             "frames": self.frames,
             "layers": host.map(|h| h.layers.len()),
             "timers": host.map(|h| h.timers.len()),
+            "plugins": host.map(|h| &h.loaded_plugins),
+            "plugin_shells": host.map(|h| &h.plugin_shells),
             "engine_api_calls": host.map(|h| h.api_calls),
             "events": self.events,
             "log_tail": host.map(|h| h.log.iter().rev().take(16).cloned().collect::<Vec<_>>()),

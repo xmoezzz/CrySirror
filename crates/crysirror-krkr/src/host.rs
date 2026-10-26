@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// Distributed under the GNU Affero General Public License, version 3 or
+// (at your option) any later version, https://www.gnu.org/licenses/agpl-3.0.html.
 //! Handle translation between KiriKiri native objects and engine services.
 //!
 //! A KiriKiri `Layer` is one engine Layer node (position, size, clip,
@@ -61,6 +62,7 @@ impl LayerState {
 
 #[derive(Clone, Debug, Default)]
 pub struct WindowState {
+    pub menu: Option<usize>,
     pub primary: Option<usize>,
     pub inner: [i64; 2],
     pub visible: bool,
@@ -76,6 +78,7 @@ pub struct TimerState {
 
 #[derive(Debug)]
 pub enum Batch {
+    Ui(Vec<Value>),
     Layers(Vec<Value>),
     Canvases(Vec<Value>),
 }
@@ -92,6 +95,11 @@ pub struct KrkrHost {
     pub layers: BTreeMap<usize, LayerState>,
     pub windows: BTreeMap<usize, WindowState>,
     pub timers: BTreeMap<usize, TimerState>,
+    pub menus: BTreeMap<usize, crate::menus::MenuState>,
+    pub menus_last: Option<Value>,
+    pub menu_popups: Vec<(usize, [f32; 2])>,
+    pub loaded_plugins: BTreeSet<String>,
+    pub plugin_shells: BTreeSet<String>,
     free_slots: BTreeSet<u32>,
     next_slot: u32,
     pub exit_requested: bool,
@@ -112,6 +120,11 @@ impl KrkrHost {
             layers: BTreeMap::new(),
             windows: BTreeMap::new(),
             timers: BTreeMap::new(),
+            menus: BTreeMap::new(),
+            menus_last: None,
+            menu_popups: vec![],
+            loaded_plugins: BTreeSet::new(),
+            plugin_shells: BTreeSet::new(),
             free_slots: BTreeSet::new(),
             next_slot: 1,
             exit_requested: false,
@@ -140,6 +153,12 @@ impl KrkrHost {
         }
     }
 
+    pub fn ui_op(&mut self, op: Value) {
+        match self.batches.last_mut() {
+            Some(Batch::Ui(ops)) => ops.push(op),
+            _ => self.batches.push(Batch::Ui(vec![op])),
+        }
+    }
     pub fn storage(&self) -> TjsResult<&Storage> {
         self.storage
             .as_ref()
@@ -320,7 +339,8 @@ impl KrkrHost {
 
     /// Emit the commands that bring engine nodes up to date: painter order
     /// from a depth-first walk, container geometry and image placement.
-    pub fn sync(&mut self) {
+    pub fn sync(&mut self) -> TjsResult<()> {
+        crate::menus::sync(self)?;
         let roots: Vec<usize> = self.windows.values().filter_map(|w| w.primary).collect();
         let mut order = Vec::new();
         for root in roots {
@@ -368,6 +388,7 @@ impl KrkrHost {
                 self.canvas_op(p);
             }
         }
+        Ok(())
     }
 
     /// Front-most visible layer containing the canvas point, with local
@@ -422,6 +443,39 @@ pub fn container_spec(l: &LayerState, major: i32, parent: Option<u32>, shown: bo
 }
 
 impl TjsHost for KrkrHost {
+    fn invalidate_object(&mut self, handle: ObjectHandle) {
+        self.timers.remove(&handle.0);
+        self.invalidate_layer(handle.0);
+        let menus = self
+            .menus
+            .iter()
+            .filter(|(id, m)| **id == handle.0 || m.window == handle.0)
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        for id in menus {
+            if let Some(menu) = self.menus.remove(&id) {
+                if let Some(parent) = menu.parent.and_then(|p| self.menus.get_mut(&p)) {
+                    parent.children.retain(|child| *child != id);
+                }
+                for child in menu.children {
+                    if let Some(child) = self.menus.get_mut(&child) {
+                        child.parent = None;
+                    }
+                }
+                for window in self.windows.values_mut() {
+                    if window.menu == Some(id) {
+                        window.menu = None;
+                    }
+                }
+            }
+        }
+        if let Some(window) = self.windows.remove(&handle.0) {
+            if let Some(primary) = window.primary {
+                self.invalidate_layer(primary);
+            }
+        }
+    }
+
     fn read_text(&mut self, name: &str, _mode: &str) -> TjsResult<String> {
         let bytes = self
             .storage()?

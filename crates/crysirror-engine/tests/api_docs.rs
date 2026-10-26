@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! docs/api is generated from the live registry and specs. This test fails
 //! when the checked-in reference is stale or an API signature change has no
 //! CHANGES.md entry. Regenerate with
 //! `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 use crysirror_engine::{
-    api_doc::{self, sample, ApiInput, DataType},
+    api_doc::{self, ApiInput, DataType, sample},
     builtin,
     object::ClassRegistry,
     services::COMMAND_API,
@@ -198,6 +199,8 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-runtime/src/media.rs",
         "crates/crysirror-runtime/src/assets_async.rs",
         "crates/crysirror-tasks/src/lib.rs",
+        "crates/crysirror-tasks/src/table.rs",
+        "crates/crysirror-scene/src/ui/menu.rs",
         "crates/crysirror-scene/src/ui.rs",
         "crates/crysirror-scene/src/material.rs",
         "crates/crysirror-scene/src/sequence.rs",
@@ -223,18 +226,66 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
-        d("DecodeLimits", "Resources.defineProfile limits", sample::<crysirror_resource::DecodeLimits>(e.clone())),
-        d("TransformSpec", "Resources.defineProfile rules and native format pipelines", sample::<crysirror_resource::TransformSpec>(json!({"algorithm":"identity"}))),
+        d(
+            "DecodeLimits",
+            "Resources.defineProfile limits",
+            sample::<crysirror_resource::DecodeLimits>(e.clone()),
+        ),
+        d(
+            "TransformSpec",
+            "Resources.defineProfile rules and native format pipelines",
+            sample::<crysirror_resource::TransformSpec>(json!({"algorithm":"identity"})),
+        ),
         d("LzssMode", "LzssParams.mode", Some(json!("bytewise"))),
-        d("LzssParams", "TransformSpec parameters for lzss", sample::<crysirror_resource::LzssParams>(e.clone())),
-        d("FileKind", "Resources file/audio decoder registry", Some(json!("file"))),
-        d("WaveLoop", "WaveSpec.loops; native sample positions", sample::<crysirror_resource::WaveLoop>(json!({"start":0,"end":1,"play_count":0}))),
-        d("WaveSpec", "Shared native resource WAVE serialization", sample::<crysirror_resource::WaveSpec>(e.clone())),
-        d("BitmapRect", "Bitmap.blit and Bitmap.stretch source/destination rectangles", Some(json!({"x":0,"y":0,"width":1,"height":1}))),
-        d("PixelMath", "Bitmap.blit and Bitmap.stretch mode", Some(json!("copy"))),
-        d("Sampling", "Bitmap.stretch sampling", Some(json!("nearest"))),
-        d("BlitOptions", "Bitmap.blit options", sample::<crysirror_image::bitmap::BlitOptions>(json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":[0,0]}))),
-        d("StretchOptions", "Bitmap.stretch options", sample::<crysirror_image::bitmap::StretchOptions>(json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":{"x":0,"y":0,"width":1,"height":1}}))),
+        d(
+            "LzssParams",
+            "TransformSpec parameters for lzss",
+            sample::<crysirror_resource::LzssParams>(e.clone()),
+        ),
+        d(
+            "FileKind",
+            "Resources file/audio decoder registry",
+            Some(json!("file")),
+        ),
+        d(
+            "WaveLoop",
+            "WaveSpec.loops; native sample positions",
+            sample::<crysirror_resource::WaveLoop>(json!({"start":0,"end":1,"play_count":0})),
+        ),
+        d(
+            "WaveSpec",
+            "Shared native resource WAVE serialization",
+            sample::<crysirror_resource::WaveSpec>(e.clone()),
+        ),
+        d(
+            "BitmapRect",
+            "Bitmap.blit and Bitmap.stretch source/destination rectangles",
+            Some(json!({"x":0,"y":0,"width":1,"height":1})),
+        ),
+        d(
+            "PixelMath",
+            "Bitmap.blit and Bitmap.stretch mode",
+            Some(json!("copy")),
+        ),
+        d(
+            "Sampling",
+            "Bitmap.stretch sampling",
+            Some(json!("nearest")),
+        ),
+        d(
+            "BlitOptions",
+            "Bitmap.blit options",
+            sample::<crysirror_image::bitmap::BlitOptions>(
+                json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":[0,0]}),
+            ),
+        ),
+        d(
+            "StretchOptions",
+            "Bitmap.stretch options",
+            sample::<crysirror_image::bitmap::StretchOptions>(
+                json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":{"x":0,"y":0,"width":1,"height":1}}),
+            ),
+        ),
         d(
             "MessageWindow",
             "Siglus `Config.message_window` (ADR 0061)",
@@ -653,6 +704,26 @@ fn generate() -> api_doc::ApiDocs {
             None,
         ),
         d("UiCommand", "UI mutation batches (`ServiceBatch.ui`)", None),
+        d(
+            "MenuSpec",
+            "UI.setMenu / UiCommand.set_menu",
+            sample::<ui::menu::MenuSpec>(
+                json!({"id":1,"rect":[0,0,640,24],"font":"default","items":[]}),
+            ),
+        ),
+        d(
+            "MenuItemSpec",
+            "MenuSpec.items",
+            sample::<ui::menu::MenuItemSpec>(json!({"id":2,"label":"File"})),
+        ),
+        d(
+            "OperationStatus",
+            "Background Text/Save/Resources operation polling",
+            None,
+        ),
+        d("OperationState", "OperationStatus.state", None),
+        d("UiEvent", "Ui.events and native engine event queries", None),
+        d("WidgetId", "UiEvent.widget client/local identity", None),
     ];
     api_doc::generate(&ApiInput {
         classes: &classes,
@@ -673,6 +744,7 @@ fn generate() -> api_doc::ApiDocs {
         data,
         adapters: vec![
             ("avg32".into(), config("crates/crysirror-avg32/src/lib.rs")),
+            ("krkr", config("crates/crysirror-krkr/src/adapter.rs")),
             (
                 "reallive",
                 config("crates/crysirror-reallive/src/adapter.rs"),
@@ -818,10 +890,12 @@ fn modular_vfx_reference_keeps_legacy_types_distinct_and_explains_wire_values() 
         field("VfxScalarValue", "Parameter")["rust_type"],
         "VfxScalarBinding"
     );
-    assert!(field("VfxScalarValue", "Constant")["doc"]
-        .as_str()
-        .unwrap()
-        .contains("without a variant tag"));
+    assert!(
+        field("VfxScalarValue", "Constant")["doc"]
+            .as_str()
+            .unwrap()
+            .contains("without a variant tag")
+    );
     assert_eq!(field("EmitterSpec", "rate")["rust_type"], "f32");
     assert!(docs.typescript.contains("class Vfx"));
     assert!(docs.typescript.contains("vfx: Vfx"));

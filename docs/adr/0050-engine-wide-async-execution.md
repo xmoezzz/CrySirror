@@ -65,9 +65,9 @@ an asynchronous pipeline around it.
 | Resources | Scoped asynchronous reads, archive/decompression/decryption, decoding/import/cook, streaming/unload and revision invalidation | ADR 0049 covers initial reads/image/model imports; broader streaming/cook/lifetime pipeline remains |
 | Audio | Streaming decode/DSP scheduling with bounded command/sample queues; real-time callback consumes ready data without blocking | Existing mixer/media workers are partial coverage; no whole-audio migration claim |
 | Video | Asynchronous demux/decode, bounded video/audio queues, synchronized presentation, seek/cancel and teardown | Existing media workers cover a bounded profile; streaming/seek and full integration remain |
-| Text and UI | Font loading, shaping/layout/raster/atlas preparation as jobs; ordered input/focus and short UI-state commits | Current shared text/UI services do not establish completed asynchronous preparation |
-| Scripts and native VMs | Ordered interpreter execution with service suspension/resumption, off-thread compilation and typed owner-thread commits | Original ordering remains; adapter readiness fences and complete async bindings remain |
-| Save/restore | Asynchronous staging/serialization/I/O/reconstruction followed by an atomic validated safepoint commit | Per-format semantics and existing snapshot limits remain; shared async lifecycle is outstanding |
+| Text and UI | Font loading, shaping/layout/raster/atlas preparation as jobs; ordered input/focus and short UI-state commits | ADR 0066 adds worker rich-text preparation/reveal and shared menus; font loading and GPU atlas boundaries remain |
+| Scripts and native VMs | Ordered interpreter execution with service suspension/resumption, off-thread compilation and typed owner-thread commits | ADR 0066 adds bounded JS service Promise bindings; native execution/storage callbacks and startup compilation still have synchronous boundaries |
+| Save/restore | Asynchronous staging/serialization/I/O/reconstruction followed by an atomic validated safepoint commit | ADR 0066 adds worker encoding/I/O/validation and atomic prepared commit; native checkpoint capture/reconstruction remain ordered owner operations |
 | Editor, authoring, MCP | Asynchronous import/build/inspection/capture/edit operations, cancellation/progress and live-session completion handling | Existing APIs/worker inspection are partial; end-to-end async operation protocol remains |
 
 These are acceptance requirements, not declarations that the listed work has

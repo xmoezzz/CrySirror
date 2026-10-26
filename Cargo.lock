@@ -1493,7 +1493,9 @@ dependencies = [
  "crysirror-author",
  "crysirror-core",
  "crysirror-engine",
+ "crysirror-image",
  "crysirror-runtime",
+ "crysirror-tasks",
  "serde_json",
  "tempfile",
 ]

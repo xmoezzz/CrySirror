@@ -1,19 +1,14 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Owner-polled resource work. Workers receive immutable bytes, registries and
 //! client capabilities; only successful completions become owner-visible state.
 //! Tickets/results are derived runtime state and are intentionally not saved.
 use crate::{Archive, DecodeContext, DecodedFile, FileRegistry, FormatRegistry};
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use crysirror_core::{service::AssetReader, state::ClientId};
 use crysirror_tasks::{Task, TaskPool};
-use std::{
-    collections::BTreeMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
-};
-static NEXT_TICKET: AtomicU64 = AtomicU64::new(1);
+use std::{collections::BTreeMap, sync::Arc};
+
 pub const MAX_RESOURCE_JOBS_PER_CLIENT: usize = 64;
 pub const MAX_RESOURCE_JOBS: usize = 256;
 #[derive(Clone)]
@@ -68,9 +63,7 @@ impl ResourceTasks {
         work: impl FnOnce(crysirror_tasks::Cancellation) -> Result<ResourceResult> + Send + 'static,
     ) -> Result<u64> {
         // The global ID may have a gap after pool rejection; no rejected job is kept.
-        let ticket = NEXT_TICKET
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
-            .map_err(|_| anyhow::anyhow!("resource task identifiers exhausted"))?;
+        let ticket = crysirror_tasks::table::next_operation_id()?;
         let task = pool.spawn(work)?;
         self.jobs.insert(
             ticket,

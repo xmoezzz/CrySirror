@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! The engine context handed to classes, behaviours and script hosts.
 use crate::{
     object::{ClassRegistry, ObjectId, ObjectTable},
@@ -35,6 +36,7 @@ pub struct EngineState {
     pub mixer_audio: crate::audio_api::AudioRuntime,
     /// Resource formats and client-scoped decode profiles (no game keys saved).
     pub resources: crate::resource_api::ResourceRuntime,
+    pub saves: crate::save_api::SaveRuntime,
     /// Arcade vehicles by entity (ADR 0043); not saved yet.
     pub vehicles: std::collections::HashMap<
         (u32, u32),

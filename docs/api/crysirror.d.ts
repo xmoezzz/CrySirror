@@ -450,6 +450,12 @@ declare class Resources {
   readDecoded(asset: string, options: Record<string, any> | null): Record<string, any>;
   /** Decode once and publish a client-scoped VFS resource at target. Normal Bitmap/Assets/Audio calls can consume it. Options {format?,profile?}; retained output shares the client's decode budget and no extracted file is written. */
   mountDecoded(asset: string, target: string, options: Record<string, any> | null): Record<string, any>;
+  /** Probe archive/file/image formats on bounded workers. Poll decodeStatus and readDecode; no source opening or decoder runs on the owner. */
+  beginProbe(asset: string, kind: string, options: Record<string, any> | null): number;
+  /** Decode a native image and its scoped companions on workers. Options {format?,profile?}. publishImage commits ready immutable pixels without a main-thread copy. Retained results charge the client profile and a host-wide 256 MiB staging budget; cancelDecode releases the ticket. */
+  beginImage(asset: string, options: Record<string, any> | null): number;
+  /** Publish a completed image into an engine surface slot. No decoding or pixel copy occurs during this owner commit. */
+  publishImage(ticket: number, slot: number): Record<string, any>;
   /** Schedule file/audio conversion (kind=file) or archive indexing (kind=archive) on the bounded CPU pool. Options {format?,profile?}. Returns a scoped ticket; owner calls never join. At most 64 retained tickets per client and 256 per host. */
   beginDecode(asset: string, kind: string, options: Record<string, any> | null): number;
   /** Poll pending/ready/failed resource work without blocking. A completed decoder failure remains visible until cancelled. */
@@ -477,28 +483,50 @@ declare class Resources {
   /** Mount archive entries in this client's asset VFS, then use normal bitmap, audio and model APIs. Options {format?,profile?}. Native paths are validated; keys and decoded bytes are not saved. */
   mount(asset: string, mountPoint: string, options: Record<string, any> | null): Record<string, any>;
 }
-/** Whole-runtime snapshots (world, layers, UI, clocks, every VM) in the client's save mount. */
+/** Client-capability snapshot operations. Captures preserve ordered VM safepoints; worker jobs perform encoding, disk I/O and validation, and prepared loads commit atomically. */
 declare class Save {
-  /** Write a validated snapshot; returns its size in bytes. */
+  /** Offline snapshot/write; realtime hosts use beginSave. Returns encoded byte size. */
   save(path: string): number;
-  /** Transactionally restore a snapshot (all-or-nothing). Entity objects from before are revalidated by generation. */
+  /** Offline read/restore; realtime hosts use beginLoad then commitLoad. A failed restore leaves the runtime unchanged. */
   load(path: string): void;
-  /** Whether a snapshot file exists. */
+  /** Offline existence query; realtime hosts use beginExists. Permission/read errors remain errors. */
   exists(path: string): boolean;
+  /** Capture logical state and native VM checkpoints at the current owner safepoint, then serialize and write on bounded CPU/I/O workers. Returns a client ticket. Native checkpoint capture itself remains ordered. */
+  beginSave(path: string): number;
+  /** Read, decode and validate a snapshot on workers. A ready result is prepared, not applied; commitLoad publishes it at an owner safepoint. */
+  beginLoad(path: string): number;
+  /** Query the save capability on the bounded I/O executor. Only NotFound becomes false. */
+  beginExists(path: string): number;
+  /** Poll pending/ready/failed without joining workers. Ready save returns bytes; exists returns exists; load returns prepared=true. All tickets are client/generation checked. */
+  status(ticket: number): Record<string, any>;
+  /** Atomically apply a prepared load, preserving native restore semantics. Reject pending, wrong-kind and obsolete results. Successful restore invalidates earlier-generation jobs. */
+  commitLoad(ticket: number): void;
+  /** Cancel/release retained work. Running atomic writes may already commit; cancellation cannot undo an existing disk write. */
+  cancel(ticket: number): void;
 }
 /** CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed. */
 declare class Text {
+  /** Prepare markup, shaping, icon decoding and initial raster on bounded workers. Returns a client/generation ticket; the old block remains until successful publication. */
+  beginDraw(name: string, markup: string, options: Record<string, any> | null): number;
+  /** Prepare saved text and reveal state on workers, publishing only after validation. */
+  beginRestore(name: string, state: Record<string, any>): number;
+  /** Measure an arbitrarily sized bounded single line on a worker; status returns metrics after completion. */
+  beginMeasure(font: string, size: number, text: string): number;
+  /** Poll and publish completed text work without joining. Ready drawing includes surface metadata; errors and obsolete generations fail visibly. */
+  status(ticket: number): Record<string, any>;
+  /** Release a ticket and cancel pending preparation. Already published blocks remain owned by Text until remove. */
+  cancel(ticket: number): void;
   /** Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface. */
   measureSimple(font: string, size: number, text: string): Record<string, any>;
-  /** Shape and rasterize rich text; returns __surface path for a layer. Optional typewriter rate advances with App frames. */
+  /** Offline rich-text preparation; live hosts use beginDraw/drawAsync. Returns a shared surface path for a layer. */
   draw(name: string, markup: string, options: Record<string, any>): string;
   /** Read content/options/reveal state for explicit persistence. */
   state(name: string): Record<string, any>;
-  /** Rebuild saved markup/options and restore reveal clock. Pending event queues are not replayed. */
+  /** Offline rebuild of saved markup/options/reveal; live hosts use beginRestore/restoreAsync. Pending event queues are not replayed. */
   restore(name: string, state: Record<string, any>): string;
   /** Pause/resume this block's reveal clock. */
   pause(name: string, paused: boolean): void;
-  /** Reveal remaining text and emit marker/finished events. */
+  /** Reveal remaining text. In live hosts, marker/finished events are delivered only after the worker raster is published. */
   finish(name: string): void;
   /** Drain grapheme, authored marker and finished events. */
   drainEvents(name: string): Record<string, any>[];
@@ -507,10 +535,22 @@ declare class Text {
 }
 /** Retained widgets (panel/label/button/toggle/slider/text_field) with focus, capture and modal routing. */
 declare class Ui {
-  /** Events produced by the last UI tick: {client, id, kind, value}. */
+  /** This client's retained UI events: {widget:{owner,id},kind,value,menu_bar?}. The last 256 events are retained globally; use drainEvents to consume them. */
   readonly events: Record<string, any>[];
   /** Focused widget or null. */
   readonly focus: any;
+  /** Consume this client's retained events once, preserving other clients' events. Use this for action dispatch; events only reads a snapshot of the queue. */
+  drainEvents(): Record<string, any>[];
+  /** Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state. */
+  setMenu(menu: Record<string, any>): void;
+  /** Remove a client menu tree. */
+  removeMenu(id: number): void;
+  /** Open a root submenu or a context popup at a logical canvas position. */
+  openMenu(id: number, item: number | null, position: number[] | null): void;
+  /** Close this client's menu popups. */
+  closeMenu(id: number): void;
+  /** Update checked state with shared sibling radio-group semantics. */
+  setMenuChecked(id: number, item: number, checked: boolean): void;
   /** Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}. */
   put(widget: Record<string, any>): void;
   /** Remove a widget and its children. */
@@ -637,3 +677,16 @@ declare const media: Media;
 declare const assets: Assets;
 declare const profiler: Profiler;
 declare const vfx: Vfx;
+
+/** JS/TS service awaits; callbacks run on owner lifecycle entries. */
+interface CancellablePromise<T> extends Promise<T> { readonly ticket: number | null; cancel(): void; }
+interface Assets { loadAsync(path: string, kind: string): CancellablePromise<number>; }
+interface Resources { decodeAsync(asset: string, kind: string, options?: Record<string, any> | null): CancellablePromise<number>; }
+interface Resources { imageAsync(asset: string, options?: Record<string, any> | null): CancellablePromise<number>; }
+interface Resources { probeAsync(asset: string, kind: string, options?: Record<string, any> | null): CancellablePromise<Record<string, any>>; }
+interface Text { drawAsync(name: string, markup: string, options?: Record<string, any> | null): CancellablePromise<string>; }
+interface Text { restoreAsync(name: string, state: Record<string, any>): CancellablePromise<string>; }
+interface Text { measureAsync(font: string, size: number, text: string): CancellablePromise<Record<string, any>>; }
+interface Save { saveAsync(path: string): CancellablePromise<number>; }
+interface Save { loadAsync(path: string): CancellablePromise<void>; }
+interface Save { existsAsync(path: string): CancellablePromise<boolean>; }

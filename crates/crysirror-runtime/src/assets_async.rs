@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Background scoped reads/imports. Only poll/resolve commits results to Assets.
 use super::Assets;
 use anyhow::{Context, Result, ensure};
@@ -293,6 +294,10 @@ impl Assets {
     }
     pub fn store_id(&self) -> u64 {
         self.asynchronous.store
+    }
+    /// Bounded blocking-I/O executor; CPU continuations are polled by owners.
+    pub fn io_tasks(&self) -> TaskPool {
+        self.asynchronous.io.clone()
     }
     pub fn cpu_tasks(&self) -> TaskPool {
         self.asynchronous.cpu.clone()

@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: MPL-2.0
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 """Strict authoring validation for CPU engine systems (no device access)."""
 from desktop_project import obj, require, integer, finite, vector, color, logical_path
 
@@ -451,6 +452,31 @@ def media_options(options):
     obj(options,set(),{'loop','audio','gain'});flags(options,['loop','audio'])
     require(finite(options.get('gain',1)) and 0<=options.get('gain',1)<=4,'media gain')
 
+def menu_spec(menu):
+    obj(menu, {'id','rect','font','items'}, {'text_size','cell_width','popup_width','row_height','visible','context'})
+    require(integer(menu['id'],1,65535), 'menu id')
+    bounds(menu['rect'])
+    require(isinstance(menu['font'],str) and 0<len(menu['font'].encode())<=128, 'menu font alias')
+    require(integer(menu.get('text_size',18),1,512), 'menu text size')
+    flags(menu,['visible','context'])
+    for key,default in [('cell_width',100),('popup_width',240),('row_height',24)]:
+        value=menu.get(key,default);require(finite(value) and 8<=value<=8192,'menu row/popup limits')
+    seen=set()
+    def items(values, depth):
+        require(isinstance(values,list) and depth<=16, 'menu nesting/items')
+        checked=set()
+        for item in values:
+            obj(item, {'id','label'}, {'visible','enabled','checked','radio','group','separator','children'})
+            require(integer(item['id'],1,65535) and item['id'] not in seen,'menu item id')
+            seen.add(item['id']);require(len(seen)<=1024,'menu item count')
+            require(isinstance(item['label'],str) and len(item['label'].encode())<=4096,'menu label')
+            flags(item,['visible','enabled','checked','radio','separator'])
+            group=item.get('group',0);require(U32(group),'menu radio group')
+            if item.get('radio',False) and item.get('checked',False):
+                require(group not in checked,'multiple checked radio siblings');checked.add(group)
+            items(item.get('children',[]),depth+1)
+    items(menu['items'],0)
+
 def ui_command(c):
     require(isinstance(c,dict),'UI command');op=c.get('op')
     if op in ('set_title','insert_text'):
@@ -458,4 +484,12 @@ def ui_command(c):
         require(isinstance(c['text'],str) and len(c['text'].encode('utf-8', errors='replace'))<=limit and all(scalar(x) for x in c['text']),'UI single-line Unicode text')
     elif op=='set_cursor_visible':obj(c,{'op','visible'});flags(c,['visible'])
     elif op in ('backspace','focus'):obj(c,{'op','id'});require(U32(c['id']),'UI widget id')
+    elif op=='set_menu':obj(c,{'op','menu'});menu_spec(c['menu'])
+    elif op in ('remove_menu','close_menu'):obj(c,{'op','id'});require(U32(c['id']),'menu id')
+    elif op=='open_menu':
+        obj(c,{'op','id'},{'item','position'});require(U32(c['id']),'menu id')
+        require(c.get('item') is None or U32(c['item']),'menu item')
+        require(c.get('position') is None or vector(c['position'],2),'menu position')
+    elif op=='set_menu_checked':
+        obj(c,{'op','id','item','checked'});require(U32(c['id']) and U32(c['item']),'menu id');flags(c,['checked'])
     else:require(False,'unsupported authoring UI operation')

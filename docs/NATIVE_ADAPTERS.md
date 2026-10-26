@@ -27,6 +27,13 @@ it does not link the original System or renderer.
 
 ## Acceptance
 
+KiriKiri's menu.dll now names a facade over CrySirror MenuSpec/Ui operations.
+Explicit registration-only plugin shells are allowed through Config.plugin_shells;
+they export no fake functionality and report their status. Shell registration
+is not capability extraction or game compatibility. Native synchronous popup
+waits and unmapped plugin methods continue to fail visibly. See
+[ADR 0066](adr/0066-awaitable-services-and-native-plugin-facades.md).
+
 1. Add missing generic image/text/UI/layer/effect/audio/video/resource abilities
    to CrySirror APIs and engine-owned state, usable without any native VM.
 2. Keep only opcode/value/resource-policy/layout/wait/save semantics and handle

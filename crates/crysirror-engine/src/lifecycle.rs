@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Application lifecycle, behaviours and plugins (ADR 0004).
 //!
 //! ```text
@@ -22,7 +23,7 @@ use crate::{
     object::{Class, ClassRegistry, ObjectTable},
     script::ScriptHost,
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::service::InputFrame;
 use crysirror_runtime::Runtime;
 use std::{collections::VecDeque, sync::Arc};
@@ -116,6 +117,7 @@ impl App {
                 audio: Default::default(),
                 mixer_audio: Default::default(),
                 resources: Default::default(),
+                saves: Default::default(),
                 vehicles: Default::default(),
             }),
             behaviours: Vec::new(),
@@ -305,6 +307,8 @@ impl App {
             })?;
         }
         self.each("on_update", false, |b, cx| b.on_update(cx, dt_ms))?;
+        crate::resource_async::update(self.cx.state()?);
+        crate::save_api::update(&mut self.cx).context("snapshot jobs")?;
         crate::systems::streaming(&mut self.cx).context("level streaming")?;
         crate::systems::spatial_audio(&mut self.cx).context("spatial audio")?;
         {

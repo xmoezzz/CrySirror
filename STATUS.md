@@ -1621,3 +1621,90 @@ Behavior validation:
 No commercial-game run, console validation or hardware-render result is claimed
 from these CPU codec/API checks. Per-format limits remain in RESOURCES.md,
 arc-resource-support.json and arc-image-support.json.
+
+
+## 2026-10-27 — Awaitable services, shared menus and native plugin facades (ADR 0066)
+
+Implementation:
+- Added engine-owned bounded OperationTable tickets with client/restore-generation
+  checks, retained completion/failure, cooperative cancellation, dependent-phase
+  backpressure and owner publication. Native resource jobs share its ID namespace.
+- Resources.beginProbe/beginImage open scoped inputs and prepare results on
+  I/O/CPU workers. Ready image pixels publish by shared immutable Arc ownership;
+  both client-profile and host-wide 256 MiB staging reservations retain their
+  lifetime. Existing dynamic surfaces retain their independent 256 MiB budget.
+- Text parsing, shaping, icon loading and rasterization now have worker APIs.
+  Reveal events publish with their corresponding pixels, and failed replacement
+  keeps the previous block. Restored generations discard stale work.
+- Save captures native checkpoints/logical state at an ordered safepoint, then
+  workers encode, perform I/O and validate. Ready loads remain staged until
+  atomic commitLoad. Native capture/reconstruction and unsupported-save behavior
+  remain explicit; the existing snapshot wire format is preserved.
+- JS/TS has generated CancellablePromise helpers for Assets/Resources/Text/Save,
+  client-scoped continuations, bounded Boa microtask/future turns, async init/start
+  fences, pending-hook reentry prevention and bounded shutdown draining.
+  Blocking legacy resource/text/save operations reject live-host use.
+- Engine MenuSpec/MenuItemSpec owns trees, radio groups, popup/bar layout,
+  mouse/keyboard input, paint and saved logical state. Ui.drainEvents consumes
+  client-scoped events once; ordinary reads retain them. Menus share the existing
+  last-256 UI event policy. Snapshot validation includes menu/focus/event owners.
+- Native MenuItem translates handles/properties/callbacks onto these APIs.
+  Plugins distinguishes engine_facade, explicit registration_only shells and
+  unsupported modules. menu.dll is a real facade; shells export no fake APIs.
+  No native DLL, extra engine implementation, compositor or device is hosted.
+- Added a standalone TS menu/async-text/save example, ADR 0066 and migration
+  documentation. Regenerated docs/api: d4f4c6edc250ee72 -> 5394949c5999cde6.
+  Edited sources use full license notices while retaining third-party licenses
+  and authors; pinned upstream files/hash manifests remain unchanged.
+- Local validation now defaults to release. Dev/test disable incremental output
+  and debug information. tools/verify.py no longer rewrites the lockfile or
+  formats pinned sources; --fmt opts into a readonly format check. No CI added.
+- Cleaned rebuildable target/debug after it reached about 313 GB (165 GB
+  incremental and 145 GB dependencies). Available disk increased from about
+  24 GiB to 336 GiB immediately after cleanup; after release verification about
+  329 GiB remains. Release output (~11 GB), local data (~44 GB) and verification
+  evidence were preserved; debug output is now about 621 MB.
+
+Compilation:
+- cargo check --release --locked --workspace --all-targets: passed on macOS.
+- Desktop arc-formats + krkr all-target release check: passed.
+- Formatting of the 38 edited Rust files and git diff whitespace checks: passed.
+  No claim that unrelated existing whole-workspace formatting is clean.
+
+Behavior validation:
+- Targeted release suites: **100 passed, 0 failed, 1 ignored**: operation table 3,
+  resource contracts 9, resource jobs 7, arc-enabled resource APIs 10, shared menus
+  4, runtime state 44, engine async services 6, JS Promises/example 4, original
+  TJS native bridge 7 and API docs 6. Repeated gate/font reruns are not added.
+- Explicitly executed all three system-font tests using a runtime system font;
+  these cover offline/worker pixel equality, reveal publication, native font
+  callbacks and the standalone TS example. No font is committed. The example
+  verifies a real menu click saves once and stays single after 30 more frames.
+- Gates verify live frames progress while CPU/I/O workers are blocked, failed or
+  cancelled work does not mutate live state, prepared loads require commit,
+  mounted sources open on workers and foreign/stale tickets cannot publish.
+  Tests also cover foreign menu/event owners, event consumption, held-button
+  dismissal and malformed saved menu paths.
+- Python 3.11 tooling: **189 passed**, including pinned-source policy and menu
+  authoring validation. The external complete-movie test remains ignored; an
+  accidental include-ignored attempt lacked its explicit MPEG path and is not
+  counted as a pass.
+- Original pinned KAG3 release diagnostic **failed**, visibly, at startup.tjs:11:
+  menu.dll linked; KAGParser.dll has no implemented facade. This is recorded as
+  an integration gap, outside the successful targeted suites, never as a pass.
+- Evidence: target/verification/async-release-results.json, *-release-final.log
+  for the named suites; async-api-release-check.log, async-workspace-release-check.log,
+  async-desktop-features-release-check.log, async-python-final.log and
+  kag3-release-probe.log.
+
+Limits:
+- Full KAG3/game boot, KAGParser natives, native synchronous popup continuations
+  and menu keyboard accelerators remain unsupported. Engine menus are logical
+  canvas overlays. Original TJS libraries are unchanged, not replaced by data VM.
+- ADR 0050 remains partial: native interpretation/storage callbacks and startup
+  compilation still have synchronous boundaries; native checkpoint capture and
+  reconstruction remain owner operations. Remaining renderer/audio/media/editor
+  scheduling gaps keep their prior status. This is not all-engine async completion.
+- Text blocks require explicit Text.state/restoreAsync reconstruction; media
+  snapshots and unsupported original-VM checkpoints still fail visibly. No new
+  commercial-game, GPU, hardware-RT or cross-platform result is claimed here.
