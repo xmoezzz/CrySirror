@@ -41,6 +41,81 @@ impl AssetReader for MemoryAssetReader {
 /// lease; OS/process handles never enter VM or save data.
 pub trait StorageLease: Send + Sync {}
 
+/// Maximum resident stereo PCM frames (128 MiB of f32 samples).
+pub const MAX_PCM_FRAMES: usize = 16 * 1024 * 1024;
+/// Metadata for a validated resident PCM resource, without samples or leases.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PcmAudioInfo {
+    /// Sample frames per second, 8000 through 192000.
+    pub sample_rate: u32,
+    /// Number of stereo frames, independent of playback position.
+    pub frames: usize,
+    /// Resident sample bytes; excludes allocation and resource overhead.
+    pub sample_bytes: usize,
+}
+/// Validated immutable PCM resource. Construction scans samples and allocates;
+/// realtime callers prepare it on workers. Clone/publication never decodes.
+/// Storage receipts and PCM are derived resources, never VM/project save data.
+#[derive(Clone)]
+pub struct PcmAudio {
+    rate: u32,
+    frames: Arc<[[f32; 2]]>,
+    storage: Option<Arc<dyn Send + Sync>>,
+}
+impl PcmAudio {
+    pub fn new(rate: u32, frames: Vec<[f32; 2]>) -> Result<Self> {
+        if !(8000..=192000).contains(&rate) {
+            return Err(crate::Error::Invalid("PCM sample rate"));
+        }
+        if frames.is_empty() || frames.len() > MAX_PCM_FRAMES {
+            return Err(crate::Error::Limit("PCM frame count"));
+        }
+        if frames
+            .iter()
+            .flatten()
+            .any(|x| !x.is_finite() || *x < -16. || *x > 16.)
+        {
+            return Err(crate::Error::Invalid("nonfinite or excessive PCM"));
+        }
+        Ok(Self {
+            rate,
+            frames: frames.into(),
+            storage: None,
+        })
+    }
+    pub fn info(&self) -> PcmAudioInfo {
+        PcmAudioInfo {
+            sample_rate: self.rate,
+            frames: self.frame_count(),
+            sample_bytes: self.byte_len(),
+        }
+    }
+    pub fn sample_rate(&self) -> u32 {
+        self.rate
+    }
+    pub fn frames(&self) -> &[[f32; 2]] {
+        &self.frames
+    }
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+    pub fn byte_len(&self) -> usize {
+        self.frames.len() * core::mem::size_of::<[f32; 2]>()
+    }
+    /// Attach before publication. Every live clone keeps the receipt until its
+    /// samples are released, including after a producer resource is stopped.
+    pub fn retain_storage(&mut self, storage: Arc<dyn Send + Sync>) {
+        self.storage = Some(storage);
+    }
+}
+impl core::fmt::Debug for PcmAudio {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PcmAudio")
+            .field("rate", &self.rate)
+            .field("frames", &self.frames.len())
+            .finish()
+    }
+}
 /// Logical encoded-audio resource; container policies are resolved by adapters.
 #[derive(Clone)]
 pub struct EncodedAudio {
@@ -122,6 +197,12 @@ pub struct AudioPreparation {
 /// and decoder resources are not part of logical VM snapshots.
 #[derive(Clone, Debug)]
 pub enum AudioRequest {
+    /// Publish a worker-prepared PCM resource without opening a codec.
+    PlayPcm {
+        channel: u32,
+        source: PcmAudio,
+        parameters: AudioParameters,
+    },
     /// Worker preparation only; synchronous submission must reject this variant.
     PlayAsset {
         channel: u32,

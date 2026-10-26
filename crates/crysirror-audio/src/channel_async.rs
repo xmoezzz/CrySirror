@@ -292,9 +292,9 @@ impl ChannelAudio {
         request: &AudioRequest,
     ) -> Result<()> {
         let (channel, stop) = match request {
-            AudioRequest::Play { channel, .. } | AudioRequest::PlayAsset { channel, .. } => {
-                (*channel, false)
-            }
+            AudioRequest::Play { channel, .. }
+            | AudioRequest::PlayAsset { channel, .. }
+            | AudioRequest::PlayPcm { channel, .. } => (*channel, false),
             AudioRequest::Stop { channel, fade_ms } => {
                 ensure!(
                     fade_ms.is_finite() && (0.0..=600000.).contains(fade_ms),

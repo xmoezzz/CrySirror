@@ -2140,3 +2140,76 @@ Remaining boundaries:
   commercial-game run, device/GPU/hardware-RT or Windows/Linux result is claimed.
 - Reflection/reverb, diffraction and near-field propagation remain acoustic
   work; the larger modern engine/VN capability objective remains active.
+
+## Worker-prepared media PCM (ADR 0072, 2026-10-27)
+
+Implementation:
+- Added dependency-free immutable PcmAudio/PcmAudioInfo and AudioRequest::PlayPcm
+  in core, plus shared audio PcmBuilder and resident-source playback. These work
+  without any native VM, movie service or output device. Prepared publication
+  performs no codec opening or sample validation scan. Core retains no device
+  dependency; resources/receipts are derived and excluded from logical saves.
+- Media workers now prepare PCM directly instead of encoding WAVE for the owner
+  to reopen/decode. Conversion preserves i16 /32768, mono duplication and the
+  existing first-two-channel projection. This is not surround downmix support.
+  Start offsets, sample-rate conversion, loop points, gain, pan and client scope
+  use the existing shared mixer. Movie PTS lead/delay and late visits retain
+  their clock/skipping policy.
+- Moved media capability opening and length queries off the owner. Audio/video
+  share one lazy scoped capability with independent AssetIo cursors. Missing
+  assets now produce asynchronous Loading -> Failed errors; invalid authority,
+  options and worker admission still reject immediately.
+- Added 16 live/starting decoder-worker reservations. Blocked canceled workers
+  retain admission until they actually exit; replacement rejects before changing
+  the current slot if no capacity remains. Loop-restart admission failures mark
+  Failed and retain emitted Stop controls for the next owner audio drain.
+- PCM sample-budget receipts follow actual queued/mixer references past resource
+  Stop. Staging and final samples are reserved together during Arc conversion.
+  The 128 MiB budget excludes allocator spare capacity, codec/provider buffers
+  and other process overhead. Inspection adds decoder_worker_reservations.
+- Generated API metadata now includes PcmAudioInfo; fingerprint changes from
+  102009774599dc55 to f55ff4c1819aaa78. The change log records the Rust enum
+  extension and asynchronous media opening errors. No JS sample-upload API was
+  added and no native opcode or renderer implementation moved into an adapter.
+
+Compilation:
+- Release audio/runtime checks and the final workspace/all-target check passed
+  with desktop krkr, arc-formats and acoustics-obvhs enabled. Existing CBG and
+  RealLive warnings remain. No CI, remote build or new device/GPU validation ran.
+
+Behavior validation:
+- Audio suites passed **51 tests**, one unrelated owner-NWA test ignored. Media
+  regression tests passed **11 tests**; its local-file case was explicitly run
+  separately and passed. API signature/reference checks passed **six tests**.
+  Total: **69 distinct Rust tests passed**. The explicitly executed movie is not
+  counted again from the earlier full-media run. Python 3.11: **189 passed**.
+- Four independent PCM tests verify invalid resources, signed extrema, mono and
+  multichannel projection, partial/oversized append atomicity, shared storage
+  lifetime, exact seek/EOF beyond the SFX Clip ceiling, sample-level start/rate/
+  loop/gain/pan controls, foreign-client Stop isolation and final voice release.
+- Media probes block opening while the owner continues ticking, assert open/len/
+  read occur off-owner and both decoders share one capability, retain admission
+  across canceled blocked providers, preserve the current slot on failed
+  replacement and release leases after actual worker exit. Queued/live PCM keeps
+  its sample reservation after resource Stop. Missing-open faults are visible;
+  synthetic PTS cases verify early audio, delayed audio and late-visit sample
+  skipping. Loop admission failure retains the completed voice's Stop.
+- Explicit owner-supplied RUSUR.MPG run reached Ended without error: **2,995
+  decoded frames / 2,987 published updates**, one PCM resource with **4,402,944
+  stereo frames at 44,100 Hz**, **35,223,552 sample bytes**, nonzero shared mixer
+  output (peak 0.99996948), and unchanged source size/mtime. This is CPU media/
+  offline-mixer evidence without any native VM, GPU or audio output device;
+  published updates are not a guarantee every source picture was presented.
+- Evidence: target/verification/pcm-audio-tests.log, pcm-media-final-tests.log,
+  pcm-media-regression-tests.log, pcm-api-final-tests.log,
+  pcm-workspace-final-check.log and pcm-python-tests.log.
+
+Remaining boundaries:
+- Movie audio still decodes a bounded complete track. Long-track streaming,
+  codec/provider/transient memory accounting and live device behavior remain
+  open. Final mix/output, control/scratch allocation, last-reference disposal
+  and final worker-pool destruction retain synchronous boundaries.
+- Native boot/discovery/images, original save/opcode coverage, other-platform
+  behavior, acoustic reflections/reverb and complete engine-wide async execution
+  are not completed by this phase. No additional whole-game compatibility or
+  hardware RT result is claimed; the broader engine objective remains active.

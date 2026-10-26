@@ -5,7 +5,7 @@
 use anyhow::{Context, Result, anyhow, ensure};
 use crysirror_core::{
     path::{Mount, VfsPath},
-    service::{AssetReader, AudioParameters, AudioRequest, ClientStorage, EncodedAudio, PcmBus},
+    service::{AssetReader, AudioParameters, AudioRequest, ClientStorage, PcmAudio, PcmBus},
     state::ClientId,
 };
 use crysirror_video::mpeg::{self, VideoFrame};
@@ -15,7 +15,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom},
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, TryRecvError},
     },
@@ -92,57 +92,58 @@ pub struct MediaUpdates {
     pub audio: Vec<MediaAudioUpdate>,
 }
 
-/// A seek cursor over a client capability. It never obtains an OS path and
-/// independent audio/video cursors do not share seek position.
+/// Opening and length queries are worker work. Audio/video share one opened
+/// capability while keeping independent cursors, including across replay loops.
+struct MediaInput {
+    storage: Arc<dyn ClientStorage>,
+    path: VfsPath,
+    reader: OnceLock<core::result::Result<Arc<dyn AssetReader>, String>>,
+}
+impl MediaInput {
+    fn reader(&self) -> Result<Arc<dyn AssetReader>> {
+        self.reader
+            .get_or_init(|| {
+                self.storage
+                    .open_asset(&self.path)
+                    .map_err(|e| format!("open scoped media asset: {e}"))
+            })
+            .as_ref()
+            .map(Arc::clone)
+            .map_err(|e| anyhow!("{e}"))
+    }
+}
 struct AssetCursor {
-    source: Arc<dyn AssetReader>,
-    len: u64,
-    position: u64,
+    inner: crysirror_resource::AssetIo,
 }
 impl AssetCursor {
     fn new(source: Arc<dyn AssetReader>) -> Result<Self> {
-        let len = source
-            .len()
-            .map_err(|e| anyhow!("media stream length: {e}"))?;
+        let inner = crysirror_resource::AssetIo::new(source)?;
         ensure!(
-            len > 0 && len <= MAX_ENCODED_BYTES,
+            inner.len() > 0 && inner.len() <= MAX_ENCODED_BYTES,
             "media encoded stream budget (1 GiB)"
         );
-        Ok(Self {
-            source,
-            len,
-            position: 0,
-        })
+        Ok(Self { inner })
     }
 }
 impl Read for AssetCursor {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        let n = self
-            .source
-            .read_at(self.position, out)
-            .map_err(|e| io::Error::other(e.to_string()))?;
-        self.position = self
-            .position
-            .checked_add(n as u64)
-            .ok_or_else(|| io::Error::other("media cursor overflow"))?;
-        Ok(n)
+        self.inner.read(out)
     }
 }
 impl Seek for AssetCursor {
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         let target = match position {
             SeekFrom::Start(v) => i128::from(v),
-            SeekFrom::Current(v) => i128::from(self.position) + i128::from(v),
-            SeekFrom::End(v) => i128::from(self.len) + i128::from(v),
+            SeekFrom::Current(v) => i128::from(self.inner.stream_position()?) + i128::from(v),
+            SeekFrom::End(v) => i128::from(self.inner.len()) + i128::from(v),
         };
-        if !(0..=i128::from(self.len)).contains(&target) {
+        if !(0..=i128::from(self.inner.len())).contains(&target) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "media seek outside capability stream",
             ));
         }
-        self.position = target as u64;
-        Ok(self.position)
+        self.inner.seek(SeekFrom::Start(target as u64))
     }
 }
 
@@ -157,12 +158,16 @@ impl ByteBudget {
             limit,
         })
     }
-    fn reserve(self: &Arc<Self>, bytes: usize) -> Result<Reservation> {
+    fn acquire(&self, bytes: usize) -> Result<()> {
         self.used
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(bytes).filter(|sum| *sum <= self.limit)
             })
             .map_err(|_| anyhow!("media retained decoder memory budget exceeded"))?;
+        Ok(())
+    }
+    fn reserve(self: &Arc<Self>, bytes: usize) -> Result<Reservation> {
+        self.acquire(bytes)?;
         Ok(Reservation {
             budget: self.clone(),
             bytes,
@@ -172,6 +177,17 @@ impl ByteBudget {
 struct Reservation {
     budget: Arc<ByteBudget>,
     bytes: usize,
+}
+impl Reservation {
+    fn grow(&mut self, bytes: usize) -> Result<()> {
+        let next = self
+            .bytes
+            .checked_add(bytes)
+            .context("media reservation overflow")?;
+        self.budget.acquire(bytes)?;
+        self.bytes = next;
+        Ok(())
+    }
 }
 impl Drop for Reservation {
     fn drop(&mut self) {
@@ -183,9 +199,8 @@ struct QueuedFrame {
     _reservation: Reservation,
 }
 struct AudioTrack {
-    bytes: Arc<[u8]>,
+    pcm: PcmAudio,
     first_pts_ms: i64,
-    _reservation: Reservation,
 }
 #[derive(Default)]
 struct Journal {
@@ -233,14 +248,22 @@ impl Drop for Workers {
 }
 impl Workers {
     fn new(
-        source: Arc<dyn AssetReader>,
+        source: Arc<MediaInput>,
         audio: bool,
         video_budget: Arc<ByteBudget>,
         audio_budget: Arc<ByteBudget>,
+        worker_budget: Arc<ByteBudget>,
     ) -> Result<Self> {
-        let mut video_reader = AssetCursor::new(source.clone())?;
-        let audio_reader = if audio {
-            Some(AssetCursor::new(source)?)
+        let video_input = source.clone();
+        let video_lease = worker_budget
+            .reserve(1)
+            .context("media decoder worker capacity exceeded")?;
+        let audio_lease = if audio {
+            Some(
+                worker_budget
+                    .reserve(1)
+                    .context("media decoder worker capacity exceeded")?,
+            )
         } else {
             None
         };
@@ -256,10 +279,15 @@ impl Workers {
         std::thread::Builder::new()
             .name("crysirror-media-video".into())
             .spawn(move || {
+                let _worker_lease = video_lease;
                 // Retain sender until the error journal has been committed. A
                 // disconnected receiver can then never mistake an error for EOS.
                 let _keep_sender = video_tx.clone();
                 protected(&errors, || {
+                    if stop.load(Ordering::Acquire) {
+                        return Ok(());
+                    }
+                    let mut video_reader = AssetCursor::new(video_input.reader()?)?;
                     if let Some(info) = mpeg::sequence_info(&mut video_reader)? {
                         frame_duration
                             .store(info.frame_ms.round().max(1.) as u64, Ordering::Release);
@@ -293,43 +321,68 @@ impl Workers {
             decoded,
             frame_ms,
         };
-        if let Some(reader) = audio_reader {
+        if let Some(audio_lease) = audio_lease {
             let (tx, rx) = mpsc::sync_channel(1);
             let stop = workers.cancel.clone();
             let errors = workers.journal.clone();
-            std::thread::Builder::new().name("crysirror-media-audio".into()).spawn(move || {
-                let _keep_sender = tx.clone();
-                protected(&errors, || {
-                    let mut samples = Vec::<i16>::new();
-                    let mut reservations = Vec::new();
-                    let mut format = None;
-                    let mut first_pts_ms = 0;
-                    mpeg::decode_audio(reader, || stop.load(Ordering::Acquire), |chunk| {
-                        if stop.load(Ordering::Acquire) { return Ok(false); }
-                        if let Some((rate, channels)) = format {
-                            ensure!((rate,channels) == (chunk.sample_rate,chunk.channels), "media audio format changed within a track");
-                        } else {
-                            format = Some((chunk.sample_rate, chunk.channels));
-                            first_pts_ms = chunk.pts_ms;
+            std::thread::Builder::new()
+                .name("crysirror-media-audio".into())
+                .spawn(move || {
+                    let _keep_sender = tx.clone();
+                    let _worker_lease = audio_lease;
+                    protected(&errors, || {
+                        if stop.load(Ordering::Acquire) {
+                            return Ok(());
                         }
-                        let count = samples.len().checked_add(chunk.samples.len()).context("media audio sample counter")?;
-                        ensure!(count <= MAX_AUDIO_SAMPLES, "media full-track audio sample budget exceeded; streaming audio required for longer tracks");
-                        reservations.push(audio_budget.reserve(chunk.samples.len() * 2)?);
-                        samples.extend_from_slice(&chunk.samples);
-                        Ok(true)
-                    })?;
-                    if stop.load(Ordering::Acquire) { return Ok(()); }
-                    let track = if let Some((rate, channels)) = format {
-                        let bytes = wave(rate, channels, &samples)?;
-                        let reservation = audio_budget.reserve(bytes.len())?;
-                        drop(samples);
-                        drop(reservations);
-                        Some(AudioTrack { bytes: Arc::from(bytes), first_pts_ms, _reservation: reservation })
-                    } else { None };
-                    let _ = tx.send(track);
-                    Ok(())
-                });
-            }).context("spawn engine media audio decoder")?;
+                        let reader = AssetCursor::new(source.reader()?)?;
+                        let mut builder = None;
+                        let mut input_samples = 0usize;
+                        let mut reservation = audio_budget.reserve(0)?;
+                        let mut format = None;
+                        let mut first_pts_ms = 0;
+                        mpeg::decode_audio(reader, || stop.load(Ordering::Acquire), |chunk| {
+                            if stop.load(Ordering::Acquire) {
+                                return Ok(false);
+                            }
+                            if let Some(current) = format {
+                                ensure!(current == (chunk.sample_rate, chunk.channels),
+                                    "media audio format changed within a track");
+                            } else {
+                                format = Some((chunk.sample_rate, chunk.channels));
+                                first_pts_ms = chunk.pts_ms;
+                                builder = Some(crysirror_audio::pcm::PcmBuilder::new(
+                                    chunk.sample_rate, chunk.channels,
+                                    crysirror_core::service::MAX_PCM_FRAMES)?);
+                            }
+                            input_samples = input_samples.checked_add(chunk.samples.len())
+                                .context("media audio sample counter")?;
+                            ensure!(input_samples <= MAX_AUDIO_SAMPLES,
+                                "media full-track audio sample budget exceeded; streaming audio required for longer tracks");
+                            ensure!(chunk.samples.len() % chunk.channels as usize == 0,
+                                "media partial audio frame");
+                            reservation.grow(chunk.samples.len() / chunk.channels as usize * 8)?;
+                            builder.as_mut().unwrap().append_i16(&chunk.samples)?;
+                            Ok(true)
+                        })?;
+                        if stop.load(Ordering::Acquire) {
+                            return Ok(());
+                        }
+                        let track = if let Some(builder) = builder {
+                            // Arc conversion may coexist with the staging allocation.
+                            // The final lease follows mixer/update clones, not the slot.
+                            let final_reservation = audio_budget.reserve(builder.byte_len())?;
+                            let mut pcm = builder.finish()?;
+                            pcm.retain_storage(Arc::new(final_reservation));
+                            drop(reservation);
+                            Some(AudioTrack { pcm, first_pts_ms })
+                        } else {
+                            None
+                        };
+                        let _ = tx.send(track);
+                        Ok(())
+                    });
+                })
+                .context("spawn engine media audio decoder")?;
             workers.audio = Some(rx);
         }
         Ok(workers)
@@ -343,32 +396,8 @@ impl Workers {
             .cloned()
     }
 }
-fn wave(rate: u32, channels: u16, samples: &[i16]) -> Result<Vec<u8>> {
-    let len = u32::try_from(samples.len().checked_mul(2).context("media WAV size")?)?;
-    ensure!(
-        rate > 0 && channels > 0 && samples.len() % channels as usize == 0,
-        "media WAV format"
-    );
-    let mut out = Vec::with_capacity(len as usize + 44);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(len + 36).to_le_bytes());
-    out.extend_from_slice(b"WAVEfmt ");
-    out.extend_from_slice(&16u32.to_le_bytes());
-    out.extend_from_slice(&1u16.to_le_bytes());
-    out.extend_from_slice(&channels.to_le_bytes());
-    out.extend_from_slice(&rate.to_le_bytes());
-    out.extend_from_slice(&(rate * u32::from(channels) * 2).to_le_bytes());
-    out.extend_from_slice(&(channels * 2).to_le_bytes());
-    out.extend_from_slice(&16u16.to_le_bytes());
-    out.extend_from_slice(b"data");
-    out.extend_from_slice(&len.to_le_bytes());
-    for sample in samples {
-        out.extend_from_slice(&sample.to_le_bytes());
-    }
-    Ok(out)
-}
 struct Slot {
-    source: Arc<dyn AssetReader>,
+    source: Arc<MediaInput>,
     workers: Option<Workers>,
     options: MediaOptions,
     status: MediaStatus,
@@ -382,7 +411,7 @@ struct Slot {
     eof: bool,
 }
 impl Slot {
-    fn new(source: Arc<dyn AssetReader>, options: MediaOptions, workers: Workers) -> Self {
+    fn new(source: Arc<MediaInput>, options: MediaOptions, workers: Workers) -> Self {
         let audio_ready = !options.audio;
         Self {
             source,
@@ -420,6 +449,7 @@ pub struct MediaManager {
     slots: BTreeMap<(ClientId, u32), Slot>,
     video_budget: Arc<ByteBudget>,
     audio_budget: Arc<ByteBudget>,
+    worker_budget: Arc<ByteBudget>,
     pending_audio: Vec<MediaAudioUpdate>,
 }
 impl Default for MediaManager {
@@ -428,6 +458,7 @@ impl Default for MediaManager {
             slots: BTreeMap::new(),
             video_budget: ByteBudget::new(MAX_QUEUED_VIDEO_BYTES),
             audio_budget: ByteBudget::new(MAX_RETAINED_AUDIO_BYTES),
+            worker_budget: ByteBudget::new(MAX_MEDIA_RESOURCES * 2),
             pending_audio: Vec::new(),
         }
     }
@@ -480,14 +511,17 @@ impl MediaManager {
                 "client media resource count budget"
             );
         }
-        let reader = storage
-            .open_asset(path)
-            .map_err(|e| anyhow!("open scoped media asset: {e}"))?;
+        let reader = Arc::new(MediaInput {
+            storage,
+            path: path.clone(),
+            reader: OnceLock::new(),
+        });
         let workers = Workers::new(
             reader.clone(),
             options.audio,
             self.video_budget.clone(),
             self.audio_budget.clone(),
+            self.worker_budget.clone(),
         )?;
         let next = Slot::new(reader, options, workers);
         if let Some(previous) = self.slots.insert((client, id), next) {
@@ -538,7 +572,7 @@ impl MediaManager {
     }
     pub fn inspect(&self) -> serde_json::Value {
         serde_json::json!({"resources":self.slots.iter().map(|((client,id),s)|serde_json::json!({"client":client.0,"id":id,"status":s.status})).collect::<Vec<_>>(),
-            "queued_video_bytes":self.video_budget.used.load(Ordering::Acquire),"retained_audio_bytes":self.audio_budget.used.load(Ordering::Acquire)})
+            "queued_video_bytes":self.video_budget.used.load(Ordering::Acquire),"retained_audio_bytes":self.audio_budget.used.load(Ordering::Acquire),"decoder_worker_reservations":self.worker_budget.used.load(Ordering::Acquire)})
     }
     pub fn tick(&mut self, now_ms: u64) -> Result<MediaUpdates> {
         // Surface worker errors before consuming any other resource's outputs.
@@ -610,13 +644,9 @@ impl MediaManager {
                         };
                         updates.audio.push(MediaAudioUpdate {
                             client: *client,
-                            request: AudioRequest::Play {
+                            request: AudioRequest::PlayPcm {
                                 channel: slot.options.audio_channel,
-                                source: EncodedAudio {
-                                    bytes: track.bytes.clone(),
-                                    frame_limit: None,
-                                },
-                                intro: None,
+                                source: track.pcm.clone(),
                                 parameters: AudioParameters {
                                     gain: slot.options.gain,
                                     start_ms: skip,
@@ -695,12 +725,23 @@ impl MediaManager {
                 slot.status.audio_started = false;
                 if slot.options.looping {
                     slot.workers = None;
-                    slot.workers = Some(Workers::new(
-                        slot.source.clone(),
-                        slot.options.audio,
-                        self.video_budget.clone(),
-                        self.audio_budget.clone(),
-                    )?);
+                    slot.workers = Some(
+                        match Workers::new(
+                            slot.source.clone(),
+                            slot.options.audio,
+                            self.video_budget.clone(),
+                            self.audio_budget.clone(),
+                            self.worker_budget.clone(),
+                        ) {
+                            Ok(workers) => workers,
+                            Err(error) => {
+                                // Preserve emitted audio controls when this tick fails,
+                                // especially the Stop for the completed loop's voice.
+                                self.pending_audio.append(&mut updates.audio);
+                                return Err(slot.fail(format!("restart media loop: {error:#}")));
+                            }
+                        },
+                    );
                     slot.status.loops_completed += 1;
                     slot.status.state = MediaState::Loading;
                     slot.pending = None;
@@ -874,7 +915,7 @@ mod tests {
             let updates = manager.tick(now).unwrap();
             for update in updates.audio {
                 assert_eq!(update.client, ClientId(3));
-                if matches!(&update.request, AudioRequest::Play { .. }) {
+                if matches!(&update.request, AudioRequest::PlayPcm { .. }) {
                     plays += 1;
                 }
                 mixer.submit(update.client.0, update.request).unwrap();
@@ -1002,6 +1043,348 @@ mod tests {
         assert!(cursor.seek(SeekFrom::Current(1)).is_err());
     }
     #[test]
+    fn missing_media_open_is_a_visible_async_failure_without_pcm_publication() {
+        let mut manager = MediaManager::default();
+        let missing = VfsPath::new(Mount::Asset, "missing.mpg").unwrap();
+        manager
+            .play(ClientId(1), 1, fixture(), &missing, options(), 0)
+            .unwrap();
+        assert_eq!(
+            manager.status(ClientId(1), 1).unwrap().state,
+            MediaState::Loading
+        );
+        let until = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Err(error) = manager.tick(0) {
+                assert!(error.to_string().contains("open scoped media asset"));
+                break;
+            }
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            manager.status(ClientId(1), 1).unwrap().state,
+            MediaState::Failed
+        );
+        assert!(
+            !manager
+                .take_audio()
+                .iter()
+                .any(|u| matches!(u.request, AudioRequest::PlayPcm { .. }))
+        );
+    }
+    #[test]
+    fn prepared_pcm_preserves_pts_lead_delay_and_late_owner_sample_skips() {
+        // Audio starts 20 ms before video, on time, or 20 ms after video.
+        // In the last case the owner next visits at 35 ms and must skip 15 ms.
+        for (audio_pts, visit, expected_frame) in [(980, 0, 960), (1000, 0, 0), (1020, 35, 720)] {
+            let mut manager = MediaManager::default();
+            let (tx, rx) = mpsc::sync_channel(1);
+            tx.send(QueuedFrame {
+                frame: VideoFrame {
+                    pts_ms: 1000,
+                    width: 1,
+                    height: 1,
+                    rgba: vec![0, 0, 0, 255],
+                },
+                _reservation: manager.video_budget.reserve(4).unwrap(),
+            })
+            .unwrap();
+            let workers = Workers {
+                video: rx,
+                audio: None,
+                cancel: Arc::new(AtomicBool::new(false)),
+                journal: Arc::new(Mutex::new(Journal::default())),
+                decoded: Arc::new(AtomicUsize::new(1)),
+                frame_ms: Arc::new(AtomicU64::new(34)),
+            };
+            let input = Arc::new(MediaInput {
+                storage: fixture(),
+                path: path(),
+                reader: OnceLock::new(),
+            });
+            let mut slot = Slot::new(input, MediaOptions::default(), workers);
+            slot.track = Some(AudioTrack {
+                pcm: PcmAudio::new(48000, (0..4096).map(|n| [n as f32 / 10000.; 2]).collect())
+                    .unwrap(),
+                first_pts_ms: audio_pts,
+            });
+            slot.audio_ready = true;
+            manager.slots.insert((ClientId(1), 1), slot);
+            let initial = manager.tick(0).unwrap();
+            let updates = if visit > 0 {
+                assert!(initial.audio.is_empty());
+                manager.tick(visit).unwrap()
+            } else {
+                initial
+            };
+            assert_eq!(updates.audio.len(), 1);
+            let mut mixer = crysirror_audio::channels::ChannelAudio::default();
+            for audio in updates.audio {
+                mixer.submit(audio.client.0, audio.request).unwrap();
+            }
+            mixer.render(1).unwrap();
+            let output = mixer.take_output();
+            assert!((output[0][0] - expected_frame as f32 / 10000.).abs() < 1e-6);
+            drop(tx);
+        }
+    }
+    #[test]
+    fn loop_admission_failure_is_failed_and_retains_the_completed_voices_stop() {
+        let mut manager = MediaManager::default();
+        manager
+            .play(
+                ClientId(1),
+                1,
+                Arc::new(Storage(
+                    include_bytes!("../../crysirror-video/tests/fixtures/media_av.mpg").to_vec(),
+                )),
+                &path(),
+                MediaOptions {
+                    looping: true,
+                    ..Default::default()
+                },
+                0,
+            )
+            .unwrap();
+        wait(&mut manager, |m| {
+            m.status(ClientId(1), 1).unwrap().audio_started
+        });
+        manager.worker_budget = ByteBudget::new(0);
+        let until = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Err(error) = manager.tick(10000) {
+                assert!(error.to_string().contains("restart media loop"));
+                break;
+            }
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            manager.status(ClientId(1), 1).unwrap().state,
+            MediaState::Failed
+        );
+        assert!(
+            manager
+                .take_audio()
+                .iter()
+                .any(|u| matches!(u.request, AudioRequest::Stop { .. }))
+        );
+    }
+    struct OpenGate {
+        owner: std::thread::ThreadId,
+        opens: AtomicUsize,
+        released: Mutex<bool>,
+        wake: std::sync::Condvar,
+    }
+    impl OpenGate {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                owner: std::thread::current().id(),
+                opens: AtomicUsize::new(0),
+                released: Mutex::new(false),
+                wake: std::sync::Condvar::new(),
+            })
+        }
+        fn release(&self) {
+            *self.released.lock().unwrap() = true;
+            self.wake.notify_all();
+        }
+        fn wait_for_opens(&self, count: usize) {
+            let until = Instant::now() + Duration::from_secs(3);
+            while self.opens.load(Ordering::Acquire) < count {
+                assert!(Instant::now() < until, "worker did not open source");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+    // Release blocked workers even if a test assertion unwinds.
+    struct ReleaseGate(Arc<OpenGate>);
+    impl Drop for ReleaseGate {
+        fn drop(&mut self) {
+            self.0.release();
+        }
+    }
+    struct ProbedStorage(Arc<OpenGate>);
+    struct ProbedReader(Arc<OpenGate>, MemoryAssetReader);
+    impl AssetReader for ProbedReader {
+        fn len(&self) -> crysirror_core::Result<u64> {
+            assert_ne!(
+                self.0.owner,
+                std::thread::current().id(),
+                "length queried on owner"
+            );
+            self.1.len()
+        }
+        fn read_at(&self, at: u64, out: &mut [u8]) -> crysirror_core::Result<usize> {
+            assert_ne!(self.0.owner, std::thread::current().id(), "read on owner");
+            self.1.read_at(at, out)
+        }
+    }
+    impl ClientStorage for ProbedStorage {
+        fn read(&self, _: &VfsPath) -> crysirror_core::Result<Vec<u8>> {
+            panic!("must open capability")
+        }
+        fn open_asset(&self, _: &VfsPath) -> crysirror_core::Result<Arc<dyn AssetReader>> {
+            assert_ne!(self.0.owner, std::thread::current().id(), "open on owner");
+            self.0.opens.fetch_add(1, Ordering::AcqRel);
+            let mut released = self.0.released.lock().unwrap();
+            while !*released {
+                released = self.0.wake.wait(released).unwrap();
+            }
+            Ok(Arc::new(ProbedReader(
+                self.0.clone(),
+                MemoryAssetReader(Arc::from(
+                    &include_bytes!("../../crysirror-video/tests/fixtures/media_av.mpg")[..],
+                )),
+            )))
+        }
+        fn write_atomic(&self, _: &VfsPath, _: &[u8]) -> crysirror_core::Result<()> {
+            Err(Error::ReadOnly)
+        }
+        fn remove(&self, _: &VfsPath) -> crysirror_core::Result<()> {
+            Err(Error::ReadOnly)
+        }
+        fn list(&self, _: Mount, _: &str) -> crysirror_core::Result<Vec<String>> {
+            Ok(vec![])
+        }
+    }
+    #[test]
+    fn media_open_length_and_reads_stay_on_workers_and_share_one_capability() {
+        let gate = OpenGate::new();
+        let _release = ReleaseGate(gate.clone());
+        let mut manager = MediaManager::default();
+        manager
+            .play(
+                ClientId(1),
+                1,
+                Arc::new(ProbedStorage(gate.clone())),
+                &path(),
+                MediaOptions::default(),
+                0,
+            )
+            .unwrap();
+        gate.wait_for_opens(1);
+        for _ in 0..8 {
+            let update = manager.tick(0).unwrap();
+            assert!(update.frames.is_empty() && update.audio.is_empty());
+            assert_eq!(
+                manager.status(ClientId(1), 1).unwrap().state,
+                MediaState::Loading
+            );
+        }
+        gate.release();
+        wait(&mut manager, |m| {
+            m.status(ClientId(1), 1).unwrap().audio_started
+        });
+        assert_eq!(
+            gate.opens.load(Ordering::Acquire),
+            1,
+            "audio/video opened separate capabilities"
+        );
+        manager.stop(ClientId(1), 1).unwrap();
+    }
+    #[test]
+    fn canceled_blocked_workers_keep_admission_leases_and_failed_replacement_is_atomic() {
+        let gate = OpenGate::new();
+        let _release = ReleaseGate(gate.clone());
+        let mut manager = MediaManager::default();
+        manager.worker_budget = ByteBudget::new(2);
+        let budget = manager.worker_budget.clone();
+        let storage = Arc::new(ProbedStorage(gate.clone()));
+        for count in 1..=2 {
+            manager
+                .play(ClientId(1), 1, storage.clone(), &path(), options(), 0)
+                .unwrap();
+            gate.wait_for_opens(count);
+        }
+        assert_eq!(budget.used.load(Ordering::Acquire), 2);
+        let old = manager.slots[&(ClientId(1), 1)].source.clone();
+        let error = manager
+            .play(ClientId(1), 1, storage, &path(), options(), 0)
+            .unwrap_err();
+        assert!(error.to_string().contains("worker capacity"));
+        assert!(Arc::ptr_eq(&old, &manager.slots[&(ClientId(1), 1)].source));
+        manager.stop(ClientId(1), 1).unwrap();
+        assert_eq!(
+            budget.used.load(Ordering::Acquire),
+            2,
+            "blocked workers lost their leases"
+        );
+        gate.release();
+        let until = Instant::now() + Duration::from_secs(3);
+        while budget.used.load(Ordering::Acquire) > 0 {
+            assert!(
+                Instant::now() < until,
+                "canceled workers did not release admission"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            !manager
+                .take_audio()
+                .iter()
+                .any(|u| matches!(u.request, AudioRequest::PlayPcm { .. }))
+        );
+    }
+    #[test]
+    fn media_pcm_reservation_follows_published_voice_past_resource_stop() {
+        let mut manager = MediaManager::default();
+        manager
+            .play(
+                ClientId(1),
+                1,
+                Arc::new(Storage(
+                    include_bytes!("../../crysirror-video/tests/fixtures/media_av.mpg").to_vec(),
+                )),
+                &path(),
+                MediaOptions::default(),
+                0,
+            )
+            .unwrap();
+        let budget = manager.audio_budget.clone();
+        let until = Instant::now() + Duration::from_secs(5);
+        let plays = loop {
+            let update = manager.tick(0).unwrap();
+            if update
+                .audio
+                .iter()
+                .any(|u| matches!(u.request, AudioRequest::PlayPcm { .. }))
+            {
+                break update.audio;
+            }
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        manager.stop(ClientId(1), 1).unwrap();
+        assert!(
+            budget.used.load(Ordering::Acquire) > 0,
+            "queued PCM lost its receipt"
+        );
+        let mut audio = crysirror_audio::channels::ChannelAudio::default();
+        for play in plays {
+            audio.submit(play.client.0, play.request).unwrap();
+        }
+        assert!(
+            budget.used.load(Ordering::Acquire) > 0,
+            "live mixer lost its receipt"
+        );
+        for stop in manager.take_audio() {
+            audio.submit(stop.client.0, stop.request).unwrap();
+        }
+        drop(manager);
+        audio.render(1).unwrap();
+        assert!(audio.take_output().iter().flatten().all(|s| *s == 0.));
+        let until = Instant::now() + Duration::from_secs(3);
+        while budget.used.load(Ordering::Acquire) > 0 {
+            assert!(
+                Instant::now() < until,
+                "PCM lease retained after all consumers stopped"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
     #[ignore = "requires CRYSIRROR_MEDIA_FIXTURE pointing to an owner-supplied local MPEG; no game data is committed"]
     fn local_complete_movie_uses_only_engine_media_and_shared_audio_apis() {
         let path = std::path::PathBuf::from(
@@ -1031,6 +1414,7 @@ mod tests {
         let mut peak = 0f32;
         let mut frames = 0;
         let mut audio_plays = 0;
+        let mut audio_info = None;
         loop {
             let updates = manager.tick(now).unwrap();
             for frame in updates.frames {
@@ -1038,8 +1422,12 @@ mod tests {
                 frames += 1;
             }
             for audio in updates.audio {
-                if matches!(&audio.request, AudioRequest::Play { .. }) {
+                if let AudioRequest::PlayPcm { source, .. } = &audio.request {
                     audio_plays += 1;
+                    let info = source.info();
+                    audio_info = Some(
+                        serde_json::json!({"sample_rate": info.sample_rate, "frames": info.frames, "sample_bytes": info.sample_bytes}),
+                    );
                 }
                 mixer.submit(audio.client.0, audio.request).unwrap();
             }
@@ -1068,7 +1456,7 @@ mod tests {
         assert_eq!(before.modified().unwrap(), after.modified().unwrap());
         eprintln!(
             "{}",
-            serde_json::json!({"test":"shared-media-without-vm","status":status,"published_updates":frames,"audio_plays":audio_plays,"mixed_peak":peak,"real_seconds":started.elapsed().as_secs_f64(),"virtual_ms":now})
+            serde_json::json!({"test":"shared-media-without-vm","status":status,"published_updates":frames,"audio_plays":audio_plays,"pcm":audio_info,"mixed_peak":peak,"real_seconds":started.elapsed().as_secs_f64(),"virtual_ms":now})
         );
     }
 }

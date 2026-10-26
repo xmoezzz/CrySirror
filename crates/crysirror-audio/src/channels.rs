@@ -44,6 +44,12 @@ struct Source {
     gain: f32,
 }
 impl AudioSource for Source {
+    fn is_nonblocking(&self) -> bool {
+        self.inner.is_nonblocking()
+    }
+    fn read_position(&self) -> Option<u64> {
+        Some(self.at)
+    }
     fn sample_rate(&self) -> u32 {
         self.inner.sample_rate()
     }
@@ -297,6 +303,21 @@ impl ChannelAudio {
             .retain(|_, h| self.mixer.is_playing(h.client, *h));
         self.cancel_pending_control(client, &request)?;
         match request {
+            AudioRequest::PlayPcm {
+                channel,
+                source,
+                parameters: p,
+            } => {
+                if !p.restart && self.is_playing(client, channel) {
+                    return Ok(());
+                }
+                let ready = prepare(
+                    wrap_source(crate::decoder::open_pcm(source), None, p.decode_gain)?,
+                    None,
+                    p,
+                )?;
+                self.publish(client, channel, ready)?;
+            }
             AudioRequest::PlayAsset { .. } => {
                 anyhow::bail!("asset channel playback requires begin preparation")
             }

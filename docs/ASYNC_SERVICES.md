@@ -122,3 +122,16 @@ Play/Wait/Stop and save epochs remain separate from worker completion. A time
 wait is not a readiness fence. Desktop audio runs asynchronously even when a
 native image/scenario profile retains blocking Assets mode; Runtime provides
 an independent audio execution override. See [ADR 0071](adr/0071-canonical-audio-worker-bridge.md).
+
+## Prepared media PCM (ADR 0072)
+
+Media workers open one scoped capability shared by independent audio/video
+cursors, and prepare immutable core PcmAudio. PlayPcm publishes that resource
+through the shared channel mixer without reopening encoded WAVE data. Opening
+failures are now asynchronous Loading → Failed results. Stops and replacements
+cancel workers; blocked provider calls retain their admission leases until exit.
+Inspection reports decoder_worker_reservations (default limit 16). PCM storage
+receipts follow queued updates and live mixer sources past Media resource Stop.
+Movie audio still prepares a bounded full track; final mixing/output and
+last-reference disposal remain synchronous. See ADR 0072 for sample budgets,
+conversion policy and completion semantics.

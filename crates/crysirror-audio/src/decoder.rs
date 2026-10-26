@@ -171,6 +171,45 @@ impl std::fmt::Debug for Clip {
             .finish()
     }
 }
+/// Constant-time publication of validated PCM, independent of Clip's shorter
+/// SFX size limit. Reads and exact seeks perform no codec/filesystem work.
+pub fn open_pcm(pcm: crysirror_core::service::PcmAudio) -> Box<dyn AudioSource> {
+    Box::new(PcmSource { pcm, at: 0 })
+}
+struct PcmSource {
+    pcm: crysirror_core::service::PcmAudio,
+    at: usize,
+}
+impl AudioSource for PcmSource {
+    fn sample_rate(&self) -> u32 {
+        self.pcm.sample_rate()
+    }
+    fn frame_count(&self) -> Option<u64> {
+        Some(self.pcm.frame_count() as u64)
+    }
+    fn is_nonblocking(&self) -> bool {
+        true
+    }
+    fn read_position(&self) -> Option<u64> {
+        Some(self.at as u64)
+    }
+    fn read(&mut self, out: &mut [StereoFrame]) -> Result<usize> {
+        let n = out
+            .len()
+            .min(self.pcm.frame_count().saturating_sub(self.at));
+        out[..n].copy_from_slice(&self.pcm.frames()[self.at..self.at + n]);
+        self.at += n;
+        Ok(n)
+    }
+    fn seek(&mut self, frame: u64) -> Result<()> {
+        ensure!(
+            frame <= self.pcm.frame_count() as u64,
+            "PCM seek outside source"
+        );
+        self.at = frame as usize;
+        Ok(())
+    }
+}
 struct ClipSource {
     clip: Clip,
     at: usize,

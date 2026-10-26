@@ -120,6 +120,14 @@ Logs and structured results are under
 `target/verification/api-media-actual-rusur-{release.log,results.json}`. Private
 media, fonts and game captures remain ignored and are not distributed.
 
+The ADR 0072 PCM revision was revalidated on 2026-10-27 with the same private
+movie: 2,995 decoded frames, 2,987 published updates, one immutable PCM playback
+resource (4,402,944 stereo frames at 44,100 Hz; 35,223,552 sample bytes), and
+Ended without error. This track exceeds the separate resident SFX Clip ceiling.
+The source size/mtime checks passed. Evidence:
+`target/verification/pcm-media-final-tests.log`. This remains independent media
+and offline-mixer evidence, without a native VM, GPU or audio output device.
+
 ## Native opening acceptance
 
 The opt-in desktop test `reallive_engine::rusur_opening_uses_retained_engine_nodes_and_can_edit_them_without_vm`

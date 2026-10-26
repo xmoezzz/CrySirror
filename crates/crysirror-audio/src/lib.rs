@@ -13,6 +13,7 @@ pub mod decoder;
 pub mod legacy_pcm;
 pub mod mixer;
 pub mod native;
+pub mod pcm;
 pub mod scene;
 
 #[cfg(feature = "rodio-output")]

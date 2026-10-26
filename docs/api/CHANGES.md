@@ -4,6 +4,20 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `f55ff4c1819aaa78` (2026-10-27): worker-prepared media PCM
+
+- Add PcmAudioInfo reference metadata. Rust clients prepare validated immutable
+  PcmAudio and publish it through the shared channel mixer without a codec or
+  shorter SFX Clip limit. No JS sample-array upload member is added.
+- **Rust enum change:** AudioRequest gains PlayPcm. Exhaustive matches must handle
+  this already prepared resource. PlayAsset keeps asynchronous preparation;
+  encoded Play retains its explicit synchronous/offline contract.
+- Media now opens shared scoped capabilities on workers and emits PlayPcm instead
+  of encoding WAV for the owner to decode. Open failures become asynchronous
+  Loading → Failed errors. PCM receipts follow queued/live mixer references and
+  canceled workers retain admission leases until exit. See ADR 0072 for limits,
+  full-track preparation, PTS and remaining synchronous boundaries.
+
 ## `102009774599dc55` (2026-10-27): canonical audio readiness
 
 - Add Audio.channelStatus and SceneVoicePhase/SceneVoiceStatus data. Canonical

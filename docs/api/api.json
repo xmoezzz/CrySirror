@@ -4864,6 +4864,31 @@
       "used_by": "HostServices::audio_preparation"
     },
     {
+      "doc": "Metadata for a validated resident PCM resource, without samples or leases.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Sample frames per second, 8000 through 192000.",
+          "name": "sample_rate",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Number of stereo frames, independent of playback position.",
+          "name": "frames",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "Resident sample bytes; excludes allocation and resource overhead.",
+          "name": "sample_bytes",
+          "rust_type": "usize"
+        }
+      ],
+      "name": "PcmAudioInfo",
+      "used_by": "PcmAudio::info / AudioRequest::PlayPcm (Rust)"
+    },
+    {
       "doc": "Read-ahead dimensions, independent of codec packet storage.",
       "fields": [
         {
@@ -11614,7 +11639,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "102009774599dc55",
+  "fingerprint": "f55ff4c1819aaa78",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

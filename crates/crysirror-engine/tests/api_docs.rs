@@ -238,6 +238,7 @@ fn generate() -> api_doc::ApiDocs {
         d("AudioAsset","HostServices::begin_audio / AudioRequest::PlayAsset",None),
         d("AudioPreparePhase","AudioPreparation.phase",None),
         d("AudioPreparation","HostServices::audio_preparation",None),
+        d("PcmAudioInfo","PcmAudio::info / AudioRequest::PlayPcm (Rust)",None),
         d("StreamBufferSpec","Rust BufferedSource::prepare; engine music uses defaults",sample::<crysirror_audio::buffered::StreamBufferSpec>(json!({}))),
         d("SourceBufferStatus","Audio.sourceStatus",None),
         d("SeekProgress","Rust Mixer::seek_progress",None),
