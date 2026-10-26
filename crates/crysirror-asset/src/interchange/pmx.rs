@@ -127,7 +127,11 @@ pub struct Model {
     pub sdef: usize,
     pub qdef: usize,
     pub ik_bones: usize,
-    pub morphs: usize,
+    /// Vertex morphs (and group morphs made of vertex morphs): name and
+    /// (vertex, MMD-space delta) offsets.
+    pub vertex_morphs: Vec<(String, Vec<(u32, [f32; 3])>)>,
+    /// Morphs of other kinds (bone, UV, material, flip, impulse).
+    pub other_morphs: usize,
     pub additional_uvs: u8,
 }
 
@@ -151,7 +155,8 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
         1 => true,
         e => bail!("PMX text encoding {e}"),
     };
-    let (extra_uv, vsize, tsize, bsize) = (g[1], g[2], g[3], g[5]);
+    let (extra_uv, vsize, tsize, msize, bsize, morph_size, rigid_size) =
+        (g[1], g[2], g[3], g[4], g[5], g[6], g[7]);
     ensure!(extra_uv <= 4, "PMX additional UV count {extra_uv}");
     let name = r.text()?;
     for _ in 0..3 {
@@ -172,7 +177,8 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
         sdef: 0,
         qdef: 0,
         ik_bones: 0,
-        morphs: 0,
+        vertex_morphs: vec![],
+        other_morphs: 0,
         additional_uvs: extra_uv,
     };
     for _ in 0..n {
@@ -301,10 +307,92 @@ pub fn parse(bytes: &[u8]) -> Result<Model> {
             parent,
         });
     }
-    // Morphs follow; their count is read only to report them.
-    if let Ok(count) = r.count() {
-        m.morphs = count;
+    // Morphs: vertex morphs are kept; group morphs are expanded below.
+    let mut groups: Vec<(String, Vec<(i32, f32)>)> = vec![];
+    let mut vertex_of_morph: Vec<Option<usize>> = vec![];
+    for _ in 0..r.count()? {
+        let name = r.text()?;
+        r.text()?;
+        r.u8()?; // panel
+        let kind = r.u8()?;
+        let n = r.count()?;
+        vertex_of_morph.push(None);
+        match kind {
+            0 | 9 => {
+                let mut members = Vec::with_capacity(n);
+                for _ in 0..n {
+                    members.push((r.index(morph_size)?, r.f32()?));
+                }
+                if kind == 0 {
+                    groups.push((name, members));
+                } else {
+                    m.other_morphs += 1;
+                }
+            }
+            1 => {
+                let mut offsets = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let v = r.vertex_index(vsize)?;
+                    ensure!((v as usize) < m.positions.len(), "PMX morph vertex {v} out of range");
+                    offsets.push((v, r.vec()?));
+                }
+                *vertex_of_morph.last_mut().unwrap() = Some(m.vertex_morphs.len());
+                m.vertex_morphs.push((name, offsets));
+            }
+            2 => {
+                for _ in 0..n {
+                    r.index(bsize)?;
+                    r.vec::<7>()?;
+                }
+                m.other_morphs += 1;
+            }
+            3..=7 => {
+                for _ in 0..n {
+                    r.vertex_index(vsize)?;
+                    r.vec::<4>()?;
+                }
+                m.other_morphs += 1;
+            }
+            8 => {
+                for _ in 0..n {
+                    r.index(msize)?;
+                    r.u8()?;
+                    r.vec::<28>()?;
+                }
+                m.other_morphs += 1;
+            }
+            10 => {
+                for _ in 0..n {
+                    r.index(rigid_size)?;
+                    r.u8()?;
+                    r.vec::<6>()?;
+                }
+                m.other_morphs += 1;
+            }
+            k => bail!("PMX morph type {k}"),
+        }
     }
+    // Group morphs whose members are vertex morphs become summed vertex morphs.
+    for (name, members) in groups {
+        let mut sum: std::collections::BTreeMap<u32, [f32; 3]> = Default::default();
+        for (index, w) in members {
+            let Some(vm) = usize::try_from(index).ok().and_then(|i| vertex_of_morph.get(i).copied().flatten()) else {
+                continue;
+            };
+            for (v, d) in &m.vertex_morphs[vm].1 {
+                let e = sum.entry(*v).or_insert([0.; 3]);
+                for a in 0..3 {
+                    e[a] += d[a] * w;
+                }
+            }
+        }
+        if sum.is_empty() {
+            m.other_morphs += 1;
+        } else {
+            m.vertex_morphs.push((name, sum.into_iter().collect()));
+        }
+    }
+
     let bones = m.bones.len() as i32;
     for b in &m.bones {
         ensure!(
@@ -472,12 +560,34 @@ pub fn convert(
             ..Default::default()
         });
         p.material = Some(doc.materials.len() - 1);
-        prims.push(p);
+        // Morph targets touching this material's vertices, as dense deltas.
+        for (name, offsets) in &m.vertex_morphs {
+            let mut delta = vec![[0f32; 3]; p.positions.len()];
+            let mut touched = false;
+            for (v, d) in offsets {
+                if let Some(local) = remap.get(v) {
+                    delta[*local as usize] = to_gltf_space(*d);
+                    touched |= d.iter().any(|x| *x != 0.);
+                }
+            }
+            if touched {
+                p.targets.push(delta);
+                p.target_names.push(name.clone());
+            }
+        }
+        prims.push((mat.name.clone(), p));
     }
     ensure!(!prims.is_empty(), "PMX model has no drawable faces");
-    doc.meshes.push((m.name.clone(), prims));
-    let mut mesh_node = glb::Node::named(format!("{}_mesh", m.name));
-    mesh_node.mesh = Some(0);
+    // One mesh per material, so each carries only the morphs that touch it.
+    let mut mesh_nodes = Vec::new();
+    for (name, p) in prims {
+        doc.meshes.push((name.clone(), vec![p]));
+        let mut node = glb::Node::named(format!("{}_{name}", m.name));
+        node.mesh = Some(doc.meshes.len() - 1);
+        node.skin = has_bones.then_some(0);
+        doc.nodes.push(node);
+        mesh_nodes.push(doc.nodes.len() - 1);
+    }
     if has_bones {
         let inverse_bind = used
             .iter()
@@ -491,10 +601,8 @@ pub fn convert(
             inverse_bind,
             skeleton: None,
         });
-        mesh_node.skin = Some(0);
     }
-    doc.nodes.push(mesh_node);
-    doc.roots.push(doc.nodes.len() - 1);
+    doc.roots.extend(mesh_nodes);
 
     if m.sdef > 0 {
         doc.dropped
@@ -510,10 +618,10 @@ pub fn convert(
             m.ik_bones
         ));
     }
-    if m.morphs > 0 {
+    if m.other_morphs > 0 {
         doc.dropped.push(format!(
-            "{} morphs (engine morph targets pending)",
-            m.morphs
+            "{} bone/UV/material/flip/impulse morphs",
+            m.other_morphs
         ));
     }
     if m.additional_uvs > 0 {

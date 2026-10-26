@@ -42,10 +42,25 @@ The engine imported glTF 2.0/GLB only (ADR 0007). The owner asked for FBX
    reference import no longer reports its skins/animations as dropped, and
    `triangles` is counted.
 
+## Morph targets (second step)
+
+- glTF/VRM morph targets load as sparse per-primitive deltas named by the
+  `targetNames` extras convention; PMX vertex morphs and group morphs made
+  of vertex morphs convert to glTF targets (one mesh per material, so a
+  mesh carries only the targets that touch it).
+- Weights are entity state (`AnimationState.morphs`, set by
+  `Entity.setMorph/setMorphs`) and are extracted with whole-scene
+  drawables. The renderer blends positions and normals on the CPU into a
+  per-draw vertex buffer, recomputed only when the weights of that
+  primitive change, and every raster pass (prepass, shadows, opaque,
+  transparent, probes) draws from it.
+- Limits: per-mesh (`pbr: true`) model references ignore weights and say
+  so in the import report; glTF weight animation channels, FBX blend
+  shapes and PMX bone/UV/material morphs are reported, not applied;
+  hardware ray-traced shadows still use unmorphed positions.
+
 ## Not done yet
 
-- **Morph targets** in the engine (VRM expressions, PMX vertex morphs, FBX
-  blend shapes). This is the next model capability; the data is reported.
 - MToon shading (VRM uses its `KHR_materials_unlit` fallback), VRM spring
   bones/constraints/humanoid mapping, PMX IK, toon/sphere maps, physics.
 - VMD motions, FBX cubic tangents, extra animation layers, ASCII FBX,

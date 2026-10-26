@@ -311,7 +311,7 @@ fn world_info() -> &'static ClassInfo {
                 "Merge animation definitions {machines: {Name: {entry, states, transitions, parameters}}, montages: {Name: {clip, length, sections, notifies}}}."),
             method("defineGameplay", vec![("defs", T::Map)], T::Void,
                 "Merge gameplay definitions {effects: {Name: EffectDef}, abilities: {Name: AbilityDef}}."),
-            method("modelInfo", vec![("path", T::String)], T::Map, "glTF summary {clips:[{name,duration}], nodes, skins, meshes, bounds:{min,max} (rest pose, model units) or null} without spawning."),
+            method("modelInfo", vec![("path", T::String)], T::Map, "Model summary {clips:[{name,duration}], nodes, skins, meshes, morphs:[target names], bounds:{min,max} (rest pose, model units) or null} without spawning."),
         ],
     })
 }
@@ -984,6 +984,7 @@ impl Class for WorldClass {
                 Ok(Value::from_json(serde_json::json!({
                     "clips": m.animations.iter().map(|c| serde_json::json!({"name": c.name, "duration": c.duration})).collect::<Vec<_>>(),
                     "nodes": m.nodes.len(), "skins": m.skins.len(), "meshes": m.meshes.len(),
+                    "morphs": m.meshes.iter().flatten().flat_map(|p| p.morphs.iter().map(|t| t.name.clone())).collect::<std::collections::BTreeSet<_>>(),
                     "bounds": bounds,
                 })))
             }
@@ -1072,6 +1073,10 @@ fn entity_info() -> &'static ClassInfo {
             method("play", vec![("clip", T::String), ("options", T::Optional(Box::new(T::Map)))], T::Void,
                 "Cross-fade skeletal animation: options {speed?: 1, fade?: seconds (0.2), loop?: true}."),
             method("stopAnimation", vec![], T::Void, "Clear animation (rest pose)."),
+            method("setMorph", vec![("name", T::String), ("weight", T::Number)], T::Void,
+                "Set a morph target (blend shape) weight by target name on a whole-scene model; 0 removes it. Names: World.modelInfo(path).morphs."),
+            method("setMorphs", vec![("weights", T::Optional(Box::new(T::Map)))], T::Void,
+                "Replace all morph weights with {name: weight}, or clear them with null."),
             method("setCollider", vec![("collider", T::Optional(Box::new(T::Map)))], T::Void,
                 "Collider {shape:{kind:'box'|'sphere'|'capsule'|'mesh'|'convex_hull',...}, body?:'static'|'dynamic'|'kinematic'|'kinematic_position'|'character',mass?,density?,friction?,restitution?,ccd?,sensor?,groups?,gravity_scale?,linear_damping?,angular_damping?,locked_translation?,locked_rotation?,offset?} or null."),
             method("applyImpulse",vec![("impulse",T::Vec3),("point",T::Optional(Box::new(T::Vec3)))],T::Void,"Apply a world-space impulse (N·s), optionally at a world-space point; saves the resulting velocity immediately."),
@@ -1348,6 +1353,31 @@ impl Class for EntityClass {
                     .unwrap_or(true);
                 let mut a = spec(cx, this)?.animation.unwrap_or_default();
                 a.play(&clip, f("speed", 1.)?, f("fade", 0.2)?, looping);
+                submit(
+                    cx,
+                    vec![WorldCommand::SetAnimation {
+                        id,
+                        animation: Some(a),
+                    }],
+                )?
+            }
+            "setMorph" | "setMorphs" => {
+                let mut a = spec(cx, this)?.animation.unwrap_or_default();
+                if m == "setMorph" {
+                    let target = arg(args, 0, "name")?.as_str()?.to_owned();
+                    let w = arg(args, 1, "weight")?.as_f32()?;
+                    if w == 0. {
+                        a.morphs.remove(&target);
+                    } else {
+                        a.morphs.insert(target, w);
+                    }
+                } else {
+                    a.morphs = match opt(args, 0) {
+                        Some(v) => serde_json::from_value(v.to_json()).context("morph weights")?,
+                        None => Default::default(),
+                    };
+                    a.morphs.retain(|_, w| *w != 0.);
+                }
                 submit(
                     cx,
                     vec![WorldCommand::SetAnimation {

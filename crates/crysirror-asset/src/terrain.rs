@@ -108,6 +108,7 @@ pub fn mesh(spec: &TerrainSpec, grid: &Grid) -> (PbrPrimitive, MipImage, PbrMate
     let hi = h.iter().cloned().fold(f32::MIN, f32::max);
     let prim = PbrPrimitive {
         skin_attrs: None,
+        morphs: Vec::new(),
         vertices,
         indices,
         material: 0,

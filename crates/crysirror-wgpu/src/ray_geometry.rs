@@ -252,6 +252,7 @@ mod tests {
             ],
             indices: vec![0, 1, 2],
             skin_attrs: Some(vec![([0; 4], [1., 0., 0., 0.]); 3]),
+            morphs: Vec::new(),
             material: 0,
             bounds: ([0.; 3], [1.; 3]),
         };
@@ -282,6 +283,7 @@ mod tests {
             ],
             indices: vec![0, 1, 2],
             skin_attrs: None,
+            morphs: Vec::new(),
             material: 0,
             bounds: ([0.; 3], [1.; 3]),
         }));

@@ -164,7 +164,13 @@ pub struct AnimationState {
     pub montage: Option<crate::animgraph::MontageInstance>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<crate::animgraph::AnimEvent>,
+    /// Morph target (blend shape) weights by target name, applied to every
+    /// mesh of the model that has a target of that name.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub morphs: std::collections::BTreeMap<String, f32>,
 }
+/// Bound on named morph weights per entity.
+pub const MAX_MORPH_WEIGHTS: usize = 1024;
 impl AnimationState {
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -184,6 +190,13 @@ impl AnimationState {
                     && (0.0..=1000.).contains(&l.fade)
                     && l.time.abs() <= 1_000_000.,
                 "invalid animation layer"
+            );
+        }
+        ensure!(self.morphs.len() <= MAX_MORPH_WEIGHTS, "too many morph weights");
+        for (name, w) in &self.morphs {
+            ensure!(
+                !name.is_empty() && name.len() <= 256 && w.is_finite() && w.abs() <= 16.,
+                "invalid morph weight `{name}`"
             );
         }
         Ok(())

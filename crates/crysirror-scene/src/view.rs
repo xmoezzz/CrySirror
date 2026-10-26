@@ -480,6 +480,8 @@ pub enum PbrDrawable {
         client: u32,
         asset: String,
         animation: Vec<crate::components::AnimationLayer>,
+        /// Non-zero morph target weights by target name.
+        morphs: Vec<(String, f32)>,
     },
     /// Untextured triangles (cubes, legacy meshes) with a base color.
     Triangles {
@@ -711,6 +713,13 @@ impl World {
                             .as_ref()
                             .map(|a| a.layers.clone())
                             .unwrap_or_default(),
+                        morphs: spec
+                            .animation
+                            .iter()
+                            .flat_map(|a| &a.morphs)
+                            .filter(|(_, w)| **w != 0.)
+                            .map(|(n, w)| (n.clone(), *w))
+                            .collect(),
                     },
                     g => {
                         let (vertices, indices) = geometry_data(g);

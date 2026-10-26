@@ -15,6 +15,11 @@ pub struct Primitive {
     pub weights: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
     pub material: Option<usize>,
+    /// Morph targets: dense position deltas per vertex. Every primitive of a
+    /// mesh carries the same targets; their names are the mesh's
+    /// `targetNames`.
+    pub targets: Vec<Vec<[f32; 3]>>,
+    pub target_names: Vec<String>,
 }
 
 pub struct Material {
@@ -258,13 +263,33 @@ impl Document {
                 }
                 let mut prim =
                     json!({"attributes":attributes,"indices":w.indices(&p.indices),"mode":4});
+                ensure!(
+                    p.targets.len() == prims[0].targets.len(),
+                    "mesh `{name}`: primitives disagree on morph targets"
+                );
+                if !p.targets.is_empty() {
+                    let mut targets = Vec::new();
+                    for t in &p.targets {
+                        ensure!(t.len() == n, "mesh `{name}`: morph target vertex count");
+                        targets.push(json!({"POSITION": w.floats(t, "VEC3", true, Some(34962))}));
+                    }
+                    prim["targets"] = Value::Array(targets);
+                }
                 if let Some(m) = p.material {
                     ensure!(m < self.materials.len(), "material index");
                     prim["material"] = json!(m);
                 }
                 out.push(prim);
             }
-            meshes.push(json!({"name":name,"primitives":out}));
+            let mut mesh = json!({"name":name,"primitives":out});
+            if let Some(first) = prims.first().filter(|p| !p.target_names.is_empty()) {
+                ensure!(
+                    first.target_names.len() == first.targets.len(),
+                    "mesh `{name}`: morph target names"
+                );
+                mesh["extras"] = json!({ "targetNames": first.target_names });
+            }
+            meshes.push(mesh);
         }
         let mut images = Vec::new();
         let mut textures = Vec::new();

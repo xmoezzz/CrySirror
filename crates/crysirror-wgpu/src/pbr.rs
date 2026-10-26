@@ -617,6 +617,8 @@ pub struct PbrRenderer {
     palette_buf: wgpu::Buffer,
     palette_capacity: u64,
     prev_palettes: HashMap<u64, Vec<[[f32; 4]; 4]>>,
+    /// Per-draw morphed vertex buffers keyed by draw key: (weights hash, buffer, vertex count).
+    morph_buffers: HashMap<u64, (u64, wgpu::Buffer, usize)>,
     ssao_bgl: wgpu::BindGroupLayout,
     blur_bgl: wgpu::BindGroupLayout,
     taa_bgl: wgpu::BindGroupLayout,
@@ -1702,6 +1704,7 @@ impl PbrRenderer {
             palette_buf,
             palette_capacity,
             prev_palettes: HashMap::new(),
+            morph_buffers: HashMap::new(),
             ssao_bgl,
             blur_bgl,
             taa_bgl,
@@ -2671,6 +2674,7 @@ impl PbrRenderer {
                 client,
                 asset,
                 animation,
+                ..
             } = &instance.drawable
             {
                 let key = format!("{client}@{}:{asset}", assets.revision(ClientId(*client)));
@@ -2729,9 +2733,14 @@ impl PbrRenderer {
             ranges: Vec<std::ops::Range<u32>>,
             /// GPU-selected cut: indirect args slot pair (main = 2n, shadow = 2n+1).
             gpu: Option<u64>,
+            /// Draws from this instance's morphed vertex buffer (`morph_buffers[key]`).
+            morph: bool,
         }
         let mut palettes: Vec<[[f32; 4]; 4]> = Vec::new();
         let mut next_prev_palettes: HashMap<u64, Vec<[[f32; 4]; 4]>> = HashMap::new();
+        // Morph targets: (draw key, weights hash, blended vertices to upload).
+        let mut morph_uploads: Vec<(u64, u64, Vec<cpu::PbrVertex>)> = Vec::new();
+        let mut morph_live: std::collections::HashSet<u64> = std::collections::HashSet::new();
         let mut next_prev_models: HashMap<u64, [[f32; 4]; 4]> = HashMap::new();
         let mut draws = Vec::new();
         let mut objects: Vec<ObjectUniform> = Vec::new();
@@ -2790,6 +2799,7 @@ impl PbrRenderer {
                             skinned: false,
                             ranges: Vec::new(),
                             gpu: None,
+                            morph: false,
                         });
                     }
                 }
@@ -2809,12 +2819,14 @@ impl PbrRenderer {
                         skinned: false,
                         ranges: Vec::new(),
                         gpu: None,
+                        morph: false,
                     });
                 }
                 PbrDrawable::Scene {
                     client,
                     asset,
                     animation: _,
+                    morphs,
                 } => {
                     let key = format!("{client}@{}:{asset}", assets.revision(ClientId(*client)));
                     let model = self.models[&key].cpu.clone();
@@ -2858,6 +2870,29 @@ impl PbrRenderer {
                             skin,
                         });
                         for (pi, p) in self.models[&key].meshes[mesh].iter().enumerate() {
+                            let dk = draw_key(sub, pi as u64);
+                            let mut morph = false;
+                            if let Some(cp) = model.meshes.get(mesh).and_then(|m| m.get(pi)) {
+                                if !morphs.is_empty() && !cp.morphs.is_empty() {
+                                    let weight = |name: &str| {
+                                        morphs.iter().find(|(n, _)| n == name).map_or(0., |(_, w)| *w)
+                                    };
+                                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                                    for t in &cp.morphs {
+                                        std::hash::Hash::hash(&weight(&t.name).to_bits(), &mut h);
+                                    }
+                                    let hash = std::hash::Hasher::finish(&h);
+                                    if self.morph_buffers.get(&dk).is_some_and(|b| b.0 == hash) {
+                                        morph = true;
+                                    } else if let Some(v) = cp.morphed(weight) {
+                                        morph_uploads.push((dk, hash, v));
+                                        morph = true;
+                                    }
+                                    if morph {
+                                        morph_live.insert(dk);
+                                    }
+                                }
+                            }
                             let b = p.bounds;
                             for i in 0..8 {
                                 let c = Vec3::new(
@@ -2870,7 +2905,7 @@ impl PbrRenderer {
                                 hi = hi.max(w);
                             }
                             draws.push(DrawRef {
-                                key: draw_key(sub, pi as u64),
+                                key: dk,
                                 override_key: override_key.clone(),
                                 object: obj,
                                 kind: 0,
@@ -2881,6 +2916,7 @@ impl PbrRenderer {
                                 skinned: skin[2] == 1 && p.skin.is_some(),
                                 ranges: Vec::new(),
                                 gpu: None,
+                                morph,
                             });
                         }
                     }
@@ -2938,6 +2974,7 @@ impl PbrRenderer {
                         skinned: false,
                         ranges: Vec::new(),
                         gpu: None,
+                        morph: false,
                     });
                 }
             }
@@ -3787,8 +3824,36 @@ impl PbrRenderer {
             frame_bind_with(opaque_depth, &self.frame_buf, &self.light_bufs)
         };
         let frame_bind = frame_bind_for(&t.pre_depth);
+        // Morphed vertex buffers: upload changed blends, drop unused ones.
+        for (dk, hash, vertices) in morph_uploads {
+            let bytes = bytes_of_vertices(&vertices);
+            match self.morph_buffers.get_mut(&dk) {
+                Some(b) if b.2 == vertices.len() => {
+                    self.gpu.queue.write_buffer(&b.1, 0, &bytes);
+                    b.0 = hash;
+                }
+                _ => {
+                    let buffer = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("pbr morphed vertices"),
+                        contents: &bytes,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    });
+                    self.morph_buffers.insert(dk, (hash, buffer, vertices.len()));
+                }
+            }
+        }
+        self.morph_buffers.retain(|k, _| morph_live.contains(k));
         // Do not bind the writable prepass attachment as a sampled texture.
         let pre_frame_bind = frame_bind_for(&self.cascade_layers[0]);
+        let morph_buffers = &self.morph_buffers;
+        let vertex_buffer = |r: &DrawRef, p: &'_ GpuPrim| -> wgpu::Buffer {
+            if r.morph {
+                if let Some(b) = morph_buffers.get(&r.key) {
+                    return b.1.clone();
+                }
+            }
+            p.vertices.clone()
+        };
         let get = |r: &DrawRef| -> (
             &GpuPrim,
             &wgpu::BindGroup,
@@ -3977,7 +4042,7 @@ impl PbrRenderer {
                     if r.skinned {
                         pass.set_vertex_buffer(1, p.skin.as_ref().unwrap().slice(..));
                     }
-                    pass.set_vertex_buffer(0, p.vertices.slice(..));
+                    pass.set_vertex_buffer(0, vertex_buffer(r, p).slice(..));
                     draw_prim!(pass, r, p, 1);
                 }
             }
@@ -4071,7 +4136,7 @@ impl PbrRenderer {
                         if r.skinned {
                             pass.set_vertex_buffer(1, p.skin.as_ref().unwrap().slice(..));
                         }
-                        pass.set_vertex_buffer(0, p.vertices.slice(..));
+                        pass.set_vertex_buffer(0, vertex_buffer(r, p).slice(..));
                         draw_prim!(pass, r, p, 1);
                     }
                 }};
@@ -4124,7 +4189,7 @@ impl PbrRenderer {
                     if r.skinned {
                         pass.set_vertex_buffer(1, p.skin.as_ref().unwrap().slice(..));
                     }
-                    pass.set_vertex_buffer(0, p.vertices.slice(..));
+                    pass.set_vertex_buffer(0, vertex_buffer(r, p).slice(..));
                     draw_prim!(pass, r, p, 1);
                 }
             }
@@ -4271,7 +4336,7 @@ impl PbrRenderer {
                             &self.object_bind,
                             &[(r.object as u64 * OBJECT_STRIDE) as u32],
                         );
-                        pass.set_vertex_buffer(0, p.vertices.slice(..));
+                        pass.set_vertex_buffer(0, vertex_buffer(r, p).slice(..));
                         draw_prim!(pass, r, p, 1);
                     }
                     if env.show_sky {
@@ -4501,7 +4566,7 @@ impl PbrRenderer {
                     &self.object_bind,
                     &[(r.object as u64 * OBJECT_STRIDE) as u32],
                 );
-                pass.set_vertex_buffer(0, p.vertices.slice(..));
+                pass.set_vertex_buffer(0, vertex_buffer(r, p).slice(..));
                 draw_prim!(pass, r, p, 0);
             }
         }
@@ -4728,7 +4793,7 @@ impl PbrRenderer {
                     &self.object_bind,
                     &[(r.object as u64 * OBJECT_STRIDE) as u32],
                 );
-                pass.set_vertex_buffer(0, p.vertices.slice(..));
+                pass.set_vertex_buffer(0, vertex_buffer(r, p).slice(..));
                 draw_prim!(pass, r, p, 0);
             }
             if env.show_sky {
@@ -4853,7 +4918,7 @@ impl PbrRenderer {
                         &self.object_bind,
                         &[(r.object as u64 * OBJECT_STRIDE) as u32],
                     );
-                    pass.set_vertex_buffer(0, p.vertices.slice(..));
+                    pass.set_vertex_buffer(0, vertex_buffer(r, p).slice(..));
                     draw_prim!(pass, r, p, 0);
                 }
             }

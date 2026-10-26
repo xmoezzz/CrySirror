@@ -672,6 +672,32 @@
           "returns": "void"
         },
         {
+          "doc": "Set a morph target (blend shape) weight by target name on a whole-scene model; 0 removes it. Names: World.modelInfo(path).morphs.",
+          "name": "setMorph",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "weight",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Replace all morph weights with {name: weight}, or clear them with null.",
+          "name": "setMorphs",
+          "params": [
+            {
+              "name": "weights",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Collider {shape:{kind:'box'|'sphere'|'capsule'|'mesh'|'convex_hull',...}, body?:'static'|'dynamic'|'kinematic'|'kinematic_position'|'character',mass?,density?,friction?,restitution?,ccd?,sensor?,groups?,gravity_scale?,linear_damping?,angular_damping?,locked_translation?,locked_rotation?,offset?} or null.",
           "name": "setCollider",
           "params": [
@@ -2933,7 +2959,7 @@
           "returns": "void"
         },
         {
-          "doc": "glTF summary {clips:[{name,duration}], nodes, skins, meshes, bounds:{min,max} (rest pose, model units) or null} without spawning.",
+          "doc": "Model summary {clips:[{name,duration}], nodes, skins, meshes, morphs:[target names], bounds:{min,max} (rest pose, model units) or null} without spawning.",
           "name": "modelInfo",
           "params": [
             {
@@ -7259,7 +7285,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "da2eda1e44d13887",
+  "fingerprint": "b9821f33f25bafe8",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

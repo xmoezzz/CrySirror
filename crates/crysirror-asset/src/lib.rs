@@ -150,7 +150,7 @@ pub fn import_gltf(
         .sum();
     if targets > 0 {
         report.dropped.push(format!(
-            "{targets} morph target(s) (engine morph targets pending)"
+            "{targets} morph target(s): only whole-scene (asScene) instances apply morph weights"
         ));
     }
     for ext in doc.extensions_used() {

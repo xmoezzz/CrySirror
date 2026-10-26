@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `da2eda1e44d13887`
+API fingerprint: `b9821f33f25bafe8`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -188,6 +188,8 @@ A generational handle to a world entity. Using it after destroy() fails.
 | `children(—)` | `Entity[]` | Direct children. |
 | `play(clip: string, options: Record<string, any> \| null)` | `void` | Cross-fade skeletal animation: options {speed?: 1, fade?: seconds (0.2), loop?: true}. |
 | `stopAnimation(—)` | `void` | Clear animation (rest pose). |
+| `setMorph(name: string, weight: number)` | `void` | Set a morph target (blend shape) weight by target name on a whole-scene model; 0 removes it. Names: World.modelInfo(path).morphs. |
+| `setMorphs(weights: Record<string, any> \| null)` | `void` | Replace all morph weights with {name: weight}, or clear them with null. |
 | `setCollider(collider: Record<string, any> \| null)` | `void` | Collider {shape:{kind:'box'\|'sphere'\|'capsule'\|'mesh'\|'convex_hull',...}, body?:'static'\|'dynamic'\|'kinematic'\|'kinematic_position'\|'character',mass?,density?,friction?,restitution?,ccd?,sensor?,groups?,gravity_scale?,linear_damping?,angular_damping?,locked_translation?,locked_rotation?,offset?} or null. |
 | `applyImpulse(impulse: Vec3, point: Vec3 \| null)` | `void` | Apply a world-space impulse (N·s), optionally at a world-space point; saves the resulting velocity immediately. |
 | `applyTorqueImpulse(impulse: Vec3)` | `void` | Apply a world-space angular impulse to a dynamic body. |
@@ -531,7 +533,7 @@ Script global: `world`.
 | `findPath(from: Vec3, to: Vec3)` | `Vec3[] \| null` | Smoothed navigation path or null. |
 | `defineAnimation(defs: Record<string, any>)` | `void` | Merge animation definitions {machines: {Name: {entry, states, transitions, parameters}}, montages: {Name: {clip, length, sections, notifies}}}. |
 | `defineGameplay(defs: Record<string, any>)` | `void` | Merge gameplay definitions {effects: {Name: EffectDef}, abilities: {Name: AbilityDef}}. |
-| `modelInfo(path: string)` | `Record<string, any>` | glTF summary {clips:[{name,duration}], nodes, skins, meshes, bounds:{min,max} (rest pose, model units) or null} without spawning. |
+| `modelInfo(path: string)` | `Record<string, any>` | Model summary {clips:[{name,duration}], nodes, skins, meshes, morphs:[target names], bounds:{min,max} (rest pose, model units) or null} without spawning. |
 
 Commands issued: `spawn` → `world.spawn`, `pause` → `world.pause`, `setCamera` → `world.set_camera`, `setEnvironment` → `world.set_environment`, `defineGameplay` → `world.define_gameplay`, `defineAnimation` → `world.define_animation`, `defineBehaviorTree` → `world.define_ai`, `streamLevel` → `world.set_streaming`, `playVideo` → `world.set_video`, `playSequence` → `world.play_sequence`, `stopSequence` → `world.stop_sequence`.
 

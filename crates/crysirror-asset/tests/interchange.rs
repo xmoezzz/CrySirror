@@ -263,7 +263,37 @@ fn pmx_fixture() -> Vec<u8> {
             f(&mut b, v);
         }
     }
-    i(&mut b, 3); // morphs (reported, not parsed)
+    i(&mut b, 3);
+    // Vertex morph: lift the top edge 1 unit towards MMD front (-Z).
+    text(&mut b, "まばたき");
+    text(&mut b, "blink");
+    b.push(1);
+    b.push(1);
+    i(&mut b, 2);
+    for v in [2, 3] {
+        i(&mut b, v);
+        for d in [0., 0., -1.] {
+            f(&mut b, d);
+        }
+    }
+    // Group morph: half of the vertex morph.
+    text(&mut b, "半分");
+    text(&mut b, "half");
+    b.push(1);
+    b.push(0);
+    i(&mut b, 1);
+    i(&mut b, 0);
+    f(&mut b, 0.5);
+    // Bone morph (reported).
+    text(&mut b, "ボーン");
+    text(&mut b, "bone");
+    b.push(1);
+    b.push(2);
+    i(&mut b, 1);
+    i(&mut b, 1);
+    for v in [0., 1., 0., 0., 0., 0., 1.] {
+        f(&mut b, v);
+    }
     b
 }
 
@@ -311,12 +341,19 @@ fn pmx_converts_to_metres_with_skin_and_texture() {
         assert!(geometric.dot(Vec3::from(prim.vertices[tri[0] as usize].normal)) > 0.99);
         assert!(geometric.z > 0.99, "{geometric}");
     }
+    // Morph targets survive conversion with names, metres and handedness.
+    let names: Vec<&str> = prim.morphs.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["まばたき", "半分"]);
+    let top_z = |w: f32, name: &str| {
+        let v = prim.morphed(|n| if n == name { w } else { 0. }).unwrap();
+        v.iter().filter(|v| v.position[1] > 1.).map(|v| v.position[2]).fold(f32::MIN, f32::max)
+    };
+    assert!((top_z(1., "まばたき") - 0.08).abs() < 1e-5);
+    assert!((top_z(1., "半分") - 0.04).abs() < 1e-5);
+    assert!(prim.morphed(|_| 0.).is_none());
     let imported = crysirror_asset::import_gltf(&bytes, &Default::default(), files).unwrap();
     let dropped = imported.report.dropped.join("; ");
-    assert!(
-        dropped.contains("3 morphs") && dropped.contains("toon"),
-        "{dropped}"
-    );
+    assert!(dropped.contains("1 bone/UV/material") && dropped.contains("toon"), "{dropped}");
 }
 
 #[test]

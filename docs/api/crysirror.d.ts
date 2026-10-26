@@ -164,6 +164,10 @@ declare class Entity {
   play(clip: string, options: Record<string, any> | null): void;
   /** Clear animation (rest pose). */
   stopAnimation(): void;
+  /** Set a morph target (blend shape) weight by target name on a whole-scene model; 0 removes it. Names: World.modelInfo(path).morphs. */
+  setMorph(name: string, weight: number): void;
+  /** Replace all morph weights with {name: weight}, or clear them with null. */
+  setMorphs(weights: Record<string, any> | null): void;
   /** Collider {shape:{kind:'box'|'sphere'|'capsule'|'mesh'|'convex_hull',...}, body?:'static'|'dynamic'|'kinematic'|'kinematic_position'|'character',mass?,density?,friction?,restitution?,ccd?,sensor?,groups?,gravity_scale?,linear_damping?,angular_damping?,locked_translation?,locked_rotation?,offset?} or null. */
   setCollider(collider: Record<string, any> | null): void;
   /** Apply a world-space impulse (N·s), optionally at a world-space point; saves the resulting velocity immediately. */
@@ -554,7 +558,7 @@ declare class World {
   defineAnimation(defs: Record<string, any>): void;
   /** Merge gameplay definitions {effects: {Name: EffectDef}, abilities: {Name: AbilityDef}}. */
   defineGameplay(defs: Record<string, any>): void;
-  /** glTF summary {clips:[{name,duration}], nodes, skins, meshes, bounds:{min,max} (rest pose, model units) or null} without spawning. */
+  /** Model summary {clips:[{name,duration}], nodes, skins, meshes, morphs:[target names], bounds:{min,max} (rest pose, model units) or null} without spawning. */
   modelInfo(path: string): Record<string, any>;
 }
 declare const engine: Engine;

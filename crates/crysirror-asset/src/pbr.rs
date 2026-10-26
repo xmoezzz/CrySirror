@@ -23,6 +23,58 @@ pub struct PbrPrimitive {
     pub indices: Vec<u32>,
     pub material: usize,
     pub bounds: ([f32; 3], [f32; 3]),
+    /// Morph targets (blend shapes), sparse: only displaced vertices.
+    pub morphs: Vec<MorphTarget>,
+}
+
+/// One morph target of a primitive: displaced vertex indices and their
+/// position/normal deltas.
+#[derive(Clone, Debug, Default)]
+pub struct MorphTarget {
+    pub name: String,
+    pub indices: Vec<u32>,
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+}
+
+/// Upper bound on morph targets per primitive.
+pub const MAX_MORPH_TARGETS: usize = 512;
+
+impl PbrPrimitive {
+    /// Vertices with the named morph weights applied, or `None` when no
+    /// target of this primitive has a non-zero weight.
+    pub fn morphed(&self, weight: impl Fn(&str) -> f32) -> Option<Vec<PbrVertex>> {
+        let active: Vec<(&MorphTarget, f32)> = self
+            .morphs
+            .iter()
+            .map(|t| (t, weight(&t.name)))
+            .filter(|(_, w)| *w != 0.)
+            .collect();
+        if active.is_empty() {
+            return None;
+        }
+        let mut out = self.vertices.clone();
+        for (t, w) in active {
+            for (k, i) in t.indices.iter().enumerate() {
+                let v = &mut out[*i as usize];
+                for a in 0..3 {
+                    v.position[a] += t.positions[k][a] * w;
+                }
+                if let Some(n) = t.normals.get(k) {
+                    for a in 0..3 {
+                        v.normal[a] += n[a] * w;
+                    }
+                }
+            }
+        }
+        for v in &mut out {
+            let n = glam::Vec3::from(v.normal);
+            if n.length_squared() > 1e-12 {
+                v.normal = n.normalize().to_array();
+            }
+        }
+        Some(out)
+    }
 }
 
 pub use crysirror_scene::material::AlphaMode;
@@ -325,6 +377,7 @@ pub fn flat_primitive(positions: &[[f32; 3]], indices: &[u32]) -> PbrPrimitive {
         indices,
         material: 0,
         bounds,
+        morphs: Vec::new(),
     }
 }
 
@@ -512,6 +565,18 @@ fn load_pbr_with(
     model.materials.push(PbrMaterial::default());
     for mesh in doc.meshes() {
         let mut prims = Vec::new();
+        // Morph target names: the `targetNames` extras convention, on the
+        // mesh or (UniVRM) on its primitives.
+        let names_of = |extras: &gltf::json::Extras| -> Option<Vec<String>> {
+            let raw = extras.as_ref()?;
+            serde_json::from_str::<serde_json::Value>(raw.get())
+                .ok()?
+                .get("targetNames")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+        };
+        let target_names: Vec<String> = names_of(mesh.extras())
+            .or_else(|| mesh.primitives().find_map(|p| names_of(p.extras())))
+            .unwrap_or_default();
         for prim in mesh.primitives() {
             if prim.mode() != gltf::mesh::Mode::Triangles {
                 model.dropped.push(format!(
@@ -573,12 +638,41 @@ fn load_pbr_with(
                 _ => None,
             };
             let bounds = bounds(&vertices);
+            let mut morphs = Vec::new();
+            for (ti, (p, n, _)) in r.read_morph_targets().enumerate() {
+                ensure!(ti < MAX_MORPH_TARGETS, "primitive exceeds {MAX_MORPH_TARGETS} morph targets");
+                let p: Vec<[f32; 3]> = p.map(|x| x.collect()).unwrap_or_default();
+                let n: Vec<[f32; 3]> = n.map(|x| x.collect()).unwrap_or_default();
+                ensure!(
+                    (p.is_empty() || p.len() == pos.len()) && (n.is_empty() || n.len() == pos.len()),
+                    "morph target attribute count"
+                );
+                let mut t = MorphTarget {
+                    name: target_names
+                        .get(ti)
+                        .cloned()
+                        .unwrap_or_else(|| format!("{}#{ti}", mesh.name().unwrap_or("mesh"))),
+                    ..Default::default()
+                };
+                for i in 0..pos.len() {
+                    let dp = p.get(i).copied().unwrap_or([0.; 3]);
+                    let dn = n.get(i).copied().unwrap_or([0.; 3]);
+                    if dp.iter().chain(&dn).any(|v| *v != 0.) {
+                        ensure!(dp.iter().chain(&dn).all(|v| v.is_finite()), "non-finite morph delta");
+                        t.indices.push(i as u32);
+                        t.positions.push(dp);
+                        t.normals.push(dn);
+                    }
+                }
+                morphs.push(t);
+            }
             prims.push(PbrPrimitive {
                 skin_attrs,
                 vertices,
                 indices,
                 material: prim.material().index().unwrap_or(default_material),
                 bounds,
+                morphs,
             });
         }
         model.meshes.push(prims);

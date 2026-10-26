@@ -4,6 +4,18 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `b9821f33f25bafe8` (2026-10-26): morph targets
+
+- `Entity.setMorph(name, weight)` and `Entity.setMorphs(weights | null)` set
+  morph target (blend shape) weights by target name on whole-scene
+  (`asScene`) models; `AnimationState.morphs` (map, default empty) stores
+  them and saves with the entity. `stopAnimation` clears them too.
+- `World.modelInfo(path).morphs` lists the model's target names (glTF
+  `targetNames` extras, else `<mesh>#<index>`).
+- `PbrDrawable::Scene` gains `morphs` (Rust callers matching it exhaustively
+  must add the field). ADR 0054.
+- Not breaking for scripts or saved projects.
+
 ## `da2eda1e44d13887` (2026-10-26): canvas presentations inside layer trees
 
 - `CanvasCommand::Present` gains `parent` (optional existing client layer id)

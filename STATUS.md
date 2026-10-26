@@ -3,6 +3,27 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## Morph targets (ADR 0054, second step)
+
+- glTF/VRM morph targets load (sparse, `targetNames`); PMX vertex and
+  group morphs convert. `Entity.setMorph/setMorphs` store weights in
+  `AnimationState.morphs`; whole-scene drawables carry them; the renderer
+  blends positions/normals on the CPU into a per-draw vertex buffer used by
+  every raster pass, re-uploaded only when that primitive's weights change.
+- Not applied: per-mesh `pbr: true` references (reported), glTF weight
+  animation channels, FBX blend shapes, PMX non-vertex morphs, hardware RT
+  shadow geometry (unmorphed).
+- Behaviour:
+  - VRM 1.0 Seed-san, release raster on Apple M5/Metal: `eye_smile`,
+    `lip_a`, `cheek` at 1.0 close the eyes, open the mouth and add blush
+    (local images `target/verification/vrm-face0.png`/`vrm-face1.png`).
+  - Rust workspace `--no-fail-fast`: **601 passed / 0 failed / 56 ignored**.
+  - Explicit Metal GPU smoke suite, `--test-threads=1`: **29 passed**. Run
+    in parallel, 21 of them panic with a wgpu validation error; the
+    unmodified previous commit fails identically (pre-existing, not
+    investigated).
+  - Python 3.11: **169 passed**.
+
 ## FBX, PMX and VRM import (ADR 0054)
 
 - glTF/GLB was already loading (DamagedHelmet, Sponza, Fox); a render of
