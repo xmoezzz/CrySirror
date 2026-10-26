@@ -1,0 +1,9 @@
+{
+  "schema": 2,
+  "name": "CrySirror modular VFX laboratory",
+  "content_revision": "aaa-vfx-1",
+  "canvas": [1280, 720],
+  "background": [3, 5, 12, 255],
+  "assets": "assets",
+  "clients": [{"name": "game", "adapter": "crysirror-script-v1", "game": "vfx-lab"}]
+}

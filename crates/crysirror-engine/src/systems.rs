@@ -153,6 +153,7 @@ fn streaming_at(cx: &mut EngineContext, frame: u64) -> Result<()> {
                     gameplay: None,
                     ai: None,
                     particles: None,
+                    vfx: None,
                     light: None,
                     reflection_probe: None,
                     irradiance_volume: None,

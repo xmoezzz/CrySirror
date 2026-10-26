@@ -1469,3 +1469,101 @@ extraction. ADR 0038 records this delivered capability increment.
   target/verification/avg32/{cpu-tests-final.log,font-test-final.log};
   target/associated-upstream.log; rt0060-all-gpu-font.log and
   rt0060/gi-benchmark.json; rendered PNGs in target/verification/vn-rt/.
+
+## Modular CPU/GPU VFX (2026-10-26, ADR 0064)
+
+- Implementation: added safe, device-independent `crysirror-vfx` definitions,
+  compilation, deterministic CPU simulation, typed parameters, multi-emitter
+  systems, five spawn shapes, ten update modules, checked lifetime curves,
+  world/local space, analytic collisions and bounded deferred CPU child events.
+  Engine `Vfx`/`Entity` APIs and data `EntitySpec.vfx` use the same state.
+  Legacy `particles` lowers into this core; its renderer-private CPU simulator
+  was deleted. No Unreal source, VM host, game data or fonts were added.
+- Async implementation: runtime moves simulation ownership into the bounded
+  worker pool and publishes immutable frame products. Live frames poll without
+  waiting. A bounded input journal retains intermediate parameters/transforms
+  while workers are busy; fixed-step debt is drained before the next sample.
+  Full journals fail visibly and an explicit offline fence can drain/recover
+  them without advancing World/VM clocks. Epochs reject stale restore products.
+- GPU implementation: resident 96-byte particle state, parallel update/death,
+  deterministic free-slot prefix allocation and parallel birth initialization,
+  active compaction, bounded device event records and indirect drawing. GPU
+  targets do not run CPU particle loops. Historical tick packets include the
+  parameters/transforms at that tick. The owner retains unsubmitted commands
+  under packet/byte budgets; receipts advance after queue submission. A second
+  direct PBR encode with pending work fails instead of resimulating a tick.
+- Render implementation: texture/flipbook sprites, camera/velocity/axis facing,
+  soft depth intersections, four blend modes, static mesh instances, CPU ribbon
+  bands, per-view culling and GPU alpha sorting. Resource access uses ordinary
+  scoped Assets; no extra texture bindings enter the PBR material pipeline.
+  Inspection separates CPU counts, GPU capacity/submissions, resident buffer
+  bytes and pending commands. Live GPU counts stay null without readback.
+- Compilation: local `cargo check --locked --workspace --all-targets` and the
+  default desktop build succeeded. Existing image/RealLive warnings remain.
+  API reference/types regenerated with 32 distinct VFX data aliases; signature
+  fingerprint changed from `1050976234c41b17` to `ff5f3d2050247846` and is logged.
+- Workspace behavior: the normal locked workspace suite completed with 659
+  passed, zero failed and 76 explicitly ignored tests. The subsequently added
+  end-to-end GPU integration test was run explicitly, including its BGRA
+  desktop-capture path. Ignored tests are not counted as hardware passes.
+- CPU behavior: core 18 tests, runtime 10 tests, engine VFX API 2 tests and API
+  documentation 6 tests passed. Tests include paused/stopped/restarted state,
+  scoped events, time-zero initialization, transactional type errors, retained
+  GPU histories beyond 32 ticks, hidden GPU simulation and submission receipts.
+  A deliberately blocked worker produced exactly the same particle arrays as
+  a per-frame offline baseline across changing parameters/transforms. Queue
+  overflow and subsequent offline recovery also passed. Python 3.11 tooling
+  passed 181 tests, including 11 new VFX schema/resource/MCP tests. Strict
+  tooling rejects unknown modules, invalid bindings/curves, unsupported GPU
+  profiles and competing components. Asset inventory covers initial entities
+  and widget spawn/set-VFX textures/static meshes; client/symlink isolation and
+  rejected MCP writes were exercised without a GPU or VM.
+- Actual GPU behavior: Apple M5 / Metal explicitly passed all five GPU compute
+  tests, three render pixel tests, the private cull/indirect test, the engine
+  timeline/PBR/submission integration test and the existing terrain/HDR legacy
+  particle test (11 device tests total). The integration test submitted every
+  tick of a 61-tick history, compared paused pixels, rejected duplicate pending
+  encoding, then abandoned/retried encoding without advancing a receipt early.
+  Device tests remain ignored in the default suite; their explicit runs are
+  separate evidence. Other desktop GPUs/platforms were not physically tested.
+- GPU performance: 100,000 resident particles, 24 timestamp samples per scope.
+  Update/compact with acceleration, drag and curl: mean 66.448 us, p50 71.250 us,
+  p95 95.000 us. Independent parallel 100k birth/allocation/compaction at dt=0:
+  mean 358.286 us, p50 115.875 us, p95 761.083 us, maximum 1.991 ms. These
+  GPU-only intervals exclude draw, CPU encoding, allocation and image/readback
+  cost; the wide burst distribution is retained in the raw JSON. No whole-frame
+  or equal-quality Niagara performance equivalence is claimed.
+- Integrated behavior: the public DamagedHelmet/HDR showcase rendered through
+  the actual desktop JS/TS API with GPU fire, textured flipbooks, CPU soft smoke,
+  instanced shards, collision child sparks and a moving world-space ribbon. Four
+  consecutive captured frames kept one renderer. The 100k stress script also
+  rendered with zero CPU particle arrays, 116 submitted ticks, all 100,000 birth
+  requests, zero unreplayed ticks and zero pending commands after capture.
+  The same PBR/effects showcase also rendered on the native hardware RT path
+  with three RT scene instances, two static BLAS and one TLAS build. Particles
+  coexist with that pipeline but do not themselves enter the RT structures.
+  Desktop captures now reuse the live renderer, retain resident particle state
+  and convert BGRA surfaces into RGBA PNGs; the BGRA pixel test passed explicitly.
+  A real winit window also ran the 100k script for 60 presented frames, captured
+  its retained GPU particles on exit and exported a trace. Its 60 completed
+  whole-frame GPU samples (including startup; simple additive-particle scene)
+  measured mean 1.347 ms, p50 0.609 ms, p95 2.378 ms. One timing-ring sample was
+  dropped, none failed or remained pending. The explicit offline VFX fence
+  occurred only for the final capture, not once per interactive tick.
+- Limits: this is a substantial modular VFX profile, not complete Niagara
+  parity. Visual graphs, arbitrary custom compute, skeletal/scene/physics data
+  interfaces, fluid simulation and effect-level significance/LOD scheduling
+  remain unfinished. GPU ribbon/child emitters/replace-oldest fail explicitly;
+  CPU supports them. Mesh particles are static unlit geometry with texture/color.
+  Transparency is not sorted jointly with ordinary scene meshes. Particle
+  probe/RT visibility and exact save/device particle checkpoints remain out.
+  Replacing a renderer after its history is retired cannot reconstruct a paused
+  GPU simulation; this fails visibly. Canonical restore resets derived visuals.
+- Evidence: target/verification/vfx-{core-tests-final,runtime-tests,
+  api-runtime-final,integration-gpu,legacy-particles-gpu,all-targets,
+  desktop-final-build,desktop-capture-build,integration-bgra-gpu,
+  changed-crates-final,all-targets-final,python-complete}.log;
+  vfx-gpu-parallel-final.log, vfx-gpu/benchmark.json,
+  vfx-render-{gpu,cull-gpu,geometry,cpu}.log, vfx-demo-final.json,
+  vfx-stress-final.json, vfx-demo-rt.json, vfx-live.log and PNGs/movies plus
+  live-profile.json in target/verification/vfx-demo/.

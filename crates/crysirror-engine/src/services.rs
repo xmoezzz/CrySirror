@@ -7,13 +7,13 @@ use crate::{
     object::{Class, ClassInfo, ClassRegistry, MethodInfo, ObjectId, PropertyInfo, TypeHint as T},
     value::Value,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::{FileSystem, HostServices},
     state::{AudioVoice, Command},
 };
-use crysirror_scene::{ServiceBatch, layer::LayerCommand, ui::UiCommand};
+use crysirror_scene::{layer::LayerCommand, ui::UiCommand, ServiceBatch};
 use std::sync::{Arc, OnceLock};
 
 /// Every typed engine command and the API method that issues it.
@@ -40,6 +40,7 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("world", "define_ai", "World.defineBehaviorTree"),
     ("world", "set_ai", "Entity.runBehaviorTree"),
     ("world", "set_particles", "Entity.setParticles"),
+    ("world", "set_vfx", "Entity.setVfx"),
     ("world", "set_light", "Entity.setLight"),
     ("world", "set_reflection_probe", "Entity.setReflectionProbe"),
     (

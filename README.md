@@ -89,7 +89,7 @@ requires separate checks; see STATUS.md.
 
 ```sh
 cargo check --locked --workspace --all-targets
-cargo test --locked --workspace --all-targets
+cargo test --locked --workspace
 cargo run --locked -p crysirror-desktop -- run examples/desktop/project.json --no-audio
 ```
 
@@ -258,3 +258,9 @@ The [frame pipeline and profiling guide](docs/FRAME_PIPELINE.md) includes public
 Khronos showcase recipes for shared RT mesh instances and asynchronous level
 streaming. `run --profile PATH` exports a CPU Chrome trace and GPU timing
 diagnostics. This advances ADR 0050; engine-wide async migration remains partial.
+
+The [modular VFX laboratory](examples/aaa-vfx/README.md) exercises engine-owned
+CPU/GPU effect systems, typed parameters, collision sub-emitters, flipbooks,
+mesh particles and ribbons in a public PBR demo. [ADR 0064](docs/adr/0064-modular-vfx-cpu-gpu.md)
+documents asynchronous ownership, resident GPU simulation and the explicit
+remaining Niagara capability gaps; it is an independent implementation.

@@ -274,3 +274,20 @@ The shared Profiler exports bounded CPU traces, stage percentiles and optional
 completed GPU durations with separate clocks. Native PBR RT now shares local
 mesh BLAS across TLAS instances and retains unchanged CPU geometry. See
 [FRAME_PIPELINE.md](FRAME_PIPELINE.md) for public showcase commands and limits.
+
+## Modular visual effects (2026-10-26)
+
+`crysirror-vfx` owns reusable effect definitions, compilation, deterministic CPU
+simulation and GPU tick planning. `VfxRuntime` schedules bounded worker jobs and
+publishes immutable products into the existing render-extraction DAG. The wgpu
+backend owns resident GPU simulation, submission receipts, per-view culling,
+sorting and Sprite/Mesh/Ribbon drawing; it no longer simulates legacy CPU
+particles. Data projects, JS/TS `Vfx`/`Entity` APIs and future VM adapters use
+these same resources and operations. Interactive updates poll completions;
+offline capture has an explicit clock-preserving readiness fence.
+
+[ADR 0064](adr/0064-modular-vfx-cpu-gpu.md) specifies typed modules, event routing,
+budgets, timeline backpressure and remaining Niagara gaps. GPU capacity and
+submission work are not reported as measured live counts. Save/restore retains
+declarations and resets derived visuals rather than claiming exact particle
+checkpoint persistence. No Unreal runtime or source was copied or hosted.

@@ -10,6 +10,7 @@ arc-formats = ["dep:crysirror-formats-arc"]
 
 [dependencies]
 crysirror-tasks.workspace = true
+crysirror-vfx.workspace = true
 crysirror-audio.workspace = true
 crysirror-core.workspace = true
 crysirror-scene.workspace = true

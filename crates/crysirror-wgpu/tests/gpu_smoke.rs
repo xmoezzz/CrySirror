@@ -415,6 +415,7 @@ fn terrain_and_hdr_particles_render() {
     for _ in 0..40 {
         rt.tick(16, InputFrame::default()).unwrap();
     }
+    rt.finish_vfx_offline().unwrap();
     let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
     renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
     let img = renderer

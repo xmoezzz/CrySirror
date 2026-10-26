@@ -260,17 +260,28 @@ def asset_inventory(path: Path, p: dict, *, require_fonts: bool = True) -> dict[
             if require_fonts:
                 require(config.get("font_alias", "default") in p.get("fonts", {}), "RealLive requires a licensed project font alias")
         systems = c.get("systems") or {}
-        materials=[entity.get("material") for entity in systems.get("entities",[])]
+        entities=list(systems.get("entities",[]))
+        materials=[entity.get("material") for entity in entities]
+        vfx_systems=[entity.get("vfx") for entity in entities]
         for widget in systems.get("widgets",[]):
             for action in widget.get("on_activate",[]):
                 if action.get("op")=="set_material":materials.append(action.get("material"))
-                elif action.get("op")=="spawn":materials.append(action["entity"].get("material"))
+                elif action.get("op")=="set_vfx":vfx_systems.append(action.get("vfx"))
+                elif action.get("op")=="spawn":
+                    spawned=action["entity"]
+                    entities.append(spawned)
+                    materials.append(spawned.get("material"))
+                    vfx_systems.append(spawned.get("vfx"))
         declared=[]
         hdr=(systems.get("environment")or{}).get("hdr")
         if hdr is not None:declared.append(hdr)
-        for entity in systems.get("entities",[]):
+        for entity in entities:
             g=entity.get("geometry") or {}
             if g.get("kind")in("model","scene"):declared.append(g["asset"])
+        for system in vfx_systems:
+            if system is not None:
+                import vfx_schema
+                declared.extend(vfx_schema.asset_paths(system))
         for material in materials:
             effect=(material or {}).get("effect") or {}
             if effect.get("kind")=="custom":declared.append(effect["asset"])

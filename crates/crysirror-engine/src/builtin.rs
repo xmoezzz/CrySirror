@@ -9,16 +9,16 @@ use crate::{
     object::{Class, ClassInfo, ClassRegistry, MethodInfo, ObjectId, PropertyInfo, TypeHint as T},
     value::Value,
 };
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::FileSystem,
     state::ClientId,
 };
 use crysirror_scene::{
-    ServiceBatch,
     model::Geometry,
     world::{EntityHandle, EntitySpec, Transform, Tween, WorldCommand},
+    ServiceBatch,
 };
 use std::{collections::BTreeMap, sync::Arc, sync::OnceLock};
 
@@ -42,6 +42,7 @@ pub const GLOBALS: &[(&str, &str)] = &[
     ("media", "Media"),
     ("assets", "Assets"),
     ("profiler", "Profiler"),
+    ("vfx", "Vfx"),
 ];
 
 pub fn register(r: &mut ClassRegistry) -> Result<()> {
@@ -55,6 +56,7 @@ pub fn register(r: &mut ClassRegistry) -> Result<()> {
     crate::canvas_api::register(r)?;
     crate::assets_api::register(r)?;
     crate::profiler_api::register(r)?;
+    crate::vfx_api::register(r)?;
     Ok(())
 }
 
@@ -335,6 +337,7 @@ fn parse_spawn(cx: &mut EngineContext, spec: &Value, id: u32) -> Result<EntitySp
                     | "angularVelocity"
                     | "collider"
                     | "particles"
+                    | "vfx"
                     | "light"
                     | "reflectionProbe"
                     | "irradianceVolume"
@@ -425,6 +428,11 @@ fn parse_spawn(cx: &mut EngineContext, spec: &Value, id: u32) -> Result<EntitySp
             Some(p) => Some(serde_json::from_value(p.to_json()).context("particles")?),
             None => None,
         },
+        vfx: spec
+            .field("vfx")
+            .filter(|v| !matches!(v, Value::Null))
+            .map(|v| serde_json::from_value(v.to_json()).context("VFX system"))
+            .transpose()?,
         light: match spec.field("light") {
             Some(l) => Some(parse_light(l)?),
             None => None,
@@ -1061,6 +1069,7 @@ fn entity_info() -> &'static ClassInfo {
             prop("gameplay", T::Any, false, "Gameplay component (attributes, effects, tags, abilities) or null."),
             prop("tags", T::List(Box::new(T::String)), false, "All owned gameplay tags."),
             prop("particles", T::Any, false, "Particle emitter spec or null."),
+            prop("vfx", T::Any, false, "Modular VFX system specification or null; simulation belongs to the engine runtime."),
             prop("reflectionProbe", T::Any, false, "Box reflection capture or null."),
             prop("irradianceVolume", T::Any, false, "Dynamic diffuse GI volume or null."),
             prop("light", T::Any, false, "Local light {shape:{kind:'point'|'spot'|'rect',...}, color, intensity, units:'candela'|'lumens', range, shadows, enabled} or null."),
@@ -1102,6 +1111,13 @@ fn entity_info() -> &'static ClassInfo {
                 "Attach/replace a local light (spot and rect emit along local -Z) or null to remove. Intensity is candela unless units:'lumens'."),
             method("setParticles", vec![("emitter", T::Optional(Box::new(T::Map)))], T::Void,
                 "Particle emitter {rate, burst, lifetime, speed, direction, spread_degrees, gravity, drag, size, color_start, color_end, max, additive, enabled, seed} or null."),
+            method("setVfx", vec![("system", T::Optional(Box::new(T::Map)))], T::Void,
+                "Attach or replace a modular VFX system; null removes it. CPU/GPU targets, emitter modules, parameters and renderers are explicitly validated."),
+            method("setVfxParameter", vec![("name",T::String),("value",T::Any)],T::Void,
+                "Set an existing typed VFX parameter. Accepts a number, bool, vector3 or color4 matching its declared type; does not restart the effect."),
+            method("pauseVfx",vec![("paused",T::Bool)],T::Void,"Freeze or resume this VFX system clock and all live particles."),
+            method("stopVfx",vec![],T::Void,"Stop new VFX births; existing particles continue to the end of their lifetimes."),
+            method("restartVfx",vec![],T::Void,"Increment the VFX revision and restart its simulation from its configured seed."),
             method("runBehaviorTree", vec![("tree", T::Optional(Box::new(T::String)))], T::Void, "Run a defined behaviour tree every fixed step (null stops)."),
             method("setBlackboard", vec![("key", T::String), ("value", T::Any)], T::Void, "Write a blackboard value (bool, number, [x,y,z], string, Entity, or null to clear)."),
             method("setStateMachine", vec![("machine", T::Optional(Box::new(T::String)))], T::Void, "Drive animation from a defined state machine (null clears)."),
@@ -1156,6 +1172,7 @@ impl Class for EntityClass {
             "gameplay" => Value::from_json(serde_json::to_value(&e.gameplay)?),
             "ai" => Value::from_json(serde_json::to_value(&e.ai)?),
             "particles" => Value::from_json(serde_json::to_value(&e.particles)?),
+            "vfx" => Value::from_json(serde_json::to_value(&e.vfx)?),
             "light" => Value::from_json(serde_json::to_value(&e.light)?),
             "reflectionProbe" => Value::from_json(serde_json::to_value(&e.reflection_probe)?),
             "irradianceVolume" => Value::from_json(serde_json::to_value(&e.irradiance_volume)?),
@@ -1281,6 +1298,60 @@ impl Class for EntityClass {
                     None => None,
                 };
                 submit(cx, vec![WorldCommand::SetParticles { id, particles }])?
+            }
+            "setVfx" => {
+                let vfx = opt(args, 0)
+                    .map(|v| {
+                        serde_json::from_value::<crysirror_vfx::SystemSpec>(v.to_json())
+                            .context("VFX system")
+                    })
+                    .transpose()?;
+                if let Some(system) = &vfx {
+                    system.compile()?;
+                }
+                submit(cx, vec![WorldCommand::SetVfx { id, vfx }])?
+            }
+            "setVfxParameter" | "pauseVfx" | "stopVfx" | "restartVfx" => {
+                let mut system = spec(cx, this)?.vfx.context("entity has no VFX system")?;
+                match m {
+                    "setVfxParameter" => {
+                        let name = arg(args, 0, "parameter name")?.as_str()?;
+                        let value = arg(args, 1, "parameter value")?;
+                        let declared = system
+                            .parameters
+                            .get(name)
+                            .context("VFX parameter is not declared")?;
+                        use crysirror_vfx::ParameterValue as P;
+                        let typed = match declared {
+                            P::Float(_) => P::Float(value.as_f32()?),
+                            P::Bool(_) => P::Bool(value.as_bool()?),
+                            P::Vector(_) => P::Vector(value.as_vec3()?),
+                            P::Color(_) => P::Color(
+                                serde_json::from_value(value.to_json())
+                                    .context("VFX color parameter requires four components")?,
+                            ),
+                        };
+                        system = system
+                            .with_parameters(&[(name.to_owned(), typed)].into_iter().collect())?;
+                    }
+                    "pauseVfx" => system.paused = arg(args, 0, "paused")?.as_bool()?,
+                    "stopVfx" => system.enabled = false,
+                    "restartVfx" => {
+                        system.revision = system
+                            .revision
+                            .checked_add(1)
+                            .context("VFX revision exhausted")?;
+                        system.enabled = true;
+                    }
+                    _ => unreachable!(),
+                }
+                submit(
+                    cx,
+                    vec![WorldCommand::SetVfx {
+                        id,
+                        vfx: Some(system),
+                    }],
+                )?
             }
             "runBehaviorTree" => {
                 let ai = match opt(args, 0) {

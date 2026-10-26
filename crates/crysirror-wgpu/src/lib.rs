@@ -11,25 +11,27 @@ pub mod probes;
 mod profile;
 mod puppet;
 mod ray_geometry;
-mod rt_pbr;
 mod raytrace;
 pub mod rt_capabilities;
+mod rt_pbr;
 pub mod text;
 mod transition;
+pub mod vfx_gpu;
+pub mod vfx_render;
 pub mod vsm;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 pub use crysirror_core::graphics::{GraphicsCapabilities, RenderingPath};
 use crysirror_core::state::{ClientId, Color, Rect, SceneState, TextRun, Visual};
 use crysirror_runtime::{assets::Assets, model::Scene3d};
 use crysirror_scene::{
+    layer::{rectangle, Blend, Paint},
     Primitive,
-    layer::{Blend, Paint, rectangle},
 };
 use geometry::{Vertex2d, Vertex3d, Viewport};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ops::Range,
-    sync::{Arc, mpsc},
+    sync::{mpsc, Arc},
 };
 use wgpu::util::DeviceExt;
 
@@ -653,8 +655,9 @@ impl Renderer {
         )
     }
     /// Explicit capture/shutdown completion; interactive frames use profile_report.
-    pub fn profile_report_offline(&mut self)->Result<serde_json::Value> {
-        self.gpu_timings.finish_offline(&self.gpu)?;self.profile_report()
+    pub fn profile_report_offline(&mut self) -> Result<serde_json::Value> {
+        self.gpu_timings.finish_offline(&self.gpu)?;
+        self.profile_report()
     }
     pub fn hardware_rt_stats(&self) -> Option<serde_json::Value> {
         if self.pbr_active() {
@@ -1280,6 +1283,11 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        // Each render owns a fresh encoder and submits internally on success.
+        // Any tokens left by a prior error belong to an abandoned encoder.
+        if let Some(p) = &mut self.pbr {
+            p.cancel_unsubmitted_vfx()?;
+        }
         let gpu_sample =
             self.gpu_timings
                 .begin(&mut encoder, self.profiler.clone(), self.profile_frame);
@@ -1520,7 +1528,7 @@ impl Renderer {
         );
         self.gpu_timings.end(&mut encoder, gpu_sample);
         self.gpu.queue.submit(Some(encoder.finish()));
-        self.gpu_timings.submitted(&self.gpu,gpu_sample);
+        self.gpu_timings.submitted(&self.gpu, gpu_sample);
         if self.path == RenderingPath::HardwareRaytrace && !pbr_active {
             if let Some(rt) = &mut self.hardware_rt {
                 rt.mark_submitted();
@@ -1528,7 +1536,7 @@ impl Renderer {
         }
         if pbr_active {
             if let Some(p) = &mut self.pbr {
-                p.after_submit();
+                p.after_submit()?;
             }
         }
         Ok(())
@@ -1543,8 +1551,11 @@ impl Renderer {
         background: [u8; 4],
     ) -> Result<image::RgbaImage> {
         ensure!(
-            self.format == wgpu::TextureFormat::Rgba8UnormSrgb,
-            "capture renderer must use RGBA8 sRGB"
+            matches!(
+                self.format,
+                wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb
+            ),
+            "capture renderer must use RGBA8 or BGRA8 sRGB"
         );
         let (width, height) = (canvas[0], canvas[1]);
         ensure!(
@@ -1643,6 +1654,11 @@ impl Renderer {
         }
         drop(data);
         buffer.unmap();
+        if self.format == wgpu::TextureFormat::Bgra8UnormSrgb {
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
         image::RgbaImage::from_raw(width, height, pixels).context("invalid capture dimensions")
     }
 }

@@ -11,6 +11,7 @@ description = "Engine object model, lifecycle, plugins and script-host contracts
 arc-formats = ["dep:crysirror-formats-arc", "crysirror-runtime/arc-formats"]
 
 [dependencies]
+crysirror-vfx.workspace = true
 crysirror-tasks.workspace = true
 crysirror-core.workspace = true
 crysirror-scene.workspace = true

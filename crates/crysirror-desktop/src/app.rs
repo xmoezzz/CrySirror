@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 use crate::audio::Audio;
-use anyhow::{Context, Result, bail, ensure};
-use crysirror_core::service::{InputFrame, buttons};
-use crysirror_runtime::{Runtime, vfs};
-use crysirror_wgpu::{Gpu, RenderTarget, Renderer, RenderingPath, geometry::Viewport};
+use anyhow::{bail, ensure, Context, Result};
+use crysirror_core::service::{buttons, InputFrame};
+use crysirror_runtime::{vfs, Runtime};
+use crysirror_wgpu::{geometry::Viewport, Gpu, RenderTarget, Renderer, RenderingPath};
 use std::{
     io::Read,
     path::{Path, PathBuf},
@@ -116,6 +116,9 @@ pub trait MovieSource {
     fn runtime(&mut self) -> &mut Runtime;
 }
 impl MovieSource for Runtime {
+    fn prepare_capture(&mut self) -> Result<()> {
+        self.finish_vfx_offline()
+    }
     fn advance(&mut self, step_ms: u64) -> Result<()> {
         self.tick(step_ms, crysirror_core::service::InputFrame::default())
     }
@@ -169,7 +172,7 @@ pub fn movie_on(
         if frame_samples.len() == 256 {
             frame_samples.pop_front();
         }
-        frame_samples.push_back(serde_json::json!({"frame":i,"time_ms":rt.now_ms(),"capture_wall_ms":capture_ms,"world_entities":rt.host.engine.world.len(),"cpu_asset_bytes":rt.assets.tasks_inspect()["resident_bytes"],"rt":renderer.hardware_rt_stats()}));
+        frame_samples.push_back(serde_json::json!({"frame":i,"time_ms":rt.now_ms(),"capture_wall_ms":capture_ms,"world_entities":rt.host.engine.world.len(),"cpu_asset_bytes":rt.assets.tasks_inspect()["resident_bytes"],"rt":renderer.hardware_rt_stats(),"vfx":renderer.pbr().map(|p|p.vfx_stats())}));
         image
             .save_with_format(
                 dir.join(format!("frame_{i:05}.png")),
@@ -184,7 +187,7 @@ pub fn movie_on(
     Ok(
         serde_json::json!({"movie_frames": frames, "movie_dir": dir, "step_ms": step_ms,
         "hardware_rt_report":renderer.gpu.hardware_rt_report(),
-        "hardware_rt_stats":renderer.hardware_rt_stats(),"frame_samples":frame_samples,"frame_samples_dropped":frames.saturating_sub(256),"profile":renderer.profile_report_offline()?}),
+        "hardware_rt_stats":renderer.hardware_rt_stats(),"vfx":renderer.pbr().map(|p|p.vfx_stats()),"frame_samples":frame_samples,"frame_samples_dropped":frames.saturating_sub(256),"profile":renderer.profile_report_offline()?}),
     )
 }
 pub fn capture_on(
@@ -209,6 +212,28 @@ fn capture_ready(
 ) -> Result<serde_json::Value> {
     let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
     renderer.set_rendering_path(rendering_path)?;
+    capture_ready_with_renderer(&mut renderer, rt, font, path)
+}
+/// Explicit capture fence on the live renderer, retaining GPU simulation state.
+fn capture_existing(
+    renderer: &mut Renderer,
+    rt: &mut Runtime,
+    font: Option<&Path>,
+    path: &Path,
+) -> Result<serde_json::Value> {
+    let previous = rt.assets.is_nonblocking();
+    rt.assets.set_nonblocking(false);
+    let result = capture_ready_with_renderer(renderer, rt, font, path);
+    rt.assets.set_nonblocking(previous);
+    result
+}
+fn capture_ready_with_renderer(
+    renderer: &mut Renderer,
+    rt: &mut Runtime,
+    font: Option<&Path>,
+    path: &Path,
+) -> Result<serde_json::Value> {
+    rt.finish_vfx_offline()?;
     let snapshot = rt.schedule_render_snapshot()?.wait(rt)?;
     renderer.set_profiler(rt.profiler.clone(), snapshot.frame);
     renderer.set_scene3d(snapshot.simple.as_ref())?;
@@ -243,6 +268,7 @@ fn capture_ready(
                 "reflection_probes": {"submitted": r.submitted, "active": r.active},
                 "virtual_shadows": {"requested": v.requested, "resident": v.resident, "rendered": v.rendered, "dropped": v.dropped, "invalidations": v.invalidations},
                 "irradiance_volume": {"probes": g.probes, "refreshed": g.refreshed, "total_refreshed": g.total_refreshed, "sweeps": g.sweeps, "converged": g.converged},
+                "vfx": p.vfx_stats(),
             })
         }
         None => serde_json::json!({}),
@@ -579,12 +605,11 @@ impl App {
             .is_some_and(|limit| self.presented >= limit)
         {
             if let Some(path) = &self.options.capture {
-                capture_on(
-                    w.renderer.gpu.clone(),
+                capture_existing(
+                    &mut w.renderer,
                     self.core.rt(),
                     self.options.font.as_deref(),
                     path,
-                    self.options.rendering_path,
                 )?;
             }
             el.exit();
@@ -664,13 +689,12 @@ impl App {
                                         self.core.rt().host.scene.frame()
                                     ))
                                 });
-                                if let Some(w) = &self.window {
-                                    capture_on(
-                                        w.renderer.gpu.clone(),
+                                if let Some(w) = &mut self.window {
+                                    capture_existing(
+                                        &mut w.renderer,
                                         self.core.rt(),
                                         self.options.font.as_deref(),
                                         &path,
-                                        self.options.rendering_path,
                                     )?;
                                 }
                             }

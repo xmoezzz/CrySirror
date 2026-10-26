@@ -89,3 +89,20 @@ pixels and clipping. CPU tests cover scoped/stale handles, hierarchy rollback,
 fixed steps, pause clocks, UI release/focus/modal/slider, input consumption,
 mutation rollback and saved state. These establish this engine profile; they do
 not establish original Siglus/RFVP execution or a complete AAA engine.
+
+## Modular VFX
+
+`crysirror-vfx` owns authored systems, typed parameters, CPU simulation and GPU
+tick planning. Runtime workers publish immutable products; wgpu owns resident
+GPU execution and Sprite/Mesh/Ribbon drawing. `Vfx.play` and `Entity.setVfx`
+store the same `EntitySpec.vfx` data as native `WorldCommand::SetVfx` calls.
+Legacy `particles` lowers into this service rather than a renderer-owned CPU
+simulator. Interactive updates poll tasks; offline capture uses an explicit
+completion fence. Stop preserves living particles, pause freezes simulation
+and revision changes restart it. MCP validation and scoped resource inventory
+also understand the VFX declarations.
+
+The [VFX laboratory](../examples/aaa-vfx/README.md) supplies runnable CPU/GPU
+effects and a 100k resident stress example. [ADR 0064](adr/0064-modular-vfx-cpu-gpu.md)
+documents supported modules, bounded histories/events and remaining Niagara
+gaps, including exact checkpoints and GPU child/ribbon support.

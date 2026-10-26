@@ -115,7 +115,7 @@ def light(l):
     flags(l,['shadows','enabled'])
 
 def entity(e):
-    obj(e, {'id','name'}, {'parent','transform','geometry','color','visible','velocity','angular_velocity','tweens','material','light','reflection_probe','irradiance_volume'})
+    obj(e, {'id','name'}, {'parent','transform','geometry','color','visible','velocity','angular_velocity','tweens','material','light','reflection_probe','irradiance_volume','particles','vfx'})
     require(U32(e['id']) and isinstance(e['name'],str) and 0<len(e['name'].encode())<=256, 'entity identity')
     if e.get('parent') is not None:
         require(U32(e['parent']), 'entity parent')
@@ -124,6 +124,13 @@ def entity(e):
     if e.get('light')is not None:light(e['light'])
     if e.get('reflection_probe')is not None:reflection_probe(e['reflection_probe'])
     if e.get('irradiance_volume')is not None:irradiance_volume(e['irradiance_volume'])
+    require(e.get('particles') is None or e.get('vfx') is None, 'choose either legacy particles or modular vfx')
+    if e.get('vfx') is not None:
+        import vfx_schema
+        vfx_schema.validate(e['vfx'])
+    if e.get('particles') is not None:
+        import vfx_schema
+        vfx_schema.legacy(e['particles'])
     flags(e,['visible'])
     require(color(e.get('color',[255]*4)) and e.get('color',[255]*4)[3]==255, 'world opaque material')
     for k in ['velocity','angular_velocity']:
@@ -172,6 +179,13 @@ def command(c):
     if op=='set_material':
         obj(c,{'op','id','material'});require(U32(c['id']),'world entity id')
         if c['material']is not None:material(c['material'])
+        return
+    if op in ('set_vfx', 'set_particles'):
+        key = 'vfx' if op == 'set_vfx' else 'particles'
+        obj(c, {'op', 'id', key}); require(U32(c['id']), 'world entity id')
+        if c[key] is not None:
+            import vfx_schema
+            (vfx_schema.validate if key == 'vfx' else vfx_schema.legacy)(c[key])
         return
     if op=='set_video':
         obj(c,{'op','name','video'});require(isinstance(c['name'],str)and 0<len(c['name'])<=128,'video name')
@@ -394,9 +408,13 @@ def validate_action_targets(entities,commands):
                 if len(removed)==n: break
             state={i:e for i,e in state.items() if i not in removed}
         elif op=='set_parent': state[c['id']]['parent']=c['parent']
+        elif op=='set_vfx': state[c['id']]['vfx']=c['vfx']
+        elif op=='set_particles': state[c['id']]['particles']=c['particles']
         elif op=='tween':
             ts=state[c['id']].setdefault('tweens',[]);ts.append(c['tween']);require(len(ts)<=64,'widget target tween limit')
     tree(list(state.values()))
+    for e in state.values():
+        require(e.get('particles') is None or e.get('vfx') is None, 'choose either legacy particles or modular vfx')
 
 def transition(t):
     """Shared transition spec. Native raw Siglus codes remain adapter policy."""

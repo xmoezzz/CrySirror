@@ -33,6 +33,7 @@ pub mod systems;
 pub mod text_api;
 pub mod value;
 pub mod vehicle;
+pub mod vfx_api;
 
 pub use context::{EngineContext, EngineState};
 pub use lifecycle::{App, AppState, Lifecycle, Plugin};

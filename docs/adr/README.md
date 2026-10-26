@@ -97,3 +97,4 @@ moves to `done` only with recorded behavior evidence.
 | [0061](0061-siglus-plain-message-engine-apis.md) | Native Siglus TEXT/NAME through shared cell layout, GlyphRun and reveal state | explicit plain profile; full native MWND/game compatibility pending |
 | [0062](0062-avg32-portable-vm-engine-apis.md) | Original AVG32 portable VM library over engine services; shared associated-RGB operations | bounded ADV profile; original saves and complex drawing remain unsupported |
 | [0063](0063-native-font-measurement.md) | Immutable engine font metrics, unwrapped Canvas text and KiriKiri Font callbacks | implemented; system-font and original TJS2 behavior validated |
+| [0064](0064-modular-vfx-cpu-gpu.md) | Engine-owned modular CPU/GPU VFX, typed data/parameters, events, sprites/meshes/ribbons and asynchronous submission | implemented profile; remaining Niagara gaps explicit |

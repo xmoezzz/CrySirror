@@ -1012,6 +1012,55 @@
           "returns": "void"
         },
         {
+          "doc": "Attach or replace a modular VFX system; null removes it. CPU/GPU targets, emitter modules, parameters and renderers are explicitly validated.",
+          "name": "setVfx",
+          "params": [
+            {
+              "name": "system",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Set an existing typed VFX parameter. Accepts a number, bool, vector3 or color4 matching its declared type; does not restart the effect.",
+          "name": "setVfxParameter",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "value",
+              "type": "any"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Freeze or resume this VFX system clock and all live particles.",
+          "name": "pauseVfx",
+          "params": [
+            {
+              "name": "paused",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Stop new VFX births; existing particles continue to the end of their lifetimes.",
+          "name": "stopVfx",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Increment the VFX revision and restart its simulation from its configured seed.",
+          "name": "restartVfx",
+          "params": [],
+          "returns": "void"
+        },
+        {
           "doc": "Run a defined behaviour tree every fixed step (null stops).",
           "name": "runBehaviorTree",
           "params": [
@@ -1350,6 +1399,12 @@
         {
           "doc": "Particle emitter spec or null.",
           "name": "particles",
+          "type": "any",
+          "writable": false
+        },
+        {
+          "doc": "Modular VFX system specification or null; simulation belongs to the engine runtime.",
+          "name": "vfx",
           "type": "any",
           "writable": false
         },
@@ -2735,6 +2790,108 @@
       ]
     },
     {
+      "doc": "Engine-owned modular visual effects. Systems are data, particles execute on bounded CPU workers or native GPU compute; JS/TS controls instances and parameters.",
+      "global": "vfx",
+      "methods": [
+        {
+          "doc": "Validate a modular system and typed parameter bindings without opening a device. Returns its emitter/module/target summary; unsupported modules fail.",
+          "name": "compile",
+          "params": [
+            {
+              "name": "system",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Spawn an entity with this VFX system. Options are ordinary World.spawn fields such as name, position, rotation, scale and parent. Simulation is published asynchronously.",
+          "name": "play",
+          "params": [
+            {
+              "name": "system",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Entity"
+        },
+        {
+          "doc": "Change an existing typed parameter on this client's VFX entity without restarting its particles.",
+          "name": "setParameter",
+          "params": [
+            {
+              "name": "entity",
+              "type": "Entity"
+            },
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "value",
+              "type": "any"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Freeze/resume the effect's simulation clock.",
+          "name": "pause",
+          "params": [
+            {
+              "name": "entity",
+              "type": "Entity"
+            },
+            {
+              "name": "paused",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Stop emission while existing particles finish.",
+          "name": "stop",
+          "params": [
+            {
+              "name": "entity",
+              "type": "Entity"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Restart an effect from its seed using a new logical revision.",
+          "name": "restart",
+          "params": [
+            {
+              "name": "entity",
+              "type": "Entity"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Read this client's published CPU counts, GPU timeline pressure and pending worker status. GPU capacity is not reported as a measured live count.",
+          "name": "stats",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Drain this client's bounded CPU birth, death and collision event queue. GPU event records remain on device; they are not fabricated as CPU callbacks.",
+          "name": "drainEvents",
+          "params": [],
+          "returns": "Record<string, any>[]"
+        }
+      ],
+      "name": "Vfx",
+      "properties": []
+    },
+    {
       "doc": "The shared dynamic 3D world, scoped to this App's client.",
       "global": "world",
       "methods": [
@@ -3244,6 +3401,11 @@
     {
       "api": "Entity.setParticles",
       "op": "set_particles",
+      "system": "world"
+    },
+    {
+      "api": "Entity.setVfx",
+      "op": "set_vfx",
       "system": "world"
     },
     {
@@ -4359,6 +4521,12 @@
           "doc": "Particle emitter (visual; ADR 0014).",
           "name": "particles",
           "rust_type": "Option<crate::components::EmitterSpec>"
+        },
+        {
+          "default": null,
+          "doc": "Engine-owned modular visual effects system (ADR 0064).",
+          "name": "vfx",
+          "rust_type": "Option<VfxSystemSpec>"
         },
         {
           "default": null,
@@ -5561,6 +5729,1304 @@
       ],
       "name": "EmitterSpec",
       "used_by": "`EntitySpec.particles`, `Entity.setParticles` (ADR 0014)"
+    },
+    {
+      "doc": "A scoped multi-emitter effect with typed parameters and a fixed simulation clock.",
+      "fields": [
+        {
+          "default": 0,
+          "doc": "Explicit restart epoch; parameter/control changes do not increment it.",
+          "name": "revision",
+          "rust_type": "u64"
+        },
+        {
+          "default": [
+            {
+              "capacity": 1024,
+              "enabled": true,
+              "enabled_parameter": null,
+              "events": [],
+              "id": "emitter",
+              "initialize": {
+                "color": [
+                  1.0,
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "color_parameter": null,
+                "direction": [
+                  0.0,
+                  1.0,
+                  0.0
+                ],
+                "lifetime": [
+                  1.0,
+                  2.0
+                ],
+                "ribbon_id": 0,
+                "rotation": [
+                  0.0,
+                  0.0
+                ],
+                "shape": {
+                  "kind": "point"
+                },
+                "size": [
+                  0.1,
+                  0.1
+                ],
+                "size_parameter": null,
+                "speed": [
+                  1.0,
+                  2.0
+                ],
+                "spread_degrees": 20.0
+              },
+              "overflow": "drop_new",
+              "render": {
+                "blend": "additive",
+                "columns": 1,
+                "facing": {
+                  "kind": "camera"
+                },
+                "fps": 0.0,
+                "frames": 1,
+                "kind": "sprite",
+                "rows": 1,
+                "soft_distance": 0.0,
+                "texture": null
+              },
+              "seed": 1,
+              "space": "world",
+              "spawn": {
+                "auto_start": true,
+                "burst_looping": true,
+                "bursts": [],
+                "duration": 5.0,
+                "looping": true,
+                "rate": 20.0
+              },
+              "target": "cpu",
+              "update": []
+            }
+          ],
+          "doc": "",
+          "name": "emitters",
+          "rust_type": "Vec<VfxEmitterSpec>"
+        },
+        {
+          "default": {},
+          "doc": "",
+          "name": "parameters",
+          "rust_type": "BTreeMap<String, VfxParameterValue>"
+        },
+        {
+          "default": 60,
+          "doc": "",
+          "name": "fixed_step_hz",
+          "rust_type": "u32"
+        },
+        {
+          "default": 0.0,
+          "doc": "",
+          "name": "warmup_seconds",
+          "rust_type": "f32"
+        },
+        {
+          "default": 64,
+          "doc": "",
+          "name": "max_steps_per_advance",
+          "rust_type": "u32"
+        },
+        {
+          "default": true,
+          "doc": "",
+          "name": "enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "",
+          "name": "paused",
+          "rust_type": "bool"
+        },
+        {
+          "default": 1.0,
+          "doc": "",
+          "name": "time_scale",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "VfxSystemSpec",
+      "used_by": "`EntitySpec.vfx`, `Vfx.compile/play`, `Entity.setVfx` (ADR 0064)"
+    },
+    {
+      "doc": "Named data-driven emitter: schedule, initialization, typed module stack and renderer.",
+      "fields": [
+        {
+          "default": "emitter",
+          "doc": "",
+          "name": "id",
+          "rust_type": "String"
+        },
+        {
+          "default": true,
+          "doc": "",
+          "name": "enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "enabled_parameter",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": "cpu",
+          "doc": "",
+          "name": "target",
+          "rust_type": "VfxSimulationTarget"
+        },
+        {
+          "default": "world",
+          "doc": "",
+          "name": "space",
+          "rust_type": "VfxSimulationSpace"
+        },
+        {
+          "default": 1024,
+          "doc": "",
+          "name": "capacity",
+          "rust_type": "u32"
+        },
+        {
+          "default": 1,
+          "doc": "",
+          "name": "seed",
+          "rust_type": "u32"
+        },
+        {
+          "default": "drop_new",
+          "doc": "",
+          "name": "overflow",
+          "rust_type": "VfxOverflowPolicy"
+        },
+        {
+          "default": {
+            "auto_start": true,
+            "burst_looping": true,
+            "bursts": [],
+            "duration": 5.0,
+            "looping": true,
+            "rate": 20.0
+          },
+          "doc": "",
+          "name": "spawn",
+          "rust_type": "VfxSpawnSpec"
+        },
+        {
+          "default": {
+            "color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "color_parameter": null,
+            "direction": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "lifetime": [
+              1.0,
+              2.0
+            ],
+            "ribbon_id": 0,
+            "rotation": [
+              0.0,
+              0.0
+            ],
+            "shape": {
+              "kind": "point"
+            },
+            "size": [
+              0.1,
+              0.1
+            ],
+            "size_parameter": null,
+            "speed": [
+              1.0,
+              2.0
+            ],
+            "spread_degrees": 20.0
+          },
+          "doc": "",
+          "name": "initialize",
+          "rust_type": "VfxInitSpec"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "update",
+          "rust_type": "Vec<VfxModule>"
+        },
+        {
+          "default": {
+            "blend": "additive",
+            "columns": 1,
+            "facing": {
+              "kind": "camera"
+            },
+            "fps": 0.0,
+            "frames": 1,
+            "kind": "sprite",
+            "rows": 1,
+            "soft_distance": 0.0,
+            "texture": null
+          },
+          "doc": "",
+          "name": "render",
+          "rust_type": "VfxRenderSpec"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "events",
+          "rust_type": "Vec<VfxEventHandler>"
+        }
+      ],
+      "name": "VfxEmitterSpec",
+      "used_by": "`VfxSystemSpec.emitters`; distinct from legacy `EmitterSpec`"
+    },
+    {
+      "doc": "Typed authored parameter value. Updates must preserve the declared variant. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Payload is serialized under `value`; `kind` selects this variant.",
+          "name": "float",
+          "rust_type": "value: f32"
+        },
+        {
+          "default": null,
+          "doc": "Payload is serialized under `value`; `kind` selects this variant.",
+          "name": "vector",
+          "rust_type": "value: [f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Payload is serialized under `value`; `kind` selects this variant.",
+          "name": "color",
+          "rust_type": "value: [f32; 4]"
+        },
+        {
+          "default": null,
+          "doc": "Payload is serialized under `value`; `kind` selects this variant.",
+          "name": "bool",
+          "rust_type": "value: bool"
+        }
+      ],
+      "name": "VfxParameterValue",
+      "used_by": "`VfxSystemSpec.parameters` typed values; `Vfx.setParameter` accepts the existing type's raw payload"
+    },
+    {
+      "doc": "Finite scalar constant or checked float-parameter binding.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Serialized as a bare number or vector, without a variant tag.",
+          "name": "Constant",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Serialized as the binding object, without a variant tag.",
+          "name": "Parameter",
+          "rust_type": "VfxScalarBinding"
+        }
+      ],
+      "name": "VfxScalarValue",
+      "used_by": "Emission rates and scalar `VfxModule` inputs"
+    },
+    {
+      "doc": "Affine float binding: parameter * scale + offset.",
+      "fields": [
+        {
+          "default": "strength",
+          "doc": "",
+          "name": "parameter",
+          "rust_type": "String"
+        },
+        {
+          "default": 1.0,
+          "doc": "",
+          "name": "scale",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "",
+          "name": "offset",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "VfxScalarBinding",
+      "used_by": "`VfxScalarValue` parameter binding object"
+    },
+    {
+      "doc": "Finite simulation-space vector or checked vector-parameter binding.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Serialized as a bare number or vector, without a variant tag.",
+          "name": "Constant",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Serialized as the binding object, without a variant tag.",
+          "name": "Parameter",
+          "rust_type": "VfxVectorBinding"
+        }
+      ],
+      "name": "VfxVectorValue",
+      "used_by": "Direction, force, position and axis inputs"
+    },
+    {
+      "doc": "Vector binding with an explicit scalar multiplier.",
+      "fields": [
+        {
+          "default": "direction",
+          "doc": "",
+          "name": "parameter",
+          "rust_type": "String"
+        },
+        {
+          "default": 1.0,
+          "doc": "",
+          "name": "scale",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "VfxVectorBinding",
+      "used_by": "`VfxVectorValue` parameter binding object"
+    },
+    {
+      "doc": "Explicit execution backend; unsupported GPU features fail at compilation.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "cpu",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "gpu",
+          "rust_type": ""
+        }
+      ],
+      "name": "VfxSimulationTarget",
+      "used_by": "`VfxEmitterSpec.target`"
+    },
+    {
+      "doc": "World trajectories stay fixed; Local trajectories follow the current transform.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "world",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "local",
+          "rust_type": ""
+        }
+      ],
+      "name": "VfxSimulationSpace",
+      "used_by": "`VfxEmitterSpec.space`"
+    },
+    {
+      "doc": "Explicit CPU birth admission policy; GPU currently supports DropNew.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "drop_new",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "kill_oldest",
+          "rust_type": ""
+        }
+      ],
+      "name": "VfxOverflowPolicy",
+      "used_by": "`VfxEmitterSpec.overflow`; GPU supports only drop_new"
+    },
+    {
+      "doc": "Automatic emission schedule; event-only targets use auto_start=false.",
+      "fields": [
+        {
+          "default": 20.0,
+          "doc": "",
+          "name": "rate",
+          "rust_type": "VfxScalarValue"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "bursts",
+          "rust_type": "Vec<VfxBurst>"
+        },
+        {
+          "default": 5.0,
+          "doc": "",
+          "name": "duration",
+          "rust_type": "f32"
+        },
+        {
+          "default": true,
+          "doc": "",
+          "name": "looping",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "Repeat burst schedules per cycle, independently of continuous emission.",
+          "name": "burst_looping",
+          "rust_type": "bool"
+        },
+        {
+          "default": true,
+          "doc": "Event-only emitters do not create automatic births.",
+          "name": "auto_start",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "VfxSpawnSpec",
+      "used_by": "`VfxEmitterSpec.spawn`"
+    },
+    {
+      "doc": "One scheduled automatic burst, in seconds within the emitter cycle.",
+      "fields": [
+        {
+          "default": 0.0,
+          "doc": "",
+          "name": "time",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1,
+          "doc": "",
+          "name": "count",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "VfxBurst",
+      "used_by": "`VfxSpawnSpec.bursts`"
+    },
+    {
+      "doc": "Birth attributes. Size is full world width/height; rotation is radians.",
+      "fields": [
+        {
+          "default": {
+            "kind": "point"
+          },
+          "doc": "",
+          "name": "shape",
+          "rust_type": "VfxSpawnShape"
+        },
+        {
+          "default": [
+            1.0,
+            2.0
+          ],
+          "doc": "",
+          "name": "lifetime",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": [
+            1.0,
+            2.0
+          ],
+          "doc": "",
+          "name": "speed",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "doc": "",
+          "name": "direction",
+          "rust_type": "VfxVectorValue"
+        },
+        {
+          "default": 20.0,
+          "doc": "",
+          "name": "spread_degrees",
+          "rust_type": "f32"
+        },
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "doc": "",
+          "name": "color",
+          "rust_type": "[f32; 4]"
+        },
+        {
+          "default": [
+            0.1,
+            0.1
+          ],
+          "doc": "",
+          "name": "size",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0
+          ],
+          "doc": "",
+          "name": "rotation",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "ribbon_id",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Optional typed user color binding sampled at birth.",
+          "name": "color_parameter",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": null,
+          "doc": "Optional vector parameter whose XY components define full birth width/height.",
+          "name": "size_parameter",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "VfxInitSpec",
+      "used_by": "`VfxEmitterSpec.initialize`; sizes are full world width/height"
+    },
+    {
+      "doc": "Birth positions in emitter-local coordinates before simulation-space conversion. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "point",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "sphere",
+          "rust_type": "radius: f32, surface: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "box",
+          "rust_type": "half_extent: [f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "cone",
+          "rust_type": "radius: f32, height: f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "line",
+          "rust_type": "end: [f32; 3]"
+        }
+      ],
+      "name": "VfxSpawnShape",
+      "used_by": "`VfxInitSpec.shape`"
+    },
+    {
+      "doc": "Typed instruction stack: ordered forces, integration, then responses and appearance. Variants are tagged by `\"op\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "acceleration",
+          "rust_type": "value: VfxVectorValue"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "drag",
+          "rust_type": "coefficient: VfxScalarValue"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "curl_noise",
+          "rust_type": "strength: VfxScalarValue, frequency: VfxScalarValue"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "attractor",
+          "rust_type": "point: VfxVectorValue, strength: VfxScalarValue, radius: VfxScalarValue"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "orbit",
+          "rust_type": "axis: VfxVectorValue, speed: VfxScalarValue"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "rotate",
+          "rust_type": "radians_per_second: VfxScalarValue"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "color_over_life",
+          "rust_type": "curve: VfxColorCurve"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size_over_life",
+          "rust_type": "curve: VfxVec2Curve"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "collision_plane",
+          "rust_type": "normal: VfxVectorValue, offset: VfxScalarValue, restitution: f32, friction: f32, kill: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "collision_sphere",
+          "rust_type": "center: VfxVectorValue, radius: VfxScalarValue, restitution: f32, kill: bool"
+        }
+      ],
+      "name": "VfxModule",
+      "used_by": "`VfxEmitterSpec.update` ordered typed module stack"
+    },
+    {
+      "doc": "Bounded curve segment interpolation; Smooth is cubic smoothstep.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "constant",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "linear",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "smooth",
+          "rust_type": ""
+        }
+      ],
+      "name": "VfxInterpolation",
+      "used_by": "Lifetime-curve interpolation"
+    },
+    {
+      "doc": "Scalar value at a normalized lifetime coordinate.",
+      "fields": [
+        {
+          "default": 0.0,
+          "doc": "",
+          "name": "time",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "",
+          "name": "value",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "VfxScalarKey",
+      "used_by": "`VfxScalarCurve.keys`"
+    },
+    {
+      "doc": "Full-width/full-height value at a normalized lifetime coordinate.",
+      "fields": [
+        {
+          "default": 0.0,
+          "doc": "",
+          "name": "time",
+          "rust_type": "f32"
+        },
+        {
+          "default": [
+            1.0,
+            1.0
+          ],
+          "doc": "",
+          "name": "value",
+          "rust_type": "[f32; 2]"
+        }
+      ],
+      "name": "VfxVec2Key",
+      "used_by": "`VfxVec2Curve.keys`"
+    },
+    {
+      "doc": "Linear HDR RGB and opacity at a normalized lifetime coordinate.",
+      "fields": [
+        {
+          "default": 0.0,
+          "doc": "",
+          "name": "time",
+          "rust_type": "f32"
+        },
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "doc": "",
+          "name": "value",
+          "rust_type": "[f32; 4]"
+        }
+      ],
+      "name": "VfxColorKey",
+      "used_by": "`VfxColorCurve.keys`"
+    },
+    {
+      "doc": "Checked scalar lifetime curve with 2..32 increasing keys from 0 to 1.",
+      "fields": [
+        {
+          "default": [
+            {
+              "time": 0.0,
+              "value": 1.0
+            },
+            {
+              "time": 1.0,
+              "value": 0.0
+            }
+          ],
+          "doc": "",
+          "name": "keys",
+          "rust_type": "Vec<VfxScalarKey>"
+        },
+        {
+          "default": "linear",
+          "doc": "",
+          "name": "interpolation",
+          "rust_type": "VfxInterpolation"
+        }
+      ],
+      "name": "VfxScalarCurve",
+      "used_by": "Scalar lifetime curves"
+    },
+    {
+      "doc": "Checked full-size lifetime curve with 2..32 normalized keys.",
+      "fields": [
+        {
+          "default": [
+            {
+              "time": 0.0,
+              "value": [
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "time": 1.0,
+              "value": [
+                0.0,
+                0.0
+              ]
+            }
+          ],
+          "doc": "",
+          "name": "keys",
+          "rust_type": "Vec<VfxVec2Key>"
+        },
+        {
+          "default": "linear",
+          "doc": "",
+          "name": "interpolation",
+          "rust_type": "VfxInterpolation"
+        }
+      ],
+      "name": "VfxVec2Curve",
+      "used_by": "`VfxModule.size_over_life.curve`"
+    },
+    {
+      "doc": "Checked linear HDR color/opacity lifetime curve.",
+      "fields": [
+        {
+          "default": [
+            {
+              "time": 0.0,
+              "value": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ]
+            },
+            {
+              "time": 1.0,
+              "value": [
+                1.0,
+                1.0,
+                1.0,
+                0.0
+              ]
+            }
+          ],
+          "doc": "",
+          "name": "keys",
+          "rust_type": "Vec<VfxColorKey>"
+        },
+        {
+          "default": "linear",
+          "doc": "",
+          "name": "interpolation",
+          "rust_type": "VfxInterpolation"
+        }
+      ],
+      "name": "VfxColorCurve",
+      "used_by": "`VfxModule.color_over_life.curve`"
+    },
+    {
+      "doc": "Device-independent renderer configuration. Ribbon width is explicit full width. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "sprite",
+          "rust_type": "texture: Option<String>, columns: u32, rows: u32, frames: u32, fps: f32, soft_distance: f32, blend: VfxBlendMode, facing: VfxFacingMode"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "mesh",
+          "rust_type": "mesh: VfxMeshShape, texture: Option<String>, blend: VfxBlendMode"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "ribbon",
+          "rust_type": "width: f32, texture: Option<String>, uv_scale: f32, max_segments: u32, blend: VfxBlendMode"
+        }
+      ],
+      "name": "VfxRenderSpec",
+      "used_by": "`VfxEmitterSpec.render`; actual Sprite, Mesh or CPU Ribbon renderer"
+    },
+    {
+      "doc": "Renderer blend contract, independent of the execution backend.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "alpha",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "additive",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "premultiplied",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "multiply",
+          "rust_type": ""
+        }
+      ],
+      "name": "VfxBlendMode",
+      "used_by": "`VfxRenderSpec.blend`"
+    },
+    {
+      "doc": "Sprite orientation: camera-facing, velocity-aligned or fixed local axis. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "camera",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "velocity",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "axis",
+          "rust_type": "axis: [f32; 3]"
+        }
+      ],
+      "name": "VfxFacingMode",
+      "used_by": "`VfxRenderSpec.sprite.facing`"
+    },
+    {
+      "doc": "Built-in or client-relative static mesh resource for particle rendering. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "cube",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "quad",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "asset",
+          "rust_type": "path: String"
+        }
+      ],
+      "name": "VfxMeshShape",
+      "used_by": "`VfxRenderSpec.mesh.mesh`; static geometry only"
+    },
+    {
+      "doc": "CPU event kinds and GPU debug record categories.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "birth",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "death",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "collision",
+          "rust_type": ""
+        }
+      ],
+      "name": "VfxEventKind",
+      "used_by": "`VfxEventHandler.event`, `VfxParticleEvent.kind`"
+    },
+    {
+      "doc": "Bounded CPU sub-emitter request at a parent event, with optional velocity inheritance.",
+      "fields": [
+        {
+          "default": "birth",
+          "doc": "",
+          "name": "event",
+          "rust_type": "VfxEventKind"
+        },
+        {
+          "default": "child",
+          "doc": "",
+          "name": "emitter",
+          "rust_type": "String"
+        },
+        {
+          "default": 1,
+          "doc": "",
+          "name": "count",
+          "rust_type": "u32"
+        },
+        {
+          "default": 0.0,
+          "doc": "",
+          "name": "inherit_velocity",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "",
+          "name": "probability",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "VfxEventHandler",
+      "used_by": "`VfxEmitterSpec.events` CPU sub-emitter handlers"
+    },
+    {
+      "doc": "Device-independent particle attributes; size is full world width/height.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "position",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "previous_position",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "velocity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "age",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "lifetime",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "color",
+          "rust_type": "[f32; 4]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "rotation",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "ribbon_id",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "VfxParticle",
+      "used_by": "Device-independent Rust CPU snapshot attributes"
+    },
+    {
+      "doc": "Client-scoped CPU event with world-space coordinates and logical identities.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "system_key",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "key",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "emitter_id",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "particle_id",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "kind",
+          "rust_type": "VfxEventKind"
+        },
+        {
+          "default": null,
+          "doc": "Event coordinates are always world space, even for local simulations.",
+          "name": "position",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "velocity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "tick",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "VfxParticleEvent",
+      "used_by": "`Vfx.drainEvents`; client-scoped CPU event records"
+    },
+    {
+      "doc": "Bounded simulation diagnostics; GPU live counts are reported by its executor.",
+      "fields": [
+        {
+          "default": 0,
+          "doc": "",
+          "name": "systems",
+          "rust_type": "usize"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "emitters",
+          "rust_type": "usize"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "reserved_particles",
+          "rust_type": "usize"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "live_particles",
+          "rust_type": "usize"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "spawned",
+          "rust_type": "u64"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "dropped_spawns",
+          "rust_type": "u64"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "events",
+          "rust_type": "usize"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "dropped_events",
+          "rust_type": "u64"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "simulated_ticks",
+          "rust_type": "u64"
+        },
+        {
+          "default": 0.0,
+          "doc": "",
+          "name": "pending_seconds",
+          "rust_type": "f64"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "gpu_history_dropped",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "VfxStats",
+      "used_by": "`VfxRuntime::inspect(None).simulation`; Rust CPU diagnostics, omitted from client-scoped `Vfx.stats`"
+    },
+    {
+      "doc": "Strict reservation and queue limits checked before new particle pools allocate.",
+      "fields": [
+        {
+          "default": 200000,
+          "doc": "",
+          "name": "max_particles",
+          "rust_type": "usize"
+        },
+        {
+          "default": 256,
+          "doc": "",
+          "name": "max_emitters",
+          "rust_type": "usize"
+        },
+        {
+          "default": 128,
+          "doc": "",
+          "name": "max_systems",
+          "rust_type": "usize"
+        },
+        {
+          "default": 4096,
+          "doc": "",
+          "name": "max_events",
+          "rust_type": "usize"
+        },
+        {
+          "default": 60.0,
+          "doc": "",
+          "name": "max_pending_seconds",
+          "rust_type": "f64"
+        }
+      ],
+      "name": "VfxWorldBudget",
+      "used_by": "Rust `CpuWorld::new`; checked CPU reservation/queue limits"
     },
     {
       "doc": "",
@@ -7483,6 +8949,12 @@
         {
           "default": null,
           "doc": "",
+          "name": "set_vfx",
+          "rust_type": "id: u32, vfx: Option<VfxSystemSpec>"
+        },
+        {
+          "default": null,
+          "doc": "",
           "name": "set_light",
           "rust_type": "id: u32, light: Option<crate::components::LightSpec>"
         },
@@ -7673,7 +9145,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "1050976234c41b17",
+  "fingerprint": "ff5f3d2050247846",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {
@@ -7747,6 +9219,10 @@
     {
       "class": "Profiler",
       "global": "profiler"
+    },
+    {
+      "class": "Vfx",
+      "global": "vfx"
     }
   ]
 }

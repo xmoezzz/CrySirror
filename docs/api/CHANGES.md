@@ -4,6 +4,38 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `ff5f3d2050247846` (2026-10-26): engine-owned modular VFX
+
+- Add the `Vfx` class and `vfx` singleton: compile/play, typed parameter updates,
+  pause/stop/restart, scoped statistics and CPU event draining. Entities expose
+  `vfx`, `setVfx`, `setVfxParameter`, `pauseVfx`, `stopVfx` and `restartVfx`;
+  `WorldCommand.set_vfx` stores the same shared authored system (ADR 0064).
+- `EntitySpec.vfx` optionally declares multiple named CPU/GPU emitters with
+  schedules, shapes, typed parameters, ordered update modules, lifetime curves,
+  CPU event handlers and renderer configuration. Defaults and nested types are
+  generated from `crysirror-vfx`; documentation names carry a `Vfx` prefix to
+  distinguish the older scene `EmitterSpec`. These aliases do not change the
+  Rust names or JSON fields. Use either `vfx` or legacy `particles` per entity.
+- **Behavior migration:** the renderer no longer owns a separate CPU particle
+  simulation. Runtime workers publish immutable frames; GPU work advances only
+  after a renderer submission receipt. Offline Rust callers must fence pending
+  Runtime work with `finish_vfx_offline()` before `render_pbr()` (App offline
+  preparation already does so). Existing legacy emitter data is lowered into
+  the shared CPU VFX system. Runtime/device state is not project data.
+- Sprites support explicit shared textures, flipbooks, facing, blend modes and
+  soft depth fade; mesh particles use real static geometry; CPU ribbons form
+  real strips. Sizes are full world width/height. Mesh rendering is unlit with
+  an explicit VFX texture/color, without imported PBR material inheritance.
+  Skinned/morphed mesh sources, GPU ribbons and GPU event sub-emitters fail
+  explicitly. Sorting is per emitter plus emitter distance order, not unified
+  transparency/OIT. Ribbon width does not follow size-over-life curves.
+- GPU state remains resident with visibility compaction, alpha sorting and
+  indirect drawing. Scoped `Vfx.stats` reports CPU counts, pending work and
+  timeline pressure; GPU live count remains `null` rather than capacity.
+  This is a bounded modular foundation, not a claim of full Niagara parity.
+- Rust callers constructing `EntitySpec` or `PbrScene` directly must provide
+  their new VFX fields; JSON projects retain optional-field compatibility.
+
 ## `1050976234c41b17` (2026-10-26): native VM services and ray lighting
 
 - `Environment.ray_traced_gi` optionally enables per-pixel single-bounce diffuse

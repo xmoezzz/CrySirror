@@ -117,3 +117,16 @@ Only opaque full-size image loads and the documented plain text profile are
 mapped initially. Other drawing/effect/layout/movie operations and both native
 saves and framework snapshots fail visibly. No commercial AVG32 game is
 claimed complete. See [ADR 0062](adr/0062-avg32-portable-vm-engine-apis.md).
+
+## Shared modular effects (2026-10-26)
+
+`EntitySpec.vfx` / `WorldCommand::SetVfx` now declare the same reusable effect
+systems as the JS/TS `Vfx` and `Entity` APIs. The safe core owns compilation,
+CPU simulation/events and GPU tick plans; runtime workers and renderer-owned
+GPU resources implement execution. A native particle/effect instruction should
+translate its scheduling/resource/coordinate semantics into these declarations
+or add a missing shared module first. It must not copy a private VM particle
+simulator or render a legacy engine framebuffer. This capability addition does
+not itself establish new native Siglus/AVG32/RealLive opcode coverage. See
+[ADR 0064](adr/0064-modular-vfx-cpu-gpu.md) for supported modules and explicit
+backend gaps.

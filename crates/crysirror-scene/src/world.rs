@@ -195,6 +195,9 @@ pub struct EntitySpec {
     /// Particle emitter (visual; ADR 0014).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub particles: Option<crate::components::EmitterSpec>,
+    /// Engine-owned modular visual effects system (ADR 0064).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vfx: Option<crysirror_vfx::SystemSpec>,
     /// Local light (ADR 0018).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<crate::components::LightSpec>,
@@ -383,6 +386,10 @@ pub enum WorldCommand {
     SetParticles {
         id: u32,
         particles: Option<crate::components::EmitterSpec>,
+    },
+    SetVfx {
+        id: u32,
+        vfx: Option<crysirror_vfx::SystemSpec>,
     },
     SetLight {
         id: u32,
@@ -684,6 +691,7 @@ impl World {
                         | WorldCommand::SetGameplay { id, .. }
                         | WorldCommand::SetAi { id, .. }
                         | WorldCommand::SetParticles { id, .. }
+                        | WorldCommand::SetVfx { id, .. }
                         | WorldCommand::SetLight { id, .. }
                         | WorldCommand::SetReflectionProbe { id, .. }
                         | WorldCommand::SetIrradianceVolume { id, .. } => *id,
@@ -721,6 +729,7 @@ impl World {
                         WorldCommand::SetParticles { particles, .. } => {
                             entity.spec.particles = particles.clone()
                         }
+                        WorldCommand::SetVfx { vfx, .. } => entity.spec.vfx = vfx.clone(),
                         WorldCommand::SetLight { light, .. } => entity.spec.light = light.clone(),
                         WorldCommand::SetReflectionProbe { probe, .. } => {
                             entity.spec.reflection_probe = probe.clone()
@@ -813,6 +822,13 @@ impl World {
                 }
                 if let Some(p) = &e.spec.particles {
                     p.validate()?;
+                }
+                if let Some(vfx) = &e.spec.vfx {
+                    vfx.compile()?;
+                    ensure!(
+                        e.spec.particles.is_none(),
+                        "choose either legacy particles or modular vfx on an entity"
+                    );
                 }
                 if let Some(l) = &e.spec.light {
                     l.validate()?;

@@ -8,7 +8,7 @@
 //! SH9 irradiance and a split-sum BRDF LUT. All GPU objects are rebuilt from
 //! logical scene data; none are saved or exposed to VMs.
 use crate::Gpu;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use crysirror_asset::pbr::{self as cpu, AlphaMode, PbrMaterial, PbrVertex};
 use crysirror_core::state::ClientId;
 use crysirror_runtime::assets::Assets;
@@ -26,6 +26,156 @@ const PREFILTER_W: u32 = 1024;
 const PREFILTER_MIPS: u32 = 7;
 const BLOOM_LEVELS: usize = 6;
 const OBJECT_STRIDE: u64 = 256;
+
+struct VfxResident {
+    generation: u64,
+    progress: crysirror_vfx::GpuProgress,
+    sim: crate::vfx_gpu::GpuSimulation,
+    pending: Option<(crate::vfx_gpu::EncodedBatch, u64)>,
+}
+
+fn vfx_draw_metadata(g: &crysirror_vfx::GpuEmitterFrame) -> crysirror_vfx::EmitterFrame {
+    crysirror_vfx::EmitterFrame {
+        key: g.key,
+        system_key: g.system_key,
+        client: g.client,
+        emitter_id: g.emitter.spec.id.clone(),
+        transform: g.transform,
+        space: g.emitter.spec.space,
+        render: g.emitter.spec.render.clone(),
+        particles: Arc::from([]),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_vfx(
+    gpu: &Gpu,
+    renderer: &mut crate::vfx_render::VfxRenderer,
+    residents: &mut HashMap<u64, VfxResident>,
+    scene: &PbrScene,
+    assets: &mut Assets,
+    encoder: &mut wgpu::CommandEncoder,
+    depth: &wgpu::TextureView,
+    view: &crate::vfx_render::VfxView,
+) -> Result<()> {
+    let _span = assets
+        .profiler
+        .span(assets.profiler.frame(), "vfx.gpu_prepare_encode");
+    renderer.begin_frame(view, scene.vfx_epoch)?;
+    let empty = crysirror_vfx::FrameSnapshot::default();
+    let frame = scene.vfx.as_deref().unwrap_or(&empty);
+    ensure!(scene.vfx.is_some() || scene.emitters.is_empty(),"particle rendering requires an engine VFX snapshot; use Runtime.finish_vfx_offline for offline tools");
+    renderer.prepare_cpu(gpu, frame, assets, depth)?;
+    let total = frame
+        .gpu_emitters
+        .iter()
+        .map(|g| g.emitter.spec.capacity as usize)
+        .sum::<usize>();
+    ensure!(
+        total + frame.stats.live_particles <= crate::vfx_render::MAX_RENDER_PARTICLES,
+        "VFX renderer's shared particle budget exceeded"
+    );
+    let wanted: std::collections::HashSet<_> = frame.gpu_emitters.iter().map(|g| g.key).collect();
+    residents.retain(|key, _| wanted.contains(key));
+    for g in &frame.gpu_emitters {
+        let new = residents.get(&g.key).is_none_or(|r| {
+            r.generation != g.generation
+                || r.progress != g.progress
+                || r.sim.stats().capacity != g.emitter.spec.capacity
+        });
+        if new {
+            residents.insert(
+                g.key,
+                VfxResident {
+                    generation: g.generation,
+                    progress: g.progress.clone(),
+                    sim: crate::vfx_gpu::GpuSimulation::new(&gpu.device, g.emitter.spec.capacity)?,
+                    pending: None,
+                },
+            );
+        }
+        let r = residents.get_mut(&g.key).unwrap();
+        let committed = r.sim.stats().committed_tick.unwrap_or(0);
+        ensure!(g.tick>=committed,"VFX snapshot predates committed GPU state; reset its runtime/renderer epoch before rewinding");
+        let metadata = vfx_draw_metadata(g);
+        // Missing asynchronous geometry never stalls simulation. The draw pass
+        // owns its actual per-view geometry count once the resource is ready.
+        let vertex_count = renderer
+            .gpu_vertex_count(gpu, assets, &metadata)?
+            .unwrap_or(6);
+        let mut steps = vec![];
+        let mut births = 0u64;
+        for s in g.steps.iter().filter(|s| s.tick > committed) {
+            if steps.len() == crate::vfx_gpu::MAX_BATCH_STEPS
+                || births + u64::from(s.count) > u64::from(crate::vfx_gpu::MAX_BATCH_SPAWNS)
+            {
+                break;
+            }
+            births += u64::from(s.count);
+            steps.push(crate::vfx_gpu::SimulationStep {
+                tick: s.tick,
+                dt: s.dt,
+                time: s.time,
+                spawn_count: s.count,
+                first_id: s.first_id,
+                seed: s.seed,
+                transform: s.transform,
+                eye: view.camera.to_array(),
+                vertex_count,
+                sort_alpha: false,
+                parameters: Some(s.parameters.clone()),
+            });
+        }
+        if let Some(first) = steps.first() {
+            if r.sim.stats().committed_tick.is_none() && first.tick > 1 {
+                ensure!(
+                    g.progress.submitted_tick() > 0,
+                    "GPU VFX initial timeline was lost before first submission"
+                );
+                // Device/renderer replacement restarts derived GPU visuals;
+                // that is explicitly diagnosed, never an exact checkpoint.
+                r.sim.acknowledge_visual_restart(first.tick)?;
+            }
+            let last = steps.last().unwrap().tick;
+            let token = r
+                .sim
+                .encode_batch(&gpu.device, encoder, &g.emitter, &steps)?;
+            r.pending = Some((token, last));
+        } else {
+            ensure!(g.tick<=committed,"GPU VFX spawn request exceeds the per-batch work budget or its timeline is missing");
+        }
+    }
+    let metadata = frame
+        .gpu_emitters
+        .iter()
+        .map(vfx_draw_metadata)
+        .collect::<Vec<_>>();
+    let draws = frame
+        .gpu_emitters
+        .iter()
+        .zip(&metadata)
+        .filter_map(|(g, e)| {
+            if scene
+                .vfx_visible
+                .as_ref()
+                .is_some_and(|v| !v.contains(&g.system_key))
+            {
+                return None;
+            }
+            let r = &residents[&g.key];
+            Some(crate::vfx_render::GpuEmitterDraw {
+                emitter: e,
+                particles: r.sim.draw_particles(),
+                indices: r.sim.draw_indices(),
+                indirect: r.sim.draw_indirect(),
+                capacity: g.emitter.spec.capacity,
+            })
+        })
+        .collect::<Vec<_>>();
+    renderer.prepare_gpu(gpu, encoder, &draws, assets, depth)?;
+    renderer.finish_frame();
+    Ok(())
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -644,6 +794,8 @@ pub struct PbrRenderer {
     prev_models: HashMap<u64, [[f32; 4]; 4]>,
     prev_view_proj: Option<Mat4>,
     particles: crate::particles::Particles,
+    gpu_particles: HashMap<u64, VfxResident>,
+    vfx_epoch: u64,
     frame_index: u32,
     sky: wgpu::RenderPipeline,
     prefilter: wgpu::RenderPipeline,
@@ -828,7 +980,9 @@ fn upload_levels(gpu: &Gpu, label: &str, levels: &Levels) -> wgpu::Texture {
 /// Native ray queries read renderer streams directly: BLAS input plus storage
 /// for GPU skinning and UV gathers (ADR 0055). Empty without the RT feature.
 fn rt_buffer_usage(d: &wgpu::Device) -> wgpu::BufferUsages {
-    if d.features().contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY) {
+    if d.features()
+        .contains(wgpu::Features::EXPERIMENTAL_RAY_QUERY)
+    {
         wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::BLAS_INPUT
     } else {
         wgpu::BufferUsages::empty()
@@ -1194,11 +1348,14 @@ impl PbrRenderer {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 14, visibility: frag,
+                    binding: 14,
+                    visibility: frag,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2Array, multisampled: false,
-                    }, count: None,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 15,
@@ -1566,7 +1723,7 @@ impl PbrRenderer {
         let post_buf = uniform("post", 32);
         let object_capacity = 256;
         let object_buf = uniform("pbr objects", OBJECT_STRIDE * object_capacity);
-        let particles = crate::particles::Particles::new(d, &frame_bgl, &common, MSAA);
+        let particles = crate::particles::Particles::new(d, HDR, MSAA)?;
         let palette_capacity = 1024u64;
         let palette_buf = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("joint palettes"),
@@ -1744,6 +1901,8 @@ impl PbrRenderer {
             prev_models: HashMap::new(),
             prev_view_proj: None,
             particles,
+            gpu_particles: HashMap::new(),
+            vfx_epoch: 0,
             frame_index: 0,
             sky,
             prefilter,
@@ -1870,6 +2029,7 @@ impl PbrRenderer {
     }
     pub fn set_scene(&mut self, scene: Option<PbrScene>) {
         if scene.is_none() {
+            self.gpu_particles.clear();
             self.models.clear();
             self.overrides.clear();
             if let Some(rt) = &mut self.hardware_rt {
@@ -1883,6 +2043,30 @@ impl PbrRenderer {
         let Some(s) = &self.scene else { return 1 };
         let env = &s.environment;
         let mut frames = 1;
+        if let Some(vfx) = &s.vfx {
+            for g in &vfx.gpu_emitters {
+                let committed = self
+                    .gpu_particles
+                    .get(&g.key)
+                    .filter(|r| r.generation == g.generation && r.progress == g.progress)
+                    .and_then(|r| r.sim.stats().committed_tick)
+                    .unwrap_or(0);
+                let (mut batches, mut count, mut births) = (0u32, 0usize, 0u64);
+                for step in g.steps.iter().filter(|step| step.tick > committed) {
+                    if count == crate::vfx_gpu::MAX_BATCH_STEPS
+                        || births + u64::from(step.count)
+                            > u64::from(crate::vfx_gpu::MAX_BATCH_SPAWNS)
+                    {
+                        batches += 1;
+                        count = 0;
+                        births = 0;
+                    }
+                    count += 1;
+                    births += u64::from(step.count);
+                }
+                frames = frames.max(batches + u32::from(count > 0));
+            }
+        }
         if env.temporal_aa {
             frames = frames.max(16);
         }
@@ -1894,7 +2078,11 @@ impl PbrRenderer {
         // ray-traced updates blend with hysteresis and need about twelve.
         if let Some(v) = s.volumes.iter().min_by_key(|v| v.key) {
             let v = &v.spec;
-            let refreshes = if v.ray_traced && self.hardware_rt.is_some() { 12 } else { 3 };
+            let refreshes = if v.ray_traced && self.hardware_rt.is_some() {
+                12
+            } else {
+                3
+            };
             frames = frames.max(
                 (refreshes
                     * v.counts
@@ -1910,7 +2098,10 @@ impl PbrRenderer {
         }
         // Ray-traced soft shadows converge over their visibility history.
         if self.hardware_rt.is_some()
-            && (env.sun.as_ref().is_some_and(|s| s.angular_diameter_degrees > 0.)
+            && (env
+                .sun
+                .as_ref()
+                .is_some_and(|s| s.angular_diameter_degrees > 0.)
                 || s.lights.iter().any(|l| l.shadows && l.source_radius > 0.))
         {
             frames = frames.max(crate::rt_pbr::MAX_HISTORY / 2);
@@ -1922,7 +2113,13 @@ impl PbrRenderer {
         self.vsm.cache.stats
     }
     /// Map this frame's page marks for reading; call after the frame's submit.
-    pub fn after_submit(&mut self) {
+    pub fn after_submit(&mut self) -> Result<()> {
+        for r in self.gpu_particles.values_mut() {
+            if let Some((token, tick)) = r.pending.take() {
+                r.sim.mark_submitted(token)?;
+                r.progress.mark_submitted(tick);
+            }
+        }
         if self.hardware_encoded {
             if let Some(rt) = &mut self.hardware_rt {
                 rt.mark_submitted();
@@ -1939,6 +2136,18 @@ impl PbrRenderer {
                 });
             self.vsm.pending = Some((rx, centers));
         }
+        Ok(())
+    }
+    /// Discard VFX work only after its unsubmitted encoder has been abandoned.
+    /// Direct encode callers must submit + after_submit before encoding again,
+    /// or drop the encoder and explicitly cancel through this method.
+    pub fn cancel_unsubmitted_vfx(&mut self) -> Result<()> {
+        for r in self.gpu_particles.values_mut() {
+            if let Some((token, _)) = r.pending.take() {
+                r.sim.cancel_pending(token)?;
+            }
+        }
+        Ok(())
     }
     /// Debug readback of the GPU cut: (main, shadow) index counts per clustered
     /// draw of the last frame. Blocks on the GPU; tests and tools only.
@@ -2015,6 +2224,9 @@ impl PbrRenderer {
     }
     pub fn live_particles(&self) -> usize {
         self.particles.live()
+    }
+    pub fn vfx_stats(&self) -> serde_json::Value {
+        serde_json::json!({"render":self.particles.stats(),"gpu_simulations":self.gpu_particles.values().map(|r|r.sim.stats()).collect::<Vec<_>>(),"resident_gpu_simulation_bytes":self.gpu_particles.values().map(|r|r.sim.draw_particles().size()+r.sim.draw_indices().size()+r.sim.draw_indirect().size()).sum::<u64>(),"live_gpu_particles":null})
     }
     pub fn active(&self) -> bool {
         self.scene.is_some()
@@ -2592,17 +2804,34 @@ impl PbrRenderer {
         // forward material stage already uses its 16-texture budget).
         let lighting = d.create_texture(&wgpu::TextureDescriptor {
             label: Some("screen ray lighting array"),
-            size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 2 },
-            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
-            format: HDR, usage: if self.hardware_rt.is_some() { rs | wgpu::TextureUsages::STORAGE_BINDING } else { rs }, view_formats: &[],
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 2,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: HDR,
+            usage: if self.hardware_rt.is_some() {
+                rs | wgpu::TextureUsages::STORAGE_BINDING
+            } else {
+                rs
+            },
+            view_formats: &[],
         });
         let lighting_array = lighting.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default()
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
         });
-        let lighting_layer = |layer| lighting.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2), base_array_layer: layer,
-            array_layer_count: Some(1), ..Default::default()
-        });
+        let lighting_layer = |layer| {
+            lighting.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                base_array_layer: layer,
+                array_layer_count: Some(1),
+                ..Default::default()
+            })
+        };
         self.targets = Some(Targets {
             size,
             msaa_color: mk("hdr msaa", size, HDR, MSAA, ra),
@@ -2653,10 +2882,16 @@ impl PbrRenderer {
         vp: [f32; 4],
     ) -> Result<()> {
         let _span = self.profiler.span(self.profile_frame, "pbr.encode");
+        ensure!(self.gpu_particles.values().all(|r|r.pending.is_none()),
+            "previous PBR VFX encoding is pending; submit + after_submit, or abandon its encoder and cancel_unsubmitted_vfx before encoding again");
         self.hardware_encoded = false;
         let use_rt = self.hardware_rt.is_some();
         assets.poll_tasks();
         let mut scene = self.scene.clone().context("no PBR scene")?;
+        if self.vfx_epoch != scene.vfx_epoch {
+            self.gpu_particles.clear();
+            self.vfx_epoch = scene.vfx_epoch;
+        }
         let env = scene.environment.clone();
         self.load_env(
             assets,
@@ -2933,7 +3168,10 @@ impl PbrRenderer {
                             if let Some(cp) = model.meshes.get(mesh).and_then(|m| m.get(pi)) {
                                 if !morphs.is_empty() && !cp.morphs.is_empty() {
                                     let weight = |name: &str| {
-                                        morphs.iter().find(|(n, _)| n == name).map_or(0., |(_, w)| *w)
+                                        morphs
+                                            .iter()
+                                            .find(|(n, _)| n == name)
+                                            .map_or(0., |(_, w)| *w)
                                     };
                                     let mut h = std::collections::hash_map::DefaultHasher::new();
                                     for t in &cp.morphs {
@@ -3116,13 +3354,22 @@ impl PbrRenderer {
                     } else {
                         &[]
                     };
-                    let bits: Vec<u32> = pose.iter().flatten().flatten().map(|v| v.to_bits()).collect();
+                    let bits: Vec<u32> = pose
+                        .iter()
+                        .flatten()
+                        .flatten()
+                        .map(|v| v.to_bits())
+                        .collect();
                     hash((&bits, morph.map(|m| m.0)))
                 } else {
                     0
                 };
                 out.push(crate::rt_pbr::PbrRtDraw {
-                    geometry: if dynamic { hash(("dynamic", draw.key)) } else { source },
+                    geometry: if dynamic {
+                        hash(("dynamic", draw.key))
+                    } else {
+                        source
+                    },
                     uv_key: source,
                     vertices: morph.map_or_else(|| prim.vertices.clone(), |m| m.1.clone()),
                     vertex_count: u32::try_from(prim.vertex_count)?,
@@ -3403,12 +3650,6 @@ impl PbrRenderer {
             );
             prev_split = *split;
         }
-        self.particles.prepare(
-            &self.gpu.device,
-            &scene.emitters,
-            scene.time,
-            Vec3::from_array(cam.eye),
-        );
         let e = self.env.as_ref().unwrap();
         let mut fu = FrameUniform {
             view_proj: view_proj.to_cols_array_2d(),
@@ -3462,10 +3703,14 @@ impl PbrRenderer {
                 .fog
                 .as_ref()
                 .map_or([0.; 4], |f| [f.sun_scattering, f.sun_exponent, 0., 0.]),
-            ssr: env
-                .reflections
-                .as_ref()
-                .map_or([0.; 4], |r| [r.intensity, r.max_roughness, if use_rt && r.ray_traced {1.} else {0.}, 0.]),
+            ssr: env.reflections.as_ref().map_or([0.; 4], |r| {
+                [
+                    r.intensity,
+                    r.max_roughness,
+                    if use_rt && r.ray_traced { 1. } else { 0. },
+                    0.,
+                ]
+            }),
             probes: [[0.; 4]; 24],
             vsm_view: [[0.; 4]; 4],
             vsm: [0.; 4],
@@ -3838,7 +4083,9 @@ impl PbrRenderer {
                 })
                 .collect();
             let dist = |i: usize| {
-                ((Vec3::from_array(scene.lights[i].position) - eye).length() - scene.lights[i].range).max(0.)
+                ((Vec3::from_array(scene.lights[i].position) - eye).length()
+                    - scene.lights[i].range)
+                    .max(0.)
             };
             order.sort_by(|a, b| dist(*a).total_cmp(&dist(*b)));
             order.truncate(2);
@@ -3854,7 +4101,10 @@ impl PbrRenderer {
         let mut fu = fu;
         fu.rt_shadow[1] = if rt_local.is_empty() { 0. } else { 1. };
         if let Some(g) = &env.ray_traced_gi {
-            ensure!(use_rt, "per-pixel ray-traced GI requires the hardware ray-tracing rendering path");
+            ensure!(
+                use_rt,
+                "per-pixel ray-traced GI requires the hardware ray-tracing rendering path"
+            );
             fu.ssr[3] = g.intensity;
         }
         fu.clusters[2] = clusters.lights.len() as f32;
@@ -3896,6 +4146,27 @@ impl PbrRenderer {
 
         let d = &self.gpu.device;
         let t = self.targets.as_ref().unwrap();
+        let fog = env.fog.as_ref();
+        prepare_vfx(
+            &self.gpu,
+            &mut self.particles,
+            &mut self.gpu_particles,
+            &scene,
+            assets,
+            encoder,
+            &t.pre_depth,
+            &crate::vfx_render::VfxView {
+                view_projection: view_proj,
+                view,
+                camera: Vec3::from_array(cam.eye),
+                viewport: canvas,
+                time: scene.time,
+                fog_color: fog.map_or([0.; 3], |f| f.color),
+                fog: fog.map_or([0.; 4], |f| {
+                    [f.density, f.height_falloff, f.base_height, f.start_distance]
+                }),
+            },
+        )?;
         let frame_bind_with =
             |opaque_depth: &wgpu::TextureView,
              frame_buf: &wgpu::Buffer,
@@ -3986,14 +4257,18 @@ impl PbrRenderer {
                     b.0 = hash;
                 }
                 _ => {
-                    let buffer = self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("pbr morphed vertices"),
-                        contents: &bytes,
-                        usage: wgpu::BufferUsages::VERTEX
-                            | wgpu::BufferUsages::COPY_DST
-                            | rt_buffer_usage(&self.gpu.device),
-                    });
-                    self.morph_buffers.insert(dk, (hash, buffer, vertices.len()));
+                    let buffer =
+                        self.gpu
+                            .device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("pbr morphed vertices"),
+                                contents: &bytes,
+                                usage: wgpu::BufferUsages::VERTEX
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | rt_buffer_usage(&self.gpu.device),
+                            });
+                    self.morph_buffers
+                        .insert(dk, (hash, buffer, vertices.len()));
                 }
             }
         }
@@ -4840,7 +5115,10 @@ impl PbrRenderer {
         }
         if let Some(rt) = &mut self.hardware_rt {
             let towards = (-l).normalize_or_zero();
-            ensure!(towards.length_squared() > 0.5, "hardware shadow sun direction must be nonzero");
+            ensure!(
+                towards.length_squared() > 0.5,
+                "hardware shadow sun direction must be nonzero"
+            );
             let shadow_view = crate::rt_pbr::ShadowView {
                 inverse_view_projection: view_proj.inverse(),
                 view_projection: view_proj,
@@ -4918,7 +5196,9 @@ impl PbrRenderer {
                     env_rotation: fu.env[1],
                     sh: fu.sh,
                     max_distance: r.max_distance,
-                    samples: r.ray_samples, diffuse: false, light_count: clusters.lights.len() as u32,
+                    samples: r.ray_samples,
+                    diffuse: false,
+                    light_count: clusters.lights.len() as u32,
                 };
                 traced_reflections = rt.encode_reflections(
                     &self.gpu,
@@ -4930,24 +5210,53 @@ impl PbrRenderer {
                     &self.linear,
                     &t.ssr,
                     &self.light_bufs.lights,
-                    &self.env.as_ref().context("environment for RT reflection")?.source,
+                    &self
+                        .env
+                        .as_ref()
+                        .context("environment for RT reflection")?
+                        .source,
                     encoder,
                 )?;
             }
         }
         if let (Some(g), Some(rt)) = (&env.ray_traced_gi, &mut self.hardware_rt) {
             let view = crate::rt_pbr::ReflectionView {
-                inverse_view_projection: view_proj.inverse(), view_projection: view_proj, view,
-                previous_view_projection: None, camera: Vec3::from_array(cam.eye),
-                sun_dir: fu.sun_dir, sun_color: fu.sun_color,
-                env_intensity: fu.env[0], env_rotation: fu.env[1], sh: fu.sh,
-                max_distance: g.max_distance, samples: g.samples, diffuse: true,
+                inverse_view_projection: view_proj.inverse(),
+                view_projection: view_proj,
+                view,
+                previous_view_projection: None,
+                camera: Vec3::from_array(cam.eye),
+                sun_dir: fu.sun_dir,
+                sun_color: fu.sun_color,
+                env_intensity: fu.env[0],
+                env_rotation: fu.env[1],
+                sh: fu.sh,
+                max_distance: g.max_distance,
+                samples: g.samples,
+                diffuse: true,
                 light_count: clusters.lights.len() as u32,
             };
-            let traced = rt.encode_reflections(&self.gpu, &view, canvas, &t.pre_depth, &t.normal,
-                &t.prev_hdr, &self.linear, &t.pixel_gi, &self.light_bufs.lights,
-                &self.env.as_ref().context("environment for pixel GI")?.source, encoder)?;
-            ensure!(traced, "per-pixel RT GI requires nonempty traceable scene geometry");
+            let traced = rt.encode_reflections(
+                &self.gpu,
+                &view,
+                canvas,
+                &t.pre_depth,
+                &t.normal,
+                &t.prev_hdr,
+                &self.linear,
+                &t.pixel_gi,
+                &self.light_bufs.lights,
+                &self
+                    .env
+                    .as_ref()
+                    .context("environment for pixel GI")?
+                    .source,
+                encoder,
+            )?;
+            ensure!(
+                traced,
+                "per-pixel RT GI requires nonempty traceable scene geometry"
+            );
         }
         if let Some(r) = env.reflections.as_ref().filter(|_| !traced_reflections) {
             let u = SsrUniform {
@@ -5050,7 +5359,7 @@ impl PbrRenderer {
                 pass.set_bind_group(0, &frame_bind, &[]);
                 pass.draw(0..3, 0..1);
             }
-            self.particles.draw(&mut pass, &frame_bind);
+            self.particles.draw(&mut pass);
         }
         // 5. TAA resolve into the history ping-pong.
         let write = (self.frame_index % 2) as usize;

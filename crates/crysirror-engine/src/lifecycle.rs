@@ -22,7 +22,7 @@ use crate::{
     object::{Class, ClassRegistry, ObjectTable},
     script::ScriptHost,
 };
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use crysirror_core::service::InputFrame;
 use crysirror_runtime::Runtime;
 use std::{collections::VecDeque, sync::Arc};
@@ -160,7 +160,8 @@ impl App {
     /// Explicit offline tool fence; publishes ready streaming cells without a
     /// second simulation/script tick. Live hosts keep polling ordinary frames.
     pub fn prepare_render_offline(&mut self) -> Result<()> {
-        crate::systems::finish_streaming_offline(&mut self.cx)
+        crate::systems::finish_streaming_offline(&mut self.cx)?;
+        self.cx.state()?.runtime.finish_vfx_offline()
     }
     pub fn quit_requested(&self) -> bool {
         self.cx

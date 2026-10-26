@@ -150,6 +150,8 @@ declare class Entity {
   readonly tags: string[];
   /** Particle emitter spec or null. */
   readonly particles: any;
+  /** Modular VFX system specification or null; simulation belongs to the engine runtime. */
+  readonly vfx: any;
   /** Box reflection capture or null. */
   readonly reflectionProbe: any;
   /** Dynamic diffuse GI volume or null. */
@@ -206,6 +208,16 @@ declare class Entity {
   setLight(light: Record<string, any> | null): void;
   /** Particle emitter {rate, burst, lifetime, speed, direction, spread_degrees, gravity, drag, size, color_start, color_end, max, additive, enabled, seed} or null. */
   setParticles(emitter: Record<string, any> | null): void;
+  /** Attach or replace a modular VFX system; null removes it. CPU/GPU targets, emitter modules, parameters and renderers are explicitly validated. */
+  setVfx(system: Record<string, any> | null): void;
+  /** Set an existing typed VFX parameter. Accepts a number, bool, vector3 or color4 matching its declared type; does not restart the effect. */
+  setVfxParameter(name: string, value: any): void;
+  /** Freeze or resume this VFX system clock and all live particles. */
+  pauseVfx(paused: boolean): void;
+  /** Stop new VFX births; existing particles continue to the end of their lifetimes. */
+  stopVfx(): void;
+  /** Increment the VFX revision and restart its simulation from its configured seed. */
+  restartVfx(): void;
   /** Run a defined behaviour tree every fixed step (null stops). */
   runBehaviorTree(tree: string | null): void;
   /** Write a blackboard value (bool, number, [x,y,z], string, Entity, or null to clear). */
@@ -502,6 +514,25 @@ declare class Ui {
   /** Label/button text and font alias. */
   setText(id: number, text: string, font: string | null): void;
 }
+/** Engine-owned modular visual effects. Systems are data, particles execute on bounded CPU workers or native GPU compute; JS/TS controls instances and parameters. */
+declare class Vfx {
+  /** Validate a modular system and typed parameter bindings without opening a device. Returns its emitter/module/target summary; unsupported modules fail. */
+  compile(system: Record<string, any>): Record<string, any>;
+  /** Spawn an entity with this VFX system. Options are ordinary World.spawn fields such as name, position, rotation, scale and parent. Simulation is published asynchronously. */
+  play(system: Record<string, any>, options: Record<string, any> | null): Entity;
+  /** Change an existing typed parameter on this client's VFX entity without restarting its particles. */
+  setParameter(entity: Entity, name: string, value: any): void;
+  /** Freeze/resume the effect's simulation clock. */
+  pause(entity: Entity, paused: boolean): void;
+  /** Stop emission while existing particles finish. */
+  stop(entity: Entity): void;
+  /** Restart an effect from its seed using a new logical revision. */
+  restart(entity: Entity): void;
+  /** Read this client's published CPU counts, GPU timeline pressure and pending worker status. GPU capacity is not reported as a measured live count. */
+  stats(): Record<string, any>;
+  /** Drain this client's bounded CPU birth, death and collision event queue. GPU event records remain on device; they are not fabricated as CPU callbacks. */
+  drainEvents(): Record<string, any>[];
+}
 /** The shared dynamic 3D world, scoped to this App's client. */
 declare class World {
   /** Entities owned by this client. */
@@ -585,3 +616,4 @@ declare const canvases: Canvases;
 declare const media: Media;
 declare const assets: Assets;
 declare const profiler: Profiler;
+declare const vfx: Vfx;

@@ -6,16 +6,16 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `1050976234c41b17`
+API fingerprint: `ff5f3d2050247846`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
 ## Contents
 
 - [Globals](#globals)
-- Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [World](#class-world)
+- Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [Vfx](#class-vfx), [World](#class-world)
 - [Commands](#commands)
-- Data: [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
+- Data: [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -40,6 +40,7 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 | `media` | [Media](#class-media) |
 | `assets` | [Assets](#class-assets) |
 | `profiler` | [Profiler](#class-profiler) |
+| `vfx` | [Vfx](#class-vfx) |
 
 ## Class Assets
 
@@ -178,6 +179,7 @@ A generational handle to a world entity. Using it after destroy() fails.
 | `gameplay` | `any` | read | Gameplay component (attributes, effects, tags, abilities) or null. |
 | `tags` | `string[]` | read | All owned gameplay tags. |
 | `particles` | `any` | read | Particle emitter spec or null. |
+| `vfx` | `any` | read | Modular VFX system specification or null; simulation belongs to the engine runtime. |
 | `reflectionProbe` | `any` | read | Box reflection capture or null. |
 | `irradianceVolume` | `any` | read | Dynamic diffuse GI volume or null. |
 | `light` | `any` | read | Local light {shape:{kind:'point'\|'spot'\|'rect',...}, color, intensity, units:'candela'\|'lumens', range, shadows, enabled} or null. |
@@ -209,6 +211,11 @@ A generational handle to a world entity. Using it after destroy() fails.
 | `setReflectionProbe(probe: Record<string, any> \| null)` | `void` | Box reflection capture {extent:[hx,hy,hz], intensity?, blend_distance?, revision?} at this entity, or null. Bump revision to recapture. |
 | `setLight(light: Record<string, any> \| null)` | `void` | Attach/replace a local light (spot and rect emit along local -Z) or null to remove. Intensity is candela unless units:'lumens'. |
 | `setParticles(emitter: Record<string, any> \| null)` | `void` | Particle emitter {rate, burst, lifetime, speed, direction, spread_degrees, gravity, drag, size, color_start, color_end, max, additive, enabled, seed} or null. |
+| `setVfx(system: Record<string, any> \| null)` | `void` | Attach or replace a modular VFX system; null removes it. CPU/GPU targets, emitter modules, parameters and renderers are explicitly validated. |
+| `setVfxParameter(name: string, value: any)` | `void` | Set an existing typed VFX parameter. Accepts a number, bool, vector3 or color4 matching its declared type; does not restart the effect. |
+| `pauseVfx(paused: boolean)` | `void` | Freeze or resume this VFX system clock and all live particles. |
+| `stopVfx(—)` | `void` | Stop new VFX births; existing particles continue to the end of their lifetimes. |
+| `restartVfx(—)` | `void` | Increment the VFX revision and restart its simulation from its configured seed. |
 | `runBehaviorTree(tree: string \| null)` | `void` | Run a defined behaviour tree every fixed step (null stops). |
 | `setBlackboard(key: string, value: any)` | `void` | Write a blackboard value (bool, number, [x,y,z], string, Entity, or null to clear). |
 | `setStateMachine(machine: string \| null)` | `void` | Drive animation from a defined state machine (null clears). |
@@ -230,7 +237,7 @@ A generational handle to a world entity. Using it after destroy() fails.
 | `drainEvents(—)` | `Record<string, any>[]` | Take queued gameplay events {kind, name, value, source}. |
 | `tween(spec: Record<string, any>)` | `void` | Integer tween {property:'x'\|'y'\|'z'\|'rotation_x'\|..., from, to, duration_ms, delay_ms?, mode?, easing?, real_time?}. |
 
-Commands issued: `destroy` → `world.despawn`, `position` → `world.set_transform`, `velocity` → `world.set_velocity`, `angularVelocity` → `world.set_angular_velocity`, `setParent` → `world.set_parent`, `visible` → `world.set_visible`, `tween` → `world.tween`, `setMaterial` → `world.set_material`, `play` → `world.set_animation`, `setCollider` → `world.set_collider`, `applyEffect` → `world.set_gameplay`, `runBehaviorTree` → `world.set_ai`, `setParticles` → `world.set_particles`, `setLight` → `world.set_light`, `setReflectionProbe` → `world.set_reflection_probe`, `setIrradianceVolume` → `world.set_irradiance_volume`.
+Commands issued: `destroy` → `world.despawn`, `position` → `world.set_transform`, `velocity` → `world.set_velocity`, `angularVelocity` → `world.set_angular_velocity`, `setParent` → `world.set_parent`, `visible` → `world.set_visible`, `tween` → `world.tween`, `setMaterial` → `world.set_material`, `play` → `world.set_animation`, `setCollider` → `world.set_collider`, `applyEffect` → `world.set_gameplay`, `runBehaviorTree` → `world.set_ai`, `setParticles` → `world.set_particles`, `setVfx` → `world.set_vfx`, `setLight` → `world.set_light`, `setReflectionProbe` → `world.set_reflection_probe`, `setIrradianceVolume` → `world.set_irradiance_volume`.
 
 ## Class Fs
 
@@ -495,6 +502,24 @@ Script global: `ui`.
 
 Commands issued: `put` → `ui.put`, `remove` → `ui.remove`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setText` → `ui.set_text`, `setTitle` → `ui.set_title`, `setCursorVisible` → `ui.set_cursor_visible`, `insertText` → `ui.insert_text`, `backspace` → `ui.backspace`, `focusTextField` → `ui.focus`.
 
+## Class Vfx
+
+Engine-owned modular visual effects. Systems are data, particles execute on bounded CPU workers or native GPU compute; JS/TS controls instances and parameters.
+
+Script global: `vfx`.
+
+| Method | Returns | Description |
+|---|---|---|
+| `compile(system: Record<string, any>)` | `Record<string, any>` | Validate a modular system and typed parameter bindings without opening a device. Returns its emitter/module/target summary; unsupported modules fail. |
+| `play(system: Record<string, any>, options: Record<string, any> \| null)` | `Entity` | Spawn an entity with this VFX system. Options are ordinary World.spawn fields such as name, position, rotation, scale and parent. Simulation is published asynchronously. |
+| `setParameter(entity: Entity, name: string, value: any)` | `void` | Change an existing typed parameter on this client's VFX entity without restarting its particles. |
+| `pause(entity: Entity, paused: boolean)` | `void` | Freeze/resume the effect's simulation clock. |
+| `stop(entity: Entity)` | `void` | Stop emission while existing particles finish. |
+| `restart(entity: Entity)` | `void` | Restart an effect from its seed using a new logical revision. |
+| `stats(—)` | `Record<string, any>` | Read this client's published CPU counts, GPU timeline pressure and pending worker status. GPU capacity is not reported as a measured live count. |
+| `drainEvents(—)` | `Record<string, any>[]` | Drain this client's bounded CPU birth, death and collision event queue. GPU event records remain on device; they are not fabricated as CPU callbacks. |
+
+
 ## Class World
 
 The shared dynamic 3D world, scoped to this App's client.
@@ -567,6 +592,7 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | world | `define_ai` | `World.defineBehaviorTree` |
 | world | `set_ai` | `Entity.runBehaviorTree` |
 | world | `set_particles` | `Entity.setParticles` |
+| world | `set_vfx` | `Entity.setVfx` |
 | world | `set_light` | `Entity.setLight` |
 | world | `set_reflection_probe` | `Entity.setReflectionProbe` |
 | world | `set_irradiance_volume` | `Entity.setIrradianceVolume` |
@@ -885,6 +911,7 @@ Used by: `World.spawn`, `ClientSpec.systems.entities`.
 | `gameplay` | `Option<crate::gameplay::GameplayState>` | — | Attributes, active effects, tags and abilities (ADR 0014). |
 | `ai` | `Option<crate::ai::AiState>` | — | Behaviour tree instance and blackboard (ADR 0014). |
 | `particles` | `Option<crate::components::EmitterSpec>` | — | Particle emitter (visual; ADR 0014). |
+| `vfx` | `Option<VfxSystemSpec>` | — | Engine-owned modular visual effects system (ADR 0064). |
 | `light` | `Option<crate::components::LightSpec>` | — | Local light (ADR 0018). |
 | `reflection_probe` | `Option<crate::components::ReflectionProbeSpec>` | — | Box reflection capture (ADR 0024). |
 | `irradiance_volume` | `Option<crate::components::IrradianceVolumeSpec>` | — | Dynamic diffuse GI volume (ADR 0028). |
@@ -1230,6 +1257,440 @@ A CPU particle emitter (ADR 0014). The spec is saved; particle state is a visual
 | `additive` | `bool` | `true` | Additive blending (false: alpha blending). |
 | `enabled` | `bool` | `true` | Emit new particles (live ones finish). |
 | `seed` | `u32` | `0` | Random seed, for reproducible emission. |
+
+### VfxSystemSpec
+
+Used by: `EntitySpec.vfx`, `Vfx.compile/play`, `Entity.setVfx` (ADR 0064).
+
+A scoped multi-emitter effect with typed parameters and a fixed simulation clock.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `revision` | `u64` | `0` | Explicit restart epoch; parameter/control changes do not increment it. |
+| `emitters` | `Vec<VfxEmitterSpec>` | `[{"capacity":1024,"enabled":true,"enabled_parameter":null,"events":[],"id":"emitter","initialize":{"color":[1.0,1.0,1.0,1.0],"color_parameter":null,"direction":[0.0,1.0,0.0],"lifetime":[1.0,2.0],"ribbon_id":0,"rotation":[0.0,0.0],"shape":{"kind":"point"},"size":[0.1,0.1],"size_parameter":null,"speed":[1.0,2.0],"spread_degrees":20.0},"overflow":"drop_new","render":{"blend":"additive","columns":1,"facing":{"kind":"camera"},"fps":0.0,"frames":1,"kind":"sprite","rows":1,"soft_distance":0.0,"texture":null},"seed":1,"space":"world","spawn":{"auto_start":true,"burst_looping":true,"bursts":[],"duration":5.0,"looping":true,"rate":20.0},"target":"cpu","update":[]}]` | — |
+| `parameters` | `BTreeMap<String, VfxParameterValue>` | `{}` | — |
+| `fixed_step_hz` | `u32` | `60` | — |
+| `warmup_seconds` | `f32` | `0.0` | — |
+| `max_steps_per_advance` | `u32` | `64` | — |
+| `enabled` | `bool` | `true` | — |
+| `paused` | `bool` | `false` | — |
+| `time_scale` | `f32` | `1.0` | — |
+
+### VfxEmitterSpec
+
+Used by: `VfxSystemSpec.emitters`; distinct from legacy `EmitterSpec`.
+
+Named data-driven emitter: schedule, initialization, typed module stack and renderer.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `id` | `String` | `"emitter"` | — |
+| `enabled` | `bool` | `true` | — |
+| `enabled_parameter` | `Option<String>` | `null` | — |
+| `target` | `VfxSimulationTarget` | `"cpu"` | — |
+| `space` | `VfxSimulationSpace` | `"world"` | — |
+| `capacity` | `u32` | `1024` | — |
+| `seed` | `u32` | `1` | — |
+| `overflow` | `VfxOverflowPolicy` | `"drop_new"` | — |
+| `spawn` | `VfxSpawnSpec` | `{"auto_start":true,"burst_looping":true,"bursts":[],"duration":5.0,"looping":true,"rate":20.0}` | — |
+| `initialize` | `VfxInitSpec` | `{"color":[1.0,1.0,1.0,1.0],"color_parameter":null,"direction":[0.0,1.0,0.0],"lifetime":[1.0,2.0],"ribbon_id":0,"rotation":[0.0,0.0],"shape":{"kind":"point"},"size":[0.1,0.1],"size_parameter":null,"speed":[1.0,2.0],"spread_degrees":20.0}` | — |
+| `update` | `Vec<VfxModule>` | `[]` | — |
+| `render` | `VfxRenderSpec` | `{"blend":"additive","columns":1,"facing":{"kind":"camera"},"fps":0.0,"frames":1,"kind":"sprite","rows":1,"soft_distance":0.0,"texture":null}` | — |
+| `events` | `Vec<VfxEventHandler>` | `[]` | — |
+
+### VfxParameterValue
+
+Used by: `VfxSystemSpec.parameters` typed values; `Vfx.setParameter` accepts the existing type's raw payload.
+
+Typed authored parameter value. Updates must preserve the declared variant. Variants are tagged by `"kind"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `float` | `value: f32` | Payload is serialized under `value`; `kind` selects this variant. |
+| `vector` | `value: [f32; 3]` | Payload is serialized under `value`; `kind` selects this variant. |
+| `color` | `value: [f32; 4]` | Payload is serialized under `value`; `kind` selects this variant. |
+| `bool` | `value: bool` | Payload is serialized under `value`; `kind` selects this variant. |
+
+### VfxScalarValue
+
+Used by: Emission rates and scalar `VfxModule` inputs.
+
+Finite scalar constant or checked float-parameter binding.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Constant` | `f32` | Serialized as a bare number or vector, without a variant tag. |
+| `Parameter` | `VfxScalarBinding` | Serialized as the binding object, without a variant tag. |
+
+### VfxScalarBinding
+
+Used by: `VfxScalarValue` parameter binding object.
+
+Affine float binding: parameter * scale + offset.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `parameter` | `String` | `"strength"` | — |
+| `scale` | `f32` | `1.0` | — |
+| `offset` | `f32` | `0.0` | — |
+
+### VfxVectorValue
+
+Used by: Direction, force, position and axis inputs.
+
+Finite simulation-space vector or checked vector-parameter binding.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Constant` | `[f32; 3]` | Serialized as a bare number or vector, without a variant tag. |
+| `Parameter` | `VfxVectorBinding` | Serialized as the binding object, without a variant tag. |
+
+### VfxVectorBinding
+
+Used by: `VfxVectorValue` parameter binding object.
+
+Vector binding with an explicit scalar multiplier.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `parameter` | `String` | `"direction"` | — |
+| `scale` | `f32` | `1.0` | — |
+
+### VfxSimulationTarget
+
+Used by: `VfxEmitterSpec.target`.
+
+Explicit execution backend; unsupported GPU features fail at compilation.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `cpu` | — | — |
+| `gpu` | — | — |
+
+### VfxSimulationSpace
+
+Used by: `VfxEmitterSpec.space`.
+
+World trajectories stay fixed; Local trajectories follow the current transform.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `world` | — | — |
+| `local` | — | — |
+
+### VfxOverflowPolicy
+
+Used by: `VfxEmitterSpec.overflow`; GPU supports only drop_new.
+
+Explicit CPU birth admission policy; GPU currently supports DropNew.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `drop_new` | — | — |
+| `kill_oldest` | — | — |
+
+### VfxSpawnSpec
+
+Used by: `VfxEmitterSpec.spawn`.
+
+Automatic emission schedule; event-only targets use auto_start=false.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `rate` | `VfxScalarValue` | `20.0` | — |
+| `bursts` | `Vec<VfxBurst>` | `[]` | — |
+| `duration` | `f32` | `5.0` | — |
+| `looping` | `bool` | `true` | — |
+| `burst_looping` | `bool` | `true` | Repeat burst schedules per cycle, independently of continuous emission. |
+| `auto_start` | `bool` | `true` | Event-only emitters do not create automatic births. |
+
+### VfxBurst
+
+Used by: `VfxSpawnSpec.bursts`.
+
+One scheduled automatic burst, in seconds within the emitter cycle.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `time` | `f32` | `0.0` | — |
+| `count` | `u32` | `1` | — |
+
+### VfxInitSpec
+
+Used by: `VfxEmitterSpec.initialize`; sizes are full world width/height.
+
+Birth attributes. Size is full world width/height; rotation is radians.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `shape` | `VfxSpawnShape` | `{"kind":"point"}` | — |
+| `lifetime` | `[f32; 2]` | `[1.0,2.0]` | — |
+| `speed` | `[f32; 2]` | `[1.0,2.0]` | — |
+| `direction` | `VfxVectorValue` | `[0.0,1.0,0.0]` | — |
+| `spread_degrees` | `f32` | `20.0` | — |
+| `color` | `[f32; 4]` | `[1.0,1.0,1.0,1.0]` | — |
+| `size` | `[f32; 2]` | `[0.1,0.1]` | — |
+| `rotation` | `[f32; 2]` | `[0.0,0.0]` | — |
+| `ribbon_id` | `u32` | `0` | — |
+| `color_parameter` | `Option<String>` | `null` | Optional typed user color binding sampled at birth. |
+| `size_parameter` | `Option<String>` | `null` | Optional vector parameter whose XY components define full birth width/height. |
+
+### VfxSpawnShape
+
+Used by: `VfxInitSpec.shape`.
+
+Birth positions in emitter-local coordinates before simulation-space conversion. Variants are tagged by `"kind"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `point` | — | — |
+| `sphere` | `radius: f32, surface: bool` | — |
+| `box` | `half_extent: [f32; 3]` | — |
+| `cone` | `radius: f32, height: f32` | — |
+| `line` | `end: [f32; 3]` | — |
+
+### VfxModule
+
+Used by: `VfxEmitterSpec.update` ordered typed module stack.
+
+Typed instruction stack: ordered forces, integration, then responses and appearance. Variants are tagged by `"op"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `acceleration` | `value: VfxVectorValue` | — |
+| `drag` | `coefficient: VfxScalarValue` | — |
+| `curl_noise` | `strength: VfxScalarValue, frequency: VfxScalarValue` | — |
+| `attractor` | `point: VfxVectorValue, strength: VfxScalarValue, radius: VfxScalarValue` | — |
+| `orbit` | `axis: VfxVectorValue, speed: VfxScalarValue` | — |
+| `rotate` | `radians_per_second: VfxScalarValue` | — |
+| `color_over_life` | `curve: VfxColorCurve` | — |
+| `size_over_life` | `curve: VfxVec2Curve` | — |
+| `collision_plane` | `normal: VfxVectorValue, offset: VfxScalarValue, restitution: f32, friction: f32, kill: bool` | — |
+| `collision_sphere` | `center: VfxVectorValue, radius: VfxScalarValue, restitution: f32, kill: bool` | — |
+
+### VfxInterpolation
+
+Used by: Lifetime-curve interpolation.
+
+Bounded curve segment interpolation; Smooth is cubic smoothstep.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `constant` | — | — |
+| `linear` | — | — |
+| `smooth` | — | — |
+
+### VfxScalarKey
+
+Used by: `VfxScalarCurve.keys`.
+
+Scalar value at a normalized lifetime coordinate.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `time` | `f32` | `0.0` | — |
+| `value` | `f32` | `1.0` | — |
+
+### VfxVec2Key
+
+Used by: `VfxVec2Curve.keys`.
+
+Full-width/full-height value at a normalized lifetime coordinate.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `time` | `f32` | `0.0` | — |
+| `value` | `[f32; 2]` | `[1.0,1.0]` | — |
+
+### VfxColorKey
+
+Used by: `VfxColorCurve.keys`.
+
+Linear HDR RGB and opacity at a normalized lifetime coordinate.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `time` | `f32` | `0.0` | — |
+| `value` | `[f32; 4]` | `[1.0,1.0,1.0,1.0]` | — |
+
+### VfxScalarCurve
+
+Used by: Scalar lifetime curves.
+
+Checked scalar lifetime curve with 2..32 increasing keys from 0 to 1.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `keys` | `Vec<VfxScalarKey>` | `[{"time":0.0,"value":1.0},{"time":1.0,"value":0.0}]` | — |
+| `interpolation` | `VfxInterpolation` | `"linear"` | — |
+
+### VfxVec2Curve
+
+Used by: `VfxModule.size_over_life.curve`.
+
+Checked full-size lifetime curve with 2..32 normalized keys.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `keys` | `Vec<VfxVec2Key>` | `[{"time":0.0,"value":[1.0,1.0]},{"time":1.0,"value":[0.0,0.0]}]` | — |
+| `interpolation` | `VfxInterpolation` | `"linear"` | — |
+
+### VfxColorCurve
+
+Used by: `VfxModule.color_over_life.curve`.
+
+Checked linear HDR color/opacity lifetime curve.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `keys` | `Vec<VfxColorKey>` | `[{"time":0.0,"value":[1.0,1.0,1.0,1.0]},{"time":1.0,"value":[1.0,1.0,1.0,0.0]}]` | — |
+| `interpolation` | `VfxInterpolation` | `"linear"` | — |
+
+### VfxRenderSpec
+
+Used by: `VfxEmitterSpec.render`; actual Sprite, Mesh or CPU Ribbon renderer.
+
+Device-independent renderer configuration. Ribbon width is explicit full width. Variants are tagged by `"kind"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `sprite` | `texture: Option<String>, columns: u32, rows: u32, frames: u32, fps: f32, soft_distance: f32, blend: VfxBlendMode, facing: VfxFacingMode` | — |
+| `mesh` | `mesh: VfxMeshShape, texture: Option<String>, blend: VfxBlendMode` | — |
+| `ribbon` | `width: f32, texture: Option<String>, uv_scale: f32, max_segments: u32, blend: VfxBlendMode` | — |
+
+### VfxBlendMode
+
+Used by: `VfxRenderSpec.blend`.
+
+Renderer blend contract, independent of the execution backend.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `alpha` | — | — |
+| `additive` | — | — |
+| `premultiplied` | — | — |
+| `multiply` | — | — |
+
+### VfxFacingMode
+
+Used by: `VfxRenderSpec.sprite.facing`.
+
+Sprite orientation: camera-facing, velocity-aligned or fixed local axis. Variants are tagged by `"kind"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `camera` | — | — |
+| `velocity` | — | — |
+| `axis` | `axis: [f32; 3]` | — |
+
+### VfxMeshShape
+
+Used by: `VfxRenderSpec.mesh.mesh`; static geometry only.
+
+Built-in or client-relative static mesh resource for particle rendering. Variants are tagged by `"kind"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `cube` | — | — |
+| `quad` | — | — |
+| `asset` | `path: String` | — |
+
+### VfxEventKind
+
+Used by: `VfxEventHandler.event`, `VfxParticleEvent.kind`.
+
+CPU event kinds and GPU debug record categories.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `birth` | — | — |
+| `death` | — | — |
+| `collision` | — | — |
+
+### VfxEventHandler
+
+Used by: `VfxEmitterSpec.events` CPU sub-emitter handlers.
+
+Bounded CPU sub-emitter request at a parent event, with optional velocity inheritance.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `event` | `VfxEventKind` | `"birth"` | — |
+| `emitter` | `String` | `"child"` | — |
+| `count` | `u32` | `1` | — |
+| `inherit_velocity` | `f32` | `0.0` | — |
+| `probability` | `f32` | `1.0` | — |
+
+### VfxParticle
+
+Used by: Device-independent Rust CPU snapshot attributes.
+
+Device-independent particle attributes; size is full world width/height.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `id` | `u64` | — | — |
+| `position` | `[f32; 3]` | — | — |
+| `previous_position` | `[f32; 3]` | — | — |
+| `velocity` | `[f32; 3]` | — | — |
+| `age` | `f32` | — | — |
+| `lifetime` | `f32` | — | — |
+| `color` | `[f32; 4]` | — | — |
+| `size` | `[f32; 2]` | — | — |
+| `rotation` | `f32` | — | — |
+| `ribbon_id` | `u32` | — | — |
+
+### VfxParticleEvent
+
+Used by: `Vfx.drainEvents`; client-scoped CPU event records.
+
+Client-scoped CPU event with world-space coordinates and logical identities.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `u32` | — | — |
+| `system_key` | `u64` | — | — |
+| `key` | `u64` | — | — |
+| `emitter_id` | `String` | — | — |
+| `particle_id` | `u64` | — | — |
+| `kind` | `VfxEventKind` | — | — |
+| `position` | `[f32; 3]` | — | Event coordinates are always world space, even for local simulations. |
+| `velocity` | `[f32; 3]` | — | — |
+| `tick` | `u64` | — | — |
+
+### VfxStats
+
+Used by: `VfxRuntime::inspect(None).simulation`; Rust CPU diagnostics, omitted from client-scoped `Vfx.stats`.
+
+Bounded simulation diagnostics; GPU live counts are reported by its executor.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `systems` | `usize` | `0` | — |
+| `emitters` | `usize` | `0` | — |
+| `reserved_particles` | `usize` | `0` | — |
+| `live_particles` | `usize` | `0` | — |
+| `spawned` | `u64` | `0` | — |
+| `dropped_spawns` | `u64` | `0` | — |
+| `events` | `usize` | `0` | — |
+| `dropped_events` | `u64` | `0` | — |
+| `simulated_ticks` | `u64` | `0` | — |
+| `pending_seconds` | `f64` | `0.0` | — |
+| `gpu_history_dropped` | `u64` | `0` | — |
+
+### VfxWorldBudget
+
+Used by: Rust `CpuWorld::new`; checked CPU reservation/queue limits.
+
+Strict reservation and queue limits checked before new particle pools allocate.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `max_particles` | `usize` | `200000` | — |
+| `max_emitters` | `usize` | `256` | — |
+| `max_systems` | `usize` | `128` | — |
+| `max_events` | `usize` | `4096` | — |
+| `max_pending_seconds` | `f64` | `60.0` | — |
 
 ### LayerSpec
 
@@ -1863,6 +2324,7 @@ Variants are tagged by `"op"`.
 | `define_ai` | `defs: crate::ai::AiDefs` | Issued by `World.defineBehaviorTree`. |
 | `set_ai` | `id: u32, ai: Option<crate::ai::AiState>` | Issued by `Entity.runBehaviorTree`. |
 | `set_particles` | `id: u32, particles: Option<crate::components::EmitterSpec>` | Issued by `Entity.setParticles`. |
+| `set_vfx` | `id: u32, vfx: Option<VfxSystemSpec>` | Issued by `Entity.setVfx`. |
 | `set_light` | `id: u32, light: Option<crate::components::LightSpec>` | Issued by `Entity.setLight`. |
 | `set_reflection_probe` | `id: u32, probe: Option<crate::components::ReflectionProbeSpec>` | Issued by `Entity.setReflectionProbe`. |
 | `set_irradiance_volume` | `id: u32, volume: Option<crate::components::IrradianceVolumeSpec>` | Issued by `Entity.setIrradianceVolume`. |

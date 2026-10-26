@@ -9,5 +9,6 @@ pub mod physics;
 pub mod runtime;
 pub mod script;
 pub mod vfs;
+pub mod vfx;
 pub use model::Project;
 pub use runtime::{AdapterRegistry, Runtime};

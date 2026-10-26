@@ -4,12 +4,13 @@
 //! CHANGES.md entry. Regenerate with
 //! `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 use crysirror_engine::{
-    api_doc::{self, ApiInput, DataType, sample},
+    api_doc::{self, sample, ApiInput, DataType},
     builtin,
     object::ClassRegistry,
     services::COMMAND_API,
 };
 use crysirror_scene::{canvas, components as c, layer, material, physics, ui, view, world};
+use crysirror_vfx as vfx;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -41,6 +42,140 @@ fn d(name: &'static str, used_by: &'static str, sample: Option<serde_json::Value
     }
 }
 
+// Public reference aliases distinguish modular VFX declarations from older
+// scene/puppet declarations. Rust and serialized field/variant names stay intact.
+const VFX_ALIASES: &[(&str, &str)] = &[
+    ("ParameterValue", "VfxParameterValue"),
+    ("ScalarValue", "VfxScalarValue"),
+    ("ScalarBinding", "VfxScalarBinding"),
+    ("VectorValue", "VfxVectorValue"),
+    ("VectorBinding", "VfxVectorBinding"),
+    ("Interpolation", "VfxInterpolation"),
+    ("ScalarKey", "VfxScalarKey"),
+    ("Vec2Key", "VfxVec2Key"),
+    ("ColorKey", "VfxColorKey"),
+    ("ScalarCurve", "VfxScalarCurve"),
+    ("Vec2Curve", "VfxVec2Curve"),
+    ("ColorCurve", "VfxColorCurve"),
+    ("SimulationTarget", "VfxSimulationTarget"),
+    ("SimulationSpace", "VfxSimulationSpace"),
+    ("OverflowPolicy", "VfxOverflowPolicy"),
+    ("SpawnShape", "VfxSpawnShape"),
+    ("Burst", "VfxBurst"),
+    ("SpawnSpec", "VfxSpawnSpec"),
+    ("InitSpec", "VfxInitSpec"),
+    ("Module", "VfxModule"),
+    ("BlendMode", "VfxBlendMode"),
+    ("FacingMode", "VfxFacingMode"),
+    ("MeshShape", "VfxMeshShape"),
+    ("RenderSpec", "VfxRenderSpec"),
+    ("EventKind", "VfxEventKind"),
+    ("EventHandler", "VfxEventHandler"),
+    ("EmitterSpec", "VfxEmitterSpec"),
+    ("SystemSpec", "VfxSystemSpec"),
+    ("Particle", "VfxParticle"),
+    ("ParticleEvent", "VfxParticleEvent"),
+    ("VfxStats", "VfxStats"),
+    ("WorldBudget", "VfxWorldBudget"),
+];
+
+fn vfx_type_aliases(ty: &str) -> String {
+    let mut result = String::new();
+    let mut word = String::new();
+    let append = |word: &mut String, result: &mut String| {
+        if word.is_empty() {
+            return;
+        }
+        if word == "ParameterMap" {
+            result.push_str("BTreeMap<String, VfxParameterValue>");
+        } else {
+            result.push_str(
+                VFX_ALIASES
+                    .iter()
+                    .find(|(original, _)| *original == word)
+                    .map_or(word.as_str(), |(_, alias)| *alias),
+            );
+        }
+        word.clear();
+    };
+    for c in ty.chars() {
+        if c.is_alphanumeric() || c == '_' {
+            word.push(c);
+        } else {
+            append(&mut word, &mut result);
+            result.push(c);
+        }
+    }
+    append(&mut word, &mut result);
+    result
+}
+
+fn vfx_doc_items() -> Vec<api_doc::RustItem> {
+    let mut result = Vec::new();
+    for file in ["schema", "simulation"] {
+        let source = read(&format!("crates/crysirror-vfx/src/{file}.rs"));
+        // Preserve serde's multiline tag/rename metadata for the deliberately
+        // small generic parser, which normally sees single-line attributes.
+        let mut normalized = String::new();
+        let mut attribute = false;
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("#[") {
+                attribute = true;
+            }
+            normalized.push_str(if attribute { trimmed } else { line });
+            if !attribute || trimmed.ends_with(']') {
+                attribute = false;
+                normalized.push('\n');
+            }
+        }
+        for mut item in api_doc::parse_rust_items(&normalized) {
+            let Some((_, alias)) = VFX_ALIASES.iter().find(|(name, _)| *name == item.name) else {
+                continue;
+            };
+            // The generic reference parser handles struct variants; supplement
+            // the three tuple-value enums from their source declarations too.
+            if matches!(
+                item.name.as_str(),
+                "ParameterValue" | "ScalarValue" | "VectorValue"
+            ) {
+                let declaration = source
+                    .split_once(&format!("pub enum {} {{", item.name))
+                    .expect("VFX enum declaration")
+                    .1
+                    .split_once('\n')
+                    .unwrap()
+                    .1
+                    .split_once("\n}")
+                    .unwrap()
+                    .0;
+                for (member, line) in item.members.iter_mut().zip(declaration.lines()) {
+                    let (variant, payload) = line.trim().split_once('(').expect("tuple variant");
+                    let payload = payload.trim_end_matches(',').trim_end_matches(')');
+                    member.ty = if item.name == "ParameterValue" {
+                        format!("value: {payload}")
+                    } else {
+                        payload.to_owned()
+                    };
+                    member.doc = if item.name == "ParameterValue" {
+                        "Payload is serialized under `value`; `kind` selects this variant.".into()
+                    } else if variant == "Constant" {
+                        "Serialized as a bare number or vector, without a variant tag.".into()
+                    } else {
+                        "Serialized as the binding object, without a variant tag.".into()
+                    };
+                }
+            }
+            item.name = (*alias).to_owned();
+            for member in &mut item.members {
+                member.ty = vfx_type_aliases(&member.ty);
+            }
+            result.push(item);
+        }
+    }
+    result
+}
+
 fn generate() -> api_doc::ApiDocs {
     let mut classes = ClassRegistry::default();
     builtin::register(&mut classes).unwrap();
@@ -66,6 +201,14 @@ fn generate() -> api_doc::ApiDocs {
     ] {
         items.extend(api_doc::parse_rust_items(&read(f)));
     }
+    for item in &mut items {
+        for member in &mut item.members {
+            member.ty = member
+                .ty
+                .replace("crysirror_vfx::SystemSpec", "VfxSystemSpec");
+        }
+    }
+    items.extend(vfx_doc_items());
     let config = |f: &str| {
         api_doc::parse_rust_items(&read(f))
             .into_iter()
@@ -74,14 +217,46 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
-        d("MessageWindow", "Siglus `Config.message_window` (ADR 0061)", Some(json!({"font":"default","rect":[20,340,600,120],"name_rect":[20,308,600,28],"size":24,"name_size":20,"spacing":[0,2],"color":[255,255,255,255],"name_color":[255,255,255,255]}))),
-        d("AssociatedBlend", "`Bitmap.composite` options.blend", Some(json!("over"))),
-        d("CoverageWrite", "`Bitmap.composite` options.coverage_write", Some(json!("preserve"))),
-        d("AssociatedBlitOptions", "`Bitmap.composite` options", Some(json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":[0,0],"blend":"over","weight":256,"coverage_write":"preserve"}))),
-        d("RgbFilter", "`Bitmap.filterRgb` filter", Some(json!({"kind":"fade","rgb":[0,0,0],"weight":256}))),
-        d("AssetKind", "`Assets.load(path, kind)`", Some(json!("model"))),
+        d(
+            "MessageWindow",
+            "Siglus `Config.message_window` (ADR 0061)",
+            Some(
+                json!({"font":"default","rect":[20,340,600,120],"name_rect":[20,308,600,28],"size":24,"name_size":20,"spacing":[0,2],"color":[255,255,255,255],"name_color":[255,255,255,255]}),
+            ),
+        ),
+        d(
+            "AssociatedBlend",
+            "`Bitmap.composite` options.blend",
+            Some(json!("over")),
+        ),
+        d(
+            "CoverageWrite",
+            "`Bitmap.composite` options.coverage_write",
+            Some(json!("preserve")),
+        ),
+        d(
+            "AssociatedBlitOptions",
+            "`Bitmap.composite` options",
+            Some(
+                json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":[0,0],"blend":"over","weight":256,"coverage_write":"preserve"}),
+            ),
+        ),
+        d(
+            "RgbFilter",
+            "`Bitmap.filterRgb` filter",
+            Some(json!({"kind":"fade","rgb":[0,0,0],"weight":256})),
+        ),
+        d(
+            "AssetKind",
+            "`Assets.load(path, kind)`",
+            Some(json!("model")),
+        ),
         d("AssetState", "`Assets.status(id)`", None),
-        d("AssetTicket", "Rust async asset handle; store/client checked", None),
+        d(
+            "AssetTicket",
+            "Rust async asset handle; store/client checked",
+            None,
+        ),
         d("AssetStatus", "`Assets.status(id)`", None),
         d("TaskStats", "`Assets.stats()` CPU and I/O pools", None),
         d(
@@ -216,6 +391,146 @@ fn generate() -> api_doc::ApiDocs {
             sample::<c::EmitterSpec>(e.clone()),
         ),
         d(
+            "VfxSystemSpec",
+            "`EntitySpec.vfx`, `Vfx.compile/play`, `Entity.setVfx` (ADR 0064)",
+            sample::<vfx::SystemSpec>(e.clone()),
+        ),
+        d(
+            "VfxEmitterSpec",
+            "`VfxSystemSpec.emitters`; distinct from legacy `EmitterSpec`",
+            sample::<vfx::EmitterSpec>(e.clone()),
+        ),
+        d(
+            "VfxParameterValue",
+            "`VfxSystemSpec.parameters` typed values; `Vfx.setParameter` accepts the existing type's raw payload",
+            None,
+        ),
+        d(
+            "VfxScalarValue",
+            "Emission rates and scalar `VfxModule` inputs",
+            None,
+        ),
+        d(
+            "VfxScalarBinding",
+            "`VfxScalarValue` parameter binding object",
+            sample::<vfx::ScalarBinding>(json!({"parameter":"strength"})),
+        ),
+        d(
+            "VfxVectorValue",
+            "Direction, force, position and axis inputs",
+            None,
+        ),
+        d(
+            "VfxVectorBinding",
+            "`VfxVectorValue` parameter binding object",
+            sample::<vfx::VectorBinding>(json!({"parameter":"direction"})),
+        ),
+        d("VfxSimulationTarget", "`VfxEmitterSpec.target`", None),
+        d("VfxSimulationSpace", "`VfxEmitterSpec.space`", None),
+        d(
+            "VfxOverflowPolicy",
+            "`VfxEmitterSpec.overflow`; GPU supports only drop_new",
+            None,
+        ),
+        d(
+            "VfxSpawnSpec",
+            "`VfxEmitterSpec.spawn`",
+            sample::<vfx::SpawnSpec>(e.clone()),
+        ),
+        d(
+            "VfxBurst",
+            "`VfxSpawnSpec.bursts`",
+            sample::<vfx::Burst>(json!({"time":0,"count":1})),
+        ),
+        d(
+            "VfxInitSpec",
+            "`VfxEmitterSpec.initialize`; sizes are full world width/height",
+            sample::<vfx::InitSpec>(e.clone()),
+        ),
+        d("VfxSpawnShape", "`VfxInitSpec.shape`", None),
+        d(
+            "VfxModule",
+            "`VfxEmitterSpec.update` ordered typed module stack",
+            None,
+        ),
+        d("VfxInterpolation", "Lifetime-curve interpolation", None),
+        d(
+            "VfxScalarKey",
+            "`VfxScalarCurve.keys`",
+            sample::<vfx::ScalarKey>(json!({"time":0,"value":1})),
+        ),
+        d(
+            "VfxVec2Key",
+            "`VfxVec2Curve.keys`",
+            sample::<vfx::Vec2Key>(json!({"time":0,"value":[1,1]})),
+        ),
+        d(
+            "VfxColorKey",
+            "`VfxColorCurve.keys`",
+            sample::<vfx::ColorKey>(json!({"time":0,"value":[1,1,1,1]})),
+        ),
+        d(
+            "VfxScalarCurve",
+            "Scalar lifetime curves",
+            sample::<vfx::ScalarCurve>(json!({"keys":[{"time":0,"value":1},{"time":1,"value":0}]})),
+        ),
+        d(
+            "VfxVec2Curve",
+            "`VfxModule.size_over_life.curve`",
+            sample::<vfx::Vec2Curve>(
+                json!({"keys":[{"time":0,"value":[1,1]},{"time":1,"value":[0,0]}]}),
+            ),
+        ),
+        d(
+            "VfxColorCurve",
+            "`VfxModule.color_over_life.curve`",
+            sample::<vfx::ColorCurve>(
+                json!({"keys":[{"time":0,"value":[1,1,1,1]},{"time":1,"value":[1,1,1,0]}]}),
+            ),
+        ),
+        d(
+            "VfxRenderSpec",
+            "`VfxEmitterSpec.render`; actual Sprite, Mesh or CPU Ribbon renderer",
+            None,
+        ),
+        d("VfxBlendMode", "`VfxRenderSpec.blend`", None),
+        d("VfxFacingMode", "`VfxRenderSpec.sprite.facing`", None),
+        d(
+            "VfxMeshShape",
+            "`VfxRenderSpec.mesh.mesh`; static geometry only",
+            None,
+        ),
+        d(
+            "VfxEventKind",
+            "`VfxEventHandler.event`, `VfxParticleEvent.kind`",
+            None,
+        ),
+        d(
+            "VfxEventHandler",
+            "`VfxEmitterSpec.events` CPU sub-emitter handlers",
+            sample::<vfx::EventHandler>(json!({"event":"birth","emitter":"child","count":1})),
+        ),
+        d(
+            "VfxParticle",
+            "Device-independent Rust CPU snapshot attributes",
+            None,
+        ),
+        d(
+            "VfxParticleEvent",
+            "`Vfx.drainEvents`; client-scoped CPU event records",
+            None,
+        ),
+        d(
+            "VfxStats",
+            "`VfxRuntime::inspect(None).simulation`; Rust CPU diagnostics, omitted from client-scoped `Vfx.stats`",
+            sample::<vfx::VfxStats>(serde_json::to_value(vfx::VfxStats::default()).unwrap()),
+        ),
+        d(
+            "VfxWorldBudget",
+            "Rust `CpuWorld::new`; checked CPU reservation/queue limits",
+            sample::<vfx::WorldBudget>(e.clone()),
+        ),
+        d(
             "LayerSpec",
             "`Layers.put`, `ClientSpec.systems.layers`",
             None,
@@ -338,7 +653,8 @@ fn generate() -> api_doc::ApiDocs {
             ("ui", "UiCommand"),
         ],
         data,
-        adapters: vec![("avg32".into(), config("crates/crysirror-avg32/src/lib.rs")),
+        adapters: vec![
+            ("avg32".into(), config("crates/crysirror-avg32/src/lib.rs")),
             (
                 "reallive",
                 config("crates/crysirror-reallive/src/adapter.rs"),
@@ -409,6 +725,18 @@ fn every_listed_data_type_has_source_docs_and_samples_where_given() {
         "IrradianceVolumeSpec",
         "ColliderSpec",
         "WidgetSpec",
+        "VfxSystemSpec",
+        "VfxEmitterSpec",
+        "VfxSpawnSpec",
+        "VfxInitSpec",
+        "VfxScalarBinding",
+        "VfxVectorBinding",
+        "VfxScalarCurve",
+        "VfxVec2Curve",
+        "VfxColorCurve",
+        "VfxEventHandler",
+        "VfxStats",
+        "VfxWorldBudget",
     ] {
         let entry = v["data"]
             .as_array()
@@ -425,6 +753,60 @@ fn every_listed_data_type_has_source_docs_and_samples_where_given() {
             "{name}: sample did not parse"
         );
     }
+}
+
+#[test]
+fn modular_vfx_reference_keeps_legacy_types_distinct_and_explains_wire_values() {
+    let docs = generate();
+    let value: serde_json::Value = serde_json::from_str(&docs.json).unwrap();
+    let data = value["data"].as_array().unwrap();
+    let entry = |name: &str| data.iter().find(|d| d["name"] == name).unwrap();
+    let field = |name: &str, member: &str| {
+        entry(name)["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == member)
+            .unwrap()
+    };
+    for (_, alias) in VFX_ALIASES {
+        assert!(
+            !entry(alias)["fields"].as_array().unwrap().is_empty(),
+            "{alias} has no source members"
+        );
+    }
+    assert_eq!(
+        field("EntitySpec", "vfx")["rust_type"],
+        "Option<VfxSystemSpec>"
+    );
+    assert_eq!(
+        field("VfxSystemSpec", "emitters")["rust_type"],
+        "Vec<VfxEmitterSpec>"
+    );
+    assert_eq!(
+        field("VfxSystemSpec", "parameters")["rust_type"],
+        "BTreeMap<String, VfxParameterValue>"
+    );
+    assert_eq!(field("VfxEmitterSpec", "target")["default"], "cpu");
+    assert_eq!(
+        field("VfxEmitterSpec", "render")["default"]["kind"],
+        "sprite"
+    );
+    assert_eq!(
+        field("VfxParameterValue", "vector")["rust_type"],
+        "value: [f32; 3]"
+    );
+    assert_eq!(
+        field("VfxScalarValue", "Parameter")["rust_type"],
+        "VfxScalarBinding"
+    );
+    assert!(field("VfxScalarValue", "Constant")["doc"]
+        .as_str()
+        .unwrap()
+        .contains("without a variant tag"));
+    assert_eq!(field("EmitterSpec", "rate")["rust_type"], "f32");
+    assert!(docs.typescript.contains("class Vfx"));
+    assert!(docs.typescript.contains("vfx: Vfx"));
 }
 
 #[test]

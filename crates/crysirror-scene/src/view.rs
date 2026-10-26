@@ -255,13 +255,19 @@ pub struct RayTracedGi {
     #[serde(default = "one")]
     pub intensity: f32,
 }
-fn gi_samples() -> u32 { 8 }
+fn gi_samples() -> u32 {
+    8
+}
 impl RayTracedGi {
     pub fn validate(&self) -> Result<()> {
-        ensure!((1..=64).contains(&self.samples)
-            && self.max_distance.is_finite() && (0.01..=10000.).contains(&self.max_distance)
-            && self.intensity.is_finite() && (0.0..=16.).contains(&self.intensity),
-            "invalid ray-traced GI");
+        ensure!(
+            (1..=64).contains(&self.samples)
+                && self.max_distance.is_finite()
+                && (0.01..=10000.).contains(&self.max_distance)
+                && self.intensity.is_finite()
+                && (0.0..=16.).contains(&self.intensity),
+            "invalid ray-traced GI"
+        );
         Ok(())
     }
 }
@@ -296,7 +302,9 @@ pub struct ScreenSpaceReflections {
     #[serde(default = "reflection_samples")]
     pub ray_samples: u32,
 }
-fn reflection_samples() -> u32 { 16 }
+fn reflection_samples() -> u32 {
+    16
+}
 fn ssr_distance() -> f32 {
     30.
 }
@@ -458,7 +466,9 @@ impl Environment {
         if let Some(a) = &self.auto_exposure {
             a.validate()?;
         }
-        if let Some(g) = &self.ray_traced_gi { g.validate()?; }
+        if let Some(g) = &self.ray_traced_gi {
+            g.validate()?;
+        }
         if let Some(r) = &self.reflections {
             r.validate()?;
         }
@@ -574,6 +584,12 @@ pub struct PbrLight {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct PbrScene {
+    /// Immutable engine simulation product. No device or renderer-owned state.
+    pub vfx: Option<std::sync::Arc<crysirror_vfx::FrameSnapshot>>,
+    /// Derived VFX lifetime epoch; changed on runtime restore/replacement.
+    pub vfx_epoch: u64,
+    /// GPU simulations continue while hidden; this set controls drawing only.
+    pub vfx_visible: Option<std::sync::Arc<std::collections::BTreeSet<u64>>>,
     /// World simulation time (seconds) for visual simulations.
     pub time: f32,
     pub emitters: Vec<ParticleEmitter>,
@@ -617,7 +633,11 @@ impl World {
                 .find(|client| {
                     self.entities(crysirror_core::state::ClientId(*client))
                         .into_iter()
-                        .any(|(_, _, spec)| spec.material.is_some())
+                        .any(|(_, _, spec)| {
+                            spec.material.is_some()
+                                || spec.vfx.is_some()
+                                || spec.particles.is_some()
+                        })
                 })
                 .map(|client| (client, Environment::default()))
         });
@@ -660,7 +680,7 @@ impl World {
                 if !self.effective_visible(client, id) {
                     continue;
                 }
-                if let Some(p) = spec.particles.as_ref().filter(|p| p.enabled) {
+                if let Some(p) = spec.particles.as_ref() {
                     let matrix = self
                         .global_matrix(EntityHandle {
                             client,
@@ -790,6 +810,9 @@ impl World {
             }
         }
         Ok(Some(PbrScene {
+            vfx: None,
+            vfx_epoch: 0,
+            vfx_visible: None,
             time: self.elapsed_ms as f32 / 1000.,
             emitters,
             camera,
@@ -812,12 +835,22 @@ mod ray_lighting_tests {
         assert_eq!(g.samples, 8);
         g.validate().unwrap();
         for samples in [0, 65, u32::MAX] {
-            assert!(RayTracedGi { samples, ..g.clone() }.validate().is_err());
+            assert!(RayTracedGi {
+                samples,
+                ..g.clone()
+            }
+            .validate()
+            .is_err());
         }
         let mut reflections: ScreenSpaceReflections = serde_json::from_str("{}").unwrap();
         assert_eq!(reflections.ray_samples, 16);
         reflections.ray_samples = 0;
         assert!(reflections.validate().is_err());
-        assert!(RayTracedGi { max_distance: f32::NAN, ..g }.validate().is_err());
+        assert!(RayTracedGi {
+            max_distance: f32::NAN,
+            ..g
+        }
+        .validate()
+        .is_err());
     }
 }

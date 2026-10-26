@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+crysirror-vfx.workspace = true
 crysirror-tasks.workspace = true
 crysirror-core.workspace = true
 crysirror-image.workspace = true

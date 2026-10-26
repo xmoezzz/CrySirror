@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Immutable render extraction DAG; owner simulation can advance while it runs.
-use crate::{Runtime, model::Scene3d};
-use anyhow::{Result, ensure};
+use crate::{model::Scene3d, Runtime};
+use anyhow::{ensure, Result};
 use crysirror_core::service::HostServices;
 use crysirror_tasks::{
     graph::{FrameGraph, NodeId},
@@ -80,6 +80,11 @@ impl PendingFrame {
 }
 impl Runtime {
     pub fn schedule_render_snapshot(&mut self) -> Result<PendingFrame> {
+        self.vfx.update(
+            &self.host.engine.world,
+            self.host.now_ms(),
+            &self.assets.cpu_tasks(),
+        )?;
         let frame = self.profiler.frame();
         let _span = self.profiler.span(frame, "snapshot.freeze");
         let transition = self.render_transition()?;
@@ -87,10 +92,19 @@ impl Runtime {
         let base = self.project.scene3d.clone();
         let mut graph = FrameGraph::new(self.profiler.clone(), frame);
         let state1 = state.clone();
+        let vfx = self.vfx.frame();
+        let vfx_epoch = self.vfx.epoch();
+        let vfx_visible = self.vfx.visible_systems();
         let base1 = base.clone();
         let p = graph.add("extract.pbr", &[], move |cancel, _| {
             cancel.check()?;
-            Ok(Part::Pbr(state1.world.pbr_scene(base1.as_ref())?))
+            let mut p = state1.world.pbr_scene(base1.as_ref())?;
+            if let Some(p) = &mut p {
+                p.vfx = Some(vfx);
+                p.vfx_epoch = vfx_epoch;
+                p.vfx_visible = Some(vfx_visible);
+            }
+            Ok(Part::Pbr(p))
         })?;
         let state2 = state.clone();
         let s = graph.add("extract.simple", &[], move |cancel, _| {

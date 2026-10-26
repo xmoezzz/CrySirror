@@ -5,14 +5,14 @@ use crate::{
     script::ScriptVm,
     vfs::DiskVfs,
 };
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use crysirror_core::{
-    Error,
     path::VfsPath,
     save::{SaveEnvelope, SaveIdentity, SaveLimits},
     service::{FileSystem, HostServices, InputFrame},
     state::{ClientId, Command, Limits, SceneState},
     vm::{VmAdapter, VmYield},
+    Error,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -528,6 +528,8 @@ struct Session {
     yielded: VmYield,
 }
 pub struct Runtime {
+    /// Derived CPU/GPU VFX state and worker completion, never device pointers.
+    pub vfx: crate::vfx::VfxRuntime,
     /// Bounded instrumentation; derived state, never serialized into saves.
     pub profiler: crysirror_tasks::profile::Profiler,
     /// Persistent CPU simulation derived from saved World body/joint data.
@@ -658,6 +660,7 @@ impl Runtime {
         let fingerprint = project.fingerprint()?;
         Ok(Self {
             physics: Default::default(),
+            vfx: Default::default(),
             project,
             host: SharedHost {
                 scene: SceneState::default(),
@@ -822,6 +825,14 @@ impl Runtime {
         self.sync_videos()?;
         self.tick_puppets(delta_ms)?;
         self.host.channel_audio.render(delta_ms)?;
+        {
+            let _span = self.profiler.span(profile_frame, "vfx.poll_schedule");
+            self.vfx.update(
+                &self.host.engine.world,
+                self.host.clock_ms,
+                &self.assets.cpu_tasks(),
+            )?;
+        }
         core(self.host.scene.advance_frame())?;
         Ok(())
     }
@@ -925,7 +936,7 @@ impl Runtime {
     pub fn inspect(&self) -> serde_json::Value {
         serde_json::json!({"name":self.project.name,"frame":self.host.scene.frame(),"time_ms":self.host.clock_ms,
             "visuals":self.host.scene.visuals().len(),"voices":self.host.scene.voices().len(),
-            "profile":self.profiler.snapshot(),"tasks":self.assets.tasks_inspect(),"channel_audio":self.host.channel_audio.mixer.stats(),"media":self.host.media.inspect(),
+            "profile":self.profiler.snapshot(),"tasks":self.assets.tasks_inspect(),"channel_audio":self.host.channel_audio.mixer.stats(),"media":self.host.media.inspect(),"vfx":self.vfx.inspect(None),
             "engine":self.host.engine,
             "adapters":self.registry.names(),"sessions":self.sessions.iter().map(|s|serde_json::json!({
                 "name":s.name,"client":s.id.0,"engine":s.vm.engine_id(),"yield":format!("{:?}",s.yielded),"native":serde_json::from_slice::<serde_json::Value>(&s.vm.diagnostics()).ok()
@@ -1100,6 +1111,7 @@ impl Runtime {
         engine.ui.reset_input_after_restore();
         self.host.engine = engine;
         self.physics.invalidate();
+        self.vfx.reset(self.host.clock_ms);
         self.host.trace.clear();
         self.restored = next_restored;
         Ok(())
@@ -1172,10 +1184,28 @@ impl Runtime {
     }
     /// PBR extraction (ADR 0010); `None` keeps the legacy raster path.
     pub fn render_pbr(&self) -> Result<Option<crysirror_scene::view::PbrScene>> {
-        self.host
+        let mut scene = self
+            .host
             .engine
             .world
-            .pbr_scene(self.project.scene3d.as_ref())
+            .pbr_scene(self.project.scene3d.as_ref())?;
+        if let Some(p) = &mut scene {
+            p.vfx = Some(self.vfx.frame());
+            p.vfx_epoch = self.vfx.epoch();
+            p.vfx_visible = Some(self.vfx.visible_systems());
+        }
+        Ok(scene)
+    }
+    /// Offline-only VFX publication fence, with no additional simulation/VM tick.
+    pub fn finish_vfx_offline(&mut self) -> Result<()> {
+        let _span = self
+            .profiler
+            .span(self.profiler.frame(), "vfx.offline_fence");
+        self.vfx.finish_offline(
+            &self.host.engine.world,
+            self.host.clock_ms,
+            &self.assets.cpu_tasks(),
+        )
     }
     pub fn render_scene3d(&self) -> Result<Option<crate::model::Scene3d>> {
         self.host
@@ -1198,20 +1228,18 @@ mod tests {
     fn two_clients_share_services_but_not_ids() {
         let (_t, mut r) = runtime();
         r.tick(0, InputFrame::default()).unwrap();
-        assert!(
-            r.host
-                .scene
-                .visuals()
-                .keys()
-                .any(|id| id.client == ClientId(1) && id.local == 0)
-        );
-        assert!(
-            r.host
-                .scene
-                .visuals()
-                .keys()
-                .any(|id| id.client == ClientId(2) && id.local == 0)
-        );
+        assert!(r
+            .host
+            .scene
+            .visuals()
+            .keys()
+            .any(|id| id.client == ClientId(1) && id.local == 0));
+        assert!(r
+            .host
+            .scene
+            .visuals()
+            .keys()
+            .any(|id| id.client == ClientId(2) && id.local == 0));
     }
     #[test]
     fn roundtrip_rewinds_runtime() {
@@ -1413,12 +1441,11 @@ mod required_engine_save_test {
         data.as_object_mut().unwrap().remove("engine");
         envelope.services = serde_json::to_vec(&data).unwrap();
         let bad = core(envelope.encode(SaveLimits::default())).unwrap();
-        assert!(
-            r.restore(&bad)
-                .unwrap_err()
-                .to_string()
-                .contains("missing engine")
-        );
+        assert!(r
+            .restore(&bad)
+            .unwrap_err()
+            .to_string()
+            .contains("missing engine"));
         assert_eq!(r.snapshot().unwrap(), before);
     }
 }
@@ -1629,7 +1656,10 @@ struct SharedImageMetadata {
 }
 impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
     fn size(&self, asset: &str) -> crysirror_core::Result<[u32; 2]> {
-        let mut sizes = self.sizes.lock().map_err(|_| Error::Io("image metadata lock".into()))?;
+        let mut sizes = self
+            .sizes
+            .lock()
+            .map_err(|_| Error::Io("image metadata lock".into()))?;
         if let Some(size) = sizes.get(asset) {
             return Ok(*size);
         }

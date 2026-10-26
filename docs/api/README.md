@@ -21,7 +21,9 @@ and a test keeps it current.
   `tests/api_coverage.rs` fails on an unmapped variant.
 - **Data specs.** Field names and Rust types come from the `pub struct` and
   `pub enum` declarations in `crysirror-scene`, plus shared media/asset declarations in core/runtime and task statistics in
-  `crysirror-tasks`. Descriptions come from their
+  `crysirror-tasks`. Modular effect authoring declarations, CPU particle/event
+  records and reservation limits come from `crysirror-vfx/src/schema.rs` and
+  `simulation.rs`. Descriptions come from their
   `///` comments. Defaults come from serde: a minimal value is parsed and
   then serialized again.
 - **Adapter configs.** The `Config` structs of the Siglus, native RealLive and
@@ -31,6 +33,40 @@ and a test keeps it current.
 
 Rust crate internals are not part of this reference. For those, use
 `cargo doc --workspace --no-deps`.
+
+## Modular VFX declarations
+
+The reference uses `Vfx`-prefixed aliases for types from `crysirror-vfx`:
+`VfxSystemSpec`, `VfxEmitterSpec`, `VfxRenderSpec`, and their dependencies.
+These are documentation names, not renamed Rust types or serialized tags.
+The older scene `EmitterSpec` still describes `EntitySpec.particles`;
+`EntitySpec.vfx` instead uses `VfxSystemSpec`. An entity cannot declare both.
+`ParameterMap` is expanded to `BTreeMap<String, VfxParameterValue>` in the
+reference. Tuple-enum payload types and multiline serde attributes are read
+from the same sources by `tests/api_docs.rs`.
+
+Authored parameters use tagged values such as
+`{"kind":"vector","value":[0,1,0]}`. A scalar or vector module input accepts
+a bare constant or a binding object such as
+`{"parameter":"wind","scale":2}`. `Vfx.setParameter` accepts the raw value
+matching the existing parameter type. Unknown fields, renderer kinds and
+unsupported GPU combinations fail validation.
+
+Simulation is owned by `crysirror-vfx` and scheduled by the Runtime; a renderer
+does not advance a private copy. Offline Rust tools publish completed work
+with `Runtime.finish_vfx_offline()` before `render_pbr()`; ordinary App offline
+preparation performs that fence too. GPU simulation additionally needs real
+renderer submissions to consume its bounded command timeline. GPU capacity
+is never a measured live-particle count.
+
+The current renderer supports textured/flipbook sprites, soft sprite depth
+fade, static unlit mesh instances, and CPU ribbons. Mesh assets provide static
+geometry and an explicit VFX texture/color, without inheriting imported PBR
+materials; skinned/morphed sources are rejected. GPU ribbons and event-driven
+sub-emitters are rejected. Transparent particles sort within an emitter and
+emitters sort by distance; this is not unified scene transparency/OIT. Ribbon
+width is explicit full world width, independent of size-over-life curves.
+This API is a bounded modular VFX foundation, not full Niagara parity.
 
 ## Rules for changing the API
 
