@@ -1,0 +1,9 @@
+{
+  "schema": 2,
+  "name": "KiriKiri font API bridge",
+  "content_revision": "metrics-1",
+  "canvas": [640, 480],
+  "assets": "assets",
+  "clients": [{"name": "game", "adapter": "krkr", "game": "krkr-metrics",
+    "config": {"root": "game", "startup": "metrics.tjs", "canvas": [640, 480]}}]
+}

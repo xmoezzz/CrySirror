@@ -1,0 +1,28 @@
+// Self-authored original TJS2, using the pinned VM and CrySirror services.
+// Pass a licensed system font with --font. No font file is bundled.
+var win = new Window();
+var base = new Layer(win, null);
+base.fillRect(0, 0, 640, 480, 0xff182238);
+var text = new Layer(win, base);
+text.setImageSize(560, 180);
+text.setSizeToImageSize();
+text.setPos(40, 120);
+text.font.height = 36;
+var label = "CrySirror font API";
+var width = text.font.getTextWidth(label);
+var height = text.font.getTextHeight(label);
+text.colorRect(0, 0, width, height, 0x304c78, 255);
+text.drawText(0, 0, label, 0xffffff);
+text.font.height = 24;
+text.drawText(0, 65, "Measured by the engine; drawn by Canvas.", 0x80d8ff);
+text.visible = true;
+var clipped = new Layer(win, base);
+clipped.setImageSize(210, 80);
+clipped.setSizeToImageSize();
+clipped.setPos(40, 280);
+clipped.colorRect(0, 0, 210, 80, 0x304c78, 255);
+clipped.font.height = 24;
+clipped.drawText(0, 0, "This single line clips at the canvas edge without wrapping.", 0xffffff);
+clipped.visible = true;
+win.visible = true;
+Debug.message("engine text extent", width, height);

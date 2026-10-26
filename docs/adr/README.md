@@ -57,10 +57,10 @@ moves to `done` only with recorded behavior evidence.
 | R4 | Engine lifecycle abstracted (init/start/update/fixed/late/pause/stop) | 0004 | implemented in crysirror-engine |
 | R5 | Not script-centric, but can export OOP API to scripts | 0004, 0005 | implemented for JS |
 | R6 | Default scripting: Rust-implemented TS/JS | 0005 | Boa runtime host + Oxc transpile |
-| R7 | Other VMs (siglus_rs SceneVm, RFVP) plug in as script hosts | 0005, 0008 | Siglus subset + RFVP registered as VmAdapters |
+| R7 | Other VMs (siglus_rs SceneVm, RFVP) plug in as script hosts | 0005, 0008, 0048, 0061, 0062 | Siglus/AVG32/RealLive bounded native API adapters; old RFVP hosting removed |
 | R8 | Abstract filesystem; native engines keep their own FS semantics | 0006 | mount table + providers |
 | R9 | Load Blender models | 0007, 0010 | glTF 2.0 import incl. textured PBR; .blend via Blender CLI export |
-| R10 | Ray tracing | 0003, 0007, 0051 | native opaque primary queries and hybrid PBR sun shadows; broader RT effects and multi-device validation remain |
+| R10 | Ray tracing | 0003, 0007, 0051, 0055–0060 | native primary/shadows, GGX reflections, probe and per-pixel GI; broader hit shading/denoising and multi-device validation remain |
 | R11 | DLSS-class upscaling | 0007 | capability contract only; vendor SDKs not distributed |
 | R12 | Asynchronous/multithreaded execution across every engine subsystem | 0049, 0050, 0052 | required; assets/poses and extraction DAG exist; remaining subsystem migration is partial |
 
@@ -93,3 +93,7 @@ moves to `done` only with recorded behavior evidence.
 | [0057](0057-rt-local-light-shadows.md) | Ray-traced shadows for the nearest two point/spot lights in spare visibility channels, emitter-radius penumbrae, three-channel denoiser | implemented; Metal validated |
 | [0058](0058-rt-reflections-material-atlas.md) | Ray-traced mirror reflections with previous-frame reuse and atlas hit shading; all-material atlas and corner attributes | implemented; Metal validated |
 | [0059](0059-rt-irradiance-probes.md) | Ray-traced irradiance probe updates writing the ADR 0028 SH/visibility data | implemented; Metal validated |
+| [0060](0060-glossy-and-per-pixel-ray-lighting.md) | GGX glossy reflections, per-pixel diffuse GI, local-light bounces and GPU timing comparison | implemented bounded hit-shading profile; Metal validated |
+| [0061](0061-siglus-plain-message-engine-apis.md) | Native Siglus TEXT/NAME through shared cell layout, GlyphRun and reveal state | explicit plain profile; full native MWND/game compatibility pending |
+| [0062](0062-avg32-portable-vm-engine-apis.md) | Original AVG32 portable VM library over engine services; shared associated-RGB operations | bounded ADV profile; original saves and complex drawing remain unsupported |
+| [0063](0063-native-font-measurement.md) | Immutable engine font metrics, unwrapped Canvas text and KiriKiri Font callbacks | implemented; system-font and original TJS2 behavior validated |

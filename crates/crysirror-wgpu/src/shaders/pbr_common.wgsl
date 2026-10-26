@@ -35,7 +35,7 @@ struct Frame {
     fog_params: vec4<f32>,
     // x sun scattering, y sun exponent
     fog_sun: vec4<f32>,
-    // x SSR intensity (0 = off), y roughness where SSR has faded out
+    // x reflection intensity, y SSR fade roughness, z native glossy, w per-pixel GI intensity
     ssr: vec4<f32>,
     // Reflection probe slots (ADR 0024): [3k] position+intensity, [3k+1] half extent+blend
     // (extent 0 = empty), [3k+2].x parallax (1 box-projected, 0 infinite)
@@ -61,7 +61,7 @@ struct Frame {
 @group(0) @binding(6) var env_source: texture_2d<f32>;
 @group(0) @binding(7) var ao_texture: texture_2d<f32>;
 @group(0) @binding(8) var opaque_depth:texture_depth_2d;
-@group(0) @binding(14) var ssr_texture: texture_2d<f32>;
+@group(0) @binding(14) var ssr_texture: texture_2d_array<f32>;
 @group(0) @binding(15) var probe_maps: texture_2d_array<f32>;
 
 fn rotate_y(d: vec3<f32>, a: f32) -> vec3<f32> {

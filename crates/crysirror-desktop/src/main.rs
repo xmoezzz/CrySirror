@@ -188,6 +188,8 @@ fn adapter_registry() -> Result<AdapterRegistry> {
     crysirror_reallive::register(&mut registry)?;
     #[cfg(feature = "krkr")]
     crysirror_krkr::register(&mut registry)?;
+    #[cfg(feature = "avg32")]
+    crysirror_avg32::register(&mut registry)?;
     Ok(registry)
 }
 fn load_project(path: &Path) -> Result<Project> {
@@ -206,6 +208,10 @@ fn load_project(path: &Path) -> Result<Project> {
     #[cfg(feature = "reallive")]
     for c in project.clients.iter().filter(|c| c.adapter == "reallive") {
         serde_json::from_value::<crysirror_reallive::Config>(c.config.clone())?.validate()?;
+    }
+    #[cfg(feature = "avg32")]
+    for c in project.clients.iter().filter(|c| c.adapter == "avg32") {
+        serde_json::from_value::<crysirror_avg32::Config>(c.config.clone())?.validate()?;
     }
     Ok(project)
 }
@@ -339,6 +345,7 @@ fn run() -> Result<()> {
         } => {
             let state_dir = state_dir(&project, data_dir)?;
             let mut rt = load_runtime(&project, &state_dir)?;
+            app::load_fonts(&mut rt, font.as_deref())?;
             rt.assets
                 .set_prepared_budget(usize::try_from(u64::from(asset_cache_mib) * 1024 * 1024)?)?;
             let core = if script.is_empty() {
@@ -382,6 +389,8 @@ fn run() -> Result<()> {
             );
             let dir = state_dir(&project, data_dir)?;
             let mut rt = load_runtime(&project, &dir)?;
+            // Native callbacks may measure fonts during the first VM tick.
+            app::load_fonts(&mut rt, font.as_deref())?;
             rt.assets
                 .set_prepared_budget(usize::try_from(u64::from(asset_cache_mib) * 1024 * 1024)?)?;
             let track = input_track::InputTrack::load(input_track.as_deref())?;
@@ -560,6 +569,7 @@ fn run() -> Result<()> {
                         "rfvp_native_vm":false,
                         "bgi_native_vm":false,
                         "reallive_native_vm":adapters.contains(&"reallive"),
+                        "avg32_native_vm":adapters.contains(&"avg32"),
                         "siglus_native_vm":adapters.contains(&"siglus")})
                 )?
             );

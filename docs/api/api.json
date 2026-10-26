@@ -1,6 +1,81 @@
 {
   "adapters": [
     {
+      "adapter": "avg32",
+      "config": [
+        {
+          "doc": "Explicit native profile: non-novel, no custom frame/effects, plain text.",
+          "name": "profile",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Native scene number to capability-relative TPC32 file.",
+          "name": "scenes",
+          "rust_type": "BTreeMap<i32, String>"
+        },
+        {
+          "doc": "Scene number used by the original Scenario at boot.",
+          "name": "start_scene",
+          "rust_type": "i32"
+        },
+        {
+          "doc": "Original opcode revision; choose explicitly for the title being adapted.",
+          "name": "version",
+          "rust_type": "i32"
+        },
+        {
+          "doc": "Native string codec accepted by the original NLS parser (default sjis).",
+          "name": "encoding",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Installed engine font alias; no font file or native font is bundled.",
+          "name": "font",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Absolute position and cell-layout width/height in logical pixels.",
+          "name": "message_rect",
+          "rust_type": "[i32; 4]"
+        },
+        {
+          "doc": "Native nominal glyph size in logical pixels (1..256).",
+          "name": "font_size",
+          "rust_type": "u16"
+        },
+        {
+          "doc": "Native horizontal half-cell and line pitch in pixels; never inferred from font metrics.",
+          "name": "cell_step",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "doc": "Original interpreter print interval in milliseconds (0 displays immediately).",
+          "name": "message_interval_ms",
+          "rust_type": "i32"
+        },
+        {
+          "doc": "Native resource names to engine image/audio paths. No filesystem bypass.",
+          "name": "resources",
+          "rust_type": "BTreeMap<String, String>"
+        },
+        {
+          "doc": "Explicit native SE table; a referenced missing entry fails visibly.",
+          "name": "sound_effects",
+          "rust_type": "BTreeMap<i32, String>"
+        },
+        {
+          "doc": "Native voice IDs mapped to shared supported audio containers.",
+          "name": "voices",
+          "rust_type": "BTreeMap<i32, String>"
+        },
+        {
+          "doc": "Explicit engine image used for native message-wait icons.",
+          "name": "message_icon",
+          "rust_type": "Option<String>"
+        }
+      ]
+    },
+    {
       "adapter": "reallive",
       "config": [
         {
@@ -57,6 +132,11 @@
           "doc": "Native resource path → asset path aliases (at most 4096).",
           "name": "resources",
           "rust_type": "BTreeMap<String, String>"
+        },
+        {
+          "doc": "Explicit mapping for the bounded plain-text MWND profile. Native Gameexe windows/markup are not guessed from a project canvas.",
+          "name": "message_window",
+          "rust_type": "Option<crate::MessageWindow>"
         }
       ]
     }
@@ -474,6 +554,48 @@
             },
             {
               "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Composite associated RGB with copy/over/under, explicit 0..256 weight and preserve/source coverage_write. Optional coverage asset supplies alpha independently of source RGB. Stored channels remain associated; self-copies use snapshots.",
+          "name": "composite",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "source",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "coverage",
+              "type": "string | null"
+            }
+          ],
+          "returns": "string"
+        },
+        {
+          "doc": "Filter RGB bytes, retaining alpha: {kind:'fade',rgb:[r,g,b],weight:0..256} or {kind:'multiply',factors:[0..256,0..256,0..256]}. Fade floors signed deltas.",
+          "name": "filterRgb",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "rect",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "filter",
               "type": "Record<string, any>"
             }
           ],
@@ -2335,6 +2457,25 @@
       "global": "text",
       "methods": [
         {
+          "doc": "Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface.",
+          "name": "measureSimple",
+          "params": [
+            {
+              "name": "font",
+              "type": "string"
+            },
+            {
+              "name": "size",
+              "type": "number"
+            },
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
           "doc": "Shape and rasterize rich text; returns __surface path for a layer. Optional typewriter rate advances with App frames.",
           "name": "draw",
           "params": [
@@ -3328,6 +3469,192 @@
   ],
   "data": [
     {
+      "doc": "Explicit native-to-project resource mapping for the plain horizontal MWND slice. This is not an automatic conversion of arbitrary Gameexe windows.",
+      "fields": [
+        {
+          "default": "default",
+          "doc": "",
+          "name": "font",
+          "rust_type": "String"
+        },
+        {
+          "default": [
+            20,
+            340,
+            600,
+            120
+          ],
+          "doc": "",
+          "name": "rect",
+          "rust_type": "[i32; 4]"
+        },
+        {
+          "default": [
+            20,
+            308,
+            600,
+            28
+          ],
+          "doc": "",
+          "name": "name_rect",
+          "rust_type": "[i32; 4]"
+        },
+        {
+          "default": 24,
+          "doc": "",
+          "name": "size",
+          "rust_type": "u16"
+        },
+        {
+          "default": 20,
+          "doc": "",
+          "name": "name_size",
+          "rust_type": "u16"
+        },
+        {
+          "default": [
+            0,
+            2
+          ],
+          "doc": "",
+          "name": "spacing",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "default": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "doc": "",
+          "name": "color",
+          "rust_type": "[u8; 4]"
+        },
+        {
+          "default": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "doc": "",
+          "name": "name_color",
+          "rust_type": "[u8; 4]"
+        }
+      ],
+      "name": "MessageWindow",
+      "used_by": "Siglus `Config.message_window` (ADR 0061)"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Replace RGB without using coverage, then weight against old RGB.",
+          "name": "copy",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Saturated source + floor(destination * (256 - coverage) / 256).",
+          "name": "over",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Saturated destination + floor(source * (256 - destination alpha) / 256).",
+          "name": "under",
+          "rust_type": ""
+        }
+      ],
+      "name": "AssociatedBlend",
+      "used_by": "`Bitmap.composite` options.blend"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "preserve",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "source",
+          "rust_type": ""
+        }
+      ],
+      "name": "CoverageWrite",
+      "used_by": "`Bitmap.composite` options.coverage_write"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": {
+            "height": 1,
+            "width": 1,
+            "x": 0,
+            "y": 0
+          },
+          "doc": "",
+          "name": "source_rect",
+          "rust_type": "BitmapRect"
+        },
+        {
+          "default": [
+            0,
+            0
+          ],
+          "doc": "",
+          "name": "destination",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "default": "over",
+          "doc": "",
+          "name": "blend",
+          "rust_type": "AssociatedBlend"
+        },
+        {
+          "default": 256,
+          "doc": "Fixed-point blend weight 0..=256; 256 applies the full result.",
+          "name": "weight",
+          "rust_type": "u16"
+        },
+        {
+          "default": "preserve",
+          "doc": "",
+          "name": "coverage_write",
+          "rust_type": "CoverageWrite"
+        }
+      ],
+      "name": "AssociatedBlitOptions",
+      "used_by": "`Bitmap.composite` options"
+    },
+    {
+      "doc": "Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Move towards RGB by floor((target - current) * weight / 256).",
+          "name": "fade",
+          "rust_type": "rgb: [u8; 3], weight: u16"
+        },
+        {
+          "default": null,
+          "doc": "Multiply each RGB byte by the corresponding factor / 256.",
+          "name": "multiply",
+          "rust_type": "factors: [u16; 3]"
+        }
+      ],
+      "name": "RgbFilter",
+      "used_by": "`Bitmap.filterRgb` filter"
+    },
+    {
       "doc": "",
       "fields": [
         {
@@ -3607,6 +3934,12 @@
         },
         {
           "default": null,
+          "doc": "Per-pixel ray-traced diffuse GI; requires the hardware rendering path.",
+          "name": "ray_traced_gi",
+          "rust_type": "Option<RayTracedGi>"
+        },
+        {
+          "default": null,
           "doc": "Cluster-LOD virtualized geometry (ADR 0026).",
           "name": "geometry_lod",
           "rust_type": "Option<GeometryLod>"
@@ -3797,13 +4130,44 @@
         },
         {
           "default": false,
-          "doc": "Trace mirror rays against the scene when the renderer runs the hardware ray-tracing path (ADR 0058); screen space otherwise. The technique actually used is reported in the RT statistics.",
+          "doc": "Trace GGX glossy rays against the scene when the renderer runs the hardware ray-tracing path (ADR 0058); screen space otherwise. The technique actually used is reported in the RT statistics.",
           "name": "ray_traced",
           "rust_type": "bool"
+        },
+        {
+          "default": 16,
+          "doc": "GGX rays per pixel on the hardware path (1..64); exact mirrors use one.",
+          "name": "ray_samples",
+          "rust_type": "u32"
         }
       ],
       "name": "ScreenSpaceReflections",
       "used_by": "`Environment.reflections` (ADR 0023)"
+    },
+    {
+      "doc": "Per-pixel diffuse irradiance from native ray queries (ADR 0060). Requires the explicit hardware ray-tracing rendering path.",
+      "fields": [
+        {
+          "default": 8,
+          "doc": "Cosine-weighted hemisphere rays per visible pixel (1..64).",
+          "name": "samples",
+          "rust_type": "u32"
+        },
+        {
+          "default": 30.0,
+          "doc": "Ray length in world meters; misses use environment irradiance.",
+          "name": "max_distance",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Multiplier of the computed diffuse irradiance (0..16).",
+          "name": "intensity",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "RayTracedGi",
+      "used_by": "`Environment.ray_traced_gi` (ADR 0060)"
     },
     {
       "doc": "Cluster-LOD virtualized geometry (ADR 0026): static model primitives get a crack-free cluster DAG at load and draw the cut whose geometric error projects to at most `pixel_error` pixels.",
@@ -4535,7 +4899,7 @@
         },
         {
           "default": false,
-          "doc": "On the hardware ray-tracing path, update probes with ray queries against the scene instead of six raster face captures (ADR 0059). Ray-traced updates light hits by the sun, emission and the volume itself; local lights are not included in their bounce yet.",
+          "doc": "On the hardware ray-tracing path, update probes with ray queries against the scene instead of six raster face captures (ADR 0059). Ray-traced updates light hits by the sun, emission and the volume itself, including shared point/spot/rect and volume lights (ADR 0060).",
           "name": "ray_traced",
           "rust_type": "bool"
         }
@@ -7309,7 +7673,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "3ff1c210d5f93836",
+  "fingerprint": "1050976234c41b17",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

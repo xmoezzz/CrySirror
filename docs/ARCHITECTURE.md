@@ -23,11 +23,12 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-author | Optional Oxc TS/JS compiler + Boa offline project builder; no player dependency |
 | crysirror-siglus | Native G00 resource frontend and metadata policies; independent VM lives in crysirror-siglus-vm |
 | crysirror-audio | Engine voice scheduling/buses and AudioDevice boundary; optional rodio output |
-| crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, reveal and CPU SDF data |
+| crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, fixed-cell layout, synchronous font-resource measurement handles, reveal and CPU SDF data |
 | crysirror-scene | Safe CPU World/Layer/UI state, migrated input/animation/projection, transactional mutations and frame extraction |
 | crysirror-reallive | Original RealLive bytecode VM and thin semantic/syscall adapter; retained Canvas/Layer/GlyphRun/UI and engine audio/Media services, no hosted renderer |
 | crysirror-krkr | Optional AGPL KiriKiri adapter: vendored Kirakira TJS2 VM (crates/krkr-upstream) with native classes translated onto engine Layer/Canvas, clock and storage (ADR 0053); not in default builds |
-| crysirror-siglus-vm | Independent subset port registered as `siglus`; full vendored SceneVm host/factory switch pending (ADR 0009) |
+| crysirror-avg32 | Original AVG32 Scenario library at a pinned siglus_rs Git revision, portable-vm only; semantic events call engine Canvas/GlyphRun/UI/audio, without the old System/renderer (ADR 0062) |
+| crysirror-siglus-vm | Independent original SceneVm subset registered as `siglus`; native operations call shared engine services, including the explicit plain TEXT/NAME profile (ADR 0061) |
 | crysirror-engine | Unity-style public API: reflective classes/objects, App lifecycle, behaviours, plugins, ScriptHost contract (ADR 0004/0005) |
 | crysirror-script-js | Default JS/TS script host (Boa + Oxc) bound to the class registry; desktop feature `scripting` (ADR 0005) |
 | crysirror-asset | Device-free importers; glTF 2.0/GLB/VRM, binary FBX and PMX (converted to GLB in memory) into world entities and PBR models (ADR 0007, 0054) |
@@ -144,19 +145,30 @@ The AO/visibility texture preserves the existing material binding budget.
 Changed positions rebuild the AS, material metadata updates do not, and removed
 geometry clears it. Only successful submission commits the cache build state.
 Since ADR 0055 BLAS read the renderer's own GPU vertex/index streams, skinned/morphed instances own GPU-skinned dynamic BLAS, MASK casters are alpha-tested by re-tracing against a baked alpha atlas and blended surfaces do not cast; custom fragment-discard shaders fail visibly.
+ADR 0060 adds GGX glossy reflections, per-pixel single-bounce diffuse GI and
+local-light shading at reflection/GI hits. Reflection and pixel irradiance
+share a two-layer array at the existing SSR sampled binding. Probe updates
+read an immutable history copy to avoid cross-workgroup write/read races.
+Hit lighting requires six storage-buffer bindings, negotiated against actual
+device limits. This remains an opaque/alpha-tested approximation: hit shading
+uses the material atlas and geometric normals; dedicated glossy/GI denoising,
+transmission and full path tracing are not implemented.
 Raster/compute remain independent selections and need no experimental RT opt-in.
 Selection is explicit in CLI/host state; a VM/save never stores device-specific
 handles. Native API eligibility, enabled device features, encoded commands and
 physically verified pixels are separate evidence. See ADR 0003 for the bounded
 compute prototype, ADR 0051 for native RT limits, and STATUS.md for actual GPUs.
 
-The legacy service text contract accepts simple-horizontal-v1. The newer engine
+The legacy service text contract accepts simple-horizontal-v1 and an explicit
+unwrapped variant; synchronous immutable font measurement handles share those
+metrics (ADR 0063). The newer engine
 Text API uses shared shaping/bidi, rich styles, ruby/vertical layout and reveal
 to publish client-scoped RGBA surfaces (ADR 0031/0033). CPU SDF atlas data exists;
-its GPU/3D sampling path remains pending. Neither API implicitly connects native
-message windows. The registered Siglus subset rejects CD_TEXT/CD_NAME, and
-native page/read/wait/save policies require a tested adapter bridge. See
-NATIVE_ADAPTERS.md and ADR 0034–0036 for executable coverage.
+its GPU/3D sampling path remains pending. Native windows require explicit
+mapping: Siglus supports bounded plain TEXT/NAME through shared grid layout,
+GlyphRun and reveal state, while the independent AVG32 portable VM maps its
+documented plain ADV slice (ADR 0061–0062). Unmapped native page/read/wait/save
+policies fail visibly. See NATIVE_ADAPTERS.md for executable coverage.
 
 Textures and assets are bounded. Unsupported dimensions/formats/layouts report
 errors. Scoped image/model reads and imports now run asynchronously on engine workers

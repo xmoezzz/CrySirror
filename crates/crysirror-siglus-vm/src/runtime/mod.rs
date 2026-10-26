@@ -406,6 +406,10 @@ impl CommandContext {
     pub fn take_pending_auto_savepoint(&mut self) -> bool {
         std::mem::take(&mut self.pending_auto_savepoint)
     }
+    pub fn request_message_auto_savepoint(&mut self) {
+        self.local_save_snapshot = None;
+        self.pending_auto_savepoint = true;
+    }
     pub fn take_pending_sel_point_result(&mut self) -> Option<i32> {
         None
     }

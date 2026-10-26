@@ -4603,14 +4603,14 @@ impl<'a> SceneVm<'a> {
                     &mut self.ctx,
                     &text,
                     rf_flag_no as i64,
-                ) {
+                )? {
                     self.ctx.ui.set_message(text);
                 }
                 self.drain_runtime_save_load_requests()?;
             }
             CD_NAME => {
                 let name = self.pop_str()?;
-                if !crate::runtime::forms::stage::cd_name_current_mwnd(&mut self.ctx, &name) {
+                if !crate::runtime::forms::stage::cd_name_current_mwnd(&mut self.ctx, &name)? {
                     self.ctx.ui.set_name(name);
                 }
                 self.drain_runtime_save_load_requests()?;
@@ -13805,6 +13805,7 @@ impl<'a> SceneVm<'a> {
 // of the data VM. Serialize its actual stacks/frames/globals, not a replay log.
 impl SceneVm<'static> {
     pub fn engine_validate(&self) -> Result<()> {
+        crate::message::validate(&self.ctx)?;
         anyhow::ensure!(
             self.int_stack.len() <= 1_000_000
                 && self.str_stack.len() <= 65536

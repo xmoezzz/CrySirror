@@ -153,3 +153,27 @@ It reads synthetic pixels and the explicit font only; no games/devices are used.
 Log from the local run: `/tmp/codex-bgi-cpu-differential.log`. These results
 establish parity with the stated original Rust reference paths and corpus,
 not every native syscall, commercial engine build, font or hardware platform.
+
+## Associated RGB, independent coverage and integer filters (2026-10-26)
+
+`associated.rs` adds engine-owned checked operations without copying an AVG32
+System, PDT manager or renderer. `AssociatedBlitOptions` selects copy, source-over
+or draw-under with explicit 0..256 weights and independent source coverage;
+coverage writes are explicit. `RgbFilter` implements signed-floor RGB fades and
+integer multiplication while retaining alpha. `Bitmap.composite/filterRgb` expose
+these same operations to scripts with client-scoped surface and asset paths.
+
+The stored RGB remains associated intermediate data. This API does not normalize
+it for the renderer's straight-alpha sampling or establish a complete native PDT
+buffer/display policy. Native fade parameter remapping stays in adapters. The
+existing `bitmap.rs` mode restrictions continue to apply to that older interface.
+
+Actual differential execution against the unchanged pinned `avg32::buffer`
+`fade_pixel/fade_under` and `avg32::pdtmgr::fade_color` passed 1,776,384 associated
+copy/over/under cases (all 256 masks and 257 weights) and 2,304 signed/clipped fade
+cases. Source RGB, destination RGB and coverage include byte extrema and
+intermediate values. The existing 19,200 RealLive, 9,216 AVG32 mask and 12 nearest
+cases were rerun and passed. The reviewed corpus is in `tools/bitmap_reference.rs`;
+the guard and command are the same `tools/compare_bitmap_upstream.py` above.
+The actual log is `target/associated-upstream.log`; no game, font or device was
+used. These results cover those byte operations, not full AVG32 VM compatibility.

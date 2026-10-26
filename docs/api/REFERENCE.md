@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `3ff1c210d5f93836`
+API fingerprint: `1050976234c41b17`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -15,7 +15,7 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 - [Globals](#globals)
 - Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [World](#class-world)
 - [Commands](#commands)
-- Data: [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
+- Data: [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -102,6 +102,8 @@ Script global: `bitmap`.
 | `fill(slot: number, rect: Record<string, any>, rgba: number[])` | `string` | Replace pixels inside clipped {x,y,width,height}; signed positions are allowed. |
 | `blit(slot: number, source: string, options: Record<string, any>)` | `string` | Copy/blend source_rect into destination:[x,y]. Explicit mode and opacity; self-copy reads the original pixels. |
 | `stretch(slot: number, source: string, options: Record<string, any>)` | `string` | Nearest-neighbor source_rect to destination rectangle with original mapping preserved after clipping. Explicit pixel math. |
+| `composite(slot: number, source: string, options: Record<string, any>, coverage: string \| null)` | `string` | Composite associated RGB with copy/over/under, explicit 0..256 weight and preserve/source coverage_write. Optional coverage asset supplies alpha independently of source RGB. Stored channels remain associated; self-copies use snapshots. |
+| `filterRgb(slot: number, rect: Record<string, any>, filter: Record<string, any>)` | `string` | Filter RGB bytes, retaining alpha: {kind:'fade',rgb:[r,g,b],weight:0..256} or {kind:'multiply',factors:[0..256,0..256,0..256]}. Fade floors signed deltas. |
 | `info(slot: number)` | `Record<string, any>` | Return client-local width, height, revision, bytes and surface path. |
 | `remove(slot: number)` | `boolean` | Release this client's surface slot; return whether it existed. |
 
@@ -456,6 +458,7 @@ Script global: `text`.
 
 | Method | Returns | Description |
 |---|---|---|
+| `measureSimple(font: string, size: number, text: string)` | `Record<string, any>` | Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface. |
 | `draw(name: string, markup: string, options: Record<string, any>)` | `string` | Shape and rasterize rich text; returns __surface path for a layer. Optional typewriter rate advances with App frames. |
 | `state(name: string)` | `Record<string, any>` | Read content/options/reveal state for explicit persistence. |
 | `restore(name: string, state: Record<string, any>)` | `string` | Rebuild saved markup/options and restore reveal clock. Pending event queues are not replayed. |
@@ -613,6 +616,65 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 
 Field defaults are the serde defaults (`—`: required, or absent when unset).
 
+### MessageWindow
+
+Used by: Siglus `Config.message_window` (ADR 0061).
+
+Explicit native-to-project resource mapping for the plain horizontal MWND slice. This is not an automatic conversion of arbitrary Gameexe windows.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `font` | `String` | `"default"` | — |
+| `rect` | `[i32; 4]` | `[20,340,600,120]` | — |
+| `name_rect` | `[i32; 4]` | `[20,308,600,28]` | — |
+| `size` | `u16` | `24` | — |
+| `name_size` | `u16` | `20` | — |
+| `spacing` | `[i32; 2]` | `[0,2]` | — |
+| `color` | `[u8; 4]` | `[255,255,255,255]` | — |
+| `name_color` | `[u8; 4]` | `[255,255,255,255]` | — |
+
+### AssociatedBlend
+
+Used by: `Bitmap.composite` options.blend.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `copy` | — | Replace RGB without using coverage, then weight against old RGB. |
+| `over` | — | Saturated source + floor(destination * (256 - coverage) / 256). |
+| `under` | — | Saturated destination + floor(source * (256 - destination alpha) / 256). |
+
+### CoverageWrite
+
+Used by: `Bitmap.composite` options.coverage_write.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `preserve` | — | — |
+| `source` | — | — |
+
+### AssociatedBlitOptions
+
+Used by: `Bitmap.composite` options.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `source_rect` | `BitmapRect` | `{"height":1,"width":1,"x":0,"y":0}` | — |
+| `destination` | `[i32; 2]` | `[0,0]` | — |
+| `blend` | `AssociatedBlend` | `"over"` | — |
+| `weight` | `u16` | `256` | Fixed-point blend weight 0..=256; 256 applies the full result. |
+| `coverage_write` | `CoverageWrite` | `"preserve"` | — |
+
+### RgbFilter
+
+Used by: `Bitmap.filterRgb` filter.
+
+Variants are tagged by `"kind"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `fade` | `rgb: [u8; 3], weight: u16` | Move towards RGB by floor((target - current) * weight / 256). |
+| `multiply` | `factors: [u16; 3]` | Multiply each RGB byte by the corresponding factor / 256. |
+
 ### AssetKind
 
 Used by: `Assets.load(path, kind)`.
@@ -694,6 +756,7 @@ Used by: `World.setEnvironment`, `world.set_environment`.
 | `fog` | `Option<Fog>` | — | Exponential height fog (ADR 0019). |
 | `auto_exposure` | `Option<AutoExposure>` | — | Eye adaptation (ADR 0019); `null` keeps a fixed exposure. |
 | `reflections` | `Option<ScreenSpaceReflections>` | — | Screen-space reflections (ADR 0023). |
+| `ray_traced_gi` | `Option<RayTracedGi>` | — | Per-pixel ray-traced diffuse GI; requires the hardware rendering path. |
 | `geometry_lod` | `Option<GeometryLod>` | — | Cluster-LOD virtualized geometry (ADR 0026). |
 | `virtual_shadows` | `Option<VirtualShadows>` | — | Virtual shadow maps for the sun, replacing cascades (ADR 0027). |
 
@@ -753,7 +816,20 @@ Screen-space reflections (ADR 0023): rays marched against the depth prepass, rad
 | `thickness` | `f32` | `0.3` | Depth tolerance (m) for counting a ray as behind a surface. |
 | `max_roughness` | `f32` | `0.6` | Roughness at which reflections have fully faded to the environment. |
 | `steps` | `u32` | `48` | Linear march steps (refined by a binary search). |
-| `ray_traced` | `bool` | `false` | Trace mirror rays against the scene when the renderer runs the hardware ray-tracing path (ADR 0058); screen space otherwise. The technique actually used is reported in the RT statistics. |
+| `ray_traced` | `bool` | `false` | Trace GGX glossy rays against the scene when the renderer runs the hardware ray-tracing path (ADR 0058); screen space otherwise. The technique actually used is reported in the RT statistics. |
+| `ray_samples` | `u32` | `16` | GGX rays per pixel on the hardware path (1..64); exact mirrors use one. |
+
+### RayTracedGi
+
+Used by: `Environment.ray_traced_gi` (ADR 0060).
+
+Per-pixel diffuse irradiance from native ray queries (ADR 0060). Requires the explicit hardware ray-tracing rendering path.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `samples` | `u32` | `8` | Cosine-weighted hemisphere rays per visible pixel (1..64). |
+| `max_distance` | `f32` | `30.0` | Ray length in world meters; misses use environment irradiance. |
+| `intensity` | `f32` | `1.0` | Multiplier of the computed diffuse irradiance (0..16). |
 
 ### GeometryLod
 
@@ -963,7 +1039,7 @@ Dynamic diffuse global illumination volume (ADR 0028): a grid of irradiance prob
 | `idle_probes_per_frame` | `u32` | `0` | Probes refreshed per frame once every probe has been refreshed three times and no light, static object, material override, sun or environment changed (0 = stop refreshing until something changes). |
 | `visibility` | `bool` | `true` | Chebyshev visibility from per-probe distance moments against light leaking through walls (false: interpolate without occlusion). |
 | `revision` | `u32` | `0` | Bump to restart accumulation. |
-| `ray_traced` | `bool` | `false` | On the hardware ray-tracing path, update probes with ray queries against the scene instead of six raster face captures (ADR 0059). Ray-traced updates light hits by the sun, emission and the volume itself; local lights are not included in their bounce yet. |
+| `ray_traced` | `bool` | `false` | On the hardware ray-tracing path, update probes with ray queries against the scene instead of six raster face captures (ADR 0059). Ray-traced updates light hits by the sun, emission and the volume itself, including shared point/spot/rect and volume lights (ADR 0060). |
 
 ### ColliderSpec
 
@@ -1839,6 +1915,25 @@ Variants are tagged by `"op"`.
 
 `clients[].config` of each original-VM adapter.
 
+### `avg32`
+
+| Field | Rust type | Description |
+|---|---|---|
+| `profile` | `String` | Explicit native profile: non-novel, no custom frame/effects, plain text. |
+| `scenes` | `BTreeMap<i32, String>` | Native scene number to capability-relative TPC32 file. |
+| `start_scene` | `i32` | Scene number used by the original Scenario at boot. |
+| `version` | `i32` | Original opcode revision; choose explicitly for the title being adapted. |
+| `encoding` | `String` | Native string codec accepted by the original NLS parser (default sjis). |
+| `font` | `String` | Installed engine font alias; no font file or native font is bundled. |
+| `message_rect` | `[i32; 4]` | Absolute position and cell-layout width/height in logical pixels. |
+| `font_size` | `u16` | Native nominal glyph size in logical pixels (1..256). |
+| `cell_step` | `[i32; 2]` | Native horizontal half-cell and line pitch in pixels; never inferred from font metrics. |
+| `message_interval_ms` | `i32` | Original interpreter print interval in milliseconds (0 displays immediately). |
+| `resources` | `BTreeMap<String, String>` | Native resource names to engine image/audio paths. No filesystem bypass. |
+| `sound_effects` | `BTreeMap<i32, String>` | Explicit native SE table; a referenced missing entry fails visibly. |
+| `voices` | `BTreeMap<i32, String>` | Native voice IDs mapped to shared supported audio containers. |
+| `message_icon` | `Option<String>` | Explicit engine image used for native message-wait icons. |
+
 ### `reallive`
 
 | Field | Rust type | Description |
@@ -1858,3 +1953,4 @@ Variants are tagged by `"op"`.
 | `string_codec` | `String` | Scene string encryption: "xor" (default) or "plain". |
 | `gameexe` | `Option<String>` | Asset path of the decoded UTF-8 Gameexe ini, if any. |
 | `resources` | `BTreeMap<String, String>` | Native resource path → asset path aliases (at most 4096). |
+| `message_window` | `Option<crate::MessageWindow>` | Explicit mapping for the bounded plain-text MWND profile. Native Gameexe windows/markup are not guessed from a project canvas. |

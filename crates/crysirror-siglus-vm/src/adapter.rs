@@ -47,6 +47,10 @@ pub struct Config {
     /// Native resource path → asset path aliases (at most 4096).
     #[serde(default)]
     pub resources: BTreeMap<String, String>,
+    /// Explicit mapping for the bounded plain-text MWND profile. Native
+    /// Gameexe windows/markup are not guessed from a project canvas.
+    #[serde(default)]
+    pub message_window: Option<crate::MessageWindow>,
 }
 impl Config {
     pub fn validate(&self) -> Result<()> {
@@ -74,6 +78,13 @@ impl Config {
         }
         if let Some(g) = &self.gameexe {
             path(g)?;
+        }
+        if let Some(window) = &self.message_window {
+            window.validate()?;
+            ensure!(
+                self.gameexe.is_none(),
+                "native Gameexe MWND conversion is not implemented; use an explicit plain-window profile without Gameexe"
+            );
         }
         Ok(())
     }
@@ -173,6 +184,7 @@ impl SiglusVm {
             SceneStringCodec::Xor
         };
         let mut ctx = CommandContext::new(PathBuf::from("asset"));
+        ctx.ui.window = self.state.config.message_window.clone();
         if let Some(name) = self.state.config.gameexe.clone() {
             let k = format!("asset/{name}");
             self.fetch(host, &k)?;
@@ -243,6 +255,7 @@ impl SiglusVm {
             }
             {
                 let vm = self.state.vm.as_mut().unwrap();
+                crate::message::sync_progress(&mut vm.ctx, ClientId(self.state.client), host)?;
                 vm.ctx.input.next_frame();
                 for (bit, key) in [
                     (1, crysirror_scene::input::VmKey::Enter),
@@ -271,6 +284,13 @@ impl SiglusVm {
                         ) {
                             let vk = crysirror_scene::input::vmkey_to_vk_code(key).unwrap();
                             if vm.ctx.input.vk_down_up_stock(vk) {
+                                if crate::message::complete_on_decide(
+                                    &mut vm.ctx,
+                                    ClientId(self.state.client),
+                                    host,
+                                )? {
+                                    continue;
+                                }
                                 let skipped = vm.ctx.wait.notify_movie_down_up(
                                     &mut vm.ctx.globals,
                                     &vm.ctx.ids,
@@ -296,11 +316,18 @@ impl SiglusVm {
                 {
                     vm.ctx.input.on_mouse_up(mouse);
                     if vm.ctx.input.vk_down_up_stock(0x01) {
-                        let skipped =
-                            vm.ctx
-                                .wait
-                                .notify_movie_down_up(&mut vm.ctx.globals, &vm.ctx.ids, 1);
-                        if !skipped {
+                        let revealed = crate::message::complete_on_decide(
+                            &mut vm.ctx,
+                            ClientId(self.state.client),
+                            host,
+                        )?;
+                        let skipped = !revealed
+                            && vm.ctx.wait.notify_movie_down_up(
+                                &mut vm.ctx.globals,
+                                &vm.ctx.ids,
+                                1,
+                            );
+                        if !skipped && !revealed {
                             vm.ctx.wait.notify_key(&mut vm.ctx.globals, &vm.ctx.ids);
                         }
                     }
@@ -384,6 +411,10 @@ impl SiglusVm {
         anyhow::bail!("native frame resource retry limit")
     }
     pub fn export_original_save(&mut self) -> Result<Vec<u8>> {
+        ensure!(
+            self.state.config.message_window.is_none(),
+            "native original-save MWND reconstruction is not implemented for the plain message profile; runtime snapshots remain supported"
+        );
         self.state
             .vm
             .as_mut()
@@ -391,6 +422,10 @@ impl SiglusVm {
             .engine_original_file()
     }
     pub fn import_original_save(&mut self, bytes: &[u8]) -> Result<()> {
+        ensure!(
+            self.state.config.message_window.is_none(),
+            "native original-save MWND reconstruction is not implemented for the plain message profile; runtime snapshots remain supported"
+        );
         ensure!(bytes.len() <= 32 * 1024 * 1024, "native save file limit");
         let previous = self.state.clone();
         let path = self
@@ -445,6 +480,9 @@ impl VmAdapter for SiglusVm {
         state.config.validate().map_err(err)?;
         if let Some(vm) = &state.vm {
             vm.engine_validate().map_err(err)?;
+            if vm.ctx.ui.window != state.config.message_window {
+                return Err(Error::SnapshotMismatch("native message configuration"));
+            }
         }
         self.state = state;
         Ok(())
@@ -520,6 +558,35 @@ mod verification_tests {
         }
     }
     impl HostServices for Host {
+        fn query_engine(
+            &mut self,
+            client: ClientId,
+            query: crysirror_core::service::EngineQuery,
+        ) -> crysirror_core::Result<Vec<u8>> {
+            match query {
+                crysirror_core::service::EngineQuery::Layer(id) => {
+                    serde_json::to_vec(&self.engine.layers.get(client, id)).map_err(err)
+                }
+                _ => Err(Error::Unsupported("test host query")),
+            }
+        }
+        fn font_metrics(
+            &self,
+            font: &str,
+            size: f32,
+            _: char,
+        ) -> crysirror_core::Result<crysirror_core::service::FontMetrics> {
+            if font != "message-font" {
+                return Err(Error::NotFound);
+            }
+            // Deterministic layout-contract host; font rasterization is covered
+            // by the separate ignored system-font rendering test.
+            Ok(crysirror_core::service::FontMetrics {
+                ascent: size * 0.75,
+                descent: -size * 0.25,
+                advance: size,
+            })
+        }
         fn now_ms(&self) -> u64 {
             self.now
         }
@@ -547,6 +614,7 @@ mod verification_tests {
             string_codec: "plain".into(),
             gameexe: None,
             resources: BTreeMap::new(),
+            message_window: None,
         };
         let mut host = Host::default();
         host.files.insert(
@@ -704,5 +772,210 @@ mod verification_tests {
             );
             assert!(host.engine.frame([320, 180]).unwrap().is_empty());
         }
+    }
+
+    fn plain_message_machine(texts: &[&str]) -> (SiglusVm, Host) {
+        let (mut vm, mut host) = machine(false);
+        vm.state.config.message_window = Some(crate::MessageWindow {
+            font: "message-font".into(),
+            rect: [12, 80, 200, 80],
+            name_rect: [12, 50, 200, 25],
+            size: 20,
+            name_size: 20,
+            spacing: [-1, 10],
+            color: [255; 4],
+            name_color: [250, 210, 70, 255],
+        });
+        let mut scene = crate::fixture::SceneBuilder::default();
+        scene.string("A name");
+        scene.code.push(crate::runtime::constants::cd::NAME);
+        scene.string("Ignored second name");
+        scene.code.push(crate::runtime::constants::cd::NAME);
+        for text in texts {
+            scene.string(text);
+            scene.code.push(crate::runtime::constants::cd::TEXT);
+            scene.i32(-1);
+        }
+        scene.code.push(crate::runtime::constants::cd::EOF);
+        host.files.insert(
+            "Asset/Scene.pck".into(),
+            crate::fixture::pack_scene(&scene.finish()),
+        );
+        (vm, host)
+    }
+    #[test]
+    fn native_text_uses_shared_cells_retained_glyphs_and_engine_reveal_clock() {
+        use crate::message::{MESSAGE_LAYER, NAME_LAYER};
+        use crysirror_scene::layer::Paint;
+        let (mut vm, mut host) = plain_message_machine(&["Aあ", "B"]);
+        assert_eq!(
+            vm.step(&mut host, InputFrame::default(), 1000).unwrap(),
+            VmYield::BudgetExhausted
+        );
+        let layer = host.engine.layers.get(ClientId(1), MESSAGE_LAYER).unwrap();
+        let Paint::GlyphRun {
+            glyphs,
+            reveal: Some(reveal),
+            ..
+        } = &layer.paint
+        else {
+            panic!("engine glyph run")
+        };
+        assert_eq!(
+            glyphs.iter().map(|g| g.baseline).collect::<Vec<_>>(),
+            [[0., 15.], [9., 15.]]
+        );
+        assert_eq!(reveal.visible_count(glyphs.len()), 0);
+        let Paint::GlyphRun { glyphs, .. } = &host
+            .engine
+            .layers
+            .get(ClientId(1), NAME_LAYER)
+            .unwrap()
+            .paint
+        else {
+            panic!("name glyph run")
+        };
+        assert_eq!(
+            glyphs.iter().map(|g| g.character).collect::<String>(),
+            "A name"
+        );
+        // Advancing the host clock alone must not advance a private VM clock.
+        host.now = 1000;
+        assert_eq!(
+            vm.step(&mut host, InputFrame::default(), 1000).unwrap(),
+            VmYield::BudgetExhausted
+        );
+        assert_eq!(
+            host.engine
+                .layers
+                .reveal_status(ClientId(1), MESSAGE_LAYER)
+                .unwrap()
+                .visible,
+            0
+        );
+        host.engine.layers.tick(40);
+        assert_eq!(
+            vm.step(&mut host, InputFrame::default(), 1000).unwrap(),
+            VmYield::BudgetExhausted
+        );
+        let Paint::GlyphRun {
+            glyphs,
+            reveal: Some(reveal),
+            ..
+        } = &host
+            .engine
+            .layers
+            .get(ClientId(1), MESSAGE_LAYER)
+            .unwrap()
+            .paint
+        else {
+            panic!("appended glyph run")
+        };
+        assert_eq!(
+            glyphs.iter().map(|g| g.character).collect::<String>(),
+            "AあB"
+        );
+        assert_eq!(glyphs[2].baseline, [28., 15.]);
+        assert_eq!(reveal.initial_visible, 2);
+        assert_eq!(reveal.visible_count(glyphs.len()), 2);
+        let saved = vm.snapshot().unwrap();
+        let engine_saved = host.engine.clone();
+        host.engine.layers.tick(20);
+        assert_eq!(
+            vm.step(&mut host, InputFrame::default(), 1000).unwrap(),
+            VmYield::Halted
+        );
+        vm.restore(&saved).unwrap();
+        host.engine = engine_saved;
+        host.engine.layers.tick(20);
+        assert_eq!(
+            vm.step(&mut host, InputFrame::default(), 1000).unwrap(),
+            VmYield::Halted
+        );
+        assert_eq!(
+            vm.state.vm.as_ref().unwrap().ctx.ui.message.as_deref(),
+            Some("AあB")
+        );
+        let ctx = &vm.state.vm.as_ref().unwrap().ctx;
+        let native = ctx
+            .globals
+            .stage_forms
+            .values()
+            .next()
+            .unwrap()
+            .mwnd_lists
+            .get(&1)
+            .unwrap()
+            .first()
+            .unwrap();
+        assert_eq!(native.msg_text, "AあB");
+        assert_eq!(native.name_text, "A name");
+        assert_eq!(native.glyphs.len(), 3);
+    }
+    #[test]
+    fn native_decide_completes_only_the_current_reveal() {
+        let (mut vm, mut host) = plain_message_machine(&["AB", "CD"]);
+        vm.step(&mut host, InputFrame::default(), 1000).unwrap();
+        vm.step(
+            &mut host,
+            InputFrame {
+                buttons_down: 1,
+                buttons_pressed: 1,
+                ..Default::default()
+            },
+            1000,
+        )
+        .unwrap();
+        assert_eq!(
+            vm.state.vm.as_ref().unwrap().ctx.ui.message.as_deref(),
+            Some("AB")
+        );
+        vm.step(&mut host, InputFrame::default(), 1000).unwrap();
+        assert_eq!(
+            vm.state.vm.as_ref().unwrap().ctx.ui.message.as_deref(),
+            Some("ABCD")
+        );
+        assert_eq!(
+            host.engine
+                .layers
+                .reveal_status(ClientId(1), crate::message::MESSAGE_LAYER)
+                .unwrap()
+                .visible,
+            2
+        );
+        assert!(!vm.state.vm.as_ref().unwrap().is_halted());
+    }
+    #[test]
+    fn newline_only_chunk_keeps_its_cursor_without_an_engine_timer() {
+        let (mut vm, mut host) = plain_message_machine(&["\n", "A"]);
+        vm.step(&mut host, InputFrame::default(), 1000).unwrap();
+        vm.step(&mut host, InputFrame::default(), 1000).unwrap();
+        let crysirror_scene::layer::Paint::GlyphRun { glyphs, .. } =
+            &host.engine.layers.get(ClientId(1), crate::message::MESSAGE_LAYER).unwrap().paint
+            else { panic!("glyph run") };
+        assert_eq!(glyphs[0].baseline, [0., 45.]);
+        assert!(vm.export_original_save().unwrap_err().to_string().contains("MWND reconstruction"));
+        assert!(vm.import_original_save(b"native").unwrap_err().to_string().contains("MWND reconstruction"));
+    }
+    #[test]
+    fn unsupported_message_forms_fail_before_publishing_partial_text() {
+        let (mut vm, mut host) = plain_message_machine(&["＄Ａ１"]);
+        let error = vm.step(&mut host, InputFrame::default(), 1000).unwrap_err();
+        assert!(error.to_string().contains("markup/emoji"), "{error}");
+        assert!(
+            host.engine
+                .layers
+                .get(ClientId(1), crate::message::MESSAGE_LAYER)
+                .is_none()
+        );
+        let (mut vm, mut host) = plain_message_machine(&["あ".repeat(500).as_str()]);
+        let error = vm.step(&mut host, InputFrame::default(), 1000).unwrap_err();
+        assert!(error.to_string().contains("page overflow"), "{error}");
+        assert!(
+            host.engine
+                .layers
+                .get(ClientId(1), crate::message::MESSAGE_LAYER)
+                .is_none()
+        );
     }
 }

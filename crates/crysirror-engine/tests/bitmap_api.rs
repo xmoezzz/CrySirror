@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 use crysirror_core::{service::InputFrame, vfs::MemoryProvider};
 use crysirror_engine::{App, Value};
-use crysirror_image::{encode_png, ImageSurface};
+use crysirror_image::{ImageSurface, encode_png};
 use crysirror_runtime::Runtime;
 use serde_json::json;
 use std::sync::Arc;
@@ -47,6 +47,40 @@ fn pixels(app: &App, slot: u32) -> Vec<u8> {
         .unwrap()
         .rgba
         .to_vec()
+}
+
+#[test]
+fn associated_composition_filters_and_failures_use_client_scoped_engine_surfaces() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = app(tmp.path());
+    call(&mut app, "create", json!([1, 1, 1, [64, 32, 16, 255]])).unwrap();
+    call(&mut app, "create", json!([2, 1, 1, [200, 100, 50, 71]])).unwrap();
+    call(&mut app, "create", json!([3, 1, 1, [0, 0, 0, 128]])).unwrap();
+    call(&mut app, "composite", json!([2,"__surface/1",{"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":[0,0],"weight":128,"coverage_write":"source"},"__surface/3"])).unwrap();
+    assert_eq!(pixels(&app, 2), [182, 91, 45, 128]);
+    call(
+        &mut app,
+        "filterRgb",
+        json!([2,{"x":0,"y":0,"width":1,"height":1},{"kind":"fade","rgb":[0,255,0],"weight":128}]),
+    )
+    .unwrap();
+    assert_eq!(pixels(&app, 2), [91, 173, 22, 128]);
+    let before = pixels(&app, 2);
+    let info = call(&mut app, "info", json!([2])).unwrap();
+    assert!(
+        call(
+            &mut app,
+            "filterRgb",
+            json!([2,{"x":0,"y":0,"width":1,"height":1},{"kind":"multiply","factors":[256,257,0]}])
+        )
+        .is_err()
+    );
+    assert_eq!(pixels(&app, 2), before);
+    assert_eq!(call(&mut app, "info", json!([2])).unwrap(), info);
+    let b = app.runtime().unwrap().client_id("b").unwrap();
+    app.context().state().unwrap().client = b;
+    call(&mut app, "create", json!([9, 1, 1, [0, 0, 0, 0]])).unwrap();
+    assert!(call(&mut app,"composite",json!([9,"__surface/1",{"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":[0,0]}])).is_err());
 }
 
 #[test]
@@ -134,7 +168,9 @@ fn scaling_output_feeds_existing_layer_rotation_and_filter_without_a_native_rend
     call(&mut app,"stretch",json!([2,"__surface/1",{"source_rect":{"x":0,"y":0,"width":2,"height":1},"destination":{"x":0,"y":0,"width":4,"height":1},"sampling":"nearest"}])).unwrap();
     assert_eq!(
         pixels(&app, 2),
-        [255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 128, 0, 0, 255, 128]
+        [
+            255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 128, 0, 0, 255, 128
+        ]
     );
     let cx = app.context();
     let layers = cx.singleton("Layers").unwrap();

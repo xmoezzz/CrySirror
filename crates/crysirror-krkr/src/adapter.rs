@@ -102,6 +102,7 @@ impl KrkrVm {
         let mut host = KrkrHost::new(self.config.canvas, self.config.font_alias.clone());
         host.storage = Some(storage);
         host.images = Some(h.image_metadata(self.client).map_err(err)?);
+        host.text_measurement = Some(h.text_measurement(self.client).map_err(err)?);
         host.now = h.now_ms();
         let mut rt = Runtime::with_host(host);
         natives::install(&mut rt);

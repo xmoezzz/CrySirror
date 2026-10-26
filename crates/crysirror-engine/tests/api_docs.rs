@@ -52,6 +52,8 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-scene/src/layer.rs",
         "crates/crysirror-scene/src/canvas.rs",
         "crates/crysirror-core/src/service.rs",
+        "crates/crysirror-image/src/associated.rs",
+        "crates/crysirror-siglus-vm/src/message.rs",
         "crates/crysirror-runtime/src/media.rs",
         "crates/crysirror-runtime/src/assets_async.rs",
         "crates/crysirror-tasks/src/lib.rs",
@@ -72,6 +74,11 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("MessageWindow", "Siglus `Config.message_window` (ADR 0061)", Some(json!({"font":"default","rect":[20,340,600,120],"name_rect":[20,308,600,28],"size":24,"name_size":20,"spacing":[0,2],"color":[255,255,255,255],"name_color":[255,255,255,255]}))),
+        d("AssociatedBlend", "`Bitmap.composite` options.blend", Some(json!("over"))),
+        d("CoverageWrite", "`Bitmap.composite` options.coverage_write", Some(json!("preserve"))),
+        d("AssociatedBlitOptions", "`Bitmap.composite` options", Some(json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":[0,0],"blend":"over","weight":256,"coverage_write":"preserve"}))),
+        d("RgbFilter", "`Bitmap.filterRgb` filter", Some(json!({"kind":"fade","rgb":[0,0,0],"weight":256}))),
         d("AssetKind", "`Assets.load(path, kind)`", Some(json!("model"))),
         d("AssetState", "`Assets.status(id)`", None),
         d("AssetTicket", "Rust async asset handle; store/client checked", None),
@@ -93,6 +100,11 @@ fn generate() -> api_doc::ApiDocs {
             "ScreenSpaceReflections",
             "`Environment.reflections` (ADR 0023)",
             sample::<view::ScreenSpaceReflections>(e.clone()),
+        ),
+        d(
+            "RayTracedGi",
+            "`Environment.ray_traced_gi` (ADR 0060)",
+            sample::<view::RayTracedGi>(e.clone()),
         ),
         d(
             "GeometryLod",
@@ -326,7 +338,7 @@ fn generate() -> api_doc::ApiDocs {
             ("ui", "UiCommand"),
         ],
         data,
-        adapters: vec![
+        adapters: vec![("avg32".into(), config("crates/crysirror-avg32/src/lib.rs")),
             (
                 "reallive",
                 config("crates/crysirror-reallive/src/adapter.rs"),

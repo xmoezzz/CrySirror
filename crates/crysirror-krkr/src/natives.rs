@@ -771,6 +771,42 @@ fn window_mut(rt: &mut Rt, h: ObjectHandle) -> Result<&mut WindowState> {
 /// Default `Font.height` (pixels) of a new layer.
 pub const DEFAULT_FONT_HEIGHT: i64 = 24;
 
+fn font_size(rt: &Rt, font: ObjectHandle) -> Result<u64> {
+    for property in ["bold", "italic", "angle"] {
+        if rt.object_member(font, property).to_integer()? != 0 {
+            return Err(unsupported(
+                &format!("Font.{property}"),
+                "matching engine canvas text style and metrics",
+            ));
+        }
+    }
+    let size = rt.object_member(font, "height").to_integer()?.unsigned_abs();
+    if !(1..=512).contains(&size) {
+        return Err(TjsError::runtime("Font.height must have magnitude 1..512"));
+    }
+    Ok(size)
+}
+
+fn font_text_width(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
+    let font = this_of(rt, t, "Font.getTextWidth")?;
+    let text = string(&a, 0, "Font.getTextWidth")?;
+    let size = font_size(rt, font)?;
+    let host = rt.host();
+    let metrics = host.text_measurement.as_ref()
+        .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?
+        .measure_simple(&host.font, size as f32, &text)
+        .map_err(|e| TjsError::runtime(format!("Font.getTextWidth: {e}")))?;
+    Ok(Variant::Integer(metrics.advance.ceil() as i64))
+}
+
+fn font_text_height(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
+    let font = this_of(rt, t, "Font.getTextHeight")?;
+    // KiriKiri returns abs(Font.height), even for the empty string. It does
+    // not return the glyph ink box or the engine's line pitch.
+    let _ = string(&a, 0, "Font.getTextHeight")?;
+    Ok(Variant::Integer(font_size(rt, font)? as i64))
+}
+
 fn install_layer(rt: &mut Rt) {
     let class = native_class(rt, "Layer", |rt, this, a| {
         let h = this_of(rt, this, "Layer")?;
@@ -812,16 +848,8 @@ fn install_layer(rt: &mut Rt) {
         rt.set_object_member(font, "bold", Variant::Integer(0));
         rt.set_object_member(font, "italic", Variant::Integer(0));
         rt.set_object_member(font, "angle", Variant::Integer(0));
-        rt.register_object_native(
-            font,
-            "getTextWidth",
-            |_: &mut Rt, _: Option<ObjectHandle>, _: Vec<Variant>| {
-                Err(unsupported(
-                    "Font.getTextWidth",
-                    "synchronous engine font metrics",
-                ))
-            },
-        );
+        rt.register_object_native_with_arg_count(font, "getTextWidth", NativeArgCount::AtLeast(1), font_text_width);
+        rt.register_object_native_with_arg_count(font, "getTextHeight", NativeArgCount::AtLeast(1), font_text_height);
         rt.set_object_member(h, "font", Variant::Object(font));
         rt.set_object_member(h, "__window", Variant::self_bound(window));
         rt.set_object_member(h, "name", Variant::String(String::new()));
@@ -1365,6 +1393,9 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
         need_int(&a, 1, "Layer.drawText")?,
     );
     let text = string(&a, 2, "Layer.drawText")?;
+    if text.contains(['\n', '\r']) {
+        return Err(unsupported("multiline Layer.drawText", "native multiline text policy"));
+    }
     let opa = int(&a, 4, 255)?;
     let color = argb(need_int(&a, 3, "Layer.drawText")?, Some(opa));
     if int(&a, 6, 0)? != 0 {
@@ -1378,14 +1409,7 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     }
     let font = object_arg(&rt.object_member(h, "font"))
         .ok_or_else(|| TjsError::runtime("Layer.font missing"))?;
-    if rt.object_member(font, "angle").to_integer().unwrap_or(0) != 0 {
-        return Err(unsupported("rotated Layer.font", "rotated canvas text"));
-    }
-    let size = rt
-        .object_member(font, "height")
-        .to_integer()?
-        .unsigned_abs()
-        .clamp(1, 512);
+    let size = font_size(rt, font)?;
     let l = rt.host().layer(h)?.clone();
     let host = rt.host_mut();
     // Every KiriKiri face maps to the configured project font alias.
@@ -1393,7 +1417,8 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     let width = (l.image_width - x).max(1);
     host.canvas_op(
         json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x,y,width,size as i64 * 2],
-        "paint":{"kind":"text","text":text,"font":alias,"size":size,"color":color}}}),
+        "paint":{"kind":"text","text":text,"font":alias,"size":size,"color":color,
+        "layout":crysirror_core::service::UNWRAPPED_TEXT_LAYOUT}}}),
     );
     host.layer_mut(h)?.blank = false;
     host.api_calls += 1;

@@ -568,6 +568,8 @@ struct Targets {
     bloom: Vec<(wgpu::TextureView, [u32; 2])>,
     /// SSR radiance (a = confidence) and the previous frame's final HDR color.
     ssr: wgpu::TextureView,
+    pixel_gi: wgpu::TextureView,
+    lighting_array: wgpu::TextureView,
     prev_hdr: wgpu::TextureView,
     prev_valid: bool,
 }
@@ -1191,7 +1193,13 @@ impl PbrRenderer {
                     },
                     count: None,
                 },
-                float_tex(14),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14, visibility: frag,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array, multisampled: false,
+                    }, count: None,
+                },
                 wgpu::BindGroupLayoutEntry {
                     binding: 15,
                     visibility: frag,
@@ -2580,6 +2588,21 @@ impl PbrRenderer {
             bloom.push((mk("bloom", s, HDR, 1, rs), s));
         }
         let ao_format = wgpu::TextureFormat::Rgba8Unorm;
+        // Reflections and diffuse GI share one sampled texture binding (the
+        // forward material stage already uses its 16-texture budget).
+        let lighting = d.create_texture(&wgpu::TextureDescriptor {
+            label: Some("screen ray lighting array"),
+            size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 2 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: HDR, usage: if self.hardware_rt.is_some() { rs | wgpu::TextureUsages::STORAGE_BINDING } else { rs }, view_formats: &[],
+        });
+        let lighting_array = lighting.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default()
+        });
+        let lighting_layer = |layer| lighting.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2), base_array_layer: layer,
+            array_layer_count: Some(1), ..Default::default()
+        });
         self.targets = Some(Targets {
             size,
             msaa_color: mk("hdr msaa", size, HDR, MSAA, ra),
@@ -2612,13 +2635,9 @@ impl PbrRenderer {
             ],
             history_valid: false,
             bloom,
-            ssr: mk(
-                "ssr",
-                size,
-                HDR,
-                1,
-                if self.hardware_rt.is_some() { rs | wgpu::TextureUsages::STORAGE_BINDING } else { rs },
-            ),
+            ssr: lighting_layer(0),
+            pixel_gi: lighting_layer(1),
+            lighting_array,
             prev_hdr: mk("previous HDR frame", size, HDR, 1, rs),
             prev_valid: false,
         });
@@ -3446,7 +3465,7 @@ impl PbrRenderer {
             ssr: env
                 .reflections
                 .as_ref()
-                .map_or([0.; 4], |r| [r.intensity, r.max_roughness, 0., 0.]),
+                .map_or([0.; 4], |r| [r.intensity, r.max_roughness, if use_rt && r.ray_traced {1.} else {0.}, 0.]),
             probes: [[0.; 4]; 24],
             vsm_view: [[0.; 4]; 4],
             vsm: [0.; 4],
@@ -3834,6 +3853,10 @@ impl PbrRenderer {
         }
         let mut fu = fu;
         fu.rt_shadow[1] = if rt_local.is_empty() { 0. } else { 1. };
+        if let Some(g) = &env.ray_traced_gi {
+            ensure!(use_rt, "per-pixel ray-traced GI requires the hardware ray-tracing rendering path");
+            fu.ssr[3] = g.intensity;
+        }
         fu.clusters[2] = clusters.lights.len() as f32;
         self.light_bufs
             .upload(&self.gpu.device, &self.gpu.queue, &clusters);
@@ -3941,7 +3964,7 @@ impl PbrRenderer {
                         },
                         wgpu::BindGroupEntry {
                             binding: 14,
-                            resource: wgpu::BindingResource::TextureView(&t.ssr),
+                            resource: wgpu::BindingResource::TextureView(&t.lighting_array),
                         },
                         wgpu::BindGroupEntry {
                             binding: 15,
@@ -4863,6 +4886,7 @@ impl PbrRenderer {
                     visibility_offset: (GI_VIS_OFFSET / 16) as u32,
                     max_distance: gi_max_distance,
                     backface_limit: GI_BACKFACE_LIMIT,
+                    light_count: clusters.lights.len() as u32,
                 };
                 rt.encode_gi(
                     &self.gpu,
@@ -4871,6 +4895,7 @@ impl PbrRenderer {
                     &e.source,
                     &self.env_sampler,
                     &self.local_shadows.matrices,
+                    &self.light_bufs.lights,
                     encoder,
                 )?;
             }
@@ -4893,6 +4918,7 @@ impl PbrRenderer {
                     env_rotation: fu.env[1],
                     sh: fu.sh,
                     max_distance: r.max_distance,
+                    samples: r.ray_samples, diffuse: false, light_count: clusters.lights.len() as u32,
                 };
                 traced_reflections = rt.encode_reflections(
                     &self.gpu,
@@ -4903,9 +4929,25 @@ impl PbrRenderer {
                     &t.prev_hdr,
                     &self.linear,
                     &t.ssr,
+                    &self.light_bufs.lights,
+                    &self.env.as_ref().context("environment for RT reflection")?.source,
                     encoder,
                 )?;
             }
+        }
+        if let (Some(g), Some(rt)) = (&env.ray_traced_gi, &mut self.hardware_rt) {
+            let view = crate::rt_pbr::ReflectionView {
+                inverse_view_projection: view_proj.inverse(), view_projection: view_proj, view,
+                previous_view_projection: None, camera: Vec3::from_array(cam.eye),
+                sun_dir: fu.sun_dir, sun_color: fu.sun_color,
+                env_intensity: fu.env[0], env_rotation: fu.env[1], sh: fu.sh,
+                max_distance: g.max_distance, samples: g.samples, diffuse: true,
+                light_count: clusters.lights.len() as u32,
+            };
+            let traced = rt.encode_reflections(&self.gpu, &view, canvas, &t.pre_depth, &t.normal,
+                &t.prev_hdr, &self.linear, &t.pixel_gi, &self.light_bufs.lights,
+                &self.env.as_ref().context("environment for pixel GI")?.source, encoder)?;
+            ensure!(traced, "per-pixel RT GI requires nonempty traceable scene geometry");
         }
         if let Some(r) = env.reflections.as_ref().filter(|_| !traced_reflections) {
             let u = SsrUniform {

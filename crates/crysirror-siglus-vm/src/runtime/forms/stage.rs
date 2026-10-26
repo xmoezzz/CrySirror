@@ -48,11 +48,15 @@ pub(crate) fn current_stage_form_id(ctx: &CommandContext) -> u32 {
         .unwrap_or_else(|| normal_stage_form_id(ctx))
 }
 
-pub fn cd_text_current_mwnd(_: &mut CommandContext, _: &str, _: i64) -> bool {
-    false
+pub fn cd_text_current_mwnd(
+    ctx: &mut CommandContext,
+    text: &str,
+    read_flag: i64,
+) -> anyhow::Result<bool> {
+    crate::message::append(ctx, text, read_flag)
 }
-pub fn cd_name_current_mwnd(_: &mut CommandContext, _: &str) -> bool {
-    false
+pub fn cd_name_current_mwnd(ctx: &mut CommandContext, name: &str) -> anyhow::Result<bool> {
+    crate::message::name(ctx, name)
 }
 pub fn restore_stage_form_backends_after_load(
     _: &mut CommandContext,

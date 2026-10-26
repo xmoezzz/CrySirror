@@ -2,6 +2,7 @@
 // Exact generated-pixel comparisons against the complete pinned native source.
 use crysirror_image::{
     ImageSurface,
+    associated::{AssociatedBlend, AssociatedBlitOptions, CoveragePlane, CoverageWrite, RgbFilter},
     bitmap::{BitmapRect, BlitOptions, PixelMath, Sampling, StretchOptions},
 };
 use reallive::surface::{Blend, Rect, Surface};
@@ -146,6 +147,126 @@ fn main() {
             nearest_cases += 1;
         }
     }
+    let mut associated_cases = 0u64;
+    for mask in 0..=255u8 {
+        for weight in 0..=256u16 {
+            for s in [0u8, 128, 255] {
+                for d in [0u8, 128, 255] {
+                    let src = ImageSurface::filled(1, 1, [s, 255 - s, s / 2, 255]).unwrap();
+                    let plane = CoveragePlane {
+                        width: 1,
+                        height: 1,
+                        bytes: vec![mask],
+                    };
+                    for blend in [
+                        AssociatedBlend::Copy,
+                        AssociatedBlend::Over,
+                        AssociatedBlend::Under,
+                    ] {
+                        let original = [d, 255 - d, d / 2];
+                        let mut reference = original;
+                        match blend {
+                            AssociatedBlend::Copy => avg32::buffer::fade_pixel(
+                                [s, 255 - s, s / 2],
+                                original,
+                                &mut reference,
+                                256,
+                                u32::from(weight),
+                            ),
+                            AssociatedBlend::Over => avg32::buffer::fade_pixel(
+                                [s, 255 - s, s / 2],
+                                original,
+                                &mut reference,
+                                u32::from(mask),
+                                u32::from(weight),
+                            ),
+                            AssociatedBlend::Under => avg32::buffer::fade_under(
+                                [s, 255 - s, s / 2],
+                                &mut reference,
+                                mask,
+                                u32::from(weight),
+                            ),
+                        }
+                        let alpha = if blend == AssociatedBlend::Under {
+                            mask
+                        } else {
+                            71
+                        };
+                        let mut shared =
+                            ImageSurface::filled(1, 1, [d, 255 - d, d / 2, alpha]).unwrap();
+                        shared
+                            .composite_associated(
+                                &src,
+                                Some(&plane),
+                                AssociatedBlitOptions {
+                                    source_rect: BitmapRect::new(0, 0, 1, 1),
+                                    destination: [0, 0],
+                                    blend,
+                                    weight,
+                                    coverage_write: CoverageWrite::Preserve,
+                                },
+                            )
+                            .unwrap();
+                        assert_eq!(
+                            &shared.rgba[..3],
+                            &reference,
+                            "associated {blend:?} mask={mask} weight={weight} s={s} d={d}"
+                        );
+                        assert_eq!(shared.rgba[3], alpha);
+                        associated_cases += 1;
+                    }
+                }
+            }
+        }
+    }
+    let mut fade_cases = 0;
+    let mut manager = avg32::pdtmgr::PdtManager::new();
+    for count in 0..=255u8 {
+        for rect in [
+            BitmapRect::new(0, 0, 5, 4),
+            BitmapRect::new(-2, -1, 4, 3),
+            BitmapRect::new(3, 2, 9, 6),
+        ] {
+            for target in [[0u8, 0, 0], [255, 255, 255], [12, 99, 143]] {
+                let mut native = avg32::buffer::PdtBuffer::new(5, 4);
+                for (i, p) in original.rgba.chunks_exact(4).enumerate() {
+                    native.set_pixel(i, [p[0], p[1], p[2]]);
+                    native.mask[i] = p[3];
+                }
+                manager.set(2, Some(native));
+                manager.fade_color(
+                    avg32::pdtmgr::Rect::new(
+                        rect.x,
+                        rect.y,
+                        rect.x + rect.width as i32 - 1,
+                        rect.y + rect.height as i32 - 1,
+                    ),
+                    2,
+                    target.map(i32::from),
+                    i32::from(count),
+                );
+                let mut shared = original.clone();
+                shared
+                    .filter_rgb(
+                        rect,
+                        RgbFilter::Fade {
+                            rgb: target,
+                            weight: u16::from(count) + 1,
+                        },
+                    )
+                    .unwrap();
+                let expected = manager.get(2).unwrap();
+                for (i, p) in shared.rgba.chunks_exact(4).enumerate() {
+                    assert_eq!(&p[..3], &expected.rgb[i * 3..i * 3 + 3]);
+                    assert_eq!(p[3], expected.mask[i]);
+                }
+                fade_cases += 1;
+            }
+        }
+    }
+    println!(
+        "PASS: associated composition={associated_cases}, signed /256 clipped RGB fades={fade_cases}"
+    );
     println!(
         "PASS: RealLive Copy/Mask255={straight_cases}, AVG32 premultiplied mask={premultiplied_cases}, AVG32 nearest RGB/mask={nearest_cases}"
     );

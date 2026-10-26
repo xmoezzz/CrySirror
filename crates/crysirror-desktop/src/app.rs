@@ -92,6 +92,7 @@ pub fn load_fonts(rt: &mut Runtime, override_font: Option<&Path>) -> Result<()> 
     for (alias, path) in &rt.project.fonts {
         let bytes = rt.assets.read(path)?;
         rt.assets.text.add_font(alias, bytes.to_vec())?;
+        rt.host.text.add_font(alias, bytes.to_vec())?;
     }
     if let Some(path) = override_font {
         let mut bytes = Vec::new();
@@ -100,6 +101,7 @@ pub fn load_fonts(rt: &mut Runtime, override_font: Option<&Path>) -> Result<()> 
             .take(32 * 1024 * 1024 + 1)
             .read_to_end(&mut bytes)?;
         ensure!(bytes.len() <= 32 * 1024 * 1024, "font exceeds 32 MiB");
+        rt.host.text.add_font("default", bytes.clone())?;
         rt.assets.text.add_font("default", bytes)?;
     }
     Ok(())

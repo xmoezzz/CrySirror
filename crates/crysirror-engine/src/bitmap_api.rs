@@ -5,17 +5,18 @@
 //! operations here. A returned path can be used by Layers.put or text icons.
 //! Slots belong to the calling client and share its existing surface budget.
 use crate::{
-    object::{Class, ClassInfo, MethodInfo, ObjectId, TypeHint as T},
     EngineContext, EngineState, Value,
+    object::{Class, ClassInfo, MethodInfo, ObjectId, TypeHint as T},
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::FileSystem,
 };
 use crysirror_image::{
-    bitmap::{BitmapRect, BlitOptions, StretchOptions},
     ImageSurface,
+    associated::{AssociatedBlitOptions, CoveragePlane, RgbFilter},
+    bitmap::{BitmapRect, BlitOptions, StretchOptions},
 };
 use crysirror_runtime::assets::SURFACE_PREFIX;
 use serde::de::DeserializeOwned;
@@ -66,7 +67,10 @@ fn source(state: &mut EngineState, asset: &str) -> Result<ImageSurface> {
             .assets
             .generated_for(state.client, asset_path.relative())?
         {
-            return state.runtime.assets.decode_image(state.client, asset, &bytes);
+            return state
+                .runtime
+                .assets
+                .decode_image(state.client, asset, &bytes);
         }
     }
     let bytes = state
@@ -75,7 +79,10 @@ fn source(state: &mut EngineState, asset: &str) -> Result<ImageSurface> {
         .fs
         .read(state.client, &asset_path)
         .map_err(|e| anyhow::anyhow!("bitmap asset: {e}"))?;
-    state.runtime.assets.decode_image(state.client,asset,&bytes)
+    state
+        .runtime
+        .assets
+        .decode_image(state.client, asset, &bytes)
 }
 fn publish(state: &mut EngineState, slot: u32, image: ImageSurface) -> Result<Value> {
     image.validate()?;
@@ -119,6 +126,10 @@ impl Class for BitmapClass {
                     "Copy/blend source_rect into destination:[x,y]. Explicit mode and opacity; self-copy reads the original pixels."),
                 method("stretch",vec![("slot",T::Int),("source",T::String),("options",T::Map)],T::String,
                     "Nearest-neighbor source_rect to destination rectangle with original mapping preserved after clipping. Explicit pixel math."),
+                method("composite",vec![("slot",T::Int),("source",T::String),("options",T::Map),("coverage",T::Optional(Box::new(T::String)))],T::String,
+                    "Composite associated RGB with copy/over/under, explicit 0..256 weight and preserve/source coverage_write. Optional coverage asset supplies alpha independently of source RGB. Stored channels remain associated; self-copies use snapshots."),
+                method("filterRgb",vec![("slot",T::Int),("rect",T::Map),("filter",T::Map)],T::String,
+                    "Filter RGB bytes, retaining alpha: {kind:'fade',rgb:[r,g,b],weight:0..256} or {kind:'multiply',factors:[0..256,0..256,0..256]}. Fade floors signed deltas."),
                 method("info",vec![("slot",T::Int)],T::Map,
                     "Return client-local width, height, revision, bytes and surface path."),
                 method("remove",vec![("slot",T::Int)],T::Bool,
@@ -169,6 +180,27 @@ impl Class for BitmapClass {
                         image.stretch_blit(&src, decode::<StretchOptions>(options)?)?;
                     }
                 }
+                publish(state, slot, image)
+            }
+            "composite" => {
+                let mut image = current(state, slot)?;
+                let src = source(state, arg(args, 1, "source")?.as_str()?)?;
+                let options: AssociatedBlitOptions = decode(arg(args, 2, "options")?)?;
+                let coverage = match args.get(3) {
+                    None | Some(Value::Null) => None,
+                    Some(value) => {
+                        Some(CoveragePlane::from_alpha(&source(state, value.as_str()?)?)?)
+                    }
+                };
+                image.composite_associated(&src, coverage.as_ref(), options)?;
+                publish(state, slot, image)
+            }
+            "filterRgb" => {
+                let mut image = current(state, slot)?;
+                image.filter_rgb(
+                    decode(arg(args, 1, "rect")?)?,
+                    decode::<RgbFilter>(arg(args, 2, "filter")?)?,
+                )?;
                 publish(state, slot, image)
             }
             "info" => {

@@ -50,6 +50,7 @@ pub trait ImageDecoder: Send + Sync {
     fn decode(&self, bytes: &[u8]) -> Result<ImageSurface>;
 }
 pub mod bitmap;
+pub mod associated;
 pub mod composition;
 mod dds;
 pub mod packed;

@@ -526,12 +526,12 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
     let kd_ibl = (vec3<f32>(1.0) - fr) * (1.0 - metallic);
     let irradiance = sh_irradiance(n);
     let r = reflect(-v, n);
-    var prefiltered = textureSampleLevel(env_prefiltered, env_sampler, equirect_uv(r), roughness * frame.env.z).rgb;
+    var prefiltered = textureSampleLevel(env_prefiltered, env_sampler, equirect_uv(r), roughness * frame.env.z).rgb * frame.env.x;
     prefiltered = probe_specular(i.world, r, roughness, prefiltered);
     // Screen-space reflections replace the environment where rays hit (ADR 0023).
     if frame.ssr.x > 0.0 && material.alpha.x < 2.0 {
-        let s = textureLoad(ssr_texture, vec2<i32>(i.clip.xy), 0);
-        let gloss = 1.0 - smoothstep(frame.ssr.y * 0.5, frame.ssr.y, roughness);
+        let s = textureLoad(ssr_texture, vec2<i32>(i.clip.xy), 0, 0);
+        let gloss = select(1.0 - smoothstep(frame.ssr.y * 0.5, frame.ssr.y, roughness), 1.0, frame.ssr.z > 0.5);
         prefiltered = mix(prefiltered, s.rgb, clamp(s.a * gloss * frame.ssr.x, 0.0, 1.0));
     }
     let lut = textureSampleLevel(brdf_lut, env_sampler, vec2<f32>(nv, roughness), 0.0).rg;
@@ -543,8 +543,11 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
     }
     // The GI volume holds absolute irradiance (sky included), so the
     // environment intensity only scales the fallback and the specular term.
-    let diffuse_irr = gi_irradiance(i.world, n, v, irradiance * frame.env.x);
-    let ambient = (kd_ibl * base.rgb * diffuse_irr / PI + specular_ibl * frame.env.x) * occlusion;
+    var diffuse_irr = gi_irradiance(i.world, n, v, irradiance * frame.env.x);
+    if frame.ssr.w > 0.0 && material.alpha.x < 2.0 {
+        diffuse_irr = textureLoad(ssr_texture, vec2<i32>(i.clip.xy), 1, 0).rgb * frame.ssr.w;
+    }
+    let ambient = (kd_ibl * base.rgb * diffuse_irr / PI + specular_ibl) * occlusion;
     let local = local_lights(i.world, i.clip.xy, ng, n, v, base.rgb, metallic, f0, max(a, 0.002), nv);
     let fog = height_fog(i.world);
     let color=mix(direct+local+ambient+emissive, fog.rgb, fog.a);

@@ -24,8 +24,10 @@ and a test keeps it current.
   `crysirror-tasks`. Descriptions come from their
   `///` comments. Defaults come from serde: a minimal value is parsed and
   then serialized again.
-- **Adapter configs.** The `Config` structs of the Siglus and native RealLive
-  adapters. Removed hosted-engine configurations are not accepted.
+- **Adapter configs.** The `Config` structs of the Siglus, native RealLive and
+  original AVG32 VM adapters. Siglus's explicit `MessageWindow` fields are also
+  exported as a data specification. Removed hosted-engine configurations are
+  not accepted.
 
 Rust crate internals are not part of this reference. For those, use
 `cargo doc --workspace --no-deps`.

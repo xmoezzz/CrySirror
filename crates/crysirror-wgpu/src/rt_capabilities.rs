@@ -10,6 +10,7 @@ pub const MAX_RT_PRIMITIVES: u32 = 1_000_000;
 /// Acceleration-structure limits actually advertised or enabled by wgpu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct AccelerationLimits {
+    pub max_storage_buffers_per_shader_stage: u32,
     pub max_blas_primitive_count: u32,
     pub max_blas_geometry_count: u32,
     pub max_tlas_instance_count: u32,
@@ -18,6 +19,7 @@ pub struct AccelerationLimits {
 impl From<&wgpu::Limits> for AccelerationLimits {
     fn from(limits: &wgpu::Limits) -> Self {
         Self {
+            max_storage_buffers_per_shader_stage: limits.max_storage_buffers_per_shader_stage,
             max_blas_primitive_count: limits.max_blas_primitive_count,
             max_blas_geometry_count: limits.max_blas_geometry_count,
             max_tlas_instance_count: limits.max_tlas_instance_count,
@@ -28,7 +30,9 @@ impl From<&wgpu::Limits> for AccelerationLimits {
 }
 impl AccelerationLimits {
     fn unavailable_reason(self) -> Option<&'static str> {
-        if self.max_blas_primitive_count == 0 {
+        if self.max_storage_buffers_per_shader_stage < 6 {
+            Some("RT hit lighting requires six storage-buffer bindings per shader stage")
+        } else if self.max_blas_primitive_count == 0 {
             Some("the BLAS primitive limit is zero")
         } else if self.max_blas_geometry_count == 0 {
             Some("the BLAS geometry limit is zero")
@@ -149,6 +153,7 @@ pub fn negotiate_limits(adapter_limits: &wgpu::Limits) -> Result<wgpu::Limits> {
     limits.max_blas_primitive_count = adapter_limits
         .max_blas_primitive_count
         .min(MAX_RT_PRIMITIVES);
+    limits.max_storage_buffers_per_shader_stage = 6;
     limits.max_blas_geometry_count = 1;
     limits.max_tlas_instance_count = adapter_limits.max_tlas_instance_count.min(4096);
     limits.max_acceleration_structures_per_shader_stage = 1;
@@ -183,6 +188,14 @@ mod tests {
             subgroup_max_size: 32,
             transient_saves_memory: false,
         }
+    }
+    #[test]
+    fn hit_lighting_storage_budget_is_negotiated_and_insufficient_adapters_fail() {
+        let mut available = limits();
+        available.max_storage_buffers_per_shader_stage = 5;
+        assert!(negotiate_limits(&available).unwrap_err().to_string().contains("six storage-buffer"));
+        available.max_storage_buffers_per_shader_stage = 6;
+        assert_eq!(negotiate_limits(&available).unwrap().max_storage_buffers_per_shader_stage, 6);
     }
     #[test]
     fn native_backends_are_capability_driven_across_vendor_identifiers() {

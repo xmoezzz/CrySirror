@@ -19,7 +19,7 @@ pub fn publish(
         "native wipe rendering is not supported by the layer bridge"
     );
     ensure!(
-        ctx.ui.message.is_none() && ctx.ui.name.is_none(),
+        ctx.ui.window.is_some() || (ctx.ui.message.is_none() && ctx.ui.name.is_none()),
         "native message layout must be implemented before CD_TEXT/CD_NAME can render"
     );
     ensure!(
@@ -130,13 +130,22 @@ pub fn publish(
                     clip: None,
                     opacity: ((b.alpha.clamp(0, 255) * b.tr.clamp(0, 255)) / 255) as u8,
                     visible: b.disp != 0,
-                    blend: [Blend::Normal, Blend::Add, Blend::Subtract, Blend::Multiply, Blend::Screen][b.blend as usize],
+                    blend: [
+                        Blend::Normal,
+                        Blend::Add,
+                        Blend::Subtract,
+                        Blend::Multiply,
+                        Blend::Screen,
+                    ][b.blend as usize],
                     uv: None,
                     filter: object_filter(b),
                 });
             }
         }
     }
+    // Shared text layout/metrics validate before any visible scene mutation.
+    let message_layers = crate::message::project(ctx, host)?;
+    ids.extend(message_layers.iter().map(|layer| layer.id));
     // Complete decoding/validation before any visible scene mutation.
     for (layer, image) in layers.iter_mut().zip(needed) {
         if let Some(image) = image {
@@ -159,6 +168,7 @@ pub fn publish(
             }
         }
     }
+    layers.extend(message_layers);
     let mut batch = ServiceBatch::default();
     batch.layers.extend(
         old.difference(&ids)
@@ -171,6 +181,7 @@ pub fn publish(
         host.submit_engine(client, 1, &serde_json::to_vec(&batch)?)?;
     }
     *old = ids;
+    ctx.ui.published_message = old.contains(&crate::message::MESSAGE_LAYER);
     Ok(())
 }
 
@@ -185,7 +196,9 @@ fn native_anchor_component(position: i64, center_rep: i64) -> f32 {
 
 /// Siglus object color effects as an engine layer filter. Units follow
 /// siglus_scene_vm's render plan: every channel/rate is value / 255.
-fn object_filter(b: &crate::runtime::globals::ObjectBaseState) -> Option<crysirror_scene::layer::LayerFilter> {
+fn object_filter(
+    b: &crate::runtime::globals::ObjectBaseState,
+) -> Option<crysirror_scene::layer::LayerFilter> {
     let u = |v: i64| (v.clamp(0, 255) as f32) / 255.;
     let f = crysirror_scene::layer::LayerFilter {
         mono: u(b.mono),
@@ -203,7 +216,12 @@ fn object_filter(b: &crate::runtime::globals::ObjectBaseState) -> Option<crysirr
     // Objects default to alpha test (discard alpha < 1/255). Without depth
     // writes that is invisible for every 2D blend mode (alpha 0 contributes
     // nothing), so it alone does not require the filtered path.
-    let identity = f.mono == 0. && f.invert == 0. && f.bright == 0. && f.dark == 0. && f.color_rate == 0. && f.add == [0.; 3];
+    let identity = f.mono == 0.
+        && f.invert == 0.
+        && f.bright == 0.
+        && f.dark == 0.
+        && f.color_rate == 0.
+        && f.add == [0.; 3];
     (!identity).then_some(f)
 }
 
@@ -215,7 +233,10 @@ mod filter_tests {
     fn siglus_object_effects_map_to_layer_filter_units() {
         let mut b = ObjectBaseState::default();
         assert_eq!(b.alpha_test, 1, "Siglus objects alpha-test by default");
-        assert!(object_filter(&b).is_none(), "default object needs no filter");
+        assert!(
+            object_filter(&b).is_none(),
+            "default object needs no filter"
+        );
         b.mono = 255;
         b.reverse = 51;
         b.color_rate = 128;

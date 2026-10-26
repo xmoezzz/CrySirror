@@ -7,7 +7,7 @@
 //! no pixels are composed here. Commands are queued while TJS runs and
 //! submitted in order by the adapter after each script entry point returns.
 use crate::storage::{Storage, decode_text};
-use crysirror_core::service::ImageMetadata;
+use crysirror_core::service::{ImageMetadata, TextMeasurement};
 use krkr_tjs2::{
     Result as TjsResult, TjsError,
     runtime::{ObjectHandle, TjsHost},
@@ -83,6 +83,7 @@ pub enum Batch {
 pub struct KrkrHost {
     pub storage: Option<Storage>,
     pub images: Option<Arc<dyn ImageMetadata>>,
+    pub text_measurement: Option<Arc<dyn TextMeasurement>>,
     pub now: u64,
     pub canvas: [u32; 2],
     pub font: String,
@@ -102,6 +103,7 @@ impl KrkrHost {
         Self {
             storage: None,
             images: None,
+            text_measurement: None,
             now: 0,
             canvas,
             font,

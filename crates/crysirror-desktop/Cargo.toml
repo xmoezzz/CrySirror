@@ -10,8 +10,9 @@ name = "crysirror"
 path = "src/main.rs"
 
 [features]
-default = ["reallive", "audio", "siglus-resources", "scripting", "gamepad", "emote-import"]
+default = ["avg32", "reallive", "audio", "siglus-resources", "scripting", "gamepad", "emote-import"]
 reallive = ["dep:crysirror-reallive"]
+avg32 = ["dep:crysirror-avg32"]
 # KiriKiri TJS2 adapter (ADR 0053). AGPL-3.0-or-later: never in `default`;
 # a binary built with it is distributed under the AGPL. Pair with `arc-formats`
 # for TLG images.
@@ -27,6 +28,7 @@ arc-formats = ["scripting", "crysirror-engine/arc-formats"]
 
 [dependencies]
 crysirror-reallive = {workspace=true,optional=true}
+crysirror-avg32 = {workspace=true,optional=true}
 crysirror-krkr = {workspace=true,optional=true}
 crysirror-core.workspace = true
 crysirror-runtime.workspace = true

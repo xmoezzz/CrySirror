@@ -240,6 +240,32 @@ impl GeometryLod {
     }
 }
 
+/// Per-pixel diffuse irradiance from native ray queries (ADR 0060).
+/// Requires the explicit hardware ray-tracing rendering path.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RayTracedGi {
+    /// Cosine-weighted hemisphere rays per visible pixel (1..64).
+    #[serde(default = "gi_samples")]
+    pub samples: u32,
+    /// Ray length in world meters; misses use environment irradiance.
+    #[serde(default = "ssr_distance")]
+    pub max_distance: f32,
+    /// Multiplier of the computed diffuse irradiance (0..16).
+    #[serde(default = "one")]
+    pub intensity: f32,
+}
+fn gi_samples() -> u32 { 8 }
+impl RayTracedGi {
+    pub fn validate(&self) -> Result<()> {
+        ensure!((1..=64).contains(&self.samples)
+            && self.max_distance.is_finite() && (0.01..=10000.).contains(&self.max_distance)
+            && self.intensity.is_finite() && (0.0..=16.).contains(&self.intensity),
+            "invalid ray-traced GI");
+        Ok(())
+    }
+}
+
 /// Screen-space reflections (ADR 0023): rays marched against the depth
 /// prepass, radiance reprojected from the previous HDR frame, blended over
 /// the prefiltered environment specular by hit confidence and roughness.
@@ -261,12 +287,16 @@ pub struct ScreenSpaceReflections {
     /// Linear march steps (refined by a binary search).
     #[serde(default = "ssr_steps")]
     pub steps: u32,
-    /// Trace mirror rays against the scene when the renderer runs the
+    /// Trace GGX glossy rays against the scene when the renderer runs the
     /// hardware ray-tracing path (ADR 0058); screen space otherwise. The
     /// technique actually used is reported in the RT statistics.
     #[serde(default)]
     pub ray_traced: bool,
+    /// GGX rays per pixel on the hardware path (1..64); exact mirrors use one.
+    #[serde(default = "reflection_samples")]
+    pub ray_samples: u32,
 }
+fn reflection_samples() -> u32 { 16 }
 fn ssr_distance() -> f32 {
     30.
 }
@@ -294,7 +324,8 @@ impl ScreenSpaceReflections {
                 && (0.01..=10_000.).contains(&self.max_distance)
                 && (0.001..=100.).contains(&self.thickness)
                 && (0.01..=1.).contains(&self.max_roughness)
-                && (4..=256).contains(&self.steps),
+                && (4..=256).contains(&self.steps)
+                && (1..=64).contains(&self.ray_samples),
             "invalid screen-space reflections"
         );
         Ok(())
@@ -359,6 +390,9 @@ pub struct Environment {
     /// Screen-space reflections (ADR 0023).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reflections: Option<ScreenSpaceReflections>,
+    /// Per-pixel ray-traced diffuse GI; requires the hardware rendering path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ray_traced_gi: Option<RayTracedGi>,
     /// Cluster-LOD virtualized geometry (ADR 0026).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry_lod: Option<GeometryLod>,
@@ -392,6 +426,7 @@ impl Default for Environment {
             fog: None,
             auto_exposure: None,
             reflections: None,
+            ray_traced_gi: None,
             geometry_lod: None,
             virtual_shadows: None,
         }
@@ -423,6 +458,7 @@ impl Environment {
         if let Some(a) = &self.auto_exposure {
             a.validate()?;
         }
+        if let Some(g) = &self.ray_traced_gi { g.validate()?; }
         if let Some(r) = &self.reflections {
             r.validate()?;
         }
@@ -764,5 +800,24 @@ impl World {
             probes,
             volumes,
         }))
+    }
+}
+
+#[cfg(test)]
+mod ray_lighting_tests {
+    use super::*;
+    #[test]
+    fn native_ray_budgets_are_defaulted_and_bounded() {
+        let g: RayTracedGi = serde_json::from_str("{}").unwrap();
+        assert_eq!(g.samples, 8);
+        g.validate().unwrap();
+        for samples in [0, 65, u32::MAX] {
+            assert!(RayTracedGi { samples, ..g.clone() }.validate().is_err());
+        }
+        let mut reflections: ScreenSpaceReflections = serde_json::from_str("{}").unwrap();
+        assert_eq!(reflections.ray_samples, 16);
+        reflections.ray_samples = 0;
+        assert!(reflections.validate().is_err());
+        assert!(RayTracedGi { max_distance: f32::NAN, ..g }.validate().is_err());
     }
 }

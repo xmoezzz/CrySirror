@@ -8,6 +8,8 @@ use crate::{
 use alloc::{string::String, sync::Arc, vec::Vec};
 
 pub const SIMPLE_TEXT_LAYOUT: &str = "simple-horizontal-v1";
+/// The same horizontal glyph metrics without automatic width wrapping.
+pub const UNWRAPPED_TEXT_LAYOUT: &str = "simple-horizontal-unwrapped-v1";
 
 /// Read-only capability for an asset such as a large native archive. Offsets
 /// are explicit: callers can keep independent seek cursors without sharing a
@@ -214,6 +216,23 @@ pub trait ImageMetadata: Send + Sync {
     fn size(&self, asset: &str) -> Result<[u32; 2]>;
 }
 
+/// Logical extents of the engine's simple horizontal text layout, before
+/// wrapping or clipping. Advance includes kerning; height is one line pitch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextExtent {
+    pub advance: f32,
+    pub line_height: f32,
+    pub ascent: f32,
+    pub descent: f32,
+}
+
+/// Immutable CPU font-resource snapshot. Native script callbacks can measure
+/// synchronously on any thread without borrowing the owner host or a renderer.
+/// This is the simple-horizontal-v1 layout, not a native layout substitution.
+pub trait TextMeasurement: Send + Sync {
+    fn measure_simple(&self, font: &str, size: f32, text: &str) -> Result<TextExtent>;
+}
+
 pub trait HostServices: FileSystem {
     fn audio_playing(&self, _client: ClientId, _channel: u32) -> Result<bool> {
         Err(crate::Error::Unsupported("engine audio status"))
@@ -271,6 +290,10 @@ pub trait HostServices: FileSystem {
     /// Thread-safe image metadata handle for this client (ADR 0053).
     fn image_metadata(&mut self, _client: ClientId) -> Result<Arc<dyn ImageMetadata>> {
         Err(crate::Error::Unsupported("image metadata handle"))
+    }
+    /// Client-authorized immutable font measurement capability.
+    fn text_measurement(&mut self, _client: ClientId) -> Result<Arc<dyn TextMeasurement>> {
+        Err(crate::Error::Unsupported("text measurement handle"))
     }
     /// Thread-safe storage handle for this client (ADR 0008).
     fn storage(&mut self, _client: ClientId) -> Result<Arc<dyn ClientStorage>> {

@@ -66,6 +66,10 @@ declare class Bitmap {
   blit(slot: number, source: string, options: Record<string, any>): string;
   /** Nearest-neighbor source_rect to destination rectangle with original mapping preserved after clipping. Explicit pixel math. */
   stretch(slot: number, source: string, options: Record<string, any>): string;
+  /** Composite associated RGB with copy/over/under, explicit 0..256 weight and preserve/source coverage_write. Optional coverage asset supplies alpha independently of source RGB. Stored channels remain associated; self-copies use snapshots. */
+  composite(slot: number, source: string, options: Record<string, any>, coverage: string | null): string;
+  /** Filter RGB bytes, retaining alpha: {kind:'fade',rgb:[r,g,b],weight:0..256} or {kind:'multiply',factors:[0..256,0..256,0..256]}. Fade floors signed deltas. */
+  filterRgb(slot: number, rect: Record<string, any>, filter: Record<string, any>): string;
   /** Return client-local width, height, revision, bytes and surface path. */
   info(slot: number): Record<string, any>;
   /** Release this client's surface slot; return whether it existed. */
@@ -452,6 +456,8 @@ declare class Save {
 }
 /** CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed. */
 declare class Text {
+  /** Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface. */
+  measureSimple(font: string, size: number, text: string): Record<string, any>;
   /** Shape and rasterize rich text; returns __surface path for a layer. Optional typewriter rate advances with App frames. */
   draw(name: string, markup: string, options: Record<string, any>): string;
   /** Read content/options/reveal state for explicit persistence. */

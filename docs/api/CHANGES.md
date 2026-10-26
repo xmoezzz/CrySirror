@@ -4,6 +4,34 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `1050976234c41b17` (2026-10-26): native VM services and ray lighting
+
+- `Environment.ray_traced_gi` optionally enables per-pixel single-bounce diffuse
+  GI on the hardware path. `ScreenSpaceReflections.ray_samples` defaults to 16;
+  native reflections sample a GGX glossy lobe. Probe and pixel GI include local
+  lights. The reflection/pixel-GI layers share the existing texture binding
+  (ADR 0060). Hardware requests now require six storage-buffer bindings;
+  unsupported limits fail explicitly. Existing projects retain GI-off defaults.
+- `Text.measureSimple(font, size, text)` returns unwrapped simple-layout
+  metrics without allocating a surface. Canvas text additionally accepts the
+  `simple-horizontal-unwrapped-v1` layout profile for clipping without automatic
+  wrapping (ADR 0063). KiriKiri font callbacks use engine font resources.
+- `Bitmap.composite` and `Bitmap.filterRgb` expose associated stored-channel
+  composition, separate coverage, explicit 0..256 weights and signed integer
+  fade/multiply. These are intermediate associated-byte operations, not an
+  automatic conversion to straight-alpha display pixels (ADR 0062).
+- Siglus config optionally accepts `message_window` for the bounded plain
+  `FRONT.MWND[0]` TEXT/NAME profile (ADR 0061). Existing configurations without
+  it keep explicit rejection of unmapped native text; it cannot be combined
+  with Gameexe. This is not automatic native window or complete game support.
+- The desktop adds the independent `avg32` adapter/feature, using the original
+  VM's pinned `portable-vm` library through scoped engine APIs (ADR 0062).
+  Its configuration and shared bitmap option types are now exported.
+- **Behaviour correction:** KiriKiri unsupported font styles and oversized
+  nominal fonts now fail instead of silently drawing a substituted style/size.
+  Single-line text clips at the canvas edge rather than wrapping. Configure a
+  supported project font and style; missing native operations still fail.
+
 ## `3ff1c210d5f93836` (2026-10-26): ray-traced irradiance probes
 
 - `IrradianceVolumeSpec.ray_traced` (bool, default `false`): on the

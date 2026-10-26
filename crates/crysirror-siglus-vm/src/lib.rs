@@ -35,6 +35,8 @@ pub mod io_fs;
 
 pub mod adapter;
 mod export;
+mod message;
+pub use message::MessageWindow;
 
 pub mod fixture;
 #[cfg(test)]

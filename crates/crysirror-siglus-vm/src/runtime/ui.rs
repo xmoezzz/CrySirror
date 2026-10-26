@@ -6,10 +6,18 @@ pub struct UiRuntime {
     pub name: Option<String>,
     pub reveal_start: Option<crate::platform_time::Instant>,
     pub visible_chars: usize,
+    pub window: Option<crate::message::MessageWindow>,
+    pub cursor: crysirror_text::grid::CellCursor,
+    pub glyphs: Vec<crysirror_text::grid::CellGlyph>,
+    pub name_glyphs: Vec<crysirror_text::grid::CellGlyph>,
+    pub reveal: Option<crysirror_scene::layer::GlyphReveal>,
+    pub published_message: bool,
 }
 impl UiRuntime {
     pub fn message_waiting(&self) -> bool {
-        false
+        self.reveal
+            .as_ref()
+            .is_some_and(|reveal| !reveal.status(self.glyphs.len()).complete)
     }
     pub fn message_visible_chars(&self) -> usize {
         self.visible_chars

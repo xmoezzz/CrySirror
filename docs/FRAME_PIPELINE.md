@@ -58,8 +58,9 @@ cargo run -p crysirror-desktop -- render examples/aaa-fox-sponza/project.json \
 
 Sponza exceeds the default 256 MiB prepared-cache budget; the example explicitly
 requests 1024 MiB. This is a host CPU-cache policy, separate from total RAM/VRAM.
-Sponza uses the raster material path: source alpha-test materials are outside
-the current force-opaque RT profile and are not silently replaced.
+This Sponza recipe uses the raster material path. Native alpha-tested RT
+casters were added later in ADR 0055; this earlier capture recipe does not
+establish that every Sponza material is supported by the RT hit-shading profile.
 
 ## Measurements
 
@@ -82,3 +83,31 @@ profiler.clear();
 Asset GUID databases/cooking, chunk/mip streaming, budgeted GPU uploads,
 simulation parallelism, BLAS refit and an editor/profiler overlay remain work.
 This iteration does not mark engine-wide ADR 0050 complete.
+
+## Glossy reflections and per-pixel GI
+
+The same Khronos model can exercise the newer lighting APIs (ADR 0060):
+
+```sh
+cargo run -p crysirror-desktop -- render examples/aaa-helmet/project.json \
+  --script examples/aaa-helmet/ray-lighting.ts --renderer hardware-raytrace \
+  --movie-frames 4 --movie-dir target/verification/ray-lighting-frames \
+  --output target/verification/ray-lighting.png
+```
+
+The script keeps the glTF material maps, places three metal panels with
+different roughness values, adds a local light and enables native diffuse GI.
+Ray-traced reflections and GI share a two-layer sampled array at the existing
+SSR binding. This does not increase the forward pass's sampled-texture count.
+
+For the reproducible synthetic-room cost comparison:
+
+```sh
+cargo test -p crysirror-wgpu --test rt_lighting \
+  compare_raster_probe_rt_probe_and_per_pixel_frame_cost -- --ignored --nocapture --test-threads=1
+```
+
+The JSON report records device, resolution, warmup, actual GPU frame samples,
+probe update budget and rays per pixel. This measures the selected workload;
+probe and per-pixel settings do not imply equal image quality. It is neither
+a universal speedup claim nor an interactive FPS measurement.

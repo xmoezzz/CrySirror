@@ -261,6 +261,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "avg32"
+version = "0.1.0"
+source = "git+https://github.com/xmoezzz/siglus_rs.git?rev=256c398e06fbcbae8e956eb046c831b3d6c8a593#256c398e06fbcbae8e956eb046c831b3d6c8a593"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cpal",
+ "encoding_rs",
+ "serde",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -773,7 +785,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -1193,6 +1207,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "crysirror-avg32"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "avg32",
+ "crysirror-core",
+ "crysirror-runtime",
+ "crysirror-scene",
+ "crysirror-text",
+ "image",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "crysirror-cli"
 version = "0.2.0"
 dependencies = [
@@ -1221,6 +1251,7 @@ dependencies = [
  "cap-std",
  "clap",
  "crysirror-audio",
+ "crysirror-avg32",
  "crysirror-core",
  "crysirror-engine",
  "crysirror-krkr",
@@ -1456,6 +1487,7 @@ dependencies = [
  "crysirror-image",
  "crysirror-scene",
  "crysirror-siglus",
+ "crysirror-text",
  "encoding_rs",
  "flate2",
  "log",

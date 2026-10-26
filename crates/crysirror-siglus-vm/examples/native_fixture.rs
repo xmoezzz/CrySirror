@@ -28,6 +28,7 @@ fn main() -> Result<()> {
         ("image", fixture::image_scene()),
         ("input", fixture::key_wait_scene(true)),
         ("message", fixture::message_scene()),
+        ("dialogue", fixture::dialogue_scene()),
     ] {
         let dir = out.join(name);
         std::fs::create_dir(&dir)?;
@@ -36,7 +37,14 @@ fn main() -> Result<()> {
         if name == "image" {
             std::fs::write(dir.join("assets/native.g00"), fixture::pixel_g00())?;
         }
-        let p = serde_json::json!({"schema":2,"name":format!("Native Siglus {name} fixture"),"content_revision":"native-verification-1","canvas":[320,180],"background":[18,22,34,255],"assets":"assets","clients":[{"name":"siglus","adapter":"siglus","game":"native-verification","config":{"scene":"Scene.pck","string_codec":"plain"}}]});
+        let mut p = serde_json::json!({"schema":2,"name":format!("Native Siglus {name} fixture"),"content_revision":"native-verification-1","canvas":[320,180],"background":[18,22,34,255],"assets":"assets","clients":[{"name":"siglus","adapter":"siglus","game":"native-verification","config":{"scene":"Scene.pck","string_codec":"plain"}}]});
+        if name == "dialogue" {
+            p["clients"][0]["config"]["message_window"] = serde_json::json!({
+                "font":"default", "rect":[12,92,296,80], "name_rect":[12,62,296,25],
+                "size":20, "name_size":20, "spacing":[-1,10],
+                "color":[255,255,255,255], "name_color":[250,210,70,255]
+            });
+        }
         std::fs::write(dir.join("project.json"), serde_json::to_vec_pretty(&p)?)?;
     }
     println!("{}", out.display());

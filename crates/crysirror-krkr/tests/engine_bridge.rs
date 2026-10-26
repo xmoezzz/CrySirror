@@ -2,7 +2,7 @@
 //! Original-style TJS2 scripts -> public engine services. Self-authored
 //! scripts and generated images only; no game data, fonts or GPU.
 use crysirror_core::{
-    service::{InputFrame, buttons},
+    service::{HostServices, InputFrame, buttons},
     state::ClientId,
 };
 use crysirror_runtime::{AdapterRegistry, Runtime};
@@ -192,4 +192,44 @@ fn shift_jis_scripts_and_case_insensitive_storage() {
     r.tick(0, InputFrame::default()).unwrap();
     let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
     assert!(log.contains("吉里吉里 1"), "{log}");
+}
+
+#[test]
+fn nominal_font_height_uses_absolute_height_and_rejects_unmapped_styles() {
+    let (_t, mut r) = fixture(r#"
+        var w = new Window(); var l = new Layer(w, null);
+        l.font.height = -37;
+        Debug.message("heights", l.font.getTextHeight("A"), l.font.getTextHeight(""));
+    "#, &[]);
+    r.tick(0, InputFrame::default()).unwrap();
+    let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log.contains("heights 37 37"), "{log}");
+    let (_t, mut r) = fixture(r#"
+        var w = new Window(); var l = new Layer(w, null);
+        l.font.bold = true; l.drawText(0, 0, "A", 0xffffff);
+    "#, &[]);
+    assert!(failure(&mut r).contains("Font.bold"));
+}
+
+#[test]
+#[ignore = "requires licensed runtime font in CRYSIRROR_TEST_FONT; no font bundled"]
+fn font_width_and_canvas_text_share_engine_font_resources() {
+    let (_t, mut r) = fixture(r#"
+        var w = new Window(); var l = new Layer(w, null);
+        l.font.height = 24;
+        Debug.message("width", l.font.getTextWidth("AVATAR"), l.font.getTextWidth(""));
+        l.drawText(5, 10, "AVATAR", 0xffffff);
+    "#, &[]);
+    let bytes = std::fs::read(std::env::var_os("CRYSIRROR_TEST_FONT").unwrap()).unwrap();
+    r.host.text.add_font("default", bytes.clone()).unwrap();
+    r.assets.text.add_font("default", bytes).unwrap();
+    let expected = r.assets.text.measure_simple("default", 24., "AVATAR").unwrap().advance.ceil() as i64;
+    r.tick(0, InputFrame::default()).unwrap();
+    let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log.contains(&format!("width {expected} 0")), "{log}");
+    let surface = r.host.engine.canvases.surface(ClientId(1), 1).unwrap();
+    let nodes = serde_json::to_string(&surface.nodes).unwrap();
+    assert!(nodes.contains("AVATAR"));
+    assert!(nodes.contains("simple-horizontal-unwrapped-v1"));
+    assert!(r.host.text_measurement(ClientId(999)).is_err());
 }

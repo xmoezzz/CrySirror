@@ -293,3 +293,18 @@ pub fn message_scene() -> Vec<u8> {
     s.code.push(cd::EOF);
     s.finish()
 }
+
+/// Plain native NAME/TEXT chunks. The adapter maps them to retained glyphs;
+/// this is compiled native scene data rather than data-VM draw commands.
+pub fn dialogue_scene() -> Vec<u8> {
+    let mut scene = SceneBuilder::default();
+    scene.string("CrySirror");
+    scene.code.push(cd::NAME);
+    for text in ["Hello, CrySirror.\n", "原生メッセージ"] {
+        scene.string(text);
+        scene.code.push(cd::TEXT);
+        scene.i32(-1);
+    }
+    scene.code.push(cd::EOF);
+    scene.finish()
+}

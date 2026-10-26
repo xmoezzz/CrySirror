@@ -170,6 +170,7 @@ pub(crate) struct PbrRtStats {
     pub alpha_bakes: u64,
     pub denoised_frames: u64,
     pub reflection_dispatches: u64,
+    pub pixel_gi_dispatches: u64,
     pub gi_probe_updates: u64,
 }
 
@@ -205,6 +206,7 @@ pub(crate) struct PbrRt {
     reflect: wgpu::ComputePipeline,
     gi_layout: wgpu::BindGroupLayout,
     gi: wgpu::ComputePipeline,
+    gi_history: Option<wgpu::Buffer>,
     /// Instance table and material slots of this frame's scene.
     tables: Option<(wgpu::Buffer, wgpu::Buffer)>,
     denoise_layout: wgpu::BindGroupLayout,
@@ -278,7 +280,7 @@ pub(crate) fn shadow_source() -> String {
 }
 /// Reflection pass source.
 pub(crate) fn reflect_source() -> String {
-    format!("{}\n{}", include_str!("shaders/rt_common.wgsl"), include_str!("shaders/rt_reflect.wgsl"))
+    format!("{}\n{}\n{}", include_str!("shaders/rt_common.wgsl"), include_str!("shaders/rt_lighting.wgsl"), include_str!("shaders/rt_reflect.wgsl"))
 }
 
 /// Camera, sun and environment for ray-traced reflections.
@@ -297,6 +299,9 @@ pub(crate) struct ReflectionView {
     pub env_rotation: f32,
     pub sh: [[f32; 4]; 9],
     pub max_distance: f32,
+    pub samples: u32,
+    pub diffuse: bool,
+    pub light_count: u32,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -316,7 +321,7 @@ struct ReflectParams {
 
 /// Probe update source.
 pub(crate) fn gi_source() -> String {
-    format!("{}\n{}", include_str!("shaders/rt_common.wgsl"), include_str!("shaders/rt_gi.wgsl"))
+    format!("{}\n{}\n{}", include_str!("shaders/rt_common.wgsl"), include_str!("shaders/rt_lighting.wgsl"), include_str!("shaders/rt_gi.wgsl"))
 }
 /// Probe updates per dispatch (`jobs` uniform capacity).
 pub const MAX_GI_JOBS: usize = 64;
@@ -337,6 +342,7 @@ pub(crate) struct GiView {
     pub visibility_offset: u32,
     pub max_distance: f32,
     pub backface_limit: f32,
+    pub light_count: u32,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -455,6 +461,8 @@ impl PbrRt {
                 storage(6, true),
                 storage(7, true),
                 storage(8, true),
+                storage(12, true),
+                texture(13, filtered),
                 texture(9, filtered),
                 wgpu::BindGroupLayoutEntry {
                     binding: 10,
@@ -492,10 +500,12 @@ impl PbrRt {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                storage(4, true),
                 storage(5, false),
                 storage(6, true),
                 storage(7, true),
                 storage(8, true),
+                storage(12, true),
                 texture(9, filtered),
                 wgpu::BindGroupLayoutEntry {
                     binding: 10,
@@ -607,6 +617,7 @@ impl PbrRt {
             clear,
             reflect_layout,
             reflect,
+            gi_history: None,
             gi_layout,
             gi,
             tables: None,
@@ -621,6 +632,7 @@ impl PbrRt {
     }
 
     pub fn clear(&mut self) {
+        self.gi_history = None;
         self.geometry.clear();
         self.tlas = None;
         self.tlas_signature.clear();
@@ -1226,6 +1238,8 @@ impl PbrRt {
         previous: &wgpu::TextureView,
         sampler: &wgpu::Sampler,
         output: &wgpu::TextureView,
+        lights: &wgpu::Buffer,
+        environment: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<bool> {
         let (Some(tlas), Some((instances, slots))) = (&self.tlas, &self.tables) else {
@@ -1242,7 +1256,7 @@ impl PbrRt {
             env: [view.env_intensity, view.env_rotation, 0., 0.],
             sh: view.sh,
             size: [canvas[0], canvas[1], u32::from(view.previous_view_projection.is_some()), 0],
-            reflection: [view.max_distance, 0., 0., 0.],
+            reflection: [view.max_distance, view.samples as f32, u32::from(view.diffuse) as f32, view.light_count as f32],
         };
         let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("RT reflection params"),
@@ -1265,13 +1279,15 @@ impl PbrRt {
                 wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&self.atlas_view) },
                 wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&self.sampler) },
                 wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(output) },
+                wgpu::BindGroupEntry { binding: 12, resource: lights.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::TextureView(environment) },
             ],
         });
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("RT reflections"), timestamp_writes: None });
         pass.set_pipeline(&self.reflect);
         pass.set_bind_group(0, &bind, &[]);
         pass.dispatch_workgroups(canvas[0].div_ceil(8), canvas[1].div_ceil(8), 1);
-        self.stats.reflection_dispatches += 1;
+        if view.diffuse { self.stats.pixel_gi_dispatches += 1; } else { self.stats.reflection_dispatches += 1; }
         Ok(true)
     }
 
@@ -1286,11 +1302,23 @@ impl PbrRt {
         environment: &wgpu::TextureView,
         environment_sampler: &wgpu::Sampler,
         data: &wgpu::Buffer,
+        lights: &wgpu::Buffer,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<bool> {
         let (Some(tlas), Some((instances, slots))) = (&self.tlas, &self.tables) else {
             return Ok(false);
         };
+        // Every workgroup and every chunk reads one immutable previous
+        // volume. Updating neighbouring probes cannot race their bounce reads.
+        if self.gi_history.as_ref().is_none_or(|h| h.size() != data.size()) {
+            self.gi_history = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("RT GI previous sweep"), size: data.size(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        let previous = self.gi_history.as_ref().expect("GI history allocated");
+        encoder.copy_buffer_to_buffer(data, 0, previous, 0, data.size());
         for chunk in jobs.chunks(MAX_GI_JOBS) {
             let mut packed = [[0u32; 4]; 16];
             for (i, probe) in chunk.iter().enumerate() {
@@ -1304,7 +1332,7 @@ impl PbrRt {
                 gi_extent: view.gi_extent,
                 gi_counts: view.gi_counts,
                 offsets: [view.gi_offset, view.visibility_offset, chunk.len() as u32, 0],
-                limits: [view.max_distance, view.backface_limit, 0., 0.],
+                limits: [view.max_distance, view.backface_limit, view.light_count as f32, 0.],
                 jobs: packed,
             };
             let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1320,7 +1348,9 @@ impl PbrRt {
                     wgpu::BindGroupEntry { binding: 1, resource: tlas.as_binding() },
                     wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(environment) },
                     wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(environment_sampler) },
+                    wgpu::BindGroupEntry { binding: 4, resource: previous.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 5, resource: data.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 12, resource: lights.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 6, resource: instances.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 7, resource: self.uv_buffer.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 8, resource: slots.as_entire_binding() },
@@ -1353,6 +1383,7 @@ impl PbrRt {
             "material_bakes": s.alpha_bakes,
             "denoised_frames": s.denoised_frames,
             "reflection_dispatches": s.reflection_dispatches,
+            "pixel_gi_dispatches": s.pixel_gi_dispatches,
             "gi_probe_updates": s.gi_probe_updates,
             "refit": "wgpu 29 implements PreferUpdate as a full rebuild",
         })

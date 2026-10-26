@@ -459,7 +459,7 @@ impl Paint {
                 text.len() <= 1024 * 1024
                     && !font.is_empty()
                     && (1..=512).contains(size)
-                    && layout == crysirror_core::service::SIMPLE_TEXT_LAYOUT,
+                    && matches!(layout.as_str(), crysirror_core::service::SIMPLE_TEXT_LAYOUT | crysirror_core::service::UNWRAPPED_TEXT_LAYOUT),
                 "unsupported text paint/profile"
             ),
             Self::GlyphRun {

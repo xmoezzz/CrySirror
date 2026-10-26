@@ -34,6 +34,11 @@ fn shaped_surface_typewriter_localization_and_client_isolation() {
     let cx = app.context();
     let text = cx.singleton("Text").unwrap();
     let loc = cx.singleton("Localization").unwrap();
+    let metrics = cx.call(text, "measureSimple", &[
+        Value::Str("latin".into()), Value::Float(24.), Value::Str("AVATAR".into())
+    ]).unwrap().to_json();
+    assert!(metrics["advance"].as_f64().unwrap() > 0.);
+    assert!(metrics["line_height"].as_f64().unwrap() > 0.);
     cx.call(
         loc,
         "define",

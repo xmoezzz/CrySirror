@@ -33,6 +33,17 @@ class NativeProjects(unittest.TestCase):
             with self.subTest(path=path),self.assertRaises(d.ProjectError):d.validate(p)
         self.project['clients'][0]['config']['resources']={'../native.g00':'safe.g00'}
         with self.assertRaises(d.ProjectError):d.validate(self.project)
+    def test_message_window_is_an_explicit_bounded_profile(self):
+        window = {'font':'default','rect':[12,92,296,80], 'name_rect':[12,62,296,25],
+                  'size':20,'name_size':20,'spacing':[-1,10],
+                  'color':[255]*4,'name_color':[250,210,70,255]}
+        self.project['clients'][0]['config']['message_window'] = window
+        d.validate(self.project)
+        for key,value in [('font',''),('size',0),('rect',[0,0,0,2]),('spacing',[0,-20]),('color',[256,0,0,0]),('unknown',True)]:
+            p=copy.deepcopy(self.project); p['clients'][0]['config']['message_window'][key]=value
+            with self.subTest(key=key),self.assertRaises(d.ProjectError):d.validate(p)
+        self.project['clients'][0]['config']['gameexe']='Gameexe.ini'
+        with self.assertRaisesRegex(d.ProjectError,'Gameexe MWND'):d.validate(self.project)
     def test_native_inventory_includes_declared_scene_and_alias_sources(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t);base=root/'assets/game';(base/'pictures').mkdir(parents=True)

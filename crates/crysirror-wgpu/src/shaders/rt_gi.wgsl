@@ -28,6 +28,7 @@ struct Params {
 @group(0) @binding(0) var<uniform> params:Params;
 @group(0) @binding(2) var environment:texture_2d<f32>;
 @group(0) @binding(3) var environment_sampler:sampler;
+@group(0) @binding(4) var<storage,read> previous:array<vec4<f32>>;
 @group(0) @binding(5) var<storage,read_write> data:array<vec4<f32>>;
 
 const PI:f32=3.14159265359;
@@ -67,11 +68,11 @@ fn volume_irradiance(p:vec3<f32>,n:vec3<f32>)->vec3<f32> {
         let idx=b+o;
         let i=idx.x+cnt.x*(idx.y+cnt.y*idx.z);
         let base=params.offsets.x+i*4u;
-        if data[base+3u].x<0.5 {continue;}
+        if previous[base+3u].x<0.5 {continue;}
         let tri=select(1.0-f,f,o==vec3<u32>(1u));
         let w=tri.x*tri.y*tri.z;
         let nn=vec4<f32>(1.0,n);
-        sum+=max(vec3<f32>(dot(data[base],nn),dot(data[base+1u],nn),dot(data[base+2u],nn)),vec3<f32>(0.0))*w;
+        sum+=max(vec3<f32>(dot(previous[base],nn),dot(previous[base+1u],nn),dot(previous[base+2u],nn)),vec3<f32>(0.0))*w;
         wsum+=w;
     }
     if wsum<=1e-6 {return vec3<f32>(0.0);}
@@ -109,7 +110,7 @@ fn update(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index
         if hit.kind==1u {
             distance=min(hit.t,params.limits.x);
             let inst=instances[hit.instance_custom_data].data;
-            let n=normalize(hit.object_to_world*vec4<f32>(corner_normal(inst.x+hit.primitive_index*3u,hit.barycentrics),0.0));
+            let n=normalize((transpose(hit.world_to_object)*corner_normal(inst.x+hit.primitive_index*3u,hit.barycentrics)).xyz);
             // Back faces by the shading normal: independent of each backend's
             // triangle winding convention for `front_face`.
             if dot(n,dir)<0.0 {
@@ -124,7 +125,8 @@ fn update(@builtin(workgroup_id) group:vec3<u32>,@builtin(local_invocation_index
                     sun=nl;
                     if params.sun_color.w>0.5 {sun*=visible(point+n*0.002,l,1e20);}
                 }
-                let irradiance=params.sun_color.rgb*params.sun_dir.w*sun+volume_irradiance(point+n*0.05,n);
+                let irradiance=params.sun_color.rgb*params.sun_dir.w*sun+volume_irradiance(point+n*0.05,n)
+                    +bounce_local(point,n,u32(params.limits.z));
                 radiance=albedo/PI*irradiance+emissive;
             } else {
                 back+=dw;

@@ -443,6 +443,15 @@ impl HostServices for SharedHost {
             sizes: std::sync::Mutex::new(BTreeMap::new()),
         }))
     }
+    fn text_measurement(
+        &mut self,
+        client: ClientId,
+    ) -> crysirror_core::Result<Arc<dyn crysirror_core::service::TextMeasurement>> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        Ok(Arc::new(self.text.clone()))
+    }
     fn storage(
         &mut self,
         client: ClientId,

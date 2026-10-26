@@ -205,6 +205,7 @@ fn info() -> &'static ClassInfo {
     INFO.get_or_init(||{
         fn m(name:&'static str,params:Vec<(&'static str,T)>,returns:T,doc:&'static str)->MethodInfo {MethodInfo{name,params,returns,doc}}
         ClassInfo{name:"Text",doc:"CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed.",properties:vec![],methods:vec![
+            m("measureSimple",vec![("font",T::String),("size",T::Number),("text",T::String)],T::Map,"Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface."),
             m("draw",vec![("name",T::String),("markup",T::String),("options",T::Map)],T::String,"Shape and rasterize rich text; returns __surface path for a layer. Optional typewriter rate advances with App frames."),
             m("state",vec![("name",T::String)],T::Map,"Read content/options/reveal state for explicit persistence."),
             m("restore",vec![("name",T::String),("state",T::Map)],T::String,"Rebuild saved markup/options and restore reveal clock. Pending event queues are not replayed."),
@@ -229,6 +230,16 @@ impl Class for TextClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if method == "measureSimple" {
+            let font = args.first().context("font alias")?.as_str()?;
+            let size = args.get(1).context("font size")?.as_f32()?;
+            let text = args.get(2).context("text")?.as_str()?;
+            let metrics = cx.state()?.runtime.assets.text.measure_simple(font, size, text)?;
+            return Ok(Value::from_json(serde_json::json!({
+                "advance": metrics.advance, "line_height": metrics.line_height,
+                "ascent": metrics.ascent, "descent": metrics.descent,
+            })));
+        }
         let name = args.first().context("text name")?.as_str()?.to_owned();
         valid_name(&name)?;
         let state = cx.state()?;

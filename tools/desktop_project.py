@@ -85,7 +85,7 @@ def action(a: Any) -> None:
         raise ProjectError(f"unsupported action: {op}")
 
 def siglus_config(config: Any) -> dict:
-    config = obj(config, {"scene"}, {"format", "string_codec", "scene_name", "gameexe", "resources"})
+    config = obj(config, {"scene"}, {"format", "string_codec", "scene_name", "gameexe", "resources", "message_window"})
     def path(value):
         require(logical_path(value) == value, "non-canonical native config path")
     path(config["scene"])
@@ -100,6 +100,19 @@ def siglus_config(config: Any) -> dict:
     for alias, source in resources.items():
         path(alias)
         path(source)
+    if config.get("message_window") is not None:
+        require(config.get("gameexe") is None, "native Gameexe MWND conversion is not implemented")
+        window = obj(config["message_window"], {"font", "rect", "name_rect", "size", "name_size", "spacing", "color", "name_color"})
+        require(isinstance(window["font"], str) and 0 < len(window["font"].encode()) <= 256
+                and not any(ord(c) < 32 or 127 <= ord(c) < 160 for c in window["font"]), "native message font alias")
+        for key in ("rect", "name_rect"):
+            rect = window[key]
+            require(vector(rect, 4, lambda n: integer(n, -32767, 32767))
+                    and rect[2] > 0 and rect[3] > 0, "native message rectangle")
+        require(integer(window["size"], 1, 512) and integer(window["name_size"], 1, 512), "native message size")
+        require(vector(window["spacing"], 2, lambda n: integer(n, -511, 4096))
+                and window["size"] + window["spacing"][1] > 0, "native message spacing")
+        require(color(window["color"]) and color(window["name_color"]), "native message colors")
     return config
 
 

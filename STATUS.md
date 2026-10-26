@@ -1384,3 +1384,88 @@ extraction. ADR 0038 records this delivered capability increment.
   candidates/refit/reflections/GI/denoising, an editor/profiler overlay, complete
   GPU memory accounting and other desktop hardware/platform validation remain.
   No new GitHub CI, proprietary data, fonts or SDKs were added.
+
+## Native VM API expansion and ray lighting (2026-10-26, ADR 0060–0063)
+
+- Implementation: native GGX glossy reflections now sample the actual material
+  roughness. Optional per-pixel diffuse GI shares a two-layer array with the
+  reflection target, retaining the forward pass's 16 sampled-texture bindings.
+  Reflection, probe-GI and pixel-GI hits use the shared local-light buffer.
+  Probe dispatches read an immutable history copy, removing inter-workgroup
+  read/write races. Native device negotiation checks six storage-buffer
+  bindings. Nonuniform-scale hit normals and environment-zero reflection
+  attenuation were corrected. These extend the earlier mirror/probe-only limits.
+- Implementation: reusable CPU text now provides fixed-cell layout, immutable
+  font measurement handles and an unwrapped Canvas layout. JS/TS callers can
+  use Text.measureSimple without a VM. KiriKiri Font width/nominal height and
+  single-line clipping call engine services. Font overrides are available before
+  both native ticks and script init/start; no private font system was added.
+- Implementation: Siglus's existing original SceneVm supports explicit plain
+  FRONT.MWND[0] TEXT/NAME mappings through shared grid/GlyphRun/reveal/query
+  operations. Chunk append, first-name policy, DECIDE consumption and runtime
+  snapshots are covered. Other native MWND/read-flag/page/original-save policies
+  remain explicit failures; this is not automatic Gameexe window conversion.
+- Implementation: AVG32 is a pinned Git library dependency on original
+  siglus_rs commit 256c398e06fbcbae8e956eb046c831b3d6c8a593, published on
+  codex/avg32-portable-vm without merging upstream main. Its portable build
+  compiles the same Scenario/parser/control-flow source; no VM source was copied
+  into CrySirror. The dependency tree contains no original System, renderer,
+  font/image painter or audio device. The thin adapter issues scoped engine
+  Canvas/GlyphRun/UI/audio operations, preserving original pending events,
+  waits, hidden choice ordinals, initial RNG state and VM-relative clock.
+  Both native saves and framework snapshots remain visibly unsupported here.
+- Implementation: Bitmap.composite/filterRgb add engine-owned associated-byte
+  composition, separate coverage and integer fade/multiply. Associated output
+  is intermediate data, not an implicit conversion to straight-alpha display.
+  The new AVG32 profile currently accepts only opaque full-size image loads;
+  these primitives do not establish complete PDT effect/mask compatibility.
+- Compilation: locked workspace all-target check and the desktop build with
+  optional krkr passed. Default workspace tests completed: 623 passed, zero
+  failed, 67 ignored. Python tooling passed 170 tests. Generated API checks
+  passed 5/5; final fingerprint changed 3ff1c210d5f93836 → 1050976234c41b17
+  and is logged in docs/api/CHANGES.md. The CLI registry assertion was updated
+  to verify the actual feature set, including AVG32 and optional KiriKiri.
+- CPU behavior: AVG32's native bridge passed five tests; its licensed-font test
+  was then explicitly executed and passed. The original upstream native engine
+  passed 33 library, one NLS and four synthetic tests (one installed-game audio
+  case filtered); portable-vm passed 11 tests. Shared bitmap differential tests
+  matched the unchanged original pin for 1,776,384 associated cases and 2,304
+  signed/clipped fades, plus existing 19,200 / 9,216 / 12 cases. Explicit system
+  font tests also passed for engine measurement, script rich text and KiriKiri.
+  Ignored font tests in the default suite are not counted as default passes.
+- GPU behavior: Apple M5 / Metal explicitly passed all 46 wgpu GPU tests in
+  one serialized run. New tests distinguish a rough reflection from the mirror
+  footprint and isolate local-light GI with sun/environment/emission disabled.
+  Floor red-channel excess was 0 without GI, 29.67 with RT probes, 25.11 with
+  per-pixel GI and 0 with the local light disabled. Raster requests for pixel
+  RT GI fail visibly. A first GPU-suite setup lacked the requested system font
+  and failed that test; the later complete font-supplied run passed.
+- GPU performance: same 160×90 room, 24 valid steady GPU frame samples per
+  mode, mean 7.578 ms raster probes / 0.810 ms RT probes / 0.644 ms pixel GI.
+  Probe modes refresh 16 probes/frame; pixel GI uses 64 rays/pixel. These are
+  different representations/sample densities, not equal-quality speedup claims
+  or isolated GI timings. RT-probe warmup dropped three timing-ring samples;
+  no failed/pending measurements remained. ADR 0060 records p50/p95 and limits.
+- Render behavior: the public Khronos DamagedHelmet/HDR files matched both
+  recorded hashes and rendered with three roughness panels, a local light,
+  native reflections and pixel GI: four instances, two BLAS, eight reflection
+  and eight pixel-GI dispatches. Original self-authored Siglus PCK and KiriKiri
+  TJS2 examples rendered through engine glyph/Canvas state. The AVG32 TPC32
+  example rendered background/text/wait icon and a subsequent native input
+  trace reached Halted with 81 engine API calls and no private framebuffer.
+  Configured font/cell metrics are explicit; these captures are not commercial
+  game completion or proof of matching a title's original fonts/layout.
+- Remaining limits: pixel GI is one diffuse bounce, without dedicated GI or
+  glossy denoising. Hit shading retains atlas/geometric-normal/constant-emission
+  approximations; transparent/transmission and full path tracing remain out.
+  Other GPU vendors/platforms were not physically tested. Siglus/AVG32 complete
+  native drawing/layout/save support and KAG3 boot remain unfinished. New native
+  VM steps publish on the owner; bounded first-use resource reads still need the
+  remaining ADR 0050 async migration. No old engine host, new GitHub CI, game
+  data, font file, credential or proprietary SDK was added.
+- Evidence: target/verification/vn-rt-{workspace-tests-complete.log,
+  all-targets-verified.log,python-final.log,api-verified.log,
+  avg32-dependencies.log,*-report.json,avg32-trace.json};
+  target/verification/avg32/{cpu-tests-final.log,font-test-final.log};
+  target/associated-upstream.log; rt0060-all-gpu-font.log and
+  rt0060/gi-benchmark.json; rendered PNGs in target/verification/vn-rt/.

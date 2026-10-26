@@ -43,7 +43,8 @@ fn fs_main(i: PreOut, @builtin(front_facing) front: bool) -> PreTargets {
     let cur = i.cur.xy / i.cur.w;
     let prev = i.prev.xy / i.prev.w;
     var o: PreTargets;
-    o.normal = vec4<f32>(n, 1.0);
+    // Alpha carries roughness for GGX ray generation; depth determines validity.
+    o.normal = vec4<f32>(n, surface.roughness);
     // Screen-space delta in UV units (y down): current - previous.
     o.velocity = (cur - prev) * vec2<f32>(0.5, -0.5);
     return o;
