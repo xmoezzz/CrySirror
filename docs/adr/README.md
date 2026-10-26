@@ -87,3 +87,4 @@ moves to `done` only with recorded behavior evidence.
 | [0051](0051-hardware-ray-query.md) | Native BLAS/TLAS ray queries, capability negotiation across Vulkan/DX12/Metal, opaque primary rays and hybrid PBR sun visibility | initial implementation; validation recorded in STATUS.md |
 | [0052](0052-frame-pipeline-streaming-and-profiling.md) | Immutable frame extraction DAG, CPU/GPU profiling, asynchronous leased streaming cells and mesh RT instancing | implemented slice; engine-wide async migration remains partial |
 | [0053](0053-krkr-tjs2-adapter.md) | Optional AGPL KiriKiri adapter: vendored Kirakira TJS2 VM over engine Layer/Canvas, clock and storage | first slice implemented; KAG3 boot pending |
+| [0054](0054-fbx-pmx-vrm-import.md) | FBX (binary) and PMX converted in memory to GLB; VRM through glTF; losses reported | first slice implemented; morph targets next |

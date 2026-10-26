@@ -407,7 +407,8 @@ fn load_pbr_with(
         bytes.len() <= crate::MAX_IMPORT_BYTES,
         "glTF document exceeds 64 MiB"
     );
-    let doc = gltf::Gltf::from_slice(bytes).context("parse glTF")?;
+    let converted = crate::interchange::to_gltf(bytes, &mut external)?;
+    let doc = gltf::Gltf::from_slice(&converted).context("parse glTF")?;
     let mut buffers = Vec::new();
     for b in doc.buffers() {
         buffers.push(match b.source() {

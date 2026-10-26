@@ -508,7 +508,7 @@ declare class World {
   find(name: string): Entity | null;
   /** All entities of this client. */
   entities(): Entity[];
-  /** Import a glTF/GLB asset (Blender export) as entities; returns {roots, report}. options: {parent?, prefix?, pbr?: true for textured PBR materials, asScene?: true for one animated/skinned entity}. */
+  /** Import a model as entities: glTF/GLB/VRM, binary FBX 7.x or MMD PMX (detected by content); returns {roots, report} with unrepresented source features in report.dropped. options: {parent?, prefix?, pbr?: true for textured PBR materials, asScene?: true for one animated/skinned entity}. */
   importModel(path: string, options: Record<string, any> | null): Record<string, any>;
   /** Camera {eye, target, up?, fov?, near?, far?} (degrees, world units). */
   setCamera(camera: Record<string, any>): void;

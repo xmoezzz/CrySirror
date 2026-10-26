@@ -1159,6 +1159,7 @@ dependencies = [
  "crysirror-image",
  "crysirror-scene",
  "crysirror-tasks",
+ "flate2",
  "glam 0.27.0",
  "gltf",
  "image",

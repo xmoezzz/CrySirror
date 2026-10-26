@@ -3,6 +3,30 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## FBX, PMX and VRM import (ADR 0054)
+
+- glTF/GLB was already loading (DamagedHelmet, Sponza, Fox); a render of
+  `examples/aaa-helmet/project.json` without `--script game.ts` is empty
+  because the scene is created by that script.
+- New `crysirror-asset::interchange`: own binary FBX 7.x and PMX 2.0/2.1
+  parsers, converted in memory to GLB and consumed by every glTF path.
+- Import reports now list morph targets and unsupported glTF extensions;
+  PBR references no longer report skins/animations as dropped; triangle
+  counts are filled in.
+- Behaviour:
+  - `crysirror-asset` tests: **23 passed** (5 new interchange tests, one of
+    them comparing local Fox glTF/FBX copies when present).
+  - Fox glTF → Blender 5.2.2 FBX → CrySirror: relative bounds error
+    2·10⁻⁵ (Survey), 1.9·10⁻⁴ (Walk), < 10⁻⁵ (Run). Release raster render
+    of `root|Run` vs the glTF `Run` at the same frame: 1.05% of pixels
+    differ by more than 8/255.
+  - VRM 1.0 Seed-san (VRM Public License 1.0, local only) renders with
+    the unlit fallback; reported: 129 morph targets, VRMC_vrm,
+    VRMC_springBone, VRMC_materials_mtoon, VRMC_node_constraint,
+    KHR_texture_transform.
+  - No real PMX model was rendered (none with a redistributable licence was
+    fetched); PMX is validated by a synthetic file only.
+
 ## KiriKiri TJS2 adapter, first slice (ADR 0053)
 
 - **Source.** Kirakira `krkr-tjs2` and `krkr-kag` vendored unmodified from

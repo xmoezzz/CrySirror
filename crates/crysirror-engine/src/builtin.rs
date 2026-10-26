@@ -276,7 +276,7 @@ fn world_info() -> &'static ClassInfo {
             method("find", vec![("name", T::String)], T::Optional(Box::new(T::Object("Entity"))), "First entity with this name."),
             method("entities", vec![], T::List(Box::new(T::Object("Entity"))), "All entities of this client."),
             method("importModel", vec![("path", T::String), ("options", T::Optional(Box::new(T::Map)))], T::Map,
-                "Import a glTF/GLB asset (Blender export) as entities; returns {roots, report}. options: {parent?, prefix?, pbr?: true for textured PBR materials, asScene?: true for one animated/skinned entity}."),
+                "Import a model as entities: glTF/GLB/VRM, binary FBX 7.x or MMD PMX (detected by content); returns {roots, report} with unrepresented source features in report.dropped. options: {parent?, prefix?, pbr?: true for textured PBR materials, asScene?: true for one animated/skinned entity}."),
             method("setCamera", vec![("camera", T::Map)], T::Void, "Camera {eye, target, up?, fov?, near?, far?} (degrees, world units)."),
             method("setEnvironment", vec![("environment", T::Map)], T::Void,
                 "Select the PBR renderer: {hdr?, intensity?, rotation_degrees?, exposure?, tonemap?: 'pbr_neutral'|'aces'|'none', show_sky?, bloom?, sun?: {direction, color, intensity, shadows}}."),

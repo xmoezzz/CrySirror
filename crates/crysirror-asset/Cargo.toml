@@ -10,6 +10,7 @@ description = "Device-free asset importers (glTF 2.0 / Blender exports) into eng
 crysirror-tasks.workspace = true
 crysirror-scene.workspace = true
 crysirror-image.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 anyhow.workspace = true
 glam.workspace = true
 serde.workspace = true

@@ -46,6 +46,7 @@ Priorities:
 | Capability | Status | ADR | Next step | P |
 |---|---|---|---|---|
 | glTF/GLB import (PBR, skins, animation), Blender export | done | 0007 | — | |
+| FBX / PMX / VRM import | partial | 0054 | engine morph targets; MToon, spring bones, VMD | P1 |
 | Texture codecs (BC/DXT, PNG, HDR) | done | 0017 | BC7/ASTC encoding and GPU compression at import | P1 |
 | Asset database (GUIDs, dependencies, incremental re-import, cooking) | missing | — | content database plus cook step to a runtime format | P0 |
 | Cluster LOD DAG | partial | 0026 | on-disk DAG cache, streaming | P1 |

@@ -508,7 +508,7 @@ Script global: `world`.
 | `spawn(spec: Record<string, any>)` | `Entity` | Spawn {name, parent?, position?, rotation?, scale?, geometry?: 'cube'\|{vertices,indices}, color?, visible?, velocity?}. |
 | `find(name: string)` | `Entity \| null` | First entity with this name. |
 | `entities(—)` | `Entity[]` | All entities of this client. |
-| `importModel(path: string, options: Record<string, any> \| null)` | `Record<string, any>` | Import a glTF/GLB asset (Blender export) as entities; returns {roots, report}. options: {parent?, prefix?, pbr?: true for textured PBR materials, asScene?: true for one animated/skinned entity}. |
+| `importModel(path: string, options: Record<string, any> \| null)` | `Record<string, any>` | Import a model as entities: glTF/GLB/VRM, binary FBX 7.x or MMD PMX (detected by content); returns {roots, report} with unrepresented source features in report.dropped. options: {parent?, prefix?, pbr?: true for textured PBR materials, asScene?: true for one animated/skinned entity}. |
 | `setCamera(camera: Record<string, any>)` | `void` | Camera {eye, target, up?, fov?, near?, far?} (degrees, world units). |
 | `setEnvironment(environment: Record<string, any>)` | `void` | Select the PBR renderer: {hdr?, intensity?, rotation_degrees?, exposure?, tonemap?: 'pbr_neutral'\|'aces'\|'none', show_sky?, bloom?, sun?: {direction, color, intensity, shadows}}. |
 | `pause(paused: boolean)` | `void` | Pause/resume this client's world simulation. |

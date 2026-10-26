@@ -9,6 +9,7 @@
 pub mod anim;
 pub mod cluster;
 pub mod indices;
+pub mod interchange;
 pub mod pbr;
 pub mod terrain;
 use anyhow::{bail, ensure, Context, Result};
@@ -22,6 +23,12 @@ use serde::Serialize;
 pub const MAX_IMPORT_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_ENTITIES: usize = 4096;
 pub const MAX_TRIANGLES: usize = 1_000_000 / 3;
+/// glTF extensions whose data the engine represents (others are reported).
+pub const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "KHR_materials_emissive_strength",
+    "KHR_materials_unlit",
+    "KHR_lights_punctual",
+];
 
 #[derive(Clone, Debug)]
 pub struct ImportOptions {
@@ -84,7 +91,8 @@ pub fn import_gltf(
         bytes.len() <= MAX_IMPORT_BYTES,
         "glTF document exceeds 64 MiB"
     );
-    let doc = gltf::Gltf::from_slice(bytes).context("parse glTF")?;
+    let converted = interchange::to_gltf(bytes, &mut external)?;
+    let doc = gltf::Gltf::from_slice(&converted).context("parse glTF")?;
     let mut buffers: Vec<Vec<u8>> = Vec::new();
     let mut total = 0usize;
     for buffer in doc.buffers() {
@@ -110,23 +118,45 @@ pub fn import_gltf(
         .or_else(|| doc.scenes().next())
         .context("glTF has no scene")?;
 
-    let mut report = ImportReport::default();
+    let mut report = ImportReport {
+        dropped: interchange::dropped_from(&doc),
+        ..Default::default()
+    };
     if doc.textures().len() > 0 && options.reference_asset.is_none() {
         report.dropped.push(format!(
             "{} texture(s): engine meshes are untextured",
             doc.textures().len()
         ));
     }
-    if doc.animations().len() > 0 {
+    // Referenced (PBR) models keep skins and animations in the engine model;
+    // baked untextured entities cannot carry them.
+    if options.reference_asset.is_none() {
+        if doc.animations().len() > 0 {
+            report.dropped.push(format!(
+                "{} animation(s): use a PBR model reference",
+                doc.animations().len()
+            ));
+        }
+        if doc.skins().len() > 0 {
+            report
+                .dropped
+                .push(format!("{} skin(s)", doc.skins().len()));
+        }
+    }
+    let targets: usize = doc
+        .meshes()
+        .flat_map(|m| m.primitives())
+        .map(|p| p.morph_targets().len())
+        .sum();
+    if targets > 0 {
         report.dropped.push(format!(
-            "{} animation(s): skeletal/keyframe import pending",
-            doc.animations().len()
+            "{targets} morph target(s) (engine morph targets pending)"
         ));
     }
-    if doc.skins().len() > 0 {
-        report
-            .dropped
-            .push(format!("{} skin(s)", doc.skins().len()));
+    for ext in doc.extensions_used() {
+        if !SUPPORTED_EXTENSIONS.contains(&ext) {
+            report.dropped.push(format!("glTF extension {ext}"));
+        }
     }
     if doc.cameras().len() > 0 {
         report
@@ -196,6 +226,10 @@ pub fn import_gltf(
                 mesh: mesh.index() as u32,
             });
             report.primitives += mesh.primitives().len();
+            report.triangles += mesh
+                .primitives()
+                .map(|p| p.indices().map_or(0, |i| i.count()) / 3)
+                .sum::<usize>();
         } else if let Some(mesh) = node.mesh() {
             let prims: Vec<_> = mesh.primitives().collect();
             for (pi, prim) in prims.iter().enumerate() {
