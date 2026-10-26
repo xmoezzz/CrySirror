@@ -91,3 +91,4 @@ moves to `done` only with recorded behavior evidence.
 | [0055](0055-rt-gpu-geometry-dynamic-blas-alpha.md) | RT BLAS from renderer GPU streams, GPU-skinned dynamic BLAS, alpha-tested casters by re-tracing with a baked alpha atlas | implemented; Metal validated |
 | [0056](0056-rt-soft-shadows-denoising.md) | Soft ray-traced sun shadows sampling the sun disc, with temporal reprojection and edge-aware spatial denoising | implemented; Metal validated |
 | [0057](0057-rt-local-light-shadows.md) | Ray-traced shadows for the nearest two point/spot lights in spare visibility channels, emitter-radius penumbrae, three-channel denoiser | implemented; Metal validated |
+| [0058](0058-rt-reflections-material-atlas.md) | Ray-traced mirror reflections with previous-frame reuse and atlas hit shading; all-material atlas and corner attributes | implemented; Metal validated |

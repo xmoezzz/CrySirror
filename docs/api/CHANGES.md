@@ -4,6 +4,15 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `1c634e6ea9b9c676` (2026-10-26): ray-traced reflections
+
+- `ScreenSpaceReflections.ray_traced` (bool, default `false`): on the
+  hardware ray-tracing path, mirror reflections trace the scene and show
+  off-screen and occluded objects (ADR 0058); other paths keep screen-space
+  marching. `hardware_rt_stats.reflection_dispatches` reports the technique
+  actually used.
+- Not breaking: optional field.
+
 ## `904dab46c3443dfa` (2026-10-26): ray-traced local light shadows
 
 - `LightSpec.source_radius` (f32, default `0`, at most `range`): emitter

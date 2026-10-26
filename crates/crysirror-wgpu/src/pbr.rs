@@ -529,6 +529,7 @@ struct RtCoverage {
     effect: bool,
     cutoff: f32,
     uv_transform: [f32; 4],
+    emissive: [f32; 3],
 }
 struct CachedMaterial {
     material: GpuMaterial,
@@ -2049,6 +2050,7 @@ impl PbrRenderer {
             effect: m.effect.is_some(),
             cutoff: m.alpha_cutoff,
             uv_transform: [m.uv_scale[0], m.uv_scale[1], m.uv_offset[0], m.uv_offset[1]],
+            emissive: m.emissive_factor.map(|e| e * m.emissive_strength),
         }
     }
     fn material_uniform<T>(m: &crysirror_scene::material::Material<T>) -> MaterialUniform {
@@ -2608,7 +2610,13 @@ impl PbrRenderer {
             ],
             history_valid: false,
             bloom,
-            ssr: mk("ssr", size, HDR, 1, rs),
+            ssr: mk(
+                "ssr",
+                size,
+                HDR,
+                1,
+                if self.hardware_rt.is_some() { rs | wgpu::TextureUsages::STORAGE_BINDING } else { rs },
+            ),
             prev_hdr: mk("previous HDR frame", size, HDR, 1, rs),
             prev_valid: false,
         });
@@ -3059,20 +3067,21 @@ impl PbrRenderer {
                     material.shader.is_none(),
                     "hardware RT cannot evaluate custom fragment-discard shaders"
                 );
-                let alpha = if material.alpha == AlphaMode::Mask {
-                    ensure!(
-                        !material.rt.effect,
-                        "hardware RT alpha testing cannot bake position/time-dependent effect coverage"
-                    );
-                    Some(crate::rt_pbr::AlphaSource {
-                        material: material_id,
-                        bind: material.bind.clone(),
-                        cutoff: material.rt.cutoff,
-                        uv_transform: material.rt.uv_transform,
-                    })
-                } else {
-                    None
-                };
+                let mask = material.alpha == AlphaMode::Mask;
+                ensure!(
+                    !(mask && material.rt.effect),
+                    "hardware RT alpha testing cannot bake position/time-dependent effect coverage"
+                );
+                // Effect presets bake at the origin and time 0: their hit colour
+                // in reflections/GI is approximate; opaque coverage is exact.
+                let rt_material = Some(crate::rt_pbr::MaterialSource {
+                    material: material_id,
+                    bind: material.bind.clone(),
+                    mask,
+                    cutoff: material.rt.cutoff,
+                    uv_transform: material.rt.uv_transform,
+                    emissive: material.rt.emissive,
+                });
                 let object = &objects[draw.object as usize];
                 let morph = if draw.morph {
                     self.morph_buffers.get(&draw.key)
@@ -3110,7 +3119,7 @@ impl PbrRenderer {
                         })
                         .flatten(),
                     revision,
-                    alpha,
+                    material: rt_material,
                 });
             }
             Some(out)
@@ -4832,8 +4841,39 @@ impl PbrRenderer {
             )?;
             self.hardware_encoded = true;
         }
-        // 3b. Screen-space reflections against the prepass, colored by the previous frame.
-        if let Some(r) = &env.reflections {
+        // 3b. Reflections: ray traced against the scene on the hardware RT
+        // path when requested (ADR 0058), otherwise screen space against the
+        // prepass, colored by the previous frame.
+        let mut traced_reflections = false;
+        if let (Some(r), Some(rt)) = (&env.reflections, &mut self.hardware_rt) {
+            if r.ray_traced {
+                let reflection_view = crate::rt_pbr::ReflectionView {
+                    inverse_view_projection: view_proj.inverse(),
+                    view_projection: view_proj,
+                    view,
+                    previous_view_projection: t.prev_valid.then_some(prev_view_proj),
+                    camera: Vec3::from_array(cam.eye),
+                    sun_dir: fu.sun_dir,
+                    sun_color: fu.sun_color,
+                    env_intensity: fu.env[0],
+                    env_rotation: fu.env[1],
+                    sh: fu.sh,
+                    max_distance: r.max_distance,
+                };
+                traced_reflections = rt.encode_reflections(
+                    &self.gpu,
+                    &reflection_view,
+                    canvas,
+                    &t.pre_depth,
+                    &t.normal,
+                    &t.prev_hdr,
+                    &self.linear,
+                    &t.ssr,
+                    encoder,
+                )?;
+            }
+        }
+        if let Some(r) = env.reflections.as_ref().filter(|_| !traced_reflections) {
             let u = SsrUniform {
                 proj: jproj.to_cols_array_2d(),
                 inv_proj: jproj.inverse().to_cols_array_2d(),

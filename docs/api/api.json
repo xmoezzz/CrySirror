@@ -3794,6 +3794,12 @@
           "doc": "Linear march steps (refined by a binary search).",
           "name": "steps",
           "rust_type": "u32"
+        },
+        {
+          "default": false,
+          "doc": "Trace mirror rays against the scene when the renderer runs the hardware ray-tracing path (ADR 0058); screen space otherwise. The technique actually used is reported in the RT statistics.",
+          "name": "ray_traced",
+          "rust_type": "bool"
         }
       ],
       "name": "ScreenSpaceReflections",
@@ -7297,7 +7303,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "904dab46c3443dfa",
+  "fingerprint": "1c634e6ea9b9c676",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

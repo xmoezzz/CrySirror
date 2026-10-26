@@ -338,7 +338,7 @@ fn pbr_hardware_alpha_texture_cuts_holes_in_the_shadow() {
         eprintln!("{name} {stats}");
         if mode == "MASK" {
             assert_eq!(stats["alpha_instances"], 1);
-            assert_eq!(stats["alpha_slots"], 1);
+            assert_eq!(stats["material_slots"], 2, "floor and plane materials");
         }
         // Floor pixels in shadow: well below the lit floor's brightness.
         let lit = image.get_pixel(150, 110).0;
@@ -458,4 +458,47 @@ fn pbr_hardware_point_light_shadows_hard_and_soft() {
     let (hard, soft) = (sharp(&shots[1]), sharp(&shots[2]));
     eprintln!("point light: shadowed {shadowed} px, sharp edges hard {hard} soft {soft}");
     assert!(soft * 5 < hard * 4, "emitter radius must soften the shadow: hard {hard} soft {soft}");
+}
+
+/// A glossy floor reflects a red box that is outside the camera's view:
+/// screen-space reflections cannot see it, ray-traced reflections can.
+#[test]
+#[ignore = "requires native ray-query GPU; execute explicitly"]
+fn pbr_hardware_reflections_show_offscreen_objects() {
+    let gpu = gpu();
+    let mut shots = vec![];
+    for (reflections, traced) in [(false, false), (true, false), (true, true)] {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir(t.path().join("assets")).unwrap();
+        let p = t.path().join("project.json");
+        std::fs::write(&p, serde_json::to_vec(&json!({"schema":2,"name":"hardware-reflect","content_revision":"1","canvas":[160,120],"assets":"assets",
+            "clients":[{"name":"game","adapter":"crysirror-script-v1","game":"fixture","systems":{"entities":[
+                {"id":1,"name":"floor","geometry":{"kind":"cube"},"transform":{"translation":[0,-0.05,0],"scale":[10,0.1,10]},"color":[40,40,45,255],
+                 "material":{"metallic_factor":1.0,"roughness_factor":0.05}},
+                {"id":2,"name":"box","geometry":{"kind":"cube"},"transform":{"translation":[0,2.2,-2.0],"scale":[2,1,1]},"color":[230,30,20,255]}]}}]})).unwrap()).unwrap();
+        let mut rt = Runtime::load(&p, &t.path().join("state")).unwrap();
+        let mut env = json!({"sun":{"direction":[0.3,-1,0.2],"intensity":4,"shadows":true},"bloom":0,"temporal_aa":false,"ambient_occlusion":0});
+        if reflections {
+            env["reflections"] = json!({"intensity":1.0,"max_distance":20.0,"ray_traced":traced});
+        }
+        // Looking down at the floor; the box hangs above the top of the frame.
+        let batch = serde_json::from_value(json!({"world":[{"op":"set_camera","camera":{"eye":[0,1.2,2.5],"target":[0,0,-0.5],"up":[0,1,0],"fov_y_degrees":40,"near":0.05,"far":100}},
+            {"op":"set_environment","environment":env}]})).unwrap();
+        rt.host.engine.submit(ClientId(1), &batch).unwrap();
+        rt.tick(0, InputFrame::default()).unwrap();
+        let mut renderer = Renderer::new(gpu.clone(), wgpu::TextureFormat::Rgba8UnormSrgb);
+        renderer.set_rendering_path(RenderingPath::HardwareRaytrace).unwrap();
+        renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
+        let image = renderer.capture(&rt.host.scene, &mut rt.assets, [160, 120], rt.project.background).unwrap();
+        let stats = renderer.hardware_rt_stats().unwrap();
+        eprintln!("reflections {reflections} traced {traced}: {}", stats["reflection_dispatches"]);
+        std::fs::create_dir_all(artifact_dir()).unwrap();
+        image.save(artifact_dir().join(format!("pbr-reflect-{reflections}-{traced}.png"))).unwrap();
+        shots.push(image);
+    }
+    let red = |a: &image::RgbaImage| a.pixels().filter(|p| i16::from(p[0]) > i16::from(p[1]) + 40 && p[0] > 60).count();
+    let counts: Vec<usize> = shots.iter().map(red).collect();
+    eprintln!("red reflection pixels: none {} ssr {} rt {}", counts[0], counts[1], counts[2]);
+    assert!(counts[0] < 20 && counts[1] < 20, "the box itself must be off screen: {counts:?}");
+    assert!(counts[2] > 300, "ray-traced reflections must show the off-screen box: {counts:?}");
 }

@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `904dab46c3443dfa`
+API fingerprint: `1c634e6ea9b9c676`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -753,6 +753,7 @@ Screen-space reflections (ADR 0023): rays marched against the depth prepass, rad
 | `thickness` | `f32` | `0.3` | Depth tolerance (m) for counting a ray as behind a surface. |
 | `max_roughness` | `f32` | `0.6` | Roughness at which reflections have fully faded to the environment. |
 | `steps` | `u32` | `48` | Linear march steps (refined by a binary search). |
+| `ray_traced` | `bool` | `false` | Trace mirror rays against the scene when the renderer runs the hardware ray-tracing path (ADR 0058); screen space otherwise. The technique actually used is reported in the RT statistics. |
 
 ### GeometryLod
 

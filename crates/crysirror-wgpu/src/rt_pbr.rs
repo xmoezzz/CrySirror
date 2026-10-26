@@ -21,19 +21,25 @@ use wgpu::util::DeviceExt;
 const ATLAS: u32 = 2048;
 const TILE: u32 = 128;
 const SLOTS: usize = ((ATLAS / TILE) * (ATLAS / TILE)) as usize;
+/// Linear base colour (stored sRGB-encoded) and coverage alpha per material.
+const ATLAS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// Dynamic (skinned/morphed) BLAS kept resident at once.
 pub const MAX_DYNAMIC: usize = 256;
-/// Corners of alpha-tested geometry with gathered UVs.
-const MAX_ALPHA_CORNERS: u64 = 3 * 1_048_576;
+/// Corners with gathered attributes (UV and normal, 8 bytes each).
+const MAX_CORNERS: u64 = 3 * crate::rt_capabilities::MAX_RT_PRIMITIVES as u64;
 
-/// What a material contributes to ray-traced coverage.
+/// What a material contributes to ray-traced coverage and hit shading.
 #[derive(Clone)]
-pub(crate) struct AlphaSource {
+pub(crate) struct MaterialSource {
     /// Stable identity of the material (model key + index or override key).
     pub material: String,
     pub bind: wgpu::BindGroup,
+    /// Alpha-tested: rays re-trace past texels below `cutoff`.
+    pub mask: bool,
     pub cutoff: f32,
     pub uv_transform: [f32; 4],
+    /// Linear emitted radiance (factor × strength; emissive textures are not baked).
+    pub emissive: [f32; 3],
 }
 
 /// Joint palette input of a skinned instance.
@@ -50,7 +56,7 @@ pub(crate) struct PbrRtDraw {
     /// Geometry identity: the source primitive for static draws, the draw
     /// (instance + primitive) for dynamic ones.
     pub geometry: u64,
-    /// Identity of the source primitive's triangle UVs.
+    /// Identity of the source primitive's corner attributes.
     pub uv_key: u64,
     /// 48-byte PbrVertex stream (the morphed stream when morphs apply).
     pub vertices: wgpu::Buffer,
@@ -63,7 +69,8 @@ pub(crate) struct PbrRtDraw {
     pub skin: Option<SkinSource>,
     /// Changes whenever the dynamic positions change (pose and morphs).
     pub revision: u64,
-    pub alpha: Option<AlphaSource>,
+    /// Baked material; `None` shades hits flat grey and never alpha-tests.
+    pub material: Option<MaterialSource>,
 }
 
 #[repr(C)]
@@ -132,7 +139,9 @@ struct Denoise {
 struct Slot {
     rect: [f32; 4],
     transform: [f32; 4],
+    /// x alpha cutoff, y 1 when alpha-tested.
     cutoff: [f32; 4],
+    emissive: [f32; 4],
 }
 
 struct Geometry {
@@ -160,6 +169,7 @@ pub(crate) struct PbrRtStats {
     pub alpha_slots: usize,
     pub alpha_bakes: u64,
     pub denoised_frames: u64,
+    pub reflection_dispatches: u64,
 }
 
 pub(crate) struct PbrRt {
@@ -190,6 +200,10 @@ pub(crate) struct PbrRt {
     shadow: wgpu::ComputePipeline,
     clear_layout: wgpu::BindGroupLayout,
     clear: wgpu::ComputePipeline,
+    reflect_layout: wgpu::BindGroupLayout,
+    reflect: wgpu::ComputePipeline,
+    /// Instance table and material slots of this frame's scene.
+    tables: Option<(wgpu::Buffer, wgpu::Buffer)>,
     denoise_layout: wgpu::BindGroupLayout,
     temporal: wgpu::ComputePipeline,
     spatial: wgpu::ComputePipeline,
@@ -255,6 +269,48 @@ fn compute(d: &wgpu::Device, layout: &wgpu::BindGroupLayout, label: &str, source
     })
 }
 
+/// Shadow pass source: the shared ray-query prelude plus the pass.
+pub(crate) fn shadow_source() -> String {
+    format!("{}\n{}", include_str!("shaders/rt_common.wgsl"), include_str!("shaders/rt_pbr_shadow.wgsl"))
+}
+/// Reflection pass source.
+pub(crate) fn reflect_source() -> String {
+    format!("{}\n{}", include_str!("shaders/rt_common.wgsl"), include_str!("shaders/rt_reflect.wgsl"))
+}
+
+/// Camera, sun and environment for ray-traced reflections.
+pub(crate) struct ReflectionView {
+    pub inverse_view_projection: glam::Mat4,
+    pub view_projection: glam::Mat4,
+    pub view: glam::Mat4,
+    /// Previous frame's view-projection (for reusing its colour); `None` when invalid.
+    pub previous_view_projection: Option<glam::Mat4>,
+    pub camera: glam::Vec3,
+    /// Direction light travels and illuminance.
+    pub sun_dir: [f32; 4],
+    /// Linear colour and 1 when the sun casts shadows.
+    pub sun_color: [f32; 4],
+    pub env_intensity: f32,
+    pub env_rotation: f32,
+    pub sh: [[f32; 4]; 9],
+    pub max_distance: f32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ReflectParams {
+    inverse_view_projection: [f32; 16],
+    inverse_view: [f32; 16],
+    view_projection: [f32; 16],
+    reproject: [f32; 16],
+    camera: [f32; 4],
+    sun_dir: [f32; 4],
+    sun_color: [f32; 4],
+    env: [f32; 4],
+    sh: [[f32; 4]; 9],
+    size: [u32; 4],
+    reflection: [f32; 4],
+}
+
 fn geometry_size(vertex_count: u32, index_count: u32) -> wgpu::BlasTriangleGeometrySizeDescriptor {
     wgpu::BlasTriangleGeometrySizeDescriptor {
         vertex_format: wgpu::VertexFormat::Float32x3,
@@ -282,7 +338,8 @@ impl PbrRt {
         );
         for (label, source) in [
             ("RT geometry", include_str!("shaders/rt_geometry.wgsl")),
-            ("RT PBR shadow", include_str!("shaders/rt_pbr_shadow.wgsl")),
+            ("RT PBR shadow", shadow_source().as_str()),
+            ("RT reflections", reflect_source().as_str()),
         ] {
             crate::hardware_rt::validate_wgsl(source).with_context(|| label.to_owned())?;
         }
@@ -296,7 +353,7 @@ impl PbrRt {
         });
         let source = include_str!("shaders/rt_geometry.wgsl");
         let skin_pipeline = compute(d, &skin_layout, "RT dynamic positions", source, "skin_positions");
-        let uv_pipeline = compute(d, &uv_layout, "RT alpha UV gather", source, "gather_uvs");
+        let uv_pipeline = compute(d, &uv_layout, "RT corner attributes", source, "gather_attributes");
         let shadow_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("RT PBR shadow"),
             entries: &[
@@ -332,7 +389,50 @@ impl PbrRt {
                 },
             ],
         });
-        let shadow = compute(d, &shadow_layout, "RT PBR sun visibility", include_str!("shaders/rt_pbr_shadow.wgsl"), "main");
+        let shadow = compute(d, &shadow_layout, "RT PBR sun visibility", &shadow_source(), "main");
+        let filtered = wgpu::TextureSampleType::Float { filterable: true };
+        let reflect_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("RT reflections"),
+            entries: &[
+                uniform(0),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::AccelerationStructure { vertex_return: false },
+                    count: None,
+                },
+                texture(2, wgpu::TextureSampleType::Depth),
+                texture(3, wgpu::TextureSampleType::Float { filterable: false }),
+                texture(4, filtered),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                storage(6, true),
+                storage(7, true),
+                storage(8, true),
+                texture(9, filtered),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let reflect = compute(d, &reflect_layout, "RT reflections", &reflect_source(), "main");
         let clear_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("RT PBR empty visibility"),
             entries: &[
@@ -349,7 +449,7 @@ impl PbrRt {
                 texture(5, wgpu::TextureSampleType::Float { filterable: false }),
             ],
         });
-        let clear = compute(d, &clear_layout, "RT PBR empty visibility", include_str!("shaders/rt_pbr_shadow.wgsl"), "clear");
+        let clear = compute(d, &clear_layout, "RT PBR empty visibility", &shadow_source(), "clear");
         crate::hardware_rt::validate_wgsl(include_str!("shaders/rt_denoise.wgsl")).context("RT denoise")?;
         let storage_out = |binding, format| wgpu::BindGroupLayoutEntry {
             binding,
@@ -385,7 +485,7 @@ impl PbrRt {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
+            format: ATLAS_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -432,6 +532,9 @@ impl PbrRt {
             shadow,
             clear_layout,
             clear,
+            reflect_layout,
+            reflect,
+            tables: None,
             denoise_layout,
             temporal,
             spatial,
@@ -530,7 +633,7 @@ impl PbrRt {
                 module: &module,
                 entry_point: Some("fs_bake"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::R8Unorm,
+                    format: ATLAS_FORMAT,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -547,7 +650,7 @@ impl PbrRt {
     }
 
     /// Slot of a material in the alpha atlas, baking it on first use.
-    fn slot(&mut self, gpu: &Gpu, alpha: &AlphaSource, encoder: &mut wgpu::CommandEncoder) -> Result<usize> {
+    fn slot(&mut self, gpu: &Gpu, alpha: &MaterialSource, encoder: &mut wgpu::CommandEncoder) -> Result<usize> {
         if let Some(s) = self.slots.get(&alpha.material) {
             return Ok(*s);
         }
@@ -594,7 +697,8 @@ impl PbrRt {
         self.slot_data.push(Slot {
             rect: [x as f32 / ATLAS as f32 + inset, y as f32 / ATLAS as f32 + inset, scale - 2. * inset, scale - 2. * inset],
             transform: alpha.uv_transform,
-            cutoff: [alpha.cutoff, 0., 0., 0.],
+            cutoff: [alpha.cutoff, if alpha.mask { 1. } else { 0. }, 0., 0.],
+            emissive: [alpha.emissive[0], alpha.emissive[1], alpha.emissive[2], 0.],
         });
         self.slots.insert(alpha.material.clone(), index);
         self.unsubmitted_slots += 1;
@@ -648,7 +752,7 @@ impl PbrRt {
         }
         let limits = gpu.device.limits();
         ensure!(draws.len() <= limits.max_tlas_instance_count as usize, "hardware RT instance budget exceeded");
-        if draws.iter().any(|d| d.alpha.is_some()) {
+        if draws.iter().any(|d| d.material.is_some()) {
             self.bake_pipeline(gpu, material_layout)?;
         }
         // Geometry: create missing BLAS; produce dynamic positions.
@@ -740,16 +844,16 @@ impl PbrRt {
                 self.stats.static_builds += 1;
             }
         }
-        // Alpha-tested UVs: regather all when the set of alpha geometry changes.
+        // Corner attributes: regather all when the set of geometry changes.
         let mut alpha_keys: BTreeMap<u64, &PbrRtDraw> = BTreeMap::new();
-        for d in draws.iter().filter(|d| d.alpha.is_some()) {
+        for d in draws {
             alpha_keys.entry(d.uv_key).or_insert(d);
         }
         if alpha_keys.keys().ne(self.uv_ranges.keys()) || (!alpha_keys.is_empty() && !self.uv_submitted) {
             let corners: u64 = alpha_keys.values().map(|d| u64::from(d.index_count)).sum();
-            ensure!(corners <= MAX_ALPHA_CORNERS, "RT alpha-tested geometry budget exceeded");
+            ensure!(corners <= MAX_CORNERS, "RT corner attribute budget exceeded");
             self.uv_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("RT alpha UVs"),
+                label: Some("RT corner attributes"),
                 size: (corners * 8).max(64),
                 usage: wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
@@ -775,15 +879,14 @@ impl PbrRt {
         let mut table = Vec::with_capacity(draws.len());
         let mut alpha_instances = 0;
         for d in draws {
-            let slot = match &d.alpha {
-                Some(a) => {
-                    alpha_instances += 1;
-                    self.slot(gpu, a, encoder)? as u32 + 1
+            let slot = match &d.material {
+                Some(m) => {
+                    alpha_instances += usize::from(m.mask);
+                    self.slot(gpu, m, encoder)? as u32 + 1
                 }
                 None => 0,
             };
-            let base = if slot > 0 { self.uv_ranges[&d.uv_key] } else { 0 };
-            table.push([base, slot, 0, 0]);
+            table.push([self.uv_ranges[&d.uv_key], slot, 0, 0]);
         }
         // TLAS: rebuilt when instances moved, geometry changed or after a failed submission.
         let signature: Vec<(u64, [u32; 12])> = draws.iter().map(|d| (d.geometry, tlas_transform(d.transform).map(f32::to_bits))).collect();
@@ -881,7 +984,9 @@ impl PbrRt {
         output: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
     ) -> Result<bool> {
-        let Some((instances, slots)) = self.prepare(gpu, draws, material_layout, palette, encoder)? else {
+        let prepared = self.prepare(gpu, draws, material_layout, palette, encoder)?;
+        self.tables = prepared.clone();
+        let Some((instances, slots)) = prepared else {
             let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("RT PBR empty visibility"),
                 layout: &self.clear_layout,
@@ -1032,6 +1137,69 @@ impl PbrRt {
         Ok(true)
     }
 
+    /// Encode mirror reflections into `output` (rgb radiance, a = hit) from
+    /// the scene prepared by this frame's `encode_shadows`. Returns false
+    /// when there is no geometry (the caller clears the target).
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_reflections(
+        &mut self,
+        gpu: &Gpu,
+        view: &ReflectionView,
+        canvas: [u32; 2],
+        depth: &wgpu::TextureView,
+        normals: &wgpu::TextureView,
+        previous: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+        output: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<bool> {
+        let (Some(tlas), Some((instances, slots))) = (&self.tlas, &self.tables) else {
+            return Ok(false);
+        };
+        let params = ReflectParams {
+            inverse_view_projection: view.inverse_view_projection.to_cols_array(),
+            inverse_view: view.view.inverse().to_cols_array(),
+            view_projection: view.view_projection.to_cols_array(),
+            reproject: view.previous_view_projection.unwrap_or(view.view_projection).to_cols_array(),
+            camera: view.camera.extend(1.).to_array(),
+            sun_dir: view.sun_dir,
+            sun_color: view.sun_color,
+            env: [view.env_intensity, view.env_rotation, 0., 0.],
+            sh: view.sh,
+            size: [canvas[0], canvas[1], u32::from(view.previous_view_projection.is_some()), 0],
+            reflection: [view.max_distance, 0., 0., 0.],
+        };
+        let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("RT reflection params"),
+            contents: bytemuck::bytes_of(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RT reflections"),
+            layout: &self.reflect_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: tlas.as_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(depth) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(normals) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(previous) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(sampler) },
+                wgpu::BindGroupEntry { binding: 6, resource: instances.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 7, resource: self.uv_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 8, resource: slots.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&self.atlas_view) },
+                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(output) },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("RT reflections"), timestamp_writes: None });
+        pass.set_pipeline(&self.reflect);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(canvas[0].div_ceil(8), canvas[1].div_ceil(8), 1);
+        self.stats.reflection_dispatches += 1;
+        Ok(true)
+    }
+
     pub fn stats_json(&self) -> serde_json::Value {
         let s = self.stats;
         serde_json::json!({
@@ -1044,9 +1212,10 @@ impl PbrRt {
             "dynamic_reused": s.dynamic_reused,
             "tlas_builds_encoded": s.tlas_builds,
             "alpha_instances": s.alpha_instances,
-            "alpha_slots": s.alpha_slots,
-            "alpha_bakes": s.alpha_bakes,
+            "material_slots": s.alpha_slots,
+            "material_bakes": s.alpha_bakes,
             "denoised_frames": s.denoised_frames,
+            "reflection_dispatches": s.reflection_dispatches,
             "refit": "wgpu 29 implements PreferUpdate as a full rebuild",
         })
     }
@@ -1054,11 +1223,13 @@ impl PbrRt {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn rt_geometry_shadow_and_alpha_bake_shaders_validate() {
         for source in [
             include_str!("shaders/rt_geometry.wgsl").to_owned(),
-            include_str!("shaders/rt_pbr_shadow.wgsl").to_owned(),
+            shadow_source(),
+            reflect_source(),
             format!(
                 "{}\n{}\n{}",
                 crate::effect::shadow_material_prelude(),
@@ -1069,8 +1240,11 @@ mod tests {
             crate::hardware_rt::validate_wgsl(&source).unwrap();
         }
         // Every shadow query proceeds exactly once on force-opaque rays.
-        let shadow = include_str!("shaders/rt_pbr_shadow.wgsl");
-        assert_eq!(shadow.matches("rayQueryProceed(").count(), 1);
-        assert!(!shadow.contains("while"));
+        let common = include_str!("shaders/rt_common.wgsl");
+        assert_eq!(common.matches("rayQueryProceed(").count(), 2, "visible() and closest()");
+        assert!(!common.contains("while"));
+        for pass in [include_str!("shaders/rt_pbr_shadow.wgsl"), include_str!("shaders/rt_reflect.wgsl")] {
+            assert!(!pass.contains("rayQueryProceed("), "passes query only through rt_common");
+        }
     }
 }

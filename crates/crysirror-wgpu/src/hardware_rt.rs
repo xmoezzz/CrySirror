@@ -560,10 +560,10 @@ mod tests {
     #[test]
     fn genuine_ray_query_shaders_parse_and_validate() {
         for shader in [
-            include_str!("shaders/hardware_rt.wgsl"),
-            include_str!("shaders/rt_pbr_shadow.wgsl"),
+            include_str!("shaders/hardware_rt.wgsl").to_owned(),
+            crate::rt_pbr::shadow_source(),
         ] {
-            validate_shader(shader).unwrap();
+            validate_shader(&shader).unwrap();
             assert!(shader.contains("rayQueryInitialize"));
             assert!(!shader.contains("distance_to_triangle"));
         }

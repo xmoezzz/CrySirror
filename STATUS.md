@@ -3,6 +3,17 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## RT step 5: ray-traced reflections (ADR 0058)
+
+- `reflections.ray_traced`: mirror rays traced on the hardware path; hits
+  visible this frame reuse the previous frame's colour, others are shaded
+  from a baked all-material atlas, GPU-gathered UV/normal attributes, the
+  sun with an RT shadow and SH irradiance. Shadow queries now use the
+  closest-hit flag (fixes a possible missed occluder behind alpha holes).
+- Behaviour (Apple M5, Metal): hardware RT GPU tests **7 passed**; whole
+  `crysirror-wgpu` ignored GPU suite `--test-threads=1` **42 passed**.
+  Off-screen box reflected: RT 2348 red pixels, SSR 0, none 0.
+
 ## RT step 4: ray-traced point/spot light shadows (ADR 0057)
 
 - Nearest two shadowed point/spot lights traced into the spare B/A

@@ -261,6 +261,11 @@ pub struct ScreenSpaceReflections {
     /// Linear march steps (refined by a binary search).
     #[serde(default = "ssr_steps")]
     pub steps: u32,
+    /// Trace mirror rays against the scene when the renderer runs the
+    /// hardware ray-tracing path (ADR 0058); screen space otherwise. The
+    /// technique actually used is reported in the RT statistics.
+    #[serde(default)]
+    pub ray_traced: bool,
 }
 fn ssr_distance() -> f32 {
     30.
