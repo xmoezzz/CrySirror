@@ -4,12 +4,12 @@
 //! Shared script binding specifications and host-owned await subscriptions.
 //! The subscriptions are runtime capabilities, never project/save JSON.
 use crate::{
-    object::{ClassRegistry, ObjectId},
     EngineContext, Value,
+    object::{ClassRegistry, ObjectId},
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use crysirror_core::state::ClientId;
-use serde_json::{json, Value as Json};
+use serde_json::{Value as Json, json};
 use std::{collections::BTreeMap, fmt::Write};
 #[derive(Clone, Copy)]
 pub struct AsyncBinding {
@@ -24,6 +24,16 @@ pub struct AsyncBinding {
     pub release: bool,
 }
 pub const BINDINGS: &[AsyncBinding] = &[
+    AsyncBinding {
+        class: "Audio",
+        name: "prepareHrtfAsync",
+        start: "beginHrtf",
+        status: "hrtfStatus",
+        cancel: "cancelHrtfJob",
+        completion: "result",
+        returns: "Record<string, any>",
+        release: true,
+    },
     AsyncBinding {
         class: "Audio",
         name: "prepareAcousticsAsync",

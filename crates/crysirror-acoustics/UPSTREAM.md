@@ -6,7 +6,7 @@ The reference is the complete checkout of
 records the SHA-256 inventory of all Rust library/test/benchmark sources in
 `crates/phonon`. Identity inventory is separate from implementation coverage.
 The original Apache license and Valve/phonon notices are preserved here.
-No demo, music, SOFA/HRIR or font data is distributed by CrySirror.
+No demo, music, measured SOFA/HRIR or font data is distributed by CrySirror.
 
 Source review for this profile covers `simulators/direct.rs`, `models/*`,
 `scene/*` and direct/panning/EQ/IIR/buffer DSP. `direct.rs` adapts exponential
@@ -33,8 +33,8 @@ Semantic differences are deliberate:
   for a propagation job. This does not make all audio decoding/mixing async.
 - Absorption/scattering fields are validated metadata reserved for reflections;
   they do not currently generate reflected energy. Travel time is reported,
-  not applied as playback delay. HRTF, diffraction, reflections and reverb remain
-  follow-up work. Existing stereo panning remains in the engine mixer.
+  not applied as playback delay. HRTF now has a separate worker-prepared module (ADR 0068);
+  diffraction, reflections and reverb remain follow-up work. Existing stereo panning remains in the engine mixer.
 
 BVH implementations are external libraries, not handwritten tree builders:
 

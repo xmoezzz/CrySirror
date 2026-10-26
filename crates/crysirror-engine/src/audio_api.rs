@@ -8,7 +8,7 @@ use crate::{
     object::{Class, ClassInfo, MethodInfo, ObjectId, PropertyInfo, TypeHint as T},
     value::Value,
 };
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_audio::{
     decoder::{self, AudioSource, Clip, StereoFrame},
     mixer::{
@@ -39,6 +39,7 @@ pub(crate) struct Attachment {
     pub(crate) spatial: Spatial,
     pub(crate) raycast: bool,
     pub(crate) acoustics: Option<crysirror_acoustics::AcousticSource>,
+    pub(crate) binaural: bool,
 }
 pub struct AudioRuntime {
     pub mixer: Mixer,
@@ -48,6 +49,7 @@ pub struct AudioRuntime {
     clip_bytes: usize,
     pub(crate) attachments: BTreeMap<(u32, u32, u64), Attachment>,
     pub acoustics: crate::acoustics_api::AcousticsRuntime,
+    pub binaural: crate::binaural_api::BinauralRuntime,
     music: BTreeMap<(u32, String), VoiceHandle>,
     listeners: BTreeMap<u32, Listener>,
     restored: Option<u64>,
@@ -64,6 +66,7 @@ impl Default for AudioRuntime {
             clip_bytes: 0,
             attachments: BTreeMap::new(),
             acoustics: Default::default(),
+            binaural: Default::default(),
             music: BTreeMap::new(),
             listeners: BTreeMap::new(),
             restored: None,
@@ -85,6 +88,7 @@ impl AudioRuntime {
         self.output.clear();
         self.remainder = 0;
         self.acoustics.reset();
+        self.binaural.reset();
     }
 }
 fn key(h: VoiceHandle) -> (u32, u32, u64) {
@@ -143,6 +147,7 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
         a.restored = Some(restored);
     }
     crate::acoustics_api::poll(cx.state()?)?;
+    crate::binaural_api::poll(cx.state()?)?;
     let current = {
         let s = cx.state()?;
         s.runtime
@@ -302,6 +307,16 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
                 0.
             };
         }
+        if a.binaural {
+            let state = cx.state()?;
+            let listener = state
+                .mixer_audio
+                .listeners
+                .get(&a.handle.client)
+                .copied()
+                .unwrap_or(auto);
+            crate::binaural_api::queue(state, a.handle, a.spatial.position, listener)?;
+        }
         if let Some(settings) = &a.acoustics {
             let s = cx.state()?;
             let listener = s
@@ -326,6 +341,7 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
             .set_spatial(a.handle.client, a.handle, Some(a.spatial))?;
     }
     crate::acoustics_api::dispatch(cx.state()?)?;
+    crate::binaural_api::dispatch(cx.state()?)?;
     let s = cx.state()?;
     let a = &mut s.mixer_audio;
     a.attachments
@@ -373,6 +389,13 @@ fn info() -> &'static ClassInfo {
         method("play",vec![("channel",T::Int),("voice",T::Map)],T::Void,"Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics."),
         method("stop",vec![("channel",T::Int)],T::Void,"Stop a classic channel."),
         method("playAt",vec![("channel",T::Int),("voice",T::Map),("where",T::Map)],T::Void,"Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion."),
+        method("beginHrtf",vec![("asset",T::String),("options",T::Map)],T::Int,"Prepare a client asset SOFA SimpleFreeFieldHRIR or HrirAsset JSON on workers, including resampling/FFT plans. HrtfOptions defaults are accepted with {}. Ready publication replaces the client profile and re-prepares enabled voices; profile replacement is not a seamless transition."),
+        method("hrtfStatus",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed dataset status; ready result contains revision, format, sample rate, measurements, FIR taps and bridge latency. Release with cancelHrtfJob."),
+        method("cancelHrtfJob",vec![("ticket",T::Int)],T::Void,"Cancel/release a dataset preparation ticket; a successfully published profile remains installed."),
+        method("clearHrtf",vec![],T::Void,"Remove this client's profile and pending preparation, cancel its filter work, and restore stereo panning on enabled voices. Acoustic direct-path filtering remains independent."),
+        method("hrtfStats",vec![],T::Map,"Client profile metadata, voice/pending counts, and host admission reservations. Reservations are estimates, not measured process memory."),
+        method("hrtfVoice",vec![("handle",T::Map)],T::Map,"Live client voice HRTF state: enabled plus ready/pending preparation/revision/published_direction/error; publication does not claim the audible crossfade has completed. Initial failure stays muted; update failure retains the last ready filter. Disable/re-enable to retry."),
+        method("setVoiceHrtf",vec![("handle",T::Map),("enabled",T::Bool)],T::Void,"Enable/disable binaural rendering on a spatial voice. Enabling requires a prepared profile; source/envelope clocks wait for worker preparation. Repeated enable is idempotent. Pose updates crossfade with the profile policy."),
         method("beginAcousticScene",vec![("asset",T::String)],T::Int,"Read a client-scoped AcousticSceneSpec JSON (up to 32 MiB) and build its CPU BVH on workers. Old geometry remains until successful owner publication. Options live in the JSON; obvhs requires its host feature."),
         method("beginAcousticProbe",vec![("query",T::Map)],T::Int,"Simulate a captured source/listener/settings query on workers. Requires a prepared scene; returns a ticket for acousticStatus. Gains exclude the mixer's existing distance curve."),
         method("acousticStatus",vec![("ticket",T::Int)],T::Map,"Nonblocking client/generation-scoped pending/ready/failed status. Ready result contains scene metadata or a direct path. Release tickets with cancelAcousticJob."),
@@ -380,7 +403,7 @@ fn info() -> &'static ClassInfo {
         method("clearAcousticScene",vec![],T::Void,"Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene."),
         method("acousticStats",vec![],T::Map,"Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement."),
         method("acousticVoice",vec![("handle",T::Map)],T::Map,"Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy."),
-        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource}; acoustics requires a ready scene and uses background direct-path updates; returns scoped generation handle."),
+        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Returns scoped generation handle."),
         method("playRandom",vec![("name",T::String),("container",T::Map),("voice",T::Map)],T::Map,"Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec."),
         method("playMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Map,"Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true."),
         method("stopVoice",vec![("handle",T::Map),("fade_ms",T::Number)],T::Void,"Stop immediately or sample-accurate fade out."),
@@ -441,6 +464,11 @@ fn voice_options(
         bail!("voice must be an object")
     };
     let mut map = map.clone();
+    let binaural = map
+        .remove("binaural")
+        .map(|v| v.as_bool())
+        .transpose()?
+        .unwrap_or(false);
     let acoustics = map
         .remove("acoustics")
         .filter(|v| !matches!(v, Value::Null))
@@ -479,6 +507,14 @@ fn voice_options(
     );
     let state = cx.state()?;
     ensure!(
+        !binaural || spec.spatial.is_some(),
+        "binaural requires a spatial voice or follow entity"
+    );
+    if binaural {
+        crate::binaural_api::poll(state)?;
+        state.mixer_audio.binaural.admit_voice(state.client.0)?;
+    }
+    ensure!(
         acoustics.is_none() || state.mixer_audio.acoustics.has_scene(state.client.0),
         "prepare an acoustic scene before playing an acoustic source"
     );
@@ -496,6 +532,7 @@ fn voice_options(
         spatial: spatial.clone(),
         raycast,
         acoustics,
+        binaural,
     });
     Ok((asset, spec, attachment))
 }
@@ -510,11 +547,20 @@ fn attach(
         runtime
             .attachments
             .retain(|_, a| runtime.mixer.is_playing(a.handle.client, a.handle));
+        let binaural = a.binaural;
         runtime.attachments.insert(key(handle), a);
         if runtime.attachments[&key(handle)].acoustics.is_some() {
             runtime
                 .mixer
                 .set_acoustic_gains(handle.client, handle, Some([0.; 3]))?;
+        }
+        if binaural {
+            if let Err(error) = crate::binaural_api::enable(cx.state()?, handle) {
+                let a = &mut cx.state()?.mixer_audio;
+                a.attachments.remove(&key(handle));
+                a.mixer.stop(handle.client, handle, 0.)?;
+                return Err(error);
+            }
         }
     }
     Ok(())
@@ -538,6 +584,9 @@ impl Class for AudioClass {
         name: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if let Some(result) = crate::binaural_api::call(cx.state()?, name, args)? {
+            return Ok(result);
+        }
         if let Some(result) = crate::acoustics_api::call(cx.state()?, name, args)? {
             return Ok(result);
         }

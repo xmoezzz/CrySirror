@@ -4,6 +4,22 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `c619eaa9bacd0fc3` (2026-10-27): worker-prepared HRTF resources
+
+- Add HrtfEarOrder, HrtfOptions, HrirAsset and HrirMeasurement data; Audio beginHrtf/hrtfStatus/
+  cancelHrtfJob/clearHrtf/hrtfStats/hrtfVoice/setVoiceHrtf and JS/TS
+  prepareHrtfAsync. Resource/filter/voice preparation is bounded and client/
+  restore-scoped. A released ready ticket leaves its resource installed.
+- playSfx accepts optional `binaural: true` with existing spatial/follow options.
+  It requires a prepared profile. Existing calls retain stereo behavior.
+  HRTF replaces spatial panning, retains the shared mixer/buses, and combines
+  with direct-path acoustic bands. Pending initial preparation freezes source/
+  envelope clocks; natural EOF drains filter/delay tails.
+- Profiles load SOFA SimpleFreeFieldHRIR or portable explicit-rate HRIR JSON.
+  Default partition latency is 64 frames. `published_direction` reports a
+  prepared target, not completion of an audible crossfade. Profiles/FFT state
+  are derived and must be prepared again after restore. See ADR 0068 for limits.
+
 ## `0d7b882595278ffb` (2026-10-27): shared acoustic scenes and direct sound
 
 - Add AcousticBackend/Material/Mesh/SceneSpec/Source/Query and DirectPath data,

@@ -101,3 +101,4 @@ moves to `done` only with recorded behavior evidence.
 | [0065](0065-native-resource-codecs-and-async-decode.md) | Shared native archive/image/audio/file codecs, capability companions and bounded owner-polled resource decode tasks | all 289 named IDs implemented; partial variants explicit |
 | [0066](0066-awaitable-services-and-native-plugin-facades.md) | Awaitable Text/Resources/Save services, bounded JS Promises, shared menus and explicit native plugin shells | implemented profile; native continuations and full KAG3 remain incomplete |
 | [0067](0067-shared-acoustics-and-cpu-bvh.md) | Client-owned acoustic BVHs, frequency transmission and bounded background direct sound | direct-sound profile; HRTF/reflections/reverb pending |
+| [0068](0068-hrtf-resources-and-binaural-voices.md) | Client-owned SOFA/HRIR, worker filter preparation and engine binaural voices | implemented profile; full audio async and room acoustics pending |

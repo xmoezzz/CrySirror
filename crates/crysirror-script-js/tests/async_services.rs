@@ -284,3 +284,22 @@ fn acoustic_promises_publish_engine_owned_scenes_and_report_native_errors() {
     app.start().unwrap();
     until(&mut app, "acoustics-ready");
 }
+
+#[test]
+fn hrtf_promises_prepare_scoped_engine_resources_and_release_owned_tickets() {
+    let (dir,mut app)=app(r#"
+      async function onInit() {
+        const profile=await audio.prepareHrtfAsync('ears.json',{max_delay_seconds:0});
+        if(profile.taps!==1 || profile.sample_rate!==48000 || profile.latency_frames!==64) throw Error('bad HRTF metadata');
+        if(audio.hrtfStats().dataset.revision!==profile.revision) throw Error('profile was released');
+        let released=false; try {audio.hrtfStatus(profile.revision);}catch(error){released=true;}
+        if(!released) throw Error('helper leaked a retained operation');
+        try {await audio.prepareHrtfAsync('missing.json',{});throw Error('missing file accepted');}
+        catch(error){if(String(error).includes('missing file accepted'))throw error;}
+        audio.clearHrtf();if(audio.hrtfStats().dataset!==null)throw Error('profile not cleared');
+        engine.log('hrtf-ready');
+      }
+    "#);
+    std::fs::write(dir.path().join("assets/a/ears.json"),br#"{"sample_rate":48000,"measurements":[{"direction":[0,0,-1],"left":[1],"right":[1]}]}"#).unwrap();
+    app.init().unwrap();app.start().unwrap();until(&mut app,"hrtf-ready");
+}

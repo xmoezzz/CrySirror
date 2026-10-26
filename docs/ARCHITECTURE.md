@@ -22,7 +22,7 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-desktop | winit lifecycle/input, audio sink, CLI and persistent state location |
 | crysirror-author | Optional Oxc TS/JS compiler + Boa offline project builder; no player dependency |
 | crysirror-siglus | Native G00 resource frontend and metadata policies; independent VM lives in crysirror-siglus-vm |
-| crysirror-acoustics | Device-free acoustic meshes/materials, default Parry and optional obvhs BVH2, volume visibility and direct propagation; immutable worker snapshots (ADR 0067) |
+| crysirror-acoustics | Device-free acoustic meshes/materials, default Parry and optional obvhs BVH2, volume visibility/direct propagation and SOFA/HRIR resources with worker-prepared convolution (ADR 0067/0068) |
 | crysirror-audio | Engine voice scheduling/buses and AudioDevice boundary; optional rodio output |
 | crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, fixed-cell layout, synchronous font-resource measurement handles, reveal and CPU SDF data |
 | crysirror-scene | Safe CPU World/Layer/UI state, migrated input/animation/projection, transactional mutations and frame extraction |

@@ -44,6 +44,11 @@ impl BandFilter {
         self.target = gains;
         Ok(())
     }
+    /// Reset sample history for a discontinuous seek, retaining gain controls.
+    pub fn reset_history(&mut self) {
+        self.low = 0.;
+        self.high_low = 0.;
+    }
     pub fn process(&mut self, input: f32) -> f32 {
         self.low += self.alpha[0] * (input - self.low);
         self.high_low += self.alpha[1] * (input - self.high_low);

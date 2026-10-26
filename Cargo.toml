@@ -36,6 +36,7 @@ members = [
     "crates/crysirror-krkr",
 ]
 exclude = [
+    "vendor/sofar",
 ]
 default-members = ["crates/crysirror-desktop"]
 
@@ -103,3 +104,7 @@ incremental = false
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# Pinned standalone SOFA/DSP dependency with the audited HDF5-v3 parser fix.
+[patch.crates-io]
+sofar = { path = "vendor/sofar" }

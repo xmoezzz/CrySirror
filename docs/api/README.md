@@ -94,12 +94,44 @@ without unloading a successfully prepared scene. Scenes are derived resources
 and require preparation again after restore.
 
 Default queries use Parry; the optional host feature `acoustics-obvhs` permits
-`backend: "obvhs"` in scene JSON. Unsupported backends fail visibly. This profile
-has no HRTF, reflected sound, diffraction or reverb. Absorption/scattering are
+`backend: "obvhs"` in scene JSON. Unsupported backends fail visibly. The direct-path profile
+does not enable HRTF by itself; prepare an HRTF resource separately for that.
+Reflected sound, diffraction and reverb remain unsupported. Absorption/scattering are
 reserved metadata and reported travel time is not a playback delay.
 See [ADR 0067](../adr/0067-shared-acoustics-and-cpu-bvh.md) for scheduling,
 limits and source attribution. The device-free synthesized demo runs with
 `cargo run --release -p crysirror-audio --example acoustic_room -- /tmp/room.wav`.
+
+## HRTF / headphone rendering
+
+```typescript
+await audio.prepareHrtfAsync('listener.sofa', { partition_frames: 64 });
+const voice = audio.playSfx({
+  asset: 'step.wav', spatial: { position: [2, 0, -4] }, binaural: true
+});
+```
+
+Profiles are client-scoped SOFA SimpleFreeFieldHRIR assets or prepared
+`HrirAsset` JSON (matching the mixer sample rate). Measured HRIR data must be
+supplied separately. `HrtfOptions` controls partition size, crossfade, delay
+capacity, SOFA normalization/reference distance and explicit ear mapping
+(left_right by default, right_left or receiver_positions when required). The default adds 64 frames
+of processing latency. Lookup follows source position and listener orientation;
+`acoustics` can additionally apply the shared direct-path scene.
+
+Initial preparation freezes a short voice until its worker buffers are ready.
+Pose updates crossfade without replacing source state; `hrtfVoice` reports the
+published target and pending preparation, not audible transition completion.
+`setVoiceHrtf(handle,false)` restores ordinary spatial pan; `clearHrtf` also
+removes the client's profile. Profiles are derived and require preparation
+after restore. Natural EOF drains per-ear delays and FIR tails. See
+[ADR 0068](../adr/0068-hrtf-resources-and-binaural-voices.md) for limits and
+remaining async boundaries.
+
+An offline, device-free example synthesizes its own source and reads an
+explicit external profile:
+`cargo run --release -p crysirror-audio --example binaural_orbit -- profile.sofa /tmp/orbit.wav`.
+No measured HRIR, game sound or font is bundled with the example.
 
 ## Rules for changing the API
 

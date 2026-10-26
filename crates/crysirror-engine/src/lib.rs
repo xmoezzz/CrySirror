@@ -12,6 +12,7 @@
 //! [`App::frame`] and render the extracted runtime state.
 #![forbid(unsafe_code)]
 pub mod acoustics_api;
+pub mod binaural_api;
 pub mod ai;
 pub mod api_doc;
 pub mod assets_api;

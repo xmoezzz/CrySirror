@@ -4,7 +4,7 @@
 //! Deterministic, device-free stereo mixer. All controls are client scoped;
 //! decoded PCM and decoder handles are derived playback resources, never saves.
 use crate::decoder::{AudioSource, Clip, StereoFrame};
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -42,11 +42,7 @@ impl Default for BusSettings {
 }
 impl BusSettings {
     fn level(self) -> f32 {
-        if self.muted {
-            0.
-        } else {
-            self.gain
-        }
+        if self.muted { 0. } else { self.gain }
     }
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -376,6 +372,10 @@ struct Voice {
     pause_after_fade: bool,
     lowpass: StereoFrame,
     acoustic: Option<crysirror_acoustics::spectrum::BandFilter>,
+    binaural: Option<crysirror_acoustics::binaural::BinauralVoice>,
+    binaural_pending: bool,
+    source_ended: bool,
+    tail_left: usize,
 }
 #[derive(Clone, Copy, Default, Debug, Serialize)]
 pub struct MixStats {
@@ -595,6 +595,10 @@ impl Mixer {
             pause_after_fade: false,
             lowpass: [0.; 2],
             acoustic: None,
+            binaural: None,
+            binaural_pending: false,
+            source_ended: false,
+            tail_left: 0,
         });
         self.generations[slot] = generation;
         self.sequence = sequence;
@@ -767,6 +771,40 @@ impl Mixer {
         }
         Ok(())
     }
+    /// Request asynchronous binaural preparation. Source/envelope clocks wait
+    /// for installation, so a short one-shot cannot disappear while workers run.
+    pub fn pending_binaural(&mut self, client: u32, h: VoiceHandle) -> Result<()> {
+        let v = self.voice(client, h)?;
+        ensure!(
+            v.spec.spatial.is_some(),
+            "binaural audio requires spatial voice"
+        );
+        v.binaural_pending = true;
+        Ok(())
+    }
+    /// Owner publication of worker-allocated convolution state. None restores
+    /// stereo panning. Existing ready state survives a rejected publication.
+    pub fn set_binaural(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        voice: Option<crysirror_acoustics::binaural::BinauralVoice>,
+    ) -> Result<()> {
+        let rate = self.config.sample_rate;
+        let v = self.voice(client, h)?;
+        if let Some(voice) = &voice {
+            ensure!(
+                v.spec.spatial.is_some() && voice.sample_rate() == rate,
+                "binaural voice sample rate/spatial mismatch"
+            );
+        }
+        v.binaural = voice;
+        v.binaural_pending = false;
+        if v.binaural.is_none() && v.source_ended {
+            v.tail_left = 0;
+        }
+        Ok(())
+    }
     pub fn pause(&mut self, client: u32, h: VoiceHandle, paused: bool) -> Result<()> {
         self.voice(client, h)?.spec.paused = paused;
         Ok(())
@@ -808,6 +846,14 @@ impl Mixer {
         v.cursor.next = source_frame;
         v.position = source_frame as f64;
         v.lowpass = [0.; 2];
+        if let Some(filter) = &mut v.acoustic {
+            filter.reset_history();
+        }
+        v.source_ended = false;
+        v.tail_left = 0;
+        if let Some(voice) = &mut v.binaural {
+            voice.reset();
+        }
         Ok(())
     }
     pub fn position(&self, client: u32, h: VoiceHandle) -> Result<f64> {
@@ -906,6 +952,7 @@ impl Mixer {
                 .expect("registered voice client");
             if v.spec.bus == Bus::Voice
                 && !v.spec.paused
+                && !v.binaural_pending
                 && v.spec.gain > 0.
                 && c.level(Bus::Voice) > 0.
             {
@@ -962,7 +1009,12 @@ impl Mixer {
             }
             for (slot, (effect, step)) in self.voices.iter_mut().zip(spatial.iter().zip(&rates)) {
                 let Some(v) = slot else { continue };
-                if v.spec.paused {
+                if v.spec.paused || v.binaural_pending {
+                    continue;
+                }
+                if v.source_ended && v.tail_left == 0 {
+                    retire_dialogue(v, &mut self.clients);
+                    *slot = None;
                     continue;
                 }
                 let loop_range = if v.spec.looping {
@@ -983,23 +1035,33 @@ impl Mixer {
                     }
                 }
                 let mut index = v.position.floor() as u64;
-                let a = match v.cursor.sample(index)? {
-                    Some(a) => a,
-                    None if v.spec.looping => {
-                        v.position = 0.;
-                        index = 0;
-                        if let Some(a) = v.cursor.sample(0)? {
-                            a
-                        } else {
-                            retire_dialogue(v, &mut self.clients);
-                            *slot = None;
-                            continue;
+                let a = if v.source_ended {
+                    [0.; 2]
+                } else {
+                    match v.cursor.sample(index)? {
+                        Some(a) => a,
+                        None if v.spec.looping => {
+                            v.position = 0.;
+                            index = 0;
+                            if let Some(a) = v.cursor.sample(0)? {
+                                a
+                            } else {
+                                retire_dialogue(v, &mut self.clients);
+                                *slot = None;
+                                continue;
+                            }
                         }
-                    }
-                    None => {
-                        retire_dialogue(v, &mut self.clients);
-                        *slot = None;
-                        continue;
+                        None => {
+                            if let Some(binaural) = &v.binaural {
+                                v.source_ended = true;
+                                v.tail_left = binaural.tail_frames();
+                                [0.; 2]
+                            } else {
+                                retire_dialogue(v, &mut self.clients);
+                                *slot = None;
+                                continue;
+                            }
+                        }
                     }
                 };
                 let next = if let Some(p) = loop_range {
@@ -1011,7 +1073,7 @@ impl Mixer {
                 } else {
                     index + 1
                 };
-                let b = if next == index {
+                let b = if v.source_ended || next == index {
                     a
                 } else {
                     v.cursor.sample(next)?.unwrap_or(a)
@@ -1022,7 +1084,7 @@ impl Mixer {
                 let mut gain =
                     v.gain.step() * v.envelope.step() * c.level(Bus::Master) * c.level(v.spec.bus);
                 let pan = v.pan.step();
-                if pan != 0.5 {
+                if pan != 0.5 && v.binaural.is_none() {
                     s[0] *= (1. - pan).sqrt() * std::f32::consts::SQRT_2;
                     s[1] *= pan.sqrt() * std::f32::consts::SQRT_2;
                 }
@@ -1036,7 +1098,11 @@ impl Mixer {
                         .acoustic
                         .as_mut()
                         .map_or(mono, |filter| filter.process(mono));
-                    s = [mono * effect.pan[0], mono * effect.pan[1]];
+                    s = if let Some(binaural) = &mut v.binaural {
+                        binaural.process(mono)?
+                    } else {
+                        [mono * effect.pan[0], mono * effect.pan[1]]
+                    };
                     if let Some(alpha) = effect.alpha {
                         for (state, input) in v.lowpass.iter_mut().zip(s) {
                             *state += alpha * (input - *state);
@@ -1046,15 +1112,24 @@ impl Mixer {
                         v.lowpass = s
                     }
                 }
+                if pan != 0.5 && v.binaural.is_some() {
+                    s[0] *= (1. - pan).sqrt() * std::f32::consts::SQRT_2;
+                    s[1] *= pan.sqrt() * std::f32::consts::SQRT_2;
+                }
                 sample[0] += s[0] * gain;
                 sample[1] += s[1] * gain;
-                v.position += step;
+                if v.source_ended {
+                    v.tail_left = v.tail_left.saturating_sub(1);
+                } else {
+                    v.position += step;
+                }
                 if v.pause_after_fade && v.envelope.left == 0 {
                     v.spec.paused = true;
                     v.pause_after_fade = false;
                 }
                 if (v.stop_after_fade && v.envelope.left == 0 && v.envelope.value == 0.)
-                    || (!v.spec.looping
+                    || (v.binaural.is_none()
+                        && !v.spec.looping
                         && v.cursor
                             .source
                             .frame_count()

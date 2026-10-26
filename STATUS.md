@@ -1790,3 +1790,100 @@ Remaining boundaries:
 - These are independent engine capabilities, not a new completed VN adapter,
   game boot, GPU/hardware-RT result or Windows/Linux behavior validation. KAG3's
   previously recorded missing KAGParser facade remains an integration gap.
+
+## HRTF resources and engine binaural voices (ADR 0068, 2026-10-27)
+
+Implementation:
+- Added immutable engine HrtfDataset/HrtfOptions/HrtfEarOrder resources in
+  crysirror-acoustics. Inputs are SOFA SimpleFreeFieldHRIR/FIR or prepared
+  HrirAsset JSON. SOFA resamples through sofar; JSON requires the mixer rate.
+  Native SOFA uses library neighborhood interpolation; prepared JSON weights
+  the nearest three directions. No measured human HRIR is bundled.
+- Integrated the standalone sofar 0.4.0 DSP library, pinned at
+  303532bd609db2d74c1b9e7f7483666dad1210fa. Its SOFA reader, FFT plans,
+  partitioned convolution, per-ear delays, crossfades and filter mailbox are
+  library components, not another game engine or mixer. vendor/sofar retains
+  original licenses/source hashes and one audited HDF5 v3 range correction.
+  No native libmysofa SDK, audio-device demo or workflow is imported.
+- Added preflight checks for original/resampled dimensions, sample rates,
+  required coordinate Type/Units, little-endian numeric encodings, finite FIRs,
+  delay axes and supported listener frames. Fixed the M=R=2 global-ear-delay
+  ambiguity using Data.Delay dimensions. Ear order is explicit: authored
+  left_right by default, right_left or receiver_positions when requested.
+  The local CIPIC profile demonstrates why metadata must not silently flip
+  conventional response-channel order.
+- Audio beginHrtf/status/cancel/clear/stats/voice controls and prepareHrtfAsync
+  prepare datasets, voice buffers and filters on bounded workers. Ready
+  resources publish on the owner; failed replacements preserve the prior
+  profile. Latest direction updates coalesce. Limits are 32 voices/client,
+  64/host and 16 in-flight voice/filter jobs. Epoch checks and storage roots
+  remain client-scoped. Reservations follow actual retained stream buffers.
+- playSfx accepts binaural:true with spatial/follow. The existing mixer replaces
+  spatial panning with convolution while retaining acoustic bands, distance,
+  gain/envelopes, buses and ducking. Pending initial preparation freezes short
+  sources; arbitrary block sizes retain history; natural EOF drains FIR/ear
+  delay tails. Pause/seek and disabling have explicit behavior. The default
+  bridge adds 64 frames (1.33 ms at 48 kHz), separate from device/queue latency.
+- hrtfVoice reports published_direction and pending preparation; it does not
+  pretend the audible crossfade has already completed. Resource replacement
+  re-prepares enabled voices; seamless profile replacement is not claimed.
+- Added authored netCDF4 SOFA impulses, including HDF5 v3, reversed receiver
+  records, bad units and a missing coordinate type. Generator dependencies
+  are development-only. Added an offline synthesized-source orbit example.
+  Regenerated docs/api; fingerprint 0d7b882595278ffb -> c619eaa9bacd0fc3.
+
+Compilation:
+- Local release workspace/all-target check passed with desktop krkr,
+  arc-formats and acoustics-obvhs features. Engine/JS and library release
+  builds passed. Original unused-code/variable warnings remain. No CI ran.
+- The vendored source audit verified all 33 original Rust-source hashes after
+  reversing the single declared parser fix; zero unexpected source changes.
+  Manifest changes exclude upstream native/device/data test targets. This
+  does not count the dependency's omitted external-data suites as passes.
+
+Behavior validation:
+- Release library suites: **41 passed, zero failed, two ignored** (external
+  SOFA and owner NWA fixtures). Engine/JS/API suites: **31 passed, zero failed,
+  two system-font tests ignored**. Thus default targeted suites passed 72;
+  ignored tests are not counted as default passes.
+- The external SOFA case was separately executed successfully with the explicit
+  local CIPIC path. The complete HRTF kernel suite, including that normally
+  ignored case, passed **8 tests**: 1250 measurements resampled to 48 kHz,
+  218 taps, finite nonzero stereo output. This input remains local/ignored.
+- Analytic FIR/sample-point oracles verify partition latency, tail preservation,
+  ear delays, crossfades, reset and three ear-order policies. The M=R=2 fixtures
+  verify constant ear delays independently of measurement index; the HDF5 v3
+  case verifies the dependency fix. Bad/missing coordinate metadata fails.
+- Engine worker gates prove dataset and initial voice work leave frames free
+  to progress. Tests verify cancellation, failed replacement, bounded results/
+  voice admission, idempotent enable, listener rotation and real PCM changes,
+  restore invalidation, distinct same-named profiles under two client roots,
+  foreign handles and clearing one client without changing the other's PCM.
+- JS awaits resource preparation, checks metadata, verifies automatic ticket
+  release with the installed resource retained, and catches missing assets.
+  Native audio predictor/channel/mixer regressions remain in the library suite;
+  no new VN opcode or complete game boot is claimed by HRTF.
+- Python 3.11 tooling: **189 passed**. Evidence in target/verification:
+  hrtf-{library-release-tests,engine-js-release-tests,core-and-sofa-tests}.log,
+  hrtf-workspace-release-check.log, hrtf-python-tests.log and
+  hrtf-source-audit.json. Offline orbit output and timings are in
+  hrtf-orbit.wav / hrtf-orbit.log; all source audio is synthesized. The Apple M5
+  single-voice offline run measured dataset read/plan 62.244 ms, eight seconds
+  of mixer rendering 16.414 ms, and 80 filter updates 0.151 ms. Source allocation
+  and final tail drain are outside the render timing; this is no multi-voice
+  deadline claim. hrtf-orbit-analysis.json verifies stereo energy and final zeros.
+
+Remaining boundaries:
+- Fixed-reference HRTF is not dynamic near-field propagation, diffraction,
+  early reflections or late reverb. Direct travel time remains metadata only.
+  Unsupported SOFA conventions, legacy object-header v1 and some generic HDF5
+  group layouts still fail visibly. No all-format or subjective localization
+  quality claim is made from the impulse tests or generated WAV.
+- Full audio async remains open: source opening, decoder reads, mixing/output
+  and teardown retain their prior synchronous boundaries. DSP processing
+  preallocates its own buffers, but the existing mixer still allocates scratch
+  and drops ended voices during render. This is not a hard real-time or
+  all-engine async completion claim. Host reservations are estimates, not a
+  process-memory sandbox; library phases are not preemptible mid-call.
+- No new GPU, device-output or Windows/Linux behavior result is claimed. Native
+  VM syscall/wait/save mappings retain their previous integration status.

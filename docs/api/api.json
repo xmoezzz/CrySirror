@@ -173,6 +173,28 @@
   ],
   "async_bindings": [
     {
+      "cancel": "cancelHrtfJob",
+      "class": "Audio",
+      "completion": "result",
+      "name": "prepareHrtfAsync",
+      "params": [
+        {
+          "name": "asset",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "options",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginHrtf",
+      "status": "hrtfStatus"
+    },
+    {
       "cancel": "cancelAcousticJob",
       "class": "Audio",
       "completion": "result",
@@ -545,6 +567,81 @@
           "returns": "void"
         },
         {
+          "doc": "Prepare a client asset SOFA SimpleFreeFieldHRIR or HrirAsset JSON on workers, including resampling/FFT plans. HrtfOptions defaults are accepted with {}. Ready publication replaces the client profile and re-prepares enabled voices; profile replacement is not a seamless transition.",
+          "name": "beginHrtf",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Client/restore-scoped pending/ready/failed dataset status; ready result contains revision, format, sample rate, measurements, FIR taps and bridge latency. Release with cancelHrtfJob.",
+          "name": "hrtfStatus",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Cancel/release a dataset preparation ticket; a successfully published profile remains installed.",
+          "name": "cancelHrtfJob",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove this client's profile and pending preparation, cancel its filter work, and restore stereo panning on enabled voices. Acoustic direct-path filtering remains independent.",
+          "name": "clearHrtf",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Client profile metadata, voice/pending counts, and host admission reservations. Reservations are estimates, not measured process memory.",
+          "name": "hrtfStats",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Live client voice HRTF state: enabled plus ready/pending preparation/revision/published_direction/error; publication does not claim the audible crossfade has completed. Initial failure stays muted; update failure retains the last ready filter. Disable/re-enable to retry.",
+          "name": "hrtfVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Enable/disable binaural rendering on a spatial voice. Enabling requires a prepared profile; source/envelope clocks wait for worker preparation. Repeated enable is idempotent. Pose updates crossfade with the profile policy.",
+          "name": "setVoiceHrtf",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "enabled",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Read a client-scoped AcousticSceneSpec JSON (up to 32 MiB) and build its CPU BVH on workers. Old geometry remains until successful owner publication. Options live in the JSON; obvhs requires its host feature.",
           "name": "beginAcousticScene",
           "params": [
@@ -612,7 +709,7 @@
           "returns": "Record<string, any>"
         },
         {
-          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource}; acoustics requires a ready scene and uses background direct-path updates; returns scoped generation handle.",
+          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Returns scoped generation handle.",
           "name": "playSfx",
           "params": [
             {
@@ -4416,6 +4513,153 @@
     }
   ],
   "data": [
+    {
+      "doc": "SOFA receiver-record mapping to output ears. Explicit overrides handle datasets whose position metadata differs from their authored channel order.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Preserve the conventional record-zero left, record-one right order.",
+          "name": "left_right",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Swap the two receiver records and their delays.",
+          "name": "right_left",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Determine ears from positive/negative SOFA Y receiver coordinates.",
+          "name": "receiver_positions",
+          "rust_type": ""
+        }
+      ],
+      "name": "HrtfEarOrder",
+      "used_by": "HrtfOptions.ear_order"
+    },
+    {
+      "doc": "Dataset preparation and per-source convolution policy.",
+      "fields": [
+        {
+          "default": "left_right",
+          "doc": "SOFA ear mapping; defaults to authored left/right order. JSON has explicit ear fields.",
+          "name": "ear_order",
+          "rust_type": "HrtfEarOrder"
+        },
+        {
+          "default": 64,
+          "doc": "FFT partition size, one of 32/64/128/256 samples; adds this many frames of bridge latency.",
+          "name": "partition_frames",
+          "rust_type": "u32"
+        },
+        {
+          "default": 20.0,
+          "doc": "Filter-change crossfade in milliseconds, 1..200; applies to pose updates.",
+          "name": "crossfade_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.05,
+          "doc": "Maximum per-ear dataset delay in seconds, 0..0.25. Delay lines allocate on workers.",
+          "name": "max_delay_seconds",
+          "rust_type": "f32"
+        },
+        {
+          "default": false,
+          "doc": "Apply sofar's normalization to SOFA files; JSON coefficients retain authored gain.",
+          "name": "normalized",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "SOFA lookup radius in metres; null uses the first measurement's radius.",
+          "name": "reference_distance",
+          "rust_type": "Option<f32>"
+        }
+      ],
+      "name": "HrtfOptions",
+      "used_by": "Audio.beginHrtf options"
+    },
+    {
+      "doc": "Portable prepared HRIR data; useful for authoring, tests and offline imports.",
+      "fields": [
+        {
+          "default": 48000,
+          "doc": "Exact output sample rate. JSON requires a matching mixer rate; SOFA resamples through sofar.",
+          "name": "sample_rate",
+          "rust_type": "u32"
+        },
+        {
+          "default": [
+            {
+              "delays_seconds": [
+                0.0,
+                0.0
+              ],
+              "direction": [
+                0.0,
+                0.0,
+                -1.0
+              ],
+              "left": [
+                1.0
+              ],
+              "right": [
+                1.0
+              ]
+            }
+          ],
+          "doc": "1..8192 measurements, with matching nonempty FIR lengths and at most 8388608 total taps.",
+          "name": "measurements",
+          "rust_type": "Vec<HrirMeasurement>"
+        }
+      ],
+      "name": "HrirAsset",
+      "used_by": "Audio.beginHrtf JSON asset"
+    },
+    {
+      "doc": "One measurement in the listener's CrySirror local axes: +X right, +Y up, -Z front.",
+      "fields": [
+        {
+          "default": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "doc": "Nonzero direction; magnitude is normalized at preparation.",
+          "name": "direction",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            1.0
+          ],
+          "doc": "Left-ear FIR, at most 4096 finite taps.",
+          "name": "left",
+          "rust_type": "Vec<f32>"
+        },
+        {
+          "default": [
+            1.0
+          ],
+          "doc": "Right-ear FIR, same length as left and all other measurements.",
+          "name": "right",
+          "rust_type": "Vec<f32>"
+        },
+        {
+          "default": [
+            0.0,
+            0.0
+          ],
+          "doc": "Additional left/right delay, in seconds; defaults to zero.",
+          "name": "delays_seconds",
+          "rust_type": "[f32; 2]"
+        }
+      ],
+      "name": "HrirMeasurement",
+      "used_by": "HrirAsset.measurements"
+    },
     {
       "doc": "",
       "fields": [
@@ -10921,7 +11165,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "0d7b882595278ffb",
+  "fingerprint": "c619eaa9bacd0fc3",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

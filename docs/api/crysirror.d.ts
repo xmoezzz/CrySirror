@@ -23,6 +23,20 @@ declare class Audio {
   stop(channel: number): void;
   /** Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion. */
   playAt(channel: number, voice: Record<string, any>, where: Record<string, any>): void;
+  /** Prepare a client asset SOFA SimpleFreeFieldHRIR or HrirAsset JSON on workers, including resampling/FFT plans. HrtfOptions defaults are accepted with {}. Ready publication replaces the client profile and re-prepares enabled voices; profile replacement is not a seamless transition. */
+  beginHrtf(asset: string, options: Record<string, any>): number;
+  /** Client/restore-scoped pending/ready/failed dataset status; ready result contains revision, format, sample rate, measurements, FIR taps and bridge latency. Release with cancelHrtfJob. */
+  hrtfStatus(ticket: number): Record<string, any>;
+  /** Cancel/release a dataset preparation ticket; a successfully published profile remains installed. */
+  cancelHrtfJob(ticket: number): void;
+  /** Remove this client's profile and pending preparation, cancel its filter work, and restore stereo panning on enabled voices. Acoustic direct-path filtering remains independent. */
+  clearHrtf(): void;
+  /** Client profile metadata, voice/pending counts, and host admission reservations. Reservations are estimates, not measured process memory. */
+  hrtfStats(): Record<string, any>;
+  /** Live client voice HRTF state: enabled plus ready/pending preparation/revision/published_direction/error; publication does not claim the audible crossfade has completed. Initial failure stays muted; update failure retains the last ready filter. Disable/re-enable to retry. */
+  hrtfVoice(handle: Record<string, any>): Record<string, any>;
+  /** Enable/disable binaural rendering on a spatial voice. Enabling requires a prepared profile; source/envelope clocks wait for worker preparation. Repeated enable is idempotent. Pose updates crossfade with the profile policy. */
+  setVoiceHrtf(handle: Record<string, any>, enabled: boolean): void;
   /** Read a client-scoped AcousticSceneSpec JSON (up to 32 MiB) and build its CPU BVH on workers. Old geometry remains until successful owner publication. Options live in the JSON; obvhs requires its host feature. */
   beginAcousticScene(asset: string): number;
   /** Simulate a captured source/listener/settings query on workers. Requires a prepared scene; returns a ticket for acousticStatus. Gains exclude the mixer's existing distance curve. */
@@ -37,7 +51,7 @@ declare class Audio {
   acousticStats(): Record<string, any>;
   /** Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. */
   acousticVoice(handle: Record<string, any>): Record<string, any>;
-  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource}; acoustics requires a ready scene and uses background direct-path updates; returns scoped generation handle. */
+  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Returns scoped generation handle. */
   playSfx(voice: Record<string, any>): Record<string, any>;
   /** Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. */
   playRandom(name: string, container: Record<string, any>, voice: Record<string, any>): Record<string, any>;
@@ -694,6 +708,7 @@ declare const vfx: Vfx;
 
 /** JS/TS service awaits; callbacks run on owner lifecycle entries. */
 interface CancellablePromise<T> extends Promise<T> { readonly ticket: number | null; cancel(): void; }
+interface Audio { prepareHrtfAsync(asset: string, options: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareAcousticsAsync(asset: string): CancellablePromise<Record<string, any>>; }
 interface Audio { traceAcousticsAsync(query: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Assets { loadAsync(path: string, kind: string): CancellablePromise<number>; }
