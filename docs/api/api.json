@@ -256,6 +256,23 @@
       "status": "playbackStatus"
     },
     {
+      "cancel": "cancelReverbJob",
+      "class": "Audio",
+      "completion": "result",
+      "name": "prepareReverbAsync",
+      "params": [
+        {
+          "name": "settings",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginReverb",
+      "status": "reverbStatus"
+    },
+    {
       "cancel": "cancelHrtfJob",
       "class": "Audio",
       "completion": "result",
@@ -659,6 +676,51 @@
             }
           ],
           "returns": "void"
+        },
+        {
+          "doc": "Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections.",
+          "name": "beginReverb",
+          "params": [
+            {
+              "name": "settings",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Client/restore-scoped pending/ready/failed preparation. Ready includes published revision, settings and both mixer rates. Release with cancelReverbJob.",
+          "name": "reverbStatus",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Cancel/release a scoped reverb preparation ticket. Releasing a published ticket keeps its installed effect.",
+          "name": "cancelReverbJob",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Cancel pending room preparation and remove this client's effect and tail from both mixers. Other clients remain unchanged.",
+          "name": "clearReverb",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Published ReverbSettings for this client, or null. Sends are post source-bus fader/duck/spatial and pre-Master; the wet return uses its own bus fader and Master once.",
+          "name": "reverbSettings",
+          "params": [],
+          "returns": "any"
         },
         {
           "doc": "Prepare a client asset SOFA SimpleFreeFieldHRIR or HrirAsset JSON on workers, including resampling/FFT plans. HrtfOptions defaults are accepted with {}. Ready publication replaces the client profile and re-prepares enabled voices; profile replacement is not a seamless transition.",
@@ -4702,6 +4764,90 @@
     }
   ],
   "data": [
+    {
+      "doc": "Authored late-reverb parameters. These do not infer room dimensions or RT60 from scene geometry. The upstream decay parameter is approximate.",
+      "fields": [
+        {
+          "default": 10.0,
+          "doc": "FDN delay scale in metres, 1..50; not an acoustic-scene bounding box.",
+          "name": "room_size_metres",
+          "rust_type": "f64"
+        },
+        {
+          "default": 1.5,
+          "doc": "Upstream approximate time to -60 dB in seconds, 0.1..20.",
+          "name": "decay_seconds",
+          "rust_type": "f64"
+        },
+        {
+          "default": 0.5,
+          "doc": "High-frequency damping, 0..1.",
+          "name": "damping",
+          "rust_type": "f64"
+        }
+      ],
+      "name": "ReverbSpec",
+      "used_by": "ReverbSettings.room"
+    },
+    {
+      "doc": "Authored late-reverb routing. The return never feeds back into its own send.",
+      "fields": [
+        {
+          "default": {
+            "damping": 0.5,
+            "decay_seconds": 1.5,
+            "room_size_metres": 10.0
+          },
+          "doc": "Parameters prepared on a worker, separate from geometry simulation.",
+          "name": "room",
+          "rust_type": "ReverbSpec"
+        },
+        {
+          "default": [
+            {
+              "bus": "sfx",
+              "gain": 0.2
+            }
+          ],
+          "doc": "At most five unique non-Master bus sends. Empty sends disable input.",
+          "name": "sends",
+          "rust_type": "Vec<ReverbSend>"
+        },
+        {
+          "default": "ambient",
+          "doc": "Return bus whose volume/mute and Music ducking affect the wet output.",
+          "name": "return_bus",
+          "rust_type": "Bus"
+        },
+        {
+          "default": 1.0,
+          "doc": "Return amplitude, 0..1. Dry playback remains unchanged.",
+          "name": "wet_gain",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "ReverbSettings",
+      "used_by": "Audio.beginReverb"
+    },
+    {
+      "doc": "One post-fader bus send. Muted input buses send silence; Master is excluded.",
+      "fields": [
+        {
+          "default": "sfx",
+          "doc": "Source bus, independent of the effect's return bus.",
+          "name": "bus",
+          "rust_type": "Bus"
+        },
+        {
+          "default": 0.2,
+          "doc": "Send amplitude, 0..1.",
+          "name": "gain",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "ReverbSend",
+      "used_by": "ReverbSettings.sends"
+    },
     {
       "doc": "Derived readiness, separate from the canonical voice declaration/save data.",
       "fields": [
@@ -11639,7 +11785,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "f55ff4c1819aaa78",
+  "fingerprint": "98b40f5f4c7c26d0",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

@@ -6,6 +6,7 @@ pub mod binaural;
 pub mod direct;
 pub mod geometry;
 pub mod schema;
+pub mod reverb;
 pub mod spectrum;
 pub use direct::{DirectPath, simulate};
 pub use geometry::{AcousticScene, SurfaceHit};

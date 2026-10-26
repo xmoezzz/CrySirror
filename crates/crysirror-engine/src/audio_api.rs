@@ -46,6 +46,7 @@ pub struct AudioRuntime {
     pub(crate) attachments: BTreeMap<(u32, u32, u64), Attachment>,
     pub acoustics: crate::acoustics_api::AcousticsRuntime,
     pub binaural: crate::binaural_api::BinauralRuntime,
+    pub reverb: crate::reverb_api::ReverbRuntime,
     pub(crate) music: BTreeMap<(u32, String), VoiceHandle>,
     listeners: BTreeMap<u32, Listener>,
     restored: Option<u64>,
@@ -63,6 +64,7 @@ impl Default for AudioRuntime {
             attachments: BTreeMap::new(),
             acoustics: Default::default(),
             binaural: Default::default(),
+            reverb: Default::default(),
             music: BTreeMap::new(),
             listeners: BTreeMap::new(),
             restored: None,
@@ -86,6 +88,7 @@ impl AudioRuntime {
         self.remainder = 0;
         self.acoustics.reset();
         self.binaural.reset();
+        self.reverb.reset();
     }
 }
 pub(crate) fn sync_generation(state: &mut crate::EngineState) {
@@ -151,6 +154,7 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
     crate::audio_async::poll(cx.state()?)?;
     crate::acoustics_api::poll(cx.state()?)?;
     crate::binaural_api::poll(cx.state()?)?;
+    crate::reverb_api::poll(cx.state()?)?;
     {
         let s = cx.state()?;
         let runtime = &mut s.runtime;
@@ -350,6 +354,11 @@ fn info() -> &'static ClassInfo {
         method("play",vec![("channel",T::Int),("voice",T::Map)],T::Void,"Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics."),
         method("stop",vec![("channel",T::Int)],T::Void,"Stop a classic channel."),
         method("playAt",vec![("channel",T::Int),("voice",T::Map),("where",T::Map)],T::Void,"Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion."),
+        method("beginReverb",vec![("settings",T::Map)],T::Int,"Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections."),
+        method("reverbStatus",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed preparation. Ready includes published revision, settings and both mixer rates. Release with cancelReverbJob."),
+        method("cancelReverbJob",vec![("ticket",T::Int)],T::Void,"Cancel/release a scoped reverb preparation ticket. Releasing a published ticket keeps its installed effect."),
+        method("clearReverb",vec![],T::Void,"Cancel pending room preparation and remove this client's effect and tail from both mixers. Other clients remain unchanged."),
+        method("reverbSettings",vec![],T::Any,"Published ReverbSettings for this client, or null. Sends are post source-bus fader/duck/spatial and pre-Master; the wet return uses its own bus fader and Master once."),
         method("beginHrtf",vec![("asset",T::String),("options",T::Map)],T::Int,"Prepare a client asset SOFA SimpleFreeFieldHRIR or HrirAsset JSON on workers, including resampling/FFT plans. HrtfOptions defaults are accepted with {}. Ready publication replaces the client profile and re-prepares enabled voices; profile replacement is not a seamless transition."),
         method("hrtfStatus",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed dataset status; ready result contains revision, format, sample rate, measurements, FIR taps and bridge latency. Release with cancelHrtfJob."),
         method("cancelHrtfJob",vec![("ticket",T::Int)],T::Void,"Cancel/release a dataset preparation ticket; a successfully published profile remains installed."),
@@ -563,6 +572,9 @@ impl Class for AudioClass {
     ) -> Result<Value> {
         sync_generation(cx.state()?);
         if let Some(result) = crate::audio_async::call(cx, name, args)? {
+            return Ok(result);
+        }
+        if let Some(result) = crate::reverb_api::call(cx.state()?, name, args)? {
             return Ok(result);
         }
         if let Some(result) = crate::binaural_api::call(cx.state()?, name, args)? {

@@ -25,6 +25,16 @@ declare class Audio {
   stop(channel: number): void;
   /** Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion. */
   playAt(channel: number, voice: Record<string, any>, where: Record<string, any>): void;
+  /** Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections. */
+  beginReverb(settings: Record<string, any>): number;
+  /** Client/restore-scoped pending/ready/failed preparation. Ready includes published revision, settings and both mixer rates. Release with cancelReverbJob. */
+  reverbStatus(ticket: number): Record<string, any>;
+  /** Cancel/release a scoped reverb preparation ticket. Releasing a published ticket keeps its installed effect. */
+  cancelReverbJob(ticket: number): void;
+  /** Cancel pending room preparation and remove this client's effect and tail from both mixers. Other clients remain unchanged. */
+  clearReverb(): void;
+  /** Published ReverbSettings for this client, or null. Sends are post source-bus fader/duck/spatial and pre-Master; the wet return uses its own bus fader and Master once. */
+  reverbSettings(): any;
   /** Prepare a client asset SOFA SimpleFreeFieldHRIR or HrirAsset JSON on workers, including resampling/FFT plans. HrtfOptions defaults are accepted with {}. Ready publication replaces the client profile and re-prepares enabled voices; profile replacement is not a seamless transition. */
   beginHrtf(asset: string, options: Record<string, any>): number;
   /** Client/restore-scoped pending/ready/failed dataset status; ready result contains revision, format, sample rate, measurements, FIR taps and bridge latency. Release with cancelHrtfJob. */
@@ -730,6 +740,7 @@ interface Audio { playSfxAsync(voice: Record<string, any>): CancellablePromise<R
 interface Audio { preloadSfxAsync(asset: string): CancellablePromise<Record<string, any>>; }
 interface Audio { playMusicAsync(name: string, voice: Record<string, any>, crossfade_ms: number): CancellablePromise<Record<string, any>>; }
 interface Audio { seekVoiceAsync(handle: Record<string, any>, source_frame: number): CancellablePromise<Record<string, any>>; }
+interface Audio { prepareReverbAsync(settings: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareHrtfAsync(asset: string, options: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareAcousticsAsync(asset: string): CancellablePromise<Record<string, any>>; }
 interface Audio { traceAcousticsAsync(query: Record<string, any>): CancellablePromise<Record<string, any>>; }

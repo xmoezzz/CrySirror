@@ -2213,3 +2213,86 @@ Remaining boundaries:
   behavior, acoustic reflections/reverb and complete engine-wide async execution
   are not completed by this phase. No additional whole-game compatibility or
   hardware RT result is claimed; the broader engine objective remains active.
+
+## Shared parametric late-reverb buses (ADR 0073, 2026-10-27)
+
+Implementation:
+- Integrated standalone FunDSP 0.23.0's 32-channel FDN behind engine-owned
+  LateReverb/PreparedReverb. Original source revision is
+  8479a70d813d539c67a908f88e65f6b0b344122e. Audited the complete reference checkout
+  inventory (70 Rust files); all 52 published registry sources match after CRLF
+  normalization, with four raw newline differences and both hash sets recorded.
+  Reverb/feedback/delay/FIR/allocation hooks were inspected. Cargo pins the crate
+  and checksum; upstream MIT/Apache terms remain intact. Optional file loading
+  and FFT convolution are disabled. No other engine or mixer was imported.
+- Shared ReverbSpec/ReverbSettings/ReverbSend provide authored room scale,
+  approximate decay, damping, source-bus sends and wet-return routing. Sends are
+  post source fader/duck/spatial/direct/HRTF and pre-Master. Wet uses its return
+  bus and Master once, without feeding itself again. Dry output remains present.
+  Tails survive source EOF/Stop/stealing; clear/replacement cuts old history.
+- Added Audio beginReverb/reverbStatus/cancelReverbJob/clearReverb/reverbSettings
+  and prepareReverbAsync. Workers construct/preallocate matched DSP objects for
+  ordinary/canonical and native/media mixers; owner publication rolls back the
+  first install if the second fails. Both call the same engine DSP/bus APIs.
+  Native adapter implementations/opcodes are unchanged; only test dependencies
+  and fixtures add shared effect configuration and output assertions.
+- Deferred worker admission, cancellation/supersession, scoped tickets and
+  restore invalidation reuse OperationTable. A 64 MiB estimated pair reservation
+  follows actual worker/DSP owners against 512 MiB/host; canceled work does not
+  release its receipt early. Tables retain at most 8 jobs/client and 32/host.
+  Published receipt release keeps installed DSP. Effects/history are derived,
+  never serialized; Mixer::clear removes them after restore/reset.
+- Added source audit/attribution, ADR 0073, async/API usage notes and a standalone
+  room_reverb example. Generated docs/api fingerprint changed from
+  f55ff4c1819aaa78 to 98b40f5f4c7c26d0 and is logged in CHANGES.md.
+
+Compilation:
+- Final local release workspace/all-target check passed with desktop krkr,
+  arc-formats and acoustics-obvhs. Desktop no-default-features reallive+avg32
+  check also passed without scripting or device output. Existing CBG/RealLive
+  and minimal-CLI warnings remain. No CI or remote build ran.
+
+Behavior validation:
+- Acoustics/audio suites with obvhs passed **68 tests**, two owner-resource cases
+  ignored. Engine reverb passed **4**, JS async services **7** (one font case
+  ignored), original RealLive/AVG32 bridge suites **12** (one font case ignored),
+  and API reference/signature checks **6**. Total: **97 distinct Rust tests
+  passed**, four ignored excluded. Focused reruns are not counted twice.
+  Python 3.11 tooling: **189 passed**.
+- Independent impulse tests verify source-EOF tails and decay, sample-identical
+  arbitrary block boundaries, Master linear scaling without squaring, input
+  mute, wet-return mute with dry preserved, client isolation, native PCM channel
+  tails, invalid formats/routes and actual storage release after Mixer::clear.
+- Engine tests verify both mixer publications, native PCM tail in App output,
+  rollback preserving the old first-mixer room when the second cannot publish,
+  foreign ticket access rejection, full-pool owner progress, cancel/supersede
+  before publication, invalid replacement preserving old settings, ticket release
+  preserving installed DSP and restore removing pending/installed histories.
+  JS/TS executes prepareReverbAsync, checks publication and receipt release,
+  catches invalid settings and clears the client room.
+- Original RealLive/AVG32 sound fixtures retain their original source-completion
+  waits and instruction/arithmetic boundaries with reverb enabled. Subsequent
+  native instructions execute while a nonzero shared bus tail remains. Worker
+  failure tests also pass. This is original-bytecode/service-boundary evidence,
+  not additional opcode, native-save or commercial-game compatibility.
+- Authored six-second dry/room/hall demo rendered stereo 48 kHz WAVs without
+  assets/devices. Mix wall times: dry 0.006363 s, room 0.031424 s, hall 0.032521 s;
+  post-source tail energy: 0, 0.01223493, 0.51438753; all peaks < 0.578. This is a
+  single-effect offline CPU sample on this host, not full-engine performance or
+  audio-device latency. Output stays ignored under target/verification/reverb-demo.
+- Evidence: reverb-library-tests.log, reverb-engine-final-tests.log,
+  reverb-js-tests.log, reverb-native-tests.log, reverb-api-final-tests.log,
+  reverb-workspace-final-check.log, reverb-minimal-check.log,
+  reverb-python-tests.log and reverb-demo.log in target/verification.
+
+Remaining boundaries:
+- Geometric early/specular/diffuse reflections, material-dependent IRs, physical
+  room/RT60 inference, diffraction/pathing and Ambisonic return rendering remain
+  open. The late FDN consumes authored parameters, not BVH materials. Its decay
+  is approximate; sends follow existing direct processing rather than a separate
+  physically simulated unoccluded indirect source path.
+- Idle installed effects continue processing; replacement/clear does not crossfade
+  or preserve old tails. Final DSP/mixing, control/scratch allocation, old-effect
+  disposal, device queues and pool teardown remain synchronous boundaries.
+  No complete engine/audio async migration, new GPU/hardware RT or Windows/Linux
+  validation is claimed. The larger modern engine/VN objective remains active.

@@ -66,6 +66,16 @@ pub const BINDINGS: &[AsyncBinding] = &[
     },
     AsyncBinding {
         class: "Audio",
+        name: "prepareReverbAsync",
+        start: "beginReverb",
+        status: "reverbStatus",
+        cancel: "cancelReverbJob",
+        completion: "result",
+        returns: "Record<string, any>",
+        release: true,
+    },
+    AsyncBinding {
+        class: "Audio",
         name: "prepareHrtfAsync",
         start: "beginHrtf",
         status: "hrtfStatus",

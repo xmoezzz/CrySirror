@@ -4,6 +4,21 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `98b40f5f4c7c26d0` (2026-10-27): shared parametric reverb buses
+
+- Add Audio.beginReverb/reverbStatus/cancelReverbJob/clearReverb/reverbSettings
+  and prepareReverbAsync. ReverbSpec, ReverbSettings and ReverbSend document
+  authored late-FDN parameters and scoped bus sends/return routing.
+- CPU workers prepare matched DSP resources for ordinary/canonical and native/
+  media mixers. Ready means both have been published. Receipt release preserves
+  installed effects; clear/replacement cuts old tails. Full pools defer work;
+  canceled/superseded/restored jobs cannot publish stale rooms.
+- Shared Rust LateReverb/PreparedReverb/Mixer APIs are usable without a VM/device.
+  Mixer::clear now also removes derived reverb histories. No native opcode or
+  save data changes. This does not add geometric reflections, measured RT60,
+  material propagation or Ambisonic returns. See ADR 0073 for limits and remaining
+  synchronous mix/disposal/output boundaries.
+
 ## `f55ff4c1819aaa78` (2026-10-27): worker-prepared media PCM
 
 - Add PcmAudioInfo reference metadata. Rust clients prepare validated immutable

@@ -210,6 +210,23 @@ fn native_audio_event_stays_at_original_pc_until_shared_preparation_and_play_wai
     let (t, mut r) = fixture(code);
     std::fs::create_dir(t.path().join("assets/WAV")).unwrap();
     std::fs::write(t.path().join("assets/WAV/tone.wav"), tone()).unwrap();
+    // The VM still waits for source completion, while the shared bus owns its tail.
+    let effect = crysirror_audio::reverb::PreparedReverb::prepare(
+        48000,
+        crysirror_audio::reverb::ReverbSettings {
+            sends: vec![crysirror_audio::reverb::ReverbSend {
+                bus: crysirror_audio::mixer::Bus::Sfx,
+                gain: 1.0,
+            }],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    r.host
+        .channel_audio
+        .mixer
+        .set_reverb(1, Some(effect))
+        .unwrap();
     r.set_audio_nonblocking(true);
     assert!(!r.assets.is_nonblocking());
     let pool = r.assets.io_tasks();
@@ -237,7 +254,18 @@ fn native_audio_event_stays_at_original_pc_until_shared_preparation_and_play_wai
         r.host.engine.ui.title.as_ref().unwrap().1,
         "after native audio"
     );
+    assert!(!r.host.audio_playing(ClientId(1), 100).unwrap());
+    r.tick(50, InputFrame::default()).unwrap();
+    assert!(
+        r.host
+            .take_pcm_output()
+            .iter()
+            .flatten()
+            .any(|sample| sample.abs() > 0.001),
+        "original native source ended without a shared reverb tail"
+    );
 }
+
 #[test]
 fn native_audio_worker_failure_never_acknowledges_following_instruction() {
     let mut code = command(21, 0, &[encode::quoted(b"bad"), encode::int(0)]);

@@ -135,3 +135,15 @@ receipts follow queued updates and live mixer sources past Media resource Stop.
 Movie audio still prepares a bounded full track; final mixing/output and
 last-reference disposal remain synchronous. See ADR 0072 for sample budgets,
 conversion policy and completion semantics.
+
+## Late-reverb preparation (ADR 0073)
+
+Audio.prepareReverbAsync uses beginReverb/reverbStatus/cancelReverbJob over
+bounded CPU workers. Graph construction, rate setup and delay allocation finish
+before owner publication to both ordinary and native/media mixers. Full task
+pools defer admission; clear, supersession and restore invalidate pending work.
+Old effects survive failed replacement. Published receipts can be released while
+their DSP remains installed. A conservative 64 MiB pair reservation survives
+actual worker/DSP lifetimes against a 512 MiB estimated host budget.
+Per-frame DSP/mixing and last-reference disposal retain synchronous boundaries.
+This is parametric late reverb, separate from geometric reflection simulation.

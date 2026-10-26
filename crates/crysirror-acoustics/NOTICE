@@ -9,3 +9,7 @@ Licensed under the Apache License, Version 2.0; see LICENSE and UPSTREAM.md.
 
 Parry and optional obvhs are external Cargo dependencies, with their own
 upstream notices and licenses. They are not relicensed by this package.
+
+Parametric late reverberation uses the external FunDSP 0.23.0 Cargo dependency,
+Copyright Sami Perttu and FunDSP contributors, under upstream MIT OR Apache-2.0
+terms. Its original notices remain in the dependency; see REVERB_UPSTREAM.md.

@@ -296,6 +296,23 @@ fn original_avg32_audio_event_waits_for_engine_workers_without_running_following
     code.extend(number(9));
     code.extend([0x60, 0x20]);
     let (_temp, mut r) = fixture(&code, json!({}));
+    // The VM still waits for source completion, while the shared bus owns its tail.
+    let effect = crysirror_audio::reverb::PreparedReverb::prepare(
+        48000,
+        crysirror_audio::reverb::ReverbSettings {
+            sends: vec![crysirror_audio::reverb::ReverbSend {
+                bus: crysirror_audio::mixer::Bus::Music,
+                gain: 1.0,
+            }],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    r.host
+        .channel_audio
+        .mixer
+        .set_reverb(1, Some(effect))
+        .unwrap();
     r.set_audio_nonblocking(true);
     assert!(!r.assets.is_nonblocking());
     let gate = Gate::block(&r.assets.io_tasks());
@@ -320,7 +337,18 @@ fn original_avg32_audio_event_waits_for_engine_workers_without_running_following
         r.tick(0, InputFrame::default()).unwrap();
     }
     assert_eq!(diag(&r)["values"][1], 9);
+    assert!(!r.host.audio_playing(ClientId(1), 20_000).unwrap());
+    r.tick(50, InputFrame::default()).unwrap();
+    assert!(
+        r.host
+            .take_pcm_output()
+            .iter()
+            .flatten()
+            .any(|sample| sample.abs() > 0.001),
+        "original native source ended without a shared reverb tail"
+    );
 }
+
 #[test]
 fn original_avg32_audio_failure_keeps_native_event_and_following_arithmetic_pending() {
     let mut code = vec![0x0e, 0x01];

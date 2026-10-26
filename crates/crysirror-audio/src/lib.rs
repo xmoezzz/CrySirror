@@ -14,6 +14,7 @@ pub mod legacy_pcm;
 pub mod mixer;
 pub mod native;
 pub mod pcm;
+pub mod reverb;
 pub mod scene;
 
 #[cfg(feature = "rodio-output")]

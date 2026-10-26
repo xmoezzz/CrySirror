@@ -185,3 +185,25 @@ See [ADR 0071](../adr/0071-canonical-audio-worker-bridge.md) for these boundarie
    or a variant, or changing a default, is a breaking change. Say so in the
    CHANGES entry. Saved projects and save files are versioned separately
    (`schema` and [SAVE_FORMAT.md](../SAVE_FORMAT.md)).
+
+## Parametric late reverberation
+
+```typescript
+await audio.prepareReverbAsync({
+  room: { room_size_metres: 18, decay_seconds: 1.2, damping: 0.55 },
+  sends: [{ bus: 'sfx', gain: 0.5 }, { bus: 'voice', gain: 0.15 }],
+  return_bus: 'ambient', wet_gain: 0.5
+});
+// Ordinary channel, pooled and native/media playback use these shared buses.
+// audio.clearReverb() removes this client's prepared room and remaining tail.
+```
+
+The optional resource applies authored parametric late reverb via FunDSP's
+32-channel FDN. It does not infer geometry, materials or physical RT60. Source
+sends follow current spatial/direct/HRTF processing and their bus faders, before
+Master. The return uses its own bus and Master once. Empty sends disable input;
+source mute blocks sends while return mute silences the wet tail. Replacing or
+clearing a room cuts its old history. Effects remain derived across saves and
+need preparation after restore. Shared Rust PreparedReverb/Mixer APIs work
+without a native VM or output device. See [ADR 0073](../adr/0073-shared-parametric-reverb-buses.md)
+for task ownership, limits, two-mixer publication and remaining async boundaries.

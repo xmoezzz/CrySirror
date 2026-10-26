@@ -162,3 +162,14 @@ and BufferedSource workers. Admission is explicitly distinct from readiness.
 Failures do not acknowledge following native instructions. Offline fixtures
 retain immediate preparation behavior; original save/layout/opcode gaps remain.
 Resource discovery and boot reads are still synchronous. See [ADR 0070](adr/0070-native-channel-audio-readiness.md).
+
+## Shared late-reverb buses (ADR 0073)
+
+Authored late reverberation is an engine resource over the standalone FunDSP
+FDN, not an algorithm in a native adapter. Audio.prepareReverbAsync publishes
+matched resources in ordinary and native/media channel mixers. Original native
+play/wait handlers still target shared channel APIs and observe source completion;
+the bus owns remaining tails independently. Adapter source/opcodes/save semantics
+are unchanged. Original RealLive/AVG32 sound fixtures exercise that boundary.
+This parametric capability does not establish geometry reflections, a physical
+room model or additional whole-game compatibility.

@@ -204,6 +204,8 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-audio/src/buffered.rs",
         "crates/crysirror-audio/src/decoder.rs",
         "crates/crysirror-audio/src/mixer.rs",
+        "crates/crysirror-audio/src/reverb.rs",
+        "crates/crysirror-acoustics/src/reverb.rs",
         "crates/crysirror-acoustics/src/schema.rs",
         "crates/crysirror-acoustics/src/binaural.rs",
         "crates/crysirror-acoustics/src/direct.rs",
@@ -233,6 +235,9 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("ReverbSpec","ReverbSettings.room",sample::<crysirror_acoustics::reverb::ReverbSpec>(json!({}))),
+        d("ReverbSettings","Audio.beginReverb",sample::<crysirror_audio::reverb::ReverbSettings>(json!({}))),
+        d("ReverbSend","ReverbSettings.sends",sample::<crysirror_audio::reverb::ReverbSend>(json!({"bus":"sfx","gain":0.2}))),
         d("SceneVoicePhase","SceneVoiceStatus.phase",None),
         d("SceneVoiceStatus","Audio.channelStatus",None),
         d("AudioAsset","HostServices::begin_audio / AudioRequest::PlayAsset",None),

@@ -357,3 +357,21 @@ fn audio_promises_prepare_play_seek_release_and_preserve_shared_mixer_handles() 
     app.start().unwrap();
     until(&mut app, "audio-async-ready");
 }
+
+#[test]
+fn reverb_promise_publishes_engine_bus_resources_and_releases_its_ticket() {
+    let (_dir, mut app) = app(r#"
+      async function onInit() {
+        const result = await audio.prepareReverbAsync({room:{decay_seconds:0.3},sends:[{bus:'sfx',gain:0.5}]});
+        if(result.kind!=='parametric_late_reverb' || result.sample_rate!==48000) throw Error('wrong reverb result');
+        if(audio.reverbSettings().sends[0].gain!==0.5) throw Error('resource not published');
+        let released=false;try {audio.reverbStatus(result.revision);}catch(error){released=true;}
+        if(!released) throw Error('helper leaked its preparation receipt');
+        try {await audio.prepareReverbAsync({room:{damping:2}});throw Error('invalid room accepted');}
+        catch(error){if(String(error).includes('invalid room accepted'))throw error;}
+        audio.clearReverb();if(audio.reverbSettings()!==null)throw Error('room survived clear');
+        engine.log('reverb-ready');
+      }
+    "#);
+    app.init().unwrap();app.start().unwrap();until(&mut app,"reverb-ready");
+}

@@ -446,6 +446,7 @@ pub struct MixStats {
     pub peak: f32,
 }
 struct Client {
+    reverb: Option<crate::reverb::PreparedReverb>,
     voice_limit: Option<usize>,
     buses: BTreeMap<Bus, BusSettings>,
     ducking: Ducking,
@@ -458,6 +459,7 @@ struct Client {
 impl Client {
     fn new(seed: u64) -> Self {
         Self {
+            reverb: None,
             voice_limit: None,
             buses: BTreeMap::new(),
             ducking: Default::default(),
@@ -521,6 +523,32 @@ impl Mixer {
         );
         let seed = self.config.seed ^ (id as u64).wrapping_mul(0x9e3779b97f4a7c15);
         Ok(self.clients.entry(id).or_insert_with(|| Client::new(seed)))
+    }
+    /// Install a worker-prepared room. Old history is returned for caller-owned
+    /// retirement; installation never allocates delay lines or resets DSP.
+    pub fn set_reverb(
+        &mut self,
+        client: u32,
+        effect: Option<crate::reverb::PreparedReverb>,
+    ) -> Result<Option<crate::reverb::PreparedReverb>> {
+        ensure!(client > 0, "audio client must be nonzero");
+        if effect.is_none() && !self.clients.contains_key(&client) {
+            return Ok(None);
+        }
+        if let Some(effect) = &effect {
+            ensure!(
+                effect.sample_rate() == self.sample_rate(),
+                "reverb/mixer sample rates differ"
+            );
+        }
+        Ok(std::mem::replace(&mut self.client(client)?.reverb, effect))
+    }
+    pub fn reverb(&self, client: u32) -> Option<&crate::reverb::ReverbSettings> {
+        self.clients
+            .get(&client)?
+            .reverb
+            .as_ref()
+            .map(|r| r.settings())
     }
     pub fn set_client_limit(&mut self, client: u32, limit: usize) -> Result<()> {
         ensure!(
@@ -704,6 +732,9 @@ impl Mixer {
         }
     }
     pub fn clear(&mut self) {
+        for c in self.clients.values_mut() {
+            c.reverb = None;
+        }
         for v in &mut self.voices {
             *v = None
         }
@@ -1260,8 +1291,8 @@ impl Mixer {
                 };
                 let mut s = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
                 let c = &self.clients[&v.handle.client];
-                let mut gain =
-                    v.gain.step() * v.envelope.step() * c.level(Bus::Master) * c.level(v.spec.bus);
+                let master_gain = c.level(Bus::Master);
+                let mut gain = v.gain.step() * v.envelope.step() * c.level(v.spec.bus);
                 let pan = v.pan.step();
                 if pan != 0.5 && v.binaural.is_none() {
                     s[0] *= (1. - pan).sqrt() * std::f32::consts::SQRT_2;
@@ -1295,8 +1326,16 @@ impl Mixer {
                     s[0] *= (1. - pan).sqrt() * std::f32::consts::SQRT_2;
                     s[1] *= pan.sqrt() * std::f32::consts::SQRT_2;
                 }
-                sample[0] += s[0] * gain;
-                sample[1] += s[1] * gain;
+                sample[0] += s[0] * gain * master_gain;
+                sample[1] += s[1] * gain * master_gain;
+                // Post source-bus fader/duck/spatial, before Master. Master is
+                // applied once on the return, not squared with the input send.
+                let c = self.clients.get_mut(&v.handle.client).unwrap();
+                if let Some(reverb) = &mut c.reverb {
+                    let send = reverb.send(v.spec.bus);
+                    reverb.input[0] += s[0] * gain * send;
+                    reverb.input[1] += s[1] * gain * send;
+                }
                 if v.source_ended {
                     v.tail_left = v.tail_left.saturating_sub(1);
                 } else {
@@ -1317,6 +1356,21 @@ impl Mixer {
                     retire_dialogue(v, &mut self.clients);
                     *slot = None
                 }
+            }
+            for c in self.clients.values_mut() {
+                let Some(reverb) = &mut c.reverb else {
+                    continue;
+                };
+                let input = std::mem::replace(&mut reverb.input, [0.; 2]);
+                let wet = reverb.dsp.process_frame(input)?;
+                let bus = reverb.settings.return_bus;
+                let wet_gain = reverb.settings.wet_gain;
+                let gain = wet_gain
+                    * c.level(Bus::Master)
+                    * c.level(bus)
+                    * if bus == Bus::Music { c.duck_output } else { 1. };
+                sample[0] += wet[0] * gain;
+                sample[1] += wet[1] * gain;
             }
             ensure!(
                 sample.iter().all(|x| x.is_finite()),

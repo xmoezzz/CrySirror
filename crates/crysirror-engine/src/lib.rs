@@ -17,6 +17,7 @@ pub mod api_doc;
 pub mod assets_api;
 pub mod async_api;
 pub mod audio_api;
+pub mod reverb_api;
 mod audio_async;
 pub mod binaural_api;
 pub mod bitmap_api;

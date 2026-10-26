@@ -106,3 +106,4 @@ moves to `done` only with recorded behavior evidence.
 | [0070](0070-native-channel-audio-readiness.md) | Shared channel preparation receipts, capability streams and original RealLive/AVG32 continuations | implemented profile; native discovery and final mix/output remain synchronous |
 | [0071](0071-canonical-audio-worker-bridge.md) | Shared SceneState voice bridge, canonical readiness and independent live audio policy | implemented profile; final mix/output and encoded media submission remain synchronous |
 | [0072](0072-worker-prepared-media-pcm.md) | Shared immutable PCM resources, media worker capability opening and live decoder admission leases | implemented bounded profile; full-track movie audio and final mix/output remain synchronous |
+| [0073](0073-shared-parametric-reverb-buses.md) | Shared FunDSP late-reverb buses, worker preparation and native/media routing | implemented parametric profile; geometry reflections and full async output remain open |
