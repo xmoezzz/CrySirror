@@ -10,6 +10,7 @@ name = "crysirror"
 path = "src/main.rs"
 
 [features]
+acoustics-obvhs = ["crysirror-engine/acoustics-obvhs"]
 default = ["avg32", "reallive", "audio", "siglus-resources", "scripting", "gamepad", "emote-import"]
 reallive = ["dep:crysirror-reallive"]
 avg32 = ["dep:crysirror-avg32"]

@@ -4,6 +4,21 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `0d7b882595278ffb` (2026-10-27): shared acoustic scenes and direct sound
+
+- Add AcousticBackend/Material/Mesh/SceneSpec/Source/Query and DirectPath data,
+  and Audio beginAcousticScene/beginAcousticProbe/acousticStatus/
+  cancelAcousticJob/clearAcousticScene/acousticStats/acousticVoice methods.
+  Asset reads, BVH preparation and propagation execute on bounded workers;
+  scene and result publication belong to the calling client/restore generation.
+- Add JS/TS prepareAcousticsAsync and traceAcousticsAsync cancellable helpers.
+  Add optional playSfx `acoustics` settings with existing spatial/follow options;
+  a prepared scene is required. Existing calls keep their previous behavior.
+- This profile applies direct three-band gains, not HRTF/reflection/reverb.
+  Absorption/scattering are reserved metadata; delay_seconds is reported only.
+  Scene geometry is derived state and must be prepared again after restore.
+  See ADR 0067 for limits, snapshot ownership and backend selection.
+
 ## `5394949c5999cde6` (2026-10-27): awaitable services and engine menus
 
 - Add bounded client/generation-scoped Text preparation, Resources image/probe

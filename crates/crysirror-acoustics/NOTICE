@@ -1,0 +1,11 @@
+CrySirror acoustic direct-path kernels
+Copyright 2017-2023 Valve Corporation.
+Copyright 2024 phonon_rs contributors.
+Copyright (c) 2026 CrySirror contributors.
+
+Air absorption, weighted dipole directivity and deterministic volumetric
+visibility are adapted from phonon_rs and its Steam Audio-derived code.
+Licensed under the Apache License, Version 2.0; see LICENSE and UPSTREAM.md.
+
+Parry and optional obvhs are external Cargo dependencies, with their own
+upstream notices and licenses. They are not relicensed by this package.

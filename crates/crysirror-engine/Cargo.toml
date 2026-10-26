@@ -9,6 +9,7 @@ description = "Engine object model, lifecycle, plugins and script-host contracts
 [features]
 # GPL archive migration plugins are explicitly selected by the host.
 arc-formats = ["dep:crysirror-formats-arc", "crysirror-runtime/arc-formats"]
+acoustics-obvhs = ["crysirror-acoustics/obvhs"]
 
 [dependencies]
 crysirror-vfx.workspace = true
@@ -20,6 +21,7 @@ crysirror-runtime.workspace = true
 crysirror-physics.workspace = true
 crysirror-asset.workspace = true
 crysirror-audio.workspace = true
+crysirror-acoustics.workspace = true
 crysirror-text.workspace = true
 crysirror-image.workspace = true
 crysirror-resource.workspace = true

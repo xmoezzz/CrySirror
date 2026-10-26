@@ -173,6 +173,40 @@
   ],
   "async_bindings": [
     {
+      "cancel": "cancelAcousticJob",
+      "class": "Audio",
+      "completion": "result",
+      "name": "prepareAcousticsAsync",
+      "params": [
+        {
+          "name": "asset",
+          "optional": false,
+          "type": "string"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginAcousticScene",
+      "status": "acousticStatus"
+    },
+    {
+      "cancel": "cancelAcousticJob",
+      "class": "Audio",
+      "completion": "result",
+      "name": "traceAcousticsAsync",
+      "params": [
+        {
+          "name": "query",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginAcousticProbe",
+      "status": "acousticStatus"
+    },
+    {
       "cancel": "release",
       "class": "Assets",
       "completion": "ticket",
@@ -511,7 +545,74 @@
           "returns": "void"
         },
         {
-          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?}; returns scoped generation handle.",
+          "doc": "Read a client-scoped AcousticSceneSpec JSON (up to 32 MiB) and build its CPU BVH on workers. Old geometry remains until successful owner publication. Options live in the JSON; obvhs requires its host feature.",
+          "name": "beginAcousticScene",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Simulate a captured source/listener/settings query on workers. Requires a prepared scene; returns a ticket for acousticStatus. Gains exclude the mixer's existing distance curve.",
+          "name": "beginAcousticProbe",
+          "params": [
+            {
+              "name": "query",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Nonblocking client/generation-scoped pending/ready/failed status. Ready result contains scene metadata or a direct path. Release tickets with cancelAcousticJob.",
+          "name": "acousticStatus",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Cancel/release a retained acoustic operation; a published scene remains installed.",
+          "name": "cancelAcousticJob",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene.",
+          "name": "clearAcousticScene",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement.",
+          "name": "acousticStats",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy.",
+          "name": "acousticVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource}; acoustics requires a ready scene and uses background direct-path updates; returns scoped generation handle.",
           "name": "playSfx",
           "params": [
             {
@@ -4315,6 +4416,313 @@
     }
   ],
   "data": [
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "parry",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "obvhs",
+          "rust_type": ""
+        }
+      ],
+      "name": "AcousticBackend",
+      "used_by": "AcousticSceneSpec.backend"
+    },
+    {
+      "doc": "A client-owned acoustic scene, separate from physics collider selection.",
+      "fields": [
+        {
+          "default": "parry",
+          "doc": "CPU query backend. Unavailable optional backends fail visibly.",
+          "name": "backend",
+          "rust_type": "AcousticBackend"
+        },
+        {
+          "default": [],
+          "doc": "Nonempty material table when geometry exists.",
+          "name": "materials",
+          "rust_type": "Vec<AcousticMaterial>"
+        },
+        {
+          "default": [],
+          "doc": "Meshes with unique IDs; maximum 4096 meshes and 262144 triangles.",
+          "name": "meshes",
+          "rust_type": "Vec<AcousticMesh>"
+        }
+      ],
+      "name": "AcousticSceneSpec",
+      "used_by": "Audio.beginAcousticScene asset JSON"
+    },
+    {
+      "doc": "Logical geometry; each triangle can have a distinct acoustic material.",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "Client-local stable mesh identity.",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": [],
+          "doc": "Local vertex positions, at most one million across a scene.",
+          "name": "vertices",
+          "rust_type": "Vec<[f32; 3]>"
+        },
+        {
+          "default": [],
+          "doc": "Indexed triangles; degenerate triangles fail instead of entering the BVH.",
+          "name": "triangles",
+          "rust_type": "Vec<[u32; 3]>"
+        },
+        {
+          "default": [],
+          "doc": "One material index per triangle, or empty to use material zero.",
+          "name": "materials",
+          "rust_type": "Vec<u32>"
+        },
+        {
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "doc": "Column-major local-to-world matrix; nonuniform scale is baked on workers.",
+          "name": "transform",
+          "rust_type": "[f32; 16]"
+        }
+      ],
+      "name": "AcousticMesh",
+      "used_by": "AcousticSceneSpec.meshes"
+    },
+    {
+      "doc": "Frequency-band energy absorption and amplitude transmission at each crossing.",
+      "fields": [
+        {
+          "default": [
+            0.5,
+            0.3,
+            0.1
+          ],
+          "doc": "Absorbed fractions in low/mid/high frequency bands; reserved for reflection.",
+          "name": "absorption",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.1,
+            0.05,
+            0.01
+          ],
+          "doc": "Amplitude transmitted at each surface crossing, in low/mid/high bands.",
+          "name": "transmission",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 0.05,
+          "doc": "Diffuse scattering fraction, reserved for reflection simulation.",
+          "name": "scattering",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "AcousticMaterial",
+      "used_by": "AcousticSceneSpec.materials"
+    },
+    {
+      "doc": "Direct sound propagation settings, reusable by any client or native adapter.",
+      "fields": [
+        {
+          "default": 0.0,
+          "doc": "Source volume radius in world units; zero traces the source center.",
+          "name": "radius",
+          "rust_type": "f32"
+        },
+        {
+          "default": 16,
+          "doc": "Deterministic volume visibility samples, 1..64.",
+          "name": "samples",
+          "rust_type": "u32"
+        },
+        {
+          "default": 32,
+          "doc": "Maximum surface crossings before reporting budget exhaustion, 1..64.",
+          "name": "transmission_hits",
+          "rust_type": "u32"
+        },
+        {
+          "default": [
+            0.0002,
+            0.0017,
+            0.182
+          ],
+          "doc": "Per-metre amplitude absorption coefficients for three frequency bands.",
+          "name": "air_absorption",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "doc": "Source forward direction for weighted dipole directivity.",
+          "name": "forward",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 0.0,
+          "doc": "Omnidirectional at zero, cardioid at 0.5, dipole at one.",
+          "name": "dipole_weight",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Directivity exponent, 0..16.",
+          "name": "dipole_power",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Explicit mesh to exclude (for example the emitter's own geometry).",
+          "name": "ignore_mesh",
+          "rust_type": "Option<u32>"
+        },
+        {
+          "default": 1.0,
+          "doc": "Conversion from world units to metres.",
+          "name": "metres_per_unit",
+          "rust_type": "f32"
+        },
+        {
+          "default": 343.0,
+          "doc": "Sound speed in metres/second; delay is reported, not applied by this profile.",
+          "name": "sound_speed",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "AcousticSource",
+      "used_by": "Audio.playSfx acoustics and AcousticQuery.settings"
+    },
+    {
+      "doc": "Immutable source/listener positions captured by an acoustic job.",
+      "fields": [
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Emitter position in world units.",
+          "name": "source",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Listener position in the same coordinate system.",
+          "name": "listener",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": {
+            "air_absorption": [
+              0.0002,
+              0.0017,
+              0.182
+            ],
+            "dipole_power": 1.0,
+            "dipole_weight": 0.0,
+            "forward": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "ignore_mesh": null,
+            "metres_per_unit": 1.0,
+            "radius": 0.0,
+            "samples": 16,
+            "sound_speed": 343.0,
+            "transmission_hits": 32
+          },
+          "doc": "Sampling, materials and physical unit settings captured by this job.",
+          "name": "settings",
+          "rust_type": "AcousticSource"
+        }
+      ],
+      "name": "AcousticQuery",
+      "used_by": "Audio.beginAcousticProbe"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Visible fraction, one means clear (opposite to the legacy occlusion scalar).",
+          "name": "visibility",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Multiplicative per-crossing amplitude transmission; no paired-surface heuristic.",
+          "name": "transmission",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Per-band air attenuation over the direct path.",
+          "name": "air_absorption",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Weighted dipole source attenuation.",
+          "name": "directivity",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Final three-band direct gains; the mixer applies its existing distance curve separately.",
+          "name": "gains",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Physical travel time, reported separately; not implicitly applied to playback.",
+          "name": "delay_seconds",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Number of surface crossings on the direct path.",
+          "name": "crossings",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "DirectPath",
+      "used_by": "Audio.acousticStatus result and Audio.acousticVoice"
+    },
     {
       "doc": "",
       "fields": [
@@ -10513,7 +10921,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "5394949c5999cde6",
+  "fingerprint": "0d7b882595278ffb",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

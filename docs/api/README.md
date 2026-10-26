@@ -68,6 +68,39 @@ emitters sort by distance; this is not unified scene transparency/OIT. Ribbon
 width is explicit full world width, independent of size-over-life curves.
 This API is a bounded modular VFX foundation, not full Niagara parity.
 
+## Acoustic scene and direct sound
+
+`Audio.prepareAcousticsAsync('room.json')` prepares the calling client's
+`AcousticSceneSpec` asset on workers. Existing scenes remain active until a
+replacement succeeds. Example script usage:
+
+```typescript
+const scene = await audio.prepareAcousticsAsync('room.json');
+const voice = audio.playSfx({
+  asset: 'step.wav', spatial: { position: [0, 0, -4] },
+  acoustics: { radius: 0.2, samples: 16 }
+});
+const path = await audio.traceAcousticsAsync({
+  source: [0, 0, -4], listener: [0, 0, 0]
+});
+```
+
+The background voice queries follow source/listener positions. Propagation
+uses low/mid/high direct-path transmission and air absorption; distance/pan
+still come from the existing mixer. `acousticVoice` exposes pending/error/path
+information. `clearAcousticScene` removes the active scene and disables this
+processing on its voices. Async helpers release their operation tickets,
+without unloading a successfully prepared scene. Scenes are derived resources
+and require preparation again after restore.
+
+Default queries use Parry; the optional host feature `acoustics-obvhs` permits
+`backend: "obvhs"` in scene JSON. Unsupported backends fail visibly. This profile
+has no HRTF, reflected sound, diffraction or reverb. Absorption/scattering are
+reserved metadata and reported travel time is not a playback delay.
+See [ADR 0067](../adr/0067-shared-acoustics-and-cpu-bvh.md) for scheduling,
+limits and source attribution. The device-free synthesized demo runs with
+`cargo run --release -p crysirror-audio --example acoustic_room -- /tmp/room.wav`.
+
 ## Rules for changing the API
 
 `crates/crysirror-engine/tests/api_docs.rs` enforces these rules in the normal

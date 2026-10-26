@@ -1708,3 +1708,85 @@ Limits:
 - Text blocks require explicit Text.state/restoreAsync reconstruction; media
   snapshots and unsupported original-VM checkpoints still fail visibly. No new
   commercial-game, GPU, hardware-RT or cross-platform result is claimed here.
+
+## Shared acoustic scenes and worker direct sound (ADR 0067, 2026-10-27)
+
+Implementation:
+- Added device-free `crysirror-acoustics`: engine-owned acoustic mesh/material
+  resources, per-triangle materials, affine transform baking, default Parry
+  TriMesh/QBVH and optional obvhs 0.4.0 BVH2. The old physics occlusion path
+  already used Rapier/Parry QBVH; this adds distinct acoustic geometry and
+  propagation, not the engine's first BVH.
+- Reviewed pinned phonon_rs direct/scene/model/DSP sources; adapted volumetric
+  visibility, exponential air absorption and weighted-dipole directivity with
+  original Apache/Valve/phonon attribution. Source inventory and semantic
+  differences are in crysirror-acoustics/UPSTREAM.md. No native SDK or HRTF data
+  is bundled. BVH build/traversal use existing libraries.
+- Added multi-ray source-volume visibility, three-band per-surface amplitude
+  transmission, air loss, directivity and reported travel time. Existing mixer
+  consumes smoothed three-band coefficients without querying geometry, retaining
+  its voice pool, distance, pan, buses, ducking and envelopes. New acoustic
+  voices are muted until their first result rather than briefly leaking sound.
+- Audio API prepares scene assets and probes on bounded workers, publishes
+  immutable client/revision resources on the owner, and exposes status/cancel/
+  clear/stats/per-voice results plus JS/TS cancellable async helpers. Automatic
+  jobs coalesce poses and use bounded round-robin dispatch. Reservations follow
+  pending/captured scenes through cancellation/clear; restore invalidates them.
+- Corrected original-origin ray intervals and an obvhs shared-edge signed-zero
+  miss (use Parry triangle intersection inside obvhs traversal). Legacy physics
+  occlusion now explicitly queries the voice's client. One existing archive
+  test buffer needed an explicit Vec<u8> annotation with the additional glam
+  dependency; no archive behavior was changed.
+- Regenerated docs/api and logged fingerprint `5394949c5999cde6` ->
+  `0d7b882595278ffb`. Added ADR 0067 and a synthesized offline acoustic-room demo.
+
+Compilation:
+- Local `cargo check --release --workspace --all-targets --features
+  crysirror-desktop/krkr,crysirror-desktop/arc-formats,
+  crysirror-desktop/acoustics-obvhs` passed on macOS aarch64. Default engine/JS
+  all-target checks and the optional acoustic backend check also passed.
+  Existing unused-code/variable warnings remain. No CI was added or run.
+
+Behavior validation:
+- Release targeted suites: **56 passed, zero failed, three ignored** across
+  default acoustic propagation (6), audio library/channels/offline PCM (25),
+  engine acoustic lifecycle (6), engine async services (5), engine mixer (4),
+  JS async services (4) and generated API checks (6). The ignored cases need
+  explicit external NWA/system-font input and are not counted as passes.
+  The obvhs-enabled propagation suite separately passed its five tests.
+- Worker gates prove frame progress while builds/probes are pending; tests
+  cover foreign owners, cancellation, failed replacement, retained-result
+  capacity, restore invalidation and immutable probes surviving scene clear.
+  Native physics occlusion for client 2 uses its own wall. A blocked acoustic
+  voice produces zero actual PCM, including before initial query completion;
+  clearing the scene restores audible direct samples through the same mixer.
+- JS awaits prepare/probe, checks scene revision and attenuation, and catches
+  missing-asset rejection. Successful helper completion releases tickets while
+  leaving scene resources installed. No native VM is involved in these tests.
+- Reproducible BVH2 microbenchmark: 32768 terraced triangles, 100000 seeded
+  downward rays with misses and interval clipping; all hits checked against an
+  analytic oracle. This host measured Parry build/query medians 4.891/13.605 ms
+  and obvhs 3.885/21.748 ms. Single-thread workload only; no general speed or
+  CWBVH/GPU claim. Parry remains default.
+- The synthesized nine-second 48 kHz stereo WAV has clear/wall/clear sections.
+  Measured wall/clear amplitudes at 200/3000/10000 Hz were 0.683/0.319/0.212;
+  the final clear section matches the initial section. Crossover responses
+  overlap; these are sample measurements, not exact material-band gains.
+- Python 3.11 tooling: **189 passed**. Evidence: target/verification/
+  acoustics-{library-tests,regression-tests,api-verify,core-tests,python-tests}.log,
+  acoustics-workspace-check.log, acoustics-bvh-compare.json,
+  acoustics-audio-demo-analysis.json and acoustics-room.wav. Output/media stays
+  ignored under target; all demo audio is synthesized from authored tones.
+
+Remaining boundaries:
+- HRTF, diffraction, early reflections, late reverb and dynamic mesh refit are
+  not implemented by this profile. Absorption/scattering remain validated
+  metadata reserved for reflections; travel time is not applied to playback.
+  Source forward is a world direction, without automatic entity rotation.
+- Audio source opening/decoding, streaming decoder reads and mix/output still
+  have synchronous boundaries; ADR 0050 is not complete. BVH library builds
+  are bounded non-preemptible phases with cancellation between phases. Ready
+  coefficients can be stale while workers are busy; there is no latency SLA.
+- These are independent engine capabilities, not a new completed VN adapter,
+  game boot, GPU/hardware-RT result or Windows/Linux behavior validation. KAG3's
+  previously recorded missing KAGParser facade remains an integration gap.

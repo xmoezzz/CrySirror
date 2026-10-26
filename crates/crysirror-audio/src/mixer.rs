@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 CrySirror contributors.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Deterministic, device-free stereo mixer. All controls are client scoped;
 //! decoded PCM and decoder handles are derived playback resources, never saves.
 use crate::decoder::{AudioSource, Clip, StereoFrame};
@@ -373,6 +375,7 @@ struct Voice {
     stop_after_fade: bool,
     pause_after_fade: bool,
     lowpass: StereoFrame,
+    acoustic: Option<crysirror_acoustics::spectrum::BandFilter>,
 }
 #[derive(Clone, Copy, Default, Debug, Serialize)]
 pub struct MixStats {
@@ -591,6 +594,7 @@ impl Mixer {
             stop_after_fade: false,
             pause_after_fade: false,
             lowpass: [0.; 2],
+            acoustic: None,
         });
         self.generations[slot] = generation;
         self.sequence = sequence;
@@ -734,6 +738,33 @@ impl Mixer {
             s.validate()?
         }
         self.voice(client, h)?.spec.spatial = spatial;
+        Ok(())
+    }
+    /// Apply prepared direct-path frequency gains. No geometry queries or I/O
+    /// run in the mixer. Existing distance, pan, buses and envelopes still apply.
+    pub fn set_acoustic_gains(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        gains: Option<[f32; 3]>,
+    ) -> Result<()> {
+        let rate = self.config.sample_rate;
+        let voice = self.voice(client, h)?;
+        if let Some(gains) = gains {
+            ensure!(
+                voice.spec.spatial.is_some(),
+                "acoustic gains require a spatial voice"
+            );
+            if let Some(filter) = &mut voice.acoustic {
+                filter.set_gains(gains)?;
+            } else {
+                voice.acoustic = Some(crysirror_acoustics::spectrum::BandFilter::with_gains(
+                    rate, gains,
+                )?);
+            }
+        } else {
+            voice.acoustic = None;
+        }
         Ok(())
     }
     pub fn pause(&mut self, client: u32, h: VoiceHandle, paused: bool) -> Result<()> {
@@ -1001,6 +1032,10 @@ impl Mixer {
                 if let Some(effect) = effect {
                     gain *= effect.gain;
                     let mono = (s[0] + s[1]) * 0.5;
+                    let mono = v
+                        .acoustic
+                        .as_mut()
+                        .map_or(mono, |filter| filter.process(mono));
                     s = [mono * effect.pan[0], mono * effect.pan[1]];
                     if let Some(alpha) = effect.alpha {
                         for (state, input) in v.lowpass.iter_mut().zip(s) {

@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 CrySirror contributors.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Shared Audio class and derived PCM playback. SceneState channels remain the
 //! canonical legacy contract; all channel and pooled voices feed one mixer.
 use crate::{
@@ -6,7 +8,7 @@ use crate::{
     object::{Class, ClassInfo, MethodInfo, ObjectId, PropertyInfo, TypeHint as T},
     value::Value,
 };
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{bail, ensure, Context, Result};
 use crysirror_audio::{
     decoder::{self, AudioSource, Clip, StereoFrame},
     mixer::{
@@ -31,11 +33,12 @@ struct Legacy {
     handle: VoiceHandle,
 }
 #[derive(Clone)]
-struct Attachment {
-    handle: VoiceHandle,
-    follow: Option<EntityHandle>,
-    spatial: Spatial,
-    raycast: bool,
+pub(crate) struct Attachment {
+    pub(crate) handle: VoiceHandle,
+    pub(crate) follow: Option<EntityHandle>,
+    pub(crate) spatial: Spatial,
+    pub(crate) raycast: bool,
+    pub(crate) acoustics: Option<crysirror_acoustics::AcousticSource>,
 }
 pub struct AudioRuntime {
     pub mixer: Mixer,
@@ -43,7 +46,8 @@ pub struct AudioRuntime {
     routes: BTreeMap<ChannelId, Bus>,
     clips: BTreeMap<(u32, String), Clip>,
     clip_bytes: usize,
-    attachments: BTreeMap<(u32, u32, u64), Attachment>,
+    pub(crate) attachments: BTreeMap<(u32, u32, u64), Attachment>,
+    pub acoustics: crate::acoustics_api::AcousticsRuntime,
     music: BTreeMap<(u32, String), VoiceHandle>,
     listeners: BTreeMap<u32, Listener>,
     restored: Option<u64>,
@@ -59,6 +63,7 @@ impl Default for AudioRuntime {
             clips: BTreeMap::new(),
             clip_bytes: 0,
             attachments: BTreeMap::new(),
+            acoustics: Default::default(),
             music: BTreeMap::new(),
             listeners: BTreeMap::new(),
             restored: None,
@@ -79,6 +84,7 @@ impl AudioRuntime {
         self.music.clear();
         self.output.clear();
         self.remainder = 0;
+        self.acoustics.reset();
     }
 }
 fn key(h: VoiceHandle) -> (u32, u32, u64) {
@@ -136,6 +142,7 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
         }
         a.restored = Some(restored);
     }
+    crate::acoustics_api::poll(cx.state()?)?;
     let current = {
         let s = cx.state()?;
         s.runtime
@@ -280,11 +287,13 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
             a.spatial.occlusion = if distance > 0.05
                 && s.runtime
                     .physics
-                    .raycast(
+                    .raycast_in(
+                        a.handle.client,
                         origin,
                         delta,
                         distance - 0.02,
                         a.follow.map(|h| (h.client, h.id)),
+                        false,
                     )
                     .is_some_and(|hit| hit.distance > 0.05)
             {
@@ -293,11 +302,30 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
                 0.
             };
         }
+        if let Some(settings) = &a.acoustics {
+            let s = cx.state()?;
+            let listener = s
+                .mixer_audio
+                .listeners
+                .get(&a.handle.client)
+                .copied()
+                .unwrap_or(auto);
+            crate::acoustics_api::queue(
+                s,
+                a.handle,
+                crysirror_acoustics::AcousticQuery {
+                    source: a.spatial.position,
+                    listener: listener.position,
+                    settings: settings.clone(),
+                },
+            )?;
+        }
         cx.state()?
             .mixer_audio
             .mixer
             .set_spatial(a.handle.client, a.handle, Some(a.spatial))?;
     }
+    crate::acoustics_api::dispatch(cx.state()?)?;
     let s = cx.state()?;
     let a = &mut s.mixer_audio;
     a.attachments
@@ -345,7 +373,14 @@ fn info() -> &'static ClassInfo {
         method("play",vec![("channel",T::Int),("voice",T::Map)],T::Void,"Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics."),
         method("stop",vec![("channel",T::Int)],T::Void,"Stop a classic channel."),
         method("playAt",vec![("channel",T::Int),("voice",T::Map),("where",T::Map)],T::Void,"Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion."),
-        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?}; returns scoped generation handle."),
+        method("beginAcousticScene",vec![("asset",T::String)],T::Int,"Read a client-scoped AcousticSceneSpec JSON (up to 32 MiB) and build its CPU BVH on workers. Old geometry remains until successful owner publication. Options live in the JSON; obvhs requires its host feature."),
+        method("beginAcousticProbe",vec![("query",T::Map)],T::Int,"Simulate a captured source/listener/settings query on workers. Requires a prepared scene; returns a ticket for acousticStatus. Gains exclude the mixer's existing distance curve."),
+        method("acousticStatus",vec![("ticket",T::Int)],T::Map,"Nonblocking client/generation-scoped pending/ready/failed status. Ready result contains scene metadata or a direct path. Release tickets with cancelAcousticJob."),
+        method("cancelAcousticJob",vec![("ticket",T::Int)],T::Void,"Cancel/release a retained acoustic operation; a published scene remains installed."),
+        method("clearAcousticScene",vec![],T::Void,"Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene."),
+        method("acousticStats",vec![],T::Map,"Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement."),
+        method("acousticVoice",vec![("handle",T::Map)],T::Map,"Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy."),
+        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource}; acoustics requires a ready scene and uses background direct-path updates; returns scoped generation handle."),
         method("playRandom",vec![("name",T::String),("container",T::Map),("voice",T::Map)],T::Map,"Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec."),
         method("playMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Map,"Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true."),
         method("stopVoice",vec![("handle",T::Map),("fade_ms",T::Number)],T::Void,"Stop immediately or sample-accurate fade out."),
@@ -406,6 +441,14 @@ fn voice_options(
         bail!("voice must be an object")
     };
     let mut map = map.clone();
+    let acoustics = map
+        .remove("acoustics")
+        .filter(|v| !matches!(v, Value::Null))
+        .map(|v| parse::<crysirror_acoustics::AcousticSource>(&v))
+        .transpose()?;
+    if let Some(settings) = &acoustics {
+        settings.validate()?;
+    }
     let asset = map
         .remove("asset")
         .map(|v| v.as_str().map(str::to_owned))
@@ -427,6 +470,19 @@ fn voice_options(
     }
     spec.validate()?;
     ensure!(
+        acoustics.is_none() || spec.spatial.is_some(),
+        "acoustics requires a spatial voice or follow entity"
+    );
+    ensure!(
+        acoustics.is_none() || !raycast,
+        "choose acoustic geometry or physics raycast_occlusion"
+    );
+    let state = cx.state()?;
+    ensure!(
+        acoustics.is_none() || state.mixer_audio.acoustics.has_scene(state.client.0),
+        "prepare an acoustic scene before playing an acoustic source"
+    );
+    ensure!(
         !raycast || spec.spatial.is_some(),
         "raycast_occlusion requires spatial audio"
     );
@@ -439,6 +495,7 @@ fn voice_options(
         follow,
         spatial: spatial.clone(),
         raycast,
+        acoustics,
     });
     Ok((asset, spec, attachment))
 }
@@ -454,6 +511,11 @@ fn attach(
             .attachments
             .retain(|_, a| runtime.mixer.is_playing(a.handle.client, a.handle));
         runtime.attachments.insert(key(handle), a);
+        if runtime.attachments[&key(handle)].acoustics.is_some() {
+            runtime
+                .mixer
+                .set_acoustic_gains(handle.client, handle, Some([0.; 3]))?;
+        }
     }
     Ok(())
 }
@@ -476,6 +538,9 @@ impl Class for AudioClass {
         name: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if let Some(result) = crate::acoustics_api::call(cx.state()?, name, args)? {
+            return Ok(result);
+        }
         let client = cx.state()?.client.0;
         match name {
             "play" | "stop" | "playAt" => {

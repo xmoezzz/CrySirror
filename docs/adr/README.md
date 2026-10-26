@@ -100,3 +100,4 @@ moves to `done` only with recorded behavior evidence.
 | [0064](0064-modular-vfx-cpu-gpu.md) | Engine-owned modular CPU/GPU VFX, typed data/parameters, events, sprites/meshes/ribbons and asynchronous submission | implemented profile; remaining Niagara gaps explicit |
 | [0065](0065-native-resource-codecs-and-async-decode.md) | Shared native archive/image/audio/file codecs, capability companions and bounded owner-polled resource decode tasks | all 289 named IDs implemented; partial variants explicit |
 | [0066](0066-awaitable-services-and-native-plugin-facades.md) | Awaitable Text/Resources/Save services, bounded JS Promises, shared menus and explicit native plugin shells | implemented profile; native continuations and full KAG3 remain incomplete |
+| [0067](0067-shared-acoustics-and-cpu-bvh.md) | Client-owned acoustic BVHs, frequency transmission and bounded background direct sound | direct-sound profile; HRTF/reflections/reverb pending |

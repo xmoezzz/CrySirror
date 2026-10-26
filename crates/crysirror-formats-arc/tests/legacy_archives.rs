@@ -848,7 +848,7 @@ fn group_c_structural_and_keyed_formats() {
     rec[1..6].copy_from_slice(b"a.txt");
     rec[0x108..0x10C].copy_from_slice(&le(data_rel));
     rec[0x10C..0x110].copy_from_slice(&le(3));
-    let mut body = Vec::new();
+    let mut body: Vec<u8> = Vec::new();
     body.extend(&header);
     body.extend(&rec);
     body.extend(b"adv");

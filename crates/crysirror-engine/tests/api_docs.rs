@@ -5,7 +5,7 @@
 //! CHANGES.md entry. Regenerate with
 //! `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 use crysirror_engine::{
-    api_doc::{self, ApiInput, DataType, sample},
+    api_doc::{self, sample, ApiInput, DataType},
     builtin,
     object::ClassRegistry,
     services::COMMAND_API,
@@ -200,6 +200,8 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-runtime/src/assets_async.rs",
         "crates/crysirror-tasks/src/lib.rs",
         "crates/crysirror-tasks/src/table.rs",
+        "crates/crysirror-acoustics/src/schema.rs",
+        "crates/crysirror-acoustics/src/direct.rs",
         "crates/crysirror-scene/src/ui/menu.rs",
         "crates/crysirror-scene/src/ui.rs",
         "crates/crysirror-scene/src/material.rs",
@@ -226,6 +228,14 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("AcousticBackend","AcousticSceneSpec.backend",Some(json!("parry"))),
+        d("AcousticSceneSpec","Audio.beginAcousticScene asset JSON",sample::<crysirror_acoustics::AcousticSceneSpec>(json!({}))),
+        d("AcousticMesh","AcousticSceneSpec.meshes",sample::<crysirror_acoustics::AcousticMesh>(json!({"id":1,"vertices":[],"triangles":[]}))),
+        d("AcousticMaterial","AcousticSceneSpec.materials",sample::<crysirror_acoustics::AcousticMaterial>(json!({}))),
+        d("AcousticSource","Audio.playSfx acoustics and AcousticQuery.settings",sample::<crysirror_acoustics::AcousticSource>(json!({}))),
+        d("AcousticQuery","Audio.beginAcousticProbe",sample::<crysirror_acoustics::AcousticQuery>(json!({"source":[0,0,0],"listener":[1,0,0]}))),
+        d("DirectPath","Audio.acousticStatus result and Audio.acousticVoice",None),
+
         d(
             "DecodeLimits",
             "Resources.defineProfile limits",
@@ -890,12 +900,10 @@ fn modular_vfx_reference_keeps_legacy_types_distinct_and_explains_wire_values() 
         field("VfxScalarValue", "Parameter")["rust_type"],
         "VfxScalarBinding"
     );
-    assert!(
-        field("VfxScalarValue", "Constant")["doc"]
-            .as_str()
-            .unwrap()
-            .contains("without a variant tag")
-    );
+    assert!(field("VfxScalarValue", "Constant")["doc"]
+        .as_str()
+        .unwrap()
+        .contains("without a variant tag"));
     assert_eq!(field("EmitterSpec", "rate")["rust_type"], "f32");
     assert!(docs.typescript.contains("class Vfx"));
     assert!(docs.typescript.contains("vfx: Vfx"));

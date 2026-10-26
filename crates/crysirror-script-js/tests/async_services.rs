@@ -264,3 +264,23 @@ fn standalone_async_menu_text_demo_uses_engine_surfaces_without_a_native_vm() {
     );
     app.shutdown().unwrap();
 }
+
+#[test]
+fn acoustic_promises_publish_engine_owned_scenes_and_report_native_errors() {
+    let (dir, mut app) = app(r#"
+      async function onInit() {
+        const scene = await audio.prepareAcousticsAsync('room.json');
+        if (scene.triangles !== 2) throw Error('scene missing');
+        const path = await audio.traceAcousticsAsync({source:[0,0,-4],listener:[0,0,0],settings:{air_absorption:[0,0,0]}});
+        if (path.visibility !== 0 || path.gains[0] !== 0.5 || path.revision !== scene.revision) throw Error('wrong propagation');
+        if (audio.acousticStats().scene.revision !== scene.revision) throw Error('released scene');
+        try { await audio.prepareAcousticsAsync('missing.json'); throw Error('missing asset accepted'); }
+        catch(error) { if (String(error).includes('missing asset accepted')) throw error; }
+        engine.log('acoustics-ready');
+      }
+    "#);
+    std::fs::write(dir.path().join("assets/a/room.json"),serde_json::to_vec(&serde_json::json!({"materials":[{"transmission":[0.5,0.25,0.125]}],"meshes":[{"id":1,"vertices":[[-10,-10,-2],[10,-10,-2],[10,10,-2],[-10,10,-2]],"triangles":[[0,1,2],[0,2,3]]}]})).unwrap()).unwrap();
+    app.init().unwrap();
+    app.start().unwrap();
+    until(&mut app, "acoustics-ready");
+}

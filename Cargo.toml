@@ -18,6 +18,7 @@ members = [
     "crates/crysirror-siglus",
     "crates/crysirror-text",
     "crates/crysirror-audio",
+    "crates/crysirror-acoustics",
     "crates/crysirror-scene",
     "crates/crysirror-puppet",
     "crates/crysirror-puppet-eluna",
@@ -60,6 +61,7 @@ crysirror-physics = { path = "crates/crysirror-physics" }
 crysirror-siglus = { path = "crates/crysirror-siglus" }
 crysirror-text = { path = "crates/crysirror-text" }
 crysirror-audio = { path = "crates/crysirror-audio" }
+crysirror-acoustics = { path = "crates/crysirror-acoustics" }
 crysirror-scene = { path = "crates/crysirror-scene" }
 crysirror-puppet = { path = "crates/crysirror-puppet" }
 crysirror-siglus-vm = { path = "crates/crysirror-siglus-vm" }

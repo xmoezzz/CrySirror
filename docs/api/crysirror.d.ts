@@ -23,7 +23,21 @@ declare class Audio {
   stop(channel: number): void;
   /** Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion. */
   playAt(channel: number, voice: Record<string, any>, where: Record<string, any>): void;
-  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?}; returns scoped generation handle. */
+  /** Read a client-scoped AcousticSceneSpec JSON (up to 32 MiB) and build its CPU BVH on workers. Old geometry remains until successful owner publication. Options live in the JSON; obvhs requires its host feature. */
+  beginAcousticScene(asset: string): number;
+  /** Simulate a captured source/listener/settings query on workers. Requires a prepared scene; returns a ticket for acousticStatus. Gains exclude the mixer's existing distance curve. */
+  beginAcousticProbe(query: Record<string, any>): number;
+  /** Nonblocking client/generation-scoped pending/ready/failed status. Ready result contains scene metadata or a direct path. Release tickets with cancelAcousticJob. */
+  acousticStatus(ticket: number): Record<string, any>;
+  /** Cancel/release a retained acoustic operation; a published scene remains installed. */
+  cancelAcousticJob(ticket: number): void;
+  /** Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene. */
+  clearAcousticScene(): void;
+  /** Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement. */
+  acousticStats(): Record<string, any>;
+  /** Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. */
+  acousticVoice(handle: Record<string, any>): Record<string, any>;
+  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource}; acoustics requires a ready scene and uses background direct-path updates; returns scoped generation handle. */
   playSfx(voice: Record<string, any>): Record<string, any>;
   /** Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. */
   playRandom(name: string, container: Record<string, any>, voice: Record<string, any>): Record<string, any>;
@@ -680,6 +694,8 @@ declare const vfx: Vfx;
 
 /** JS/TS service awaits; callbacks run on owner lifecycle entries. */
 interface CancellablePromise<T> extends Promise<T> { readonly ticket: number | null; cancel(): void; }
+interface Audio { prepareAcousticsAsync(asset: string): CancellablePromise<Record<string, any>>; }
+interface Audio { traceAcousticsAsync(query: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Assets { loadAsync(path: string, kind: string): CancellablePromise<number>; }
 interface Resources { decodeAsync(asset: string, kind: string, options?: Record<string, any> | null): CancellablePromise<number>; }
 interface Resources { imageAsync(asset: string, options?: Record<string, any> | null): CancellablePromise<number>; }
