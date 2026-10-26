@@ -402,3 +402,60 @@ fn pbr_hardware_soft_sun_shadows_have_penumbrae_and_converge() {
     assert!(results[1].0 * 5 < results[0].0 * 4, "soft shadow edges stay sharp: {results:?}");
     assert!(results[1].1 < 1.5, "converged soft shadow flickers: {results:?}");
 }
+
+/// The nearest shadowed point light is ray traced into a visibility channel:
+/// its shadow appears without the atlas, and an emitter radius widens it.
+#[test]
+#[ignore = "requires native ray-query GPU; execute explicitly"]
+fn pbr_hardware_point_light_shadows_hard_and_soft() {
+    let gpu = gpu();
+    let mut shots = vec![];
+    for (shadows, radius) in [(false, 0.0f32), (true, 0.0), (true, 0.35)] {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir(t.path().join("assets")).unwrap();
+        let p = t.path().join("project.json");
+        std::fs::write(&p, serde_json::to_vec(&json!({"schema":2,"name":"hardware-local","content_revision":"1","canvas":[192,128],"assets":"assets",
+            "clients":[{"name":"game","adapter":"crysirror-script-v1","game":"fixture","systems":{"entities":[
+                {"id":1,"name":"floor","geometry":{"kind":"cube"},"transform":{"translation":[0,-0.05,0],"scale":[10,0.1,10]},"color":[210,210,210,255]},
+                {"id":2,"name":"box","geometry":{"kind":"cube"},"transform":{"translation":[0,0.5,0]},"color":[60,140,220,255]},
+                {"id":3,"name":"lamp","transform":{"translation":[-1.6,2.2,0.4]},
+                 "light":{"shape":{"kind":"point"},"color":[1,0.9,0.8],"intensity":60,"range":20,"shadows":shadows,"source_radius":radius}}]}}]})).unwrap()).unwrap();
+        let mut rt = Runtime::load(&p, &t.path().join("state")).unwrap();
+        let batch = serde_json::from_value(json!({"world":[{"op":"set_camera","camera":{"eye":[3.5,3,3.5],"target":[0.6,0.2,0],"up":[0,1,0],"fov_y_degrees":50,"near":0.05,"far":100}},
+            {"op":"set_environment","environment":{"sun":null,"bloom":0,"temporal_aa":false,"ambient_occlusion":0,"intensity":0.05}}]})).unwrap();
+        rt.host.engine.submit(ClientId(1), &batch).unwrap();
+        rt.tick(0, InputFrame::default()).unwrap();
+        let mut renderer = Renderer::new(gpu.clone(), wgpu::TextureFormat::Rgba8UnormSrgb);
+        renderer.set_rendering_path(RenderingPath::HardwareRaytrace).unwrap();
+        renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
+        let mut image = renderer.capture(&rt.host.scene, &mut rt.assets, [192, 128], rt.project.background).unwrap();
+        if radius > 0. {
+            // A second capture continues the history like a running game.
+            image = renderer.capture(&rt.host.scene, &mut rt.assets, [192, 128], rt.project.background).unwrap();
+        }
+        std::fs::create_dir_all(artifact_dir()).unwrap();
+        image.save(artifact_dir().join(format!("pbr-point-shadows-{shadows}-{radius}.png"))).unwrap();
+        shots.push(image);
+    }
+    let darker = |a: &image::RgbaImage, b: &image::RgbaImage| {
+        a.pixels().zip(b.pixels()).filter(|(x, y)| i16::from(x[1]) - i16::from(y[1]) > 25).count()
+    };
+    let shadowed = darker(&shots[0], &shots[1]);
+    assert!(shadowed > 150, "traced point-light shadow darkened only {shadowed} pixels");
+    // Only floor pixels (lit and grey in the unshadowed image) count, so the
+    // cube silhouette and the horizon do not.
+    let floor = |x: u32, y: u32| {
+        let p = shots[0].get_pixel(x, y);
+        p[0] > 60 && (i16::from(p[0]) - i16::from(p[2])).abs() < 60
+    };
+    let sharp = |a: &image::RgbaImage| {
+        (0..a.height())
+            .flat_map(|y| (1..a.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| floor(x, y) && floor(x - 1, y))
+            .filter(|&(x, y)| (i16::from(a.get_pixel(x, y)[1]) - i16::from(a.get_pixel(x - 1, y)[1])).abs() > 18)
+            .count()
+    };
+    let (hard, soft) = (sharp(&shots[1]), sharp(&shots[2]));
+    eprintln!("point light: shadowed {shadowed} px, sharp edges hard {hard} soft {soft}");
+    assert!(soft * 5 < hard * 4, "emitter radius must soften the shadow: hard {hard} soft {soft}");
+}

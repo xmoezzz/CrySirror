@@ -3,6 +3,17 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## RT step 4: ray-traced point/spot light shadows (ADR 0057)
+
+- Nearest two shadowed point/spot lights traced into the spare B/A
+  channels of the RT visibility target (16-texture binding budget kept);
+  `LightSpec.source_radius` gives denoised penumbrae; others keep atlas
+  shadows.
+- Behaviour (Apple M5, Metal): hardware RT GPU tests **6 passed**; whole
+  `crysirror-wgpu` ignored GPU suite `--test-threads=1` **41 passed**.
+  Point light: 1389 shadowed floor pixels; 0.35 m emitter: sharp floor
+  shadow edges 119 → 79.
+
 ## RT step 3: soft sun shadows and denoising (ADR 0056)
 
 - `Sun.angular_diameter_degrees` (default 0): 2 cone-sampled shadow rays per

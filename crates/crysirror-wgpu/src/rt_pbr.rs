@@ -83,6 +83,15 @@ pub(crate) struct ShadowView {
     pub towards_sun: glam::Vec3,
     /// Angular diameter of the sun disc; 0 traces one exact hard-shadow ray.
     pub angular_diameter_degrees: f32,
+    /// Shadowed point/spot lights traced into visibility channels B and A.
+    pub local: [Option<LocalShadow>; 2],
+}
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LocalShadow {
+    pub position: glam::Vec3,
+    /// Emitter sphere radius; 0 traces one exact hard ray.
+    pub radius: f32,
+    pub range: f32,
 }
 /// Stochastic soft-shadow rays per pixel and frame (denoised over time).
 pub const SOFT_SAMPLES: u32 = 2;
@@ -96,6 +105,8 @@ struct TraceParams {
     towards_sun: [f32; 4],
     size: [u32; 4],
     soft: [f32; 4],
+    local: [[f32; 4]; 2],
+    local_range: [[f32; 4]; 2],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -105,11 +116,13 @@ struct DenoiseParams {
     prev_view_projection: [f32; 16],
     prev_view: [f32; 16],
     size: [u32; 4],
+    soft: [f32; 4],
 }
 struct Denoise {
     size: [u32; 2],
     noisy: (wgpu::Texture, wgpu::TextureView),
     history: [(wgpu::Texture, wgpu::TextureView); 2],
+    history_depth: [(wgpu::Texture, wgpu::TextureView); 2],
     current: usize,
     valid: bool,
     prev: Option<(glam::Mat4, glam::Mat4)>,
@@ -338,12 +351,12 @@ impl PbrRt {
         });
         let clear = compute(d, &clear_layout, "RT PBR empty visibility", include_str!("shaders/rt_pbr_shadow.wgsl"), "clear");
         crate::hardware_rt::validate_wgsl(include_str!("shaders/rt_denoise.wgsl")).context("RT denoise")?;
-        let storage_out = |binding| wgpu::BindGroupLayoutEntry {
+        let storage_out = |binding, format| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::COMPUTE,
             ty: wgpu::BindingType::StorageTexture {
                 access: wgpu::StorageTextureAccess::WriteOnly,
-                format: wgpu::TextureFormat::Rgba16Float,
+                format,
                 view_dimension: wgpu::TextureViewDimension::D2,
             },
             count: None,
@@ -356,10 +369,11 @@ impl PbrRt {
                 texture(1, wgpu::TextureSampleType::Depth),
                 texture(2, unfiltered),
                 texture(3, unfiltered),
-                storage_out(4),
+                storage_out(4, wgpu::TextureFormat::Rgba16Float),
                 texture(5, unfiltered),
-                texture(6, unfiltered),
-                storage_out(7),
+                storage_out(7, wgpu::TextureFormat::Rgba16Float),
+                texture(8, unfiltered),
+                storage_out(9, wgpu::TextureFormat::R32Float),
             ],
         });
         let denoise_source = include_str!("shaders/rt_denoise.wgsl");
@@ -884,25 +898,34 @@ impl PbrRt {
         };
         self.frame = self.frame.wrapping_add(1);
         let radius = (view.angular_diameter_degrees * 0.5).to_radians();
-        let soft = radius > 0.;
+        let soft_mask = [
+            radius > 0.,
+            view.local[0].is_some_and(|l| l.radius > 0.),
+            view.local[1].is_some_and(|l| l.radius > 0.),
+        ];
+        let soft = soft_mask.iter().any(|s| *s);
+        let local = view.local.map(|l| l.map_or([0.; 4], |l| l.position.extend(l.radius).to_array()));
+        let local_range = view.local.map(|l| l.map_or([0.; 4], |l| [l.range, 1., 0., 0.]));
         let params = TraceParams {
             inverse_view_projection: view.inverse_view_projection.to_cols_array(),
             inverse_view: view.view.inverse().to_cols_array(),
             towards_sun: view.towards_sun.extend(0.).to_array(),
             size: [canvas[0], canvas[1], 0, 0],
-            soft: [if soft { radius.cos() } else { 1. }, SOFT_SAMPLES as f32, (self.frame % 4096) as f32, 0.],
+            soft: [if radius > 0. { radius.cos() } else { 1. }, SOFT_SAMPLES as f32, (self.frame % 4096) as f32, 0.],
+            local,
+            local_range,
         };
         if !soft {
             self.denoise = None;
         } else if self.denoise.as_ref().is_none_or(|d| d.size != canvas) {
-            let target = |label| {
+            let target = |label, format| {
                 let t = gpu.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some(label),
                     size: wgpu::Extent3d { width: canvas[0], height: canvas[1], depth_or_array_layers: 1 },
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba16Float,
+                    format,
                     usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
                 });
@@ -911,8 +934,15 @@ impl PbrRt {
             };
             self.denoise = Some(Denoise {
                 size: canvas,
-                noisy: target("RT noisy visibility"),
-                history: [target("RT visibility history A"), target("RT visibility history B")],
+                noisy: target("RT noisy visibility", wgpu::TextureFormat::Rgba16Float),
+                history: [
+                    target("RT visibility history A", wgpu::TextureFormat::Rgba16Float),
+                    target("RT visibility history B", wgpu::TextureFormat::Rgba16Float),
+                ],
+                history_depth: [
+                    target("RT history depth A", wgpu::TextureFormat::R32Float),
+                    target("RT history depth B", wgpu::TextureFormat::R32Float),
+                ],
                 current: 0,
                 valid: false,
                 prev: None,
@@ -958,6 +988,7 @@ impl PbrRt {
                 prev_view_projection: prev_view_projection.to_cols_array(),
                 prev_view: prev_view.to_cols_array(),
                 size: [canvas[0], canvas[1], u32::from(dn.valid && dn.prev.is_some()), MAX_HISTORY],
+                soft: [f32::from(u8::from(soft_mask[0])), f32::from(u8::from(soft_mask[1])), f32::from(u8::from(soft_mask[2])), 0.],
             };
             let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("RT denoise params"),
@@ -965,7 +996,7 @@ impl PbrRt {
                 usage: wgpu::BufferUsages::UNIFORM,
             });
             let (prev, cur) = (dn.current ^ 1, dn.current);
-            let bind = |sampled: &wgpu::TextureView, written: &wgpu::TextureView| {
+            let bind = |sampled: usize, written: usize| {
                 gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("RT visibility denoise"),
                     layout: &self.denoise_layout,
@@ -973,18 +1004,19 @@ impl PbrRt {
                         wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
                         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(depth) },
                         wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&dn.noisy.1) },
-                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sampled) },
-                        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(written) },
+                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&dn.history[sampled].1) },
+                        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&dn.history[written].1) },
                         wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(normals) },
-                        wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(ao) },
                         wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(output) },
+                        wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&dn.history_depth[sampled].1) },
+                        wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&dn.history_depth[written].1) },
                     ],
                 })
             };
-            let temporal = bind(&dn.history[prev].1, &dn.history[cur].1);
+            let temporal = bind(prev, cur);
             // The spatial pass samples the fresh history and writes the
             // (unsampled) older one only nominally; it stores to `output`.
-            let spatial = bind(&dn.history[cur].1, &dn.history[prev].1);
+            let spatial = bind(cur, prev);
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("RT visibility denoise"), timestamp_writes: None });
             for (pipeline, bind) in [(&self.temporal, &temporal), (&self.spatial, &spatial)] {
                 pass.set_pipeline(pipeline);

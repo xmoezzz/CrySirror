@@ -698,6 +698,10 @@ pub struct LightSpec {
     /// Turn the light off without removing it.
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Radius of a point/spot emitter sphere (world units). Hardware
+    /// ray-traced shadows sample it for penumbrae; 0 keeps hard shadows.
+    #[serde(default)]
+    pub source_radius: f32,
 }
 fn white() -> [f32; 3] {
     [1.; 3]
@@ -719,6 +723,7 @@ impl Default for LightSpec {
             range: light_range(),
             shadows: false,
             enabled: true,
+            source_radius: 0.,
         }
     }
 }
@@ -736,6 +741,12 @@ impl LightSpec {
         ensure!(
             self.range.is_finite() && (0.01..=100_000.).contains(&self.range),
             "invalid light range"
+        );
+        ensure!(
+            self.source_radius.is_finite()
+                && self.source_radius >= 0.
+                && self.source_radius <= self.range,
+            "invalid light source radius"
         );
         match self.shape {
             LightShape::Point => {}

@@ -4,6 +4,15 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `904dab46c3443dfa` (2026-10-26): ray-traced local light shadows
+
+- `LightSpec.source_radius` (f32, default `0`, at most `range`): emitter
+  sphere radius of a point/spot light. With hardware RT the nearest two
+  shadowed point/spot lights are ray traced (ADR 0057); a radius > 0
+  samples the emitter for penumbrae. Raster shadows ignore it.
+- Rust: `PbrLight.source_radius`; `lights::ClusterData.order`.
+- Not breaking for scripts or projects: optional field.
+
 ## `bd521feef8e3756c` (2026-10-26): soft ray-traced sun shadows
 
 - `Sun.angular_diameter_degrees` (f32, default `0`, at most 10): the sun

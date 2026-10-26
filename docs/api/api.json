@@ -4341,6 +4341,12 @@
           "doc": "Turn the light off without removing it.",
           "name": "enabled",
           "rust_type": "bool"
+        },
+        {
+          "default": 0.0,
+          "doc": "Radius of a point/spot emitter sphere (world units). Hardware ray-traced shadows sample it for penumbrae; 0 keeps hard shadows.",
+          "name": "source_radius",
+          "rust_type": "f32"
         }
       ],
       "name": "LightSpec",
@@ -7291,7 +7297,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "bd521feef8e3756c",
+  "fingerprint": "904dab46c3443dfa",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

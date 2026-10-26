@@ -61,6 +61,8 @@ pub struct ClusterStats {
 
 pub struct ClusterData {
     pub lights: Vec<GpuLight>,
+    /// Input light index of each uploaded light.
+    pub order: Vec<usize>,
     /// Per cluster: (offset, count) into `indices`.
     pub grid: Vec<[u32; 2]>,
     pub indices: Vec<u32>,
@@ -168,7 +170,7 @@ pub fn build(lights: &[PbrLight], cv: &ClusterView, shadow_slot: impl Fn(usize) 
         grid.push([indices.len() as u32, list.len() as u32]);
         indices.extend_from_slice(list);
     }
-    ClusterData { lights: gpu, grid, indices, stats }
+    ClusterData { lights: gpu, order, grid, indices, stats }
 }
 
 pub fn cluster_index(x: u32, y: u32, z: u32) -> usize {
@@ -316,6 +318,7 @@ mod tests {
             shape: LightShape::Point,
             falloff: Default::default(),
             shadows: false,
+            source_radius: 0.,
         }
     }
     fn view() -> ClusterView {

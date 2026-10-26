@@ -1899,7 +1899,8 @@ impl PbrRenderer {
         }
         // Ray-traced soft shadows converge over their visibility history.
         if self.hardware_rt.is_some()
-            && env.sun.as_ref().is_some_and(|s| s.angular_diameter_degrees > 0.)
+            && (env.sun.as_ref().is_some_and(|s| s.angular_diameter_degrees > 0.)
+                || s.lights.iter().any(|l| l.shadows && l.source_radius > 0.))
         {
             frames = frames.max(crate::rt_pbr::MAX_HISTORY / 2);
         }
@@ -3772,7 +3773,7 @@ impl PbrRenderer {
             ls.requested = alloc.requested;
             ls.granted = alloc.granted;
         }
-        let clusters = crate::lights::build(
+        let mut clusters = crate::lights::build(
             &scene.lights,
             &crate::lights::ClusterView {
                 view,
@@ -3783,7 +3784,38 @@ impl PbrRenderer {
             },
             |i| alloc.slots[i],
         );
+        // Hardware RT traces the nearest two shadowed point/spot lights into
+        // visibility channels B/A (ADR 0057); others keep atlas shadows. The
+        // atlas tiles stay allocated for probe and transparent views.
+        let rt_local: Vec<usize> = if use_rt {
+            let eye = Vec3::from_array(cam.eye);
+            let mut order: Vec<usize> = (0..scene.lights.len())
+                .filter(|i| {
+                    let l = &scene.lights[*i];
+                    l.shadows
+                        && matches!(
+                            l.shape,
+                            crysirror_scene::components::LightShape::Point
+                                | crysirror_scene::components::LightShape::Spot { .. }
+                        )
+                })
+                .collect();
+            let dist = |i: usize| {
+                ((Vec3::from_array(scene.lights[i].position) - eye).length() - scene.lights[i].range).max(0.)
+            };
+            order.sort_by(|a, b| dist(*a).total_cmp(&dist(*b)));
+            order.truncate(2);
+            order
+        } else {
+            Vec::new()
+        };
+        for (gi, li) in clusters.order.iter().enumerate() {
+            if let Some(channel) = rt_local.iter().position(|x| x == li) {
+                clusters.lights[gi].cone[3] = channel as f32 + 1.;
+            }
+        }
         let mut fu = fu;
+        fu.rt_shadow[1] = if rt_local.is_empty() { 0. } else { 1. };
         fu.clusters[2] = clusters.lights.len() as f32;
         self.light_bufs
             .upload(&self.gpu.device, &self.gpu.queue, &clusters);
@@ -4774,6 +4806,16 @@ impl PbrRenderer {
                 view,
                 towards_sun: towards,
                 angular_diameter_degrees: sun.angular_diameter_degrees,
+                local: [0, 1].map(|k| {
+                    rt_local.get(k).map(|i| {
+                        let l = &scene.lights[*i];
+                        crate::rt_pbr::LocalShadow {
+                            position: Vec3::from_array(l.position),
+                            radius: l.source_radius,
+                            range: l.range,
+                        }
+                    })
+                }),
             };
             rt.encode_shadows(
                 &self.gpu,

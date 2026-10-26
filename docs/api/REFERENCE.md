@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `bd521feef8e3756c`
+API fingerprint: `904dab46c3443dfa`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -894,6 +894,7 @@ A local light on an entity (ADR 0018). Position and direction come from the enti
 | `range` | `f32` | `10.0` | Attenuation radius (world units); influence ends smoothly here. |
 | `shadows` | `bool` | `false` | Cast shadows (budgeted by the renderer). |
 | `enabled` | `bool` | `true` | Turn the light off without removing it. |
+| `source_radius` | `f32` | `0.0` | Radius of a point/spot emitter sphere (world units). Hardware ray-traced shadows sample it for penumbrae; 0 keeps hard shadows. |
 
 ### LightShape
 

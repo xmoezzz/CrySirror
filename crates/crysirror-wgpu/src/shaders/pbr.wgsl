@@ -224,7 +224,13 @@ fn local_lights(world: vec3<f32>, clip: vec2<f32>, ng: vec3<f32>, n: vec3<f32>, 
         }
         var vis = 1.0;
         if kind < 1.5 {
-            vis = local_shadow(li.intensity.w, kind, world, li.position_range.xyz, ng);
+            if frame.rt_shadow.y > 0.5 && li.cone.w > 0.5 {
+                // Ray-traced visibility of this light at this pixel (ADR 0057).
+                let traced = textureLoad(ao_texture, vec2<i32>(clip), 0);
+                vis = select(traced.a, traced.b, li.cone.w < 1.5);
+            } else {
+                vis = local_shadow(li.intensity.w, kind, world, li.position_range.xyz, ng);
+            }
         }
         sum = sum + brdf(n, v, l, base, metallic, f0, a, nv) * li.intensity.rgb * (emit * atten * vis);
     }

@@ -316,6 +316,7 @@ fn punctual_light(
         range,
         shadows: false,
         enabled: true,
+        source_radius: 0.,
     };
     match spec.validate() {
         Ok(()) => Some(spec),

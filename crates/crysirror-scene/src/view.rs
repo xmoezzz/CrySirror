@@ -528,6 +528,8 @@ pub struct PbrLight {
     pub shape: crate::components::LightShape,
     pub falloff: crate::components::Falloff,
     pub shadows: bool,
+    /// Emitter sphere radius for ray-traced penumbrae (0: hard).
+    pub source_radius: f32,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct PbrScene {
@@ -690,6 +692,7 @@ impl World {
                         shape: l.shape,
                         falloff: l.falloff,
                         shadows: l.shadows,
+                        source_radius: l.source_radius * m.transform_vector3(Vec3::X).length(),
                     });
                 }
                 let Some(geometry) = &spec.geometry else {
