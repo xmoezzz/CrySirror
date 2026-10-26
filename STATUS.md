@@ -3,6 +3,17 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## RT step 3: soft sun shadows and denoising (ADR 0056)
+
+- `Sun.angular_diameter_degrees` (default 0): 2 cone-sampled shadow rays per
+  pixel and frame, temporal accumulation with depth-validated reprojection
+  (≤ 32 samples) and a 5×5 edge-aware spatial filter. 0 keeps the exact
+  hard ray.
+- Behaviour (Apple M5, Metal): hardware RT GPU tests **5 passed**
+  (release, `--test-threads=1`); soft test: sharp floor edges 211 → 146 px,
+  converged frame-to-frame mean |ΔG| 0.008. Sponza (local) with a 2° sun
+  renders clean penumbrae.
+
 ## RT step 2: GPU-stream BLAS, dynamic BLAS, alpha-tested shadows (ADR 0055)
 
 - PBR hardware RT builds BLAS from the renderer's GPU vertex/index streams

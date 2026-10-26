@@ -3655,6 +3655,12 @@
           "doc": "Cast shadows (cascades or virtual shadow maps).",
           "name": "shadows",
           "rust_type": "bool"
+        },
+        {
+          "default": 0.0,
+          "doc": "Angular diameter of the sun disc in degrees (the real sun is about 0.53). Hardware ray-traced shadows sample the disc and denoise over time; 0 keeps one exact hard-shadow ray. Raster shadows ignore it.",
+          "name": "angular_diameter_degrees",
+          "rust_type": "f32"
         }
       ],
       "name": "Sun",
@@ -7285,7 +7291,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "b9821f33f25bafe8",
+  "fingerprint": "bd521feef8e3756c",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

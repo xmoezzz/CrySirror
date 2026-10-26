@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `b9821f33f25bafe8`
+API fingerprint: `bd521feef8e3756c`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -707,6 +707,7 @@ Used by: `Environment.sun`.
 | `color` | `[f32; 3]` | `[1.0,1.0,1.0]` | Linear RGB color. |
 | `intensity` | `f32` | `3.0` | Illuminance (lux-like renderer units). |
 | `shadows` | `bool` | `true` | Cast shadows (cascades or virtual shadow maps). |
+| `angular_diameter_degrees` | `f32` | `0.0` | Angular diameter of the sun disc in degrees (the real sun is about 0.53). Hardware ray-traced shadows sample the disc and denoise over time; 0 keeps one exact hard-shadow ray. Raster shadows ignore it. |
 
 ### Fog
 

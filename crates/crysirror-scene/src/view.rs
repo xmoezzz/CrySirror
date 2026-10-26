@@ -42,6 +42,11 @@ pub struct Sun {
     /// Cast shadows (cascades or virtual shadow maps).
     #[serde(default = "yes")]
     pub shadows: bool,
+    /// Angular diameter of the sun disc in degrees (the real sun is about
+    /// 0.53). Hardware ray-traced shadows sample the disc and denoise over
+    /// time; 0 keeps one exact hard-shadow ray. Raster shadows ignore it.
+    #[serde(default)]
+    pub angular_diameter_degrees: f32,
 }
 fn yes() -> bool {
     true
@@ -53,6 +58,7 @@ impl Default for Sun {
             color: white3(),
             intensity: sun_lux(),
             shadows: true,
+            angular_diameter_degrees: 0.,
         }
     }
 }
@@ -428,7 +434,8 @@ impl Environment {
                     && finite(&s.color)
                     && s.color.iter().all(|c| *c >= 0.)
                     && s.intensity.is_finite()
-                    && (0.0..=100_000.).contains(&s.intensity),
+                    && (0.0..=100_000.).contains(&s.intensity)
+                    && (0.0..=10.).contains(&s.angular_diameter_degrees),
                 "invalid sun"
             );
         }

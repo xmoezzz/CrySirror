@@ -74,6 +74,46 @@ struct GeometryParams {
     skinned: u32,
     out_base: u32,
 }
+/// Camera and sun for one visibility pass.
+pub(crate) struct ShadowView {
+    pub inverse_view_projection: glam::Mat4,
+    pub view_projection: glam::Mat4,
+    pub view: glam::Mat4,
+    /// Unit vector towards the sun.
+    pub towards_sun: glam::Vec3,
+    /// Angular diameter of the sun disc; 0 traces one exact hard-shadow ray.
+    pub angular_diameter_degrees: f32,
+}
+/// Stochastic soft-shadow rays per pixel and frame (denoised over time).
+pub const SOFT_SAMPLES: u32 = 2;
+/// Upper bound of accumulated frames in the visibility history.
+pub const MAX_HISTORY: u32 = 32;
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct TraceParams {
+    inverse_view_projection: [f32; 16],
+    inverse_view: [f32; 16],
+    towards_sun: [f32; 4],
+    size: [u32; 4],
+    soft: [f32; 4],
+}
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct DenoiseParams {
+    inverse_view_projection: [f32; 16],
+    view: [f32; 16],
+    prev_view_projection: [f32; 16],
+    prev_view: [f32; 16],
+    size: [u32; 4],
+}
+struct Denoise {
+    size: [u32; 2],
+    noisy: (wgpu::Texture, wgpu::TextureView),
+    history: [(wgpu::Texture, wgpu::TextureView); 2],
+    current: usize,
+    valid: bool,
+    prev: Option<(glam::Mat4, glam::Mat4)>,
+}
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Slot {
@@ -106,6 +146,7 @@ pub(crate) struct PbrRtStats {
     pub alpha_instances: usize,
     pub alpha_slots: usize,
     pub alpha_bakes: u64,
+    pub denoised_frames: u64,
 }
 
 pub(crate) struct PbrRt {
@@ -136,6 +177,11 @@ pub(crate) struct PbrRt {
     shadow: wgpu::ComputePipeline,
     clear_layout: wgpu::BindGroupLayout,
     clear: wgpu::ComputePipeline,
+    denoise_layout: wgpu::BindGroupLayout,
+    temporal: wgpu::ComputePipeline,
+    spatial: wgpu::ComputePipeline,
+    denoise: Option<Denoise>,
+    frame: u32,
     dummy: wgpu::Buffer,
     pub stats: PbrRtStats,
 }
@@ -291,6 +337,34 @@ impl PbrRt {
             ],
         });
         let clear = compute(d, &clear_layout, "RT PBR empty visibility", include_str!("shaders/rt_pbr_shadow.wgsl"), "clear");
+        crate::hardware_rt::validate_wgsl(include_str!("shaders/rt_denoise.wgsl")).context("RT denoise")?;
+        let storage_out = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::StorageTexture {
+                access: wgpu::StorageTextureAccess::WriteOnly,
+                format: wgpu::TextureFormat::Rgba16Float,
+                view_dimension: wgpu::TextureViewDimension::D2,
+            },
+            count: None,
+        };
+        let unfiltered = wgpu::TextureSampleType::Float { filterable: false };
+        let denoise_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("RT visibility denoise"),
+            entries: &[
+                uniform(0),
+                texture(1, wgpu::TextureSampleType::Depth),
+                texture(2, unfiltered),
+                texture(3, unfiltered),
+                storage_out(4),
+                texture(5, unfiltered),
+                texture(6, unfiltered),
+                storage_out(7),
+            ],
+        });
+        let denoise_source = include_str!("shaders/rt_denoise.wgsl");
+        let temporal = compute(d, &denoise_layout, "RT visibility temporal", denoise_source, "temporal");
+        let spatial = compute(d, &denoise_layout, "RT visibility spatial", denoise_source, "spatial");
         let atlas = d.create_texture(&wgpu::TextureDescriptor {
             label: Some("RT alpha atlas"),
             size: wgpu::Extent3d { width: ATLAS, height: ATLAS, depth_or_array_layers: 1 },
@@ -344,6 +418,11 @@ impl PbrRt {
             shadow,
             clear_layout,
             clear,
+            denoise_layout,
+            temporal,
+            spatial,
+            denoise: None,
+            frame: 0,
             dummy,
             stats: PbrRtStats::default(),
         })
@@ -780,7 +859,7 @@ impl PbrRt {
         draws: &[PbrRtDraw],
         material_layout: &wgpu::BindGroupLayout,
         palette: &wgpu::Buffer,
-        params: &[u8],
+        view: &ShadowView,
         canvas: [u32; 2],
         depth: &wgpu::TextureView,
         normals: &wgpu::TextureView,
@@ -803,9 +882,49 @@ impl PbrRt {
             pass.dispatch_workgroups(canvas[0].div_ceil(8), canvas[1].div_ceil(8), 1);
             return Ok(false);
         };
+        self.frame = self.frame.wrapping_add(1);
+        let radius = (view.angular_diameter_degrees * 0.5).to_radians();
+        let soft = radius > 0.;
+        let params = TraceParams {
+            inverse_view_projection: view.inverse_view_projection.to_cols_array(),
+            inverse_view: view.view.inverse().to_cols_array(),
+            towards_sun: view.towards_sun.extend(0.).to_array(),
+            size: [canvas[0], canvas[1], 0, 0],
+            soft: [if soft { radius.cos() } else { 1. }, SOFT_SAMPLES as f32, (self.frame % 4096) as f32, 0.],
+        };
+        if !soft {
+            self.denoise = None;
+        } else if self.denoise.as_ref().is_none_or(|d| d.size != canvas) {
+            let target = |label| {
+                let t = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d { width: canvas[0], height: canvas[1], depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let v = t.create_view(&Default::default());
+                (t, v)
+            };
+            self.denoise = Some(Denoise {
+                size: canvas,
+                noisy: target("RT noisy visibility"),
+                history: [target("RT visibility history A"), target("RT visibility history B")],
+                current: 0,
+                valid: false,
+                prev: None,
+            });
+        }
+        let trace_output = match &self.denoise {
+            Some(d) => &d.noisy.1,
+            None => output,
+        };
         let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("RT PBR shadow params"),
-            contents: params,
+            contents: bytemuck::bytes_of(&params),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -816,7 +935,7 @@ impl PbrRt {
                 wgpu::BindGroupEntry { binding: 1, resource: self.tlas.as_ref().unwrap().as_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(depth) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(normals) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(output) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(trace_output) },
                 wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(ao) },
                 wgpu::BindGroupEntry { binding: 6, resource: instances.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 7, resource: self.uv_buffer.as_entire_binding() },
@@ -825,10 +944,59 @@ impl PbrRt {
                 wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::Sampler(&self.sampler) },
             ],
         });
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("RT PBR sun visibility"), timestamp_writes: None });
-        pass.set_pipeline(&self.shadow);
-        pass.set_bind_group(0, &bind, &[]);
-        pass.dispatch_workgroups(canvas[0].div_ceil(8), canvas[1].div_ceil(8), 1);
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("RT PBR sun visibility"), timestamp_writes: None });
+            pass.set_pipeline(&self.shadow);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.dispatch_workgroups(canvas[0].div_ceil(8), canvas[1].div_ceil(8), 1);
+        }
+        if let Some(dn) = &mut self.denoise {
+            let (prev_view_projection, prev_view) = dn.prev.unwrap_or((view.view_projection, view.view));
+            let params = DenoiseParams {
+                inverse_view_projection: view.inverse_view_projection.to_cols_array(),
+                view: view.view.to_cols_array(),
+                prev_view_projection: prev_view_projection.to_cols_array(),
+                prev_view: prev_view.to_cols_array(),
+                size: [canvas[0], canvas[1], u32::from(dn.valid && dn.prev.is_some()), MAX_HISTORY],
+            };
+            let uniform = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("RT denoise params"),
+                contents: bytemuck::bytes_of(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let (prev, cur) = (dn.current ^ 1, dn.current);
+            let bind = |sampled: &wgpu::TextureView, written: &wgpu::TextureView| {
+                gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("RT visibility denoise"),
+                    layout: &self.denoise_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(depth) },
+                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&dn.noisy.1) },
+                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(sampled) },
+                        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(written) },
+                        wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(normals) },
+                        wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(ao) },
+                        wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(output) },
+                    ],
+                })
+            };
+            let temporal = bind(&dn.history[prev].1, &dn.history[cur].1);
+            // The spatial pass samples the fresh history and writes the
+            // (unsampled) older one only nominally; it stores to `output`.
+            let spatial = bind(&dn.history[cur].1, &dn.history[prev].1);
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("RT visibility denoise"), timestamp_writes: None });
+            for (pipeline, bind) in [(&self.temporal, &temporal), (&self.spatial, &spatial)] {
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, bind, &[]);
+                pass.dispatch_workgroups(canvas[0].div_ceil(8), canvas[1].div_ceil(8), 1);
+            }
+            drop(pass);
+            dn.prev = Some((view.view_projection, view.view));
+            dn.current ^= 1;
+            dn.valid = true;
+            self.stats.denoised_frames += 1;
+        }
         Ok(true)
     }
 
@@ -846,6 +1014,7 @@ impl PbrRt {
             "alpha_instances": s.alpha_instances,
             "alpha_slots": s.alpha_slots,
             "alpha_bakes": s.alpha_bakes,
+            "denoised_frames": s.denoised_frames,
             "refit": "wgpu 29 implements PreferUpdate as a full rebuild",
         })
     }

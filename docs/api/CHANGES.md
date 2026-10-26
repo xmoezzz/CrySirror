@@ -4,6 +4,14 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `bd521feef8e3756c` (2026-10-26): soft ray-traced sun shadows
+
+- `Sun.angular_diameter_degrees` (f32, default `0`, at most 10): the sun
+  disc's angular size. Hardware ray-traced shadows sample it and denoise
+  over time (ADR 0056); `0` keeps one exact hard-shadow ray. Raster shadow
+  paths ignore it.
+- Not breaking: optional field.
+
 ## `b9821f33f25bafe8` (2026-10-26): morph targets
 
 - `Entity.setMorph(name, weight)` and `Entity.setMorphs(weights | null)` set

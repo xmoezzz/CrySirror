@@ -1897,6 +1897,12 @@ impl PbrRenderer {
         if env.virtual_shadows.is_some() {
             frames = frames.max(3);
         }
+        // Ray-traced soft shadows converge over their visibility history.
+        if self.hardware_rt.is_some()
+            && env.sun.as_ref().is_some_and(|s| s.angular_diameter_degrees > 0.)
+        {
+            frames = frames.max(crate::rt_pbr::MAX_HISTORY / 2);
+        }
         frames
     }
     /// Virtual shadow map page statistics of the last encoded frame.
@@ -4762,18 +4768,19 @@ impl PbrRenderer {
         if let Some(rt) = &mut self.hardware_rt {
             let towards = (-l).normalize_or_zero();
             ensure!(towards.length_squared() > 0.5, "hardware shadow sun direction must be nonzero");
-            let mut params = Vec::with_capacity(160);
-            for m in [view_proj.inverse(), view.inverse()] {
-                params.extend_from_slice(bytemuck::cast_slice(&m.to_cols_array()));
-            }
-            params.extend_from_slice(bytemuck::cast_slice(&[towards.x, towards.y, towards.z, 0.]));
-            params.extend_from_slice(bytemuck::cast_slice(&[canvas[0], canvas[1], 0, 0]));
+            let shadow_view = crate::rt_pbr::ShadowView {
+                inverse_view_projection: view_proj.inverse(),
+                view_projection: view_proj,
+                view,
+                towards_sun: towards,
+                angular_diameter_degrees: sun.angular_diameter_degrees,
+            };
             rt.encode_shadows(
                 &self.gpu,
                 rt_draws.as_deref().unwrap_or(&[]),
                 &self.material_bgl,
                 &self.palette_buf,
-                &params,
+                &shadow_view,
                 canvas,
                 &t.pre_depth,
                 &t.normal,

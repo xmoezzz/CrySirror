@@ -356,3 +356,49 @@ fn pbr_hardware_alpha_texture_cuts_holes_in_the_shadow() {
     let ratio = dark[1] as f32 / dark[0] as f32;
     assert!((0.25..0.75).contains(&ratio), "checker alpha should remove about half the shadow: {dark:?}");
 }
+
+/// A sun disc widens the ray-traced shadow into a penumbra; temporal and
+/// spatial denoising keep the converged result stable between frames.
+#[test]
+#[ignore = "requires native ray-query GPU; execute explicitly"]
+fn pbr_hardware_soft_sun_shadows_have_penumbrae_and_converge() {
+    let gpu = gpu();
+    let mut results = vec![];
+    for diameter in [0.0f32, 4.0] {
+        let t = tempfile::tempdir().unwrap();
+        let mut rt = pbr(t.path(), true);
+        let batch = serde_json::from_value(json!({"world":[{"op":"set_environment","environment":{
+            "sun":{"direction":[1,-1,0.3],"intensity":4,"shadows":true,"angular_diameter_degrees":diameter},
+            "bloom":0,"temporal_aa":false,"ambient_occlusion":0}}]})).unwrap();
+        rt.host.engine.submit(ClientId(1), &batch).unwrap();
+        let mut renderer = Renderer::new(gpu.clone(), wgpu::TextureFormat::Rgba8UnormSrgb);
+        renderer.set_rendering_path(RenderingPath::HardwareRaytrace).unwrap();
+        renderer.set_pbr_scene(rt.render_pbr().unwrap()).unwrap();
+        let a = renderer.capture(&rt.host.scene, &mut rt.assets, [192, 128], rt.project.background).unwrap();
+        let b = renderer.capture(&rt.host.scene, &mut rt.assets, [192, 128], rt.project.background).unwrap();
+        let stats = renderer.hardware_rt_stats().unwrap();
+        // Sharp shadow edges: large green steps between horizontal neighbours
+        // on the (bluish) floor; a penumbra spreads each step over pixels.
+        let partial = (0..a.height())
+            .flat_map(|y| (1..a.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let (p, q) = (a.get_pixel(x, y), a.get_pixel(x - 1, y));
+                p[2] > 150 && q[2] > 150 && (i16::from(p[1]) - i16::from(q[1])).abs() > 18
+            })
+            .count();
+        let flicker = a.pixels().zip(b.pixels()).map(|(x, y)| (i32::from(x[1]) - i32::from(y[1])).abs()).sum::<i32>() as f64
+            / (a.width() * a.height()) as f64;
+        eprintln!("diameter {diameter}: sharp floor edges {partial} px, frame-to-frame mean |dG| {flicker:.3}, {stats}");
+        if diameter > 0. {
+            assert!(stats["denoised_frames"].as_u64().unwrap() > 1, "{stats}");
+        }
+        std::fs::create_dir_all(artifact_dir()).unwrap();
+        a.save(artifact_dir().join(format!("pbr-sun-{diameter}deg.png"))).unwrap();
+        results.push((partial, flicker));
+    }
+    assert!(results[0].0 > 20, "hard shadow must have sharp edges: {results:?}");
+    // Contact edges and the cube's own silhouette stay sharp; the shadow's
+    // far edges widen into a penumbra.
+    assert!(results[1].0 * 5 < results[0].0 * 4, "soft shadow edges stay sharp: {results:?}");
+    assert!(results[1].1 < 1.5, "converged soft shadow flickers: {results:?}");
+}

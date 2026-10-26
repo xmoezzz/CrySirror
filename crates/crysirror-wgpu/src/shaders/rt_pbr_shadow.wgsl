@@ -5,7 +5,8 @@
 // force-opaque geometry (see hardware_rt.wgsl for the Naga 29.0.3 Metal
 // constraint), so no candidate callbacks are needed on any backend.
 enable wgpu_ray_query;
-struct Params { inverse_view_projection:mat4x4<f32>, inverse_view:mat4x4<f32>, towards_sun:vec4<f32>, size:vec4<u32> }
+// soft: x cosine of the sun's angular radius (1 = hard), y samples per pixel, z frame.
+struct Params { inverse_view_projection:mat4x4<f32>, inverse_view:mat4x4<f32>, towards_sun:vec4<f32>, size:vec4<u32>, soft:vec4<f32> }
 // x: first UV corner of the instance's geometry, y: alpha slot + 1 (0 = opaque).
 struct Instance { data:vec4<u32> }
 // rect: atlas UV origin/size; transform: material UV scale/offset; cutoff.x.
@@ -52,6 +53,28 @@ fn visible(origin:vec3<f32>,direction:vec3<f32>)->f32 {
     return 0.0;
 }
 
+// PCG hash; per pixel, frame and sample decorrelated sequences.
+fn pcg(v:u32)->u32 {
+    let state=v*747796405u+2891336453u;
+    let word=((state>>((state>>28u)+4u))^state)*277803737u;
+    return (word>>22u)^word;
+}
+fn random2(pixel:vec2<u32>,frame:u32,k:u32)->vec2<f32> {
+    let a=pcg(pixel.x+pcg(pixel.y+pcg(frame*16u+k)));
+    let b=pcg(a);
+    return vec2<f32>(f32(a)/4294967296.0,f32(b)/4294967296.0);
+}
+// Uniform direction inside the cone around `axis`.
+fn cone(axis:vec3<f32>,cos_max:f32,u:vec2<f32>)->vec3<f32> {
+    let cos_t=1.0-u.x*(1.0-cos_max);
+    let sin_t=sqrt(max(1.0-cos_t*cos_t,0.0));
+    let phi=6.28318530718*u.y;
+    let helper=select(vec3<f32>(1.0,0.0,0.0),vec3<f32>(0.0,1.0,0.0),abs(axis.x)>0.9);
+    let t=normalize(cross(helper,axis));
+    let b=cross(axis,t);
+    return normalize(t*(cos(phi)*sin_t)+b*(sin(phi)*sin_t)+axis*cos_t);
+}
+
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3<u32>){
     if any(id.xy>=params.size.xy){return;}
@@ -70,7 +93,16 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
         if normal_squared>1e-12 && normal_squared<1e30 {normal=normal_w*inverseSqrt(normal_squared);}
         let light=params.towards_sun.xyz;
         let origin=world+normal*0.002+light*0.001;
-        visibility=visible(origin,light);
+        if params.soft.x>=1.0 {
+            visibility=visible(origin,light);
+        } else {
+            let samples=max(u32(params.soft.y),1u);
+            var sum=0.0;
+            for (var k=0u; k<samples; k++) {
+                sum+=visible(origin,cone(light,params.soft.x,random2(id.xy,u32(params.soft.z),k)));
+            }
+            visibility=sum/f32(samples);
+        }
     }
     textureStore(output,pixel,vec4<f32>(textureLoad(ao,pixel,0).r,visibility,0.0,1.0));
 }
