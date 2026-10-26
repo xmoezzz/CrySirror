@@ -47,3 +47,13 @@ The upstream fetch tool creates reference checkouts on the developer's machine;
 use --source-root outside the deliverable tree. Those checkouts are not included
 in this source export. No fonts may be added to an
 assistant-generated delivery merely because they happen to be installed locally.
+
+The optional KiriKiri adapter vendors `krkr-tjs2` and `krkr-kag` from
+liulifox233/Kirakira at commit c451918023477620ff9055a2eb8a6714b947d9c1
+(crates/krkr-upstream, unmodified sources, SHA-256 in SOURCE.json), and
+crates/crysirror-krkr/src/constants.rs is ported from that commit's
+`krkr-engine/src/globals/constants.rs`. They are licensed AGPL-3.0-or-later
+(crates/krkr-upstream/LICENSE). `crysirror-krkr` is AGPL-3.0-or-later too.
+None of them is in a default build; a binary built with the desktop `krkr`
+feature is covered by the AGPL, including its section 13 network clause.
+The krkr-demo images and scripts are self-authored.

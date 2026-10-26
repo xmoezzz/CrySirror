@@ -1,0 +1,12 @@
+{
+  "schema": 2,
+  "name": "CrySirror KiriKiri demo",
+  "content_revision": "krkr-demo-1",
+  "canvas": [640, 480],
+  "background": [0, 0, 0, 255],
+  "assets": "assets",
+  "clients": [
+    { "name": "game", "adapter": "krkr", "game": "krkr-demo",
+      "config": { "root": "game", "canvas": [640, 480] } }
+  ]
+}

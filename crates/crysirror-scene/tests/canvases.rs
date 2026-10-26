@@ -49,6 +49,8 @@ fn setup() -> (CanvasSystem, LayerSystem) {
                 id: 2,
                 layer: 7,
                 order: 0,
+                parent: None,
+                position: [0., 0.],
             },
         ],
         &mut l,
@@ -106,6 +108,8 @@ fn client_handles_and_presentations_are_isolated() {
                 id: 1,
                 layer: 7,
                 order: 0,
+                parent: None,
+                position: [0., 0.],
             },
         ],
         &mut l,
@@ -238,4 +242,43 @@ fn dynamic_reveal_is_rejected_in_commands_and_restored_groups() {
             .validate()
             .is_err()
     );
+}
+#[test]
+fn presentation_attaches_under_parent_layer_and_follows_it() {
+    use crysirror_scene::layer::LayerCommand;
+    let mut c = CanvasSystem::default();
+    let mut l = LayerSystem::default();
+    let client = ClientId(1);
+    let mut parent = draw([0, 0, 0, 0]);
+    parent.id = 5;
+    parent.rect = [100., 50., 64., 32.];
+    l.apply_batch(client, &[LayerCommand::Put { layer: parent }]).unwrap();
+    c.apply_batch(
+        client,
+        &[
+            C::Create { id: 3, width: 16, height: 8 },
+            C::Clear { id: 3, color: [255, 0, 0, 255] },
+            C::Present { id: 3, layer: 9, order: 2, parent: Some(5), position: [4., 2.] },
+        ],
+        &mut l,
+    )
+    .unwrap();
+    let root = l.get(client, 9).unwrap();
+    assert_eq!(root.parent, Some(5));
+    assert_eq!(root.rect, [4., 2., 16., 8.]);
+    let frame = l.frame([640, 480]).unwrap();
+    let fill = frame
+        .iter()
+        .find(|p| matches!(p.paint, crysirror_scene::layer::Paint::Solid { color } if color == [255, 0, 0, 255]))
+        .unwrap();
+    assert_eq!(fill.quad[0][0], 104.);
+    assert_eq!(fill.quad[0][1], 52.);
+    // A presentation cannot reference a parent that does not exist.
+    assert!(c
+        .apply_batch(
+            client,
+            &[C::Present { id: 3, layer: 10, order: 0, parent: Some(77), position: [0., 0.] }],
+            &mut l,
+        )
+        .is_err());
 }

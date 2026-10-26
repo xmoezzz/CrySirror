@@ -1,0 +1,26 @@
+class Orbit extends Layer {
+    var angle, radius, speed;
+    function Orbit(win, parent, angle, radius) {
+        super.Layer(win, parent);
+        loadImages("star");
+        this.angle = angle; this.radius = radius; speed = 0.08;
+        opacity = 220;
+        visible = true;
+        place();
+    }
+    function place() {
+        left = 320 - width \ 2 + (int)(Math.cos(angle) * radius);
+        top = 170 - height \ 2 + (int)(Math.sin(angle) * radius * 0.5);
+    }
+    function step() { angle += speed; place(); }
+}
+
+class OrbitSet {
+    var items = [];
+    function OrbitSet(win, parent, count) {
+        for (var i = 0; i < count; i++)
+            items.add(new Orbit(win, parent, Math.PI * 2 * i / count, 200));
+    }
+    function step() { for (var i = 0; i < items.count; i++) items[i].step(); }
+    function each(f) { for (var i = 0; i < items.count; i++) f(items[i]); }
+}

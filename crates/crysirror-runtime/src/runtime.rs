@@ -430,6 +430,19 @@ impl HostServices for SharedHost {
         self.generated.push((client, path.clone(), bytes));
         VfsPath::new(crysirror_core::path::Mount::Asset, &path)
     }
+    fn image_metadata(
+        &mut self,
+        client: ClientId,
+    ) -> crysirror_core::Result<Arc<dyn crysirror_core::service::ImageMetadata>> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        Ok(Arc::new(SharedImageMetadata {
+            storage: self.fs.storage(client)?,
+            decoders: self.decoders.clone(),
+            sizes: std::sync::Mutex::new(BTreeMap::new()),
+        }))
+    }
     fn storage(
         &mut self,
         client: ClientId,
@@ -1595,5 +1608,36 @@ mod siglus_pack_tests {
         assert_eq!(f.len(), 2);
         assert_eq!(f[0].id, f[1].id);
         assert_ne!(f[0].owner, f[1].owner);
+    }
+}
+
+/// Image metadata handle over the same scoped storage and decoder registry the
+/// renderer uses; sizes are cached per handle.
+struct SharedImageMetadata {
+    storage: Arc<dyn crysirror_core::service::ClientStorage>,
+    decoders: crysirror_image::DecoderRegistry,
+    sizes: std::sync::Mutex<BTreeMap<String, [u32; 2]>>,
+}
+impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
+    fn size(&self, asset: &str) -> crysirror_core::Result<[u32; 2]> {
+        let mut sizes = self.sizes.lock().map_err(|_| Error::Io("image metadata lock".into()))?;
+        if let Some(size) = sizes.get(asset) {
+            return Ok(*size);
+        }
+        let path = VfsPath::new(crysirror_core::path::Mount::Asset, asset)?;
+        let bytes = self.storage.read(&path)?;
+        let source = |name: &str| {
+            self.storage
+                .read(&VfsPath::new(crysirror_core::path::Mount::Asset, name)?)
+        };
+        let image = self
+            .decoders
+            .decode_with(asset, &bytes, Some(&source), None, None)
+            .map_err(|e| Error::Io(e.to_string()))?;
+        if sizes.len() >= 4096 {
+            sizes.clear();
+        }
+        sizes.insert(asset.to_owned(), [image.width, image.height]);
+        Ok([image.width, image.height])
     }
 }

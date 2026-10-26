@@ -26,6 +26,7 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, reveal and CPU SDF data |
 | crysirror-scene | Safe CPU World/Layer/UI state, migrated input/animation/projection, transactional mutations and frame extraction |
 | crysirror-reallive | Original RealLive bytecode VM and thin semantic/syscall adapter; retained Canvas/Layer/GlyphRun/UI and engine audio/Media services, no hosted renderer |
+| crysirror-krkr | Optional AGPL KiriKiri adapter: vendored Kirakira TJS2 VM (crates/krkr-upstream) with native classes translated onto engine Layer/Canvas, clock and storage (ADR 0053); not in default builds |
 | crysirror-siglus-vm | Independent subset port registered as `siglus`; full vendored SceneVm host/factory switch pending (ADR 0009) |
 | crysirror-engine | Unity-style public API: reflective classes/objects, App lifecycle, behaviours, plugins, ScriptHost contract (ADR 0004/0005) |
 | crysirror-script-js | Default JS/TS script host (Boa + Oxc) bound to the class registry; desktop feature `scripting` (ADR 0005) |

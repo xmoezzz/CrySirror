@@ -186,6 +186,8 @@ fn adapter_registry() -> Result<AdapterRegistry> {
     let mut registry = AdapterRegistry::default();
     #[cfg(feature = "reallive")]
     crysirror_reallive::register(&mut registry)?;
+    #[cfg(feature = "krkr")]
+    crysirror_krkr::register(&mut registry)?;
     Ok(registry)
 }
 fn load_project(path: &Path) -> Result<Project> {
@@ -196,6 +198,10 @@ fn load_project(path: &Path) -> Result<Project> {
             "hosted engine adapter '{}' has been removed; a CrySirror API bridge is required",
             client.adapter
         );
+    }
+    #[cfg(feature = "krkr")]
+    for c in project.clients.iter().filter(|c| c.adapter == "krkr") {
+        serde_json::from_value::<crysirror_krkr::Config>(c.config.clone())?.validate()?;
     }
     #[cfg(feature = "reallive")]
     for c in project.clients.iter().filter(|c| c.adapter == "reallive") {

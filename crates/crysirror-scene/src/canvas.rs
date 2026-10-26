@@ -8,6 +8,8 @@ use anyhow::{Context, Result, ensure};
 use crysirror_core::state::ClientId;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+/// Per-client surface budget; native layer trees keep one surface per layer.
+pub const MAX_SURFACES: usize = 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanvasSurface {
@@ -63,6 +65,13 @@ pub enum CanvasCommand {
         layer: u32,
         #[serde(default)]
         order: i32,
+        /// Existing client layer the presentation is attached under; its
+        /// transform, visibility, opacity and clip are inherited.
+        #[serde(default)]
+        parent: Option<u32>,
+        /// Top-left of the surface in the parent's (or canvas) space.
+        #[serde(default)]
+        position: [f32; 2],
     },
     Hide {
         layer: u32,
@@ -73,6 +82,10 @@ struct Presentation {
     source: u32,
     order: i32,
     generated: Vec<u32>,
+    #[serde(default)]
+    parent: Option<u32>,
+    #[serde(default)]
+    position: [f32; 2],
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,7 +120,7 @@ impl CanvasSystem {
     }
     pub fn validate(&self) -> Result<()> {
         for owner in self.clients.values() {
-            ensure!(owner.len() <= 128, "canvas surface limit");
+            ensure!(owner.len() <= MAX_SURFACES, "canvas surface limit");
             for s in owner.values() {
                 ensure!(
                     s.width > 0 && s.height > 0 && s.width <= 8192 && s.height <= 8192,
@@ -242,13 +255,32 @@ impl CanvasSystem {
                         });
                     }
                 }
-                CanvasCommand::Present { id, layer, order } => {
+                CanvasCommand::Present {
+                    id,
+                    layer,
+                    order,
+                    parent,
+                    position,
+                } => {
                     ensure!(next.surface(c, *id).is_some(), "present canvas absent");
                     ensure!(*layer < 0x2000_0000, "reserved canvas layer id");
+                    ensure!(
+                        position.iter().all(|v| v.is_finite() && v.abs() <= 1_000_000.),
+                        "canvas presentation position"
+                    );
+                    if let Some(parent) = parent {
+                        ensure!(*parent != *layer, "canvas presentation parent cycle");
+                        ensure!(
+                            next_layers.get(c, *parent).is_some(),
+                            "canvas presentation parent layer absent"
+                        );
+                    }
                     let owner = next.presentations.entry(c.0).or_default();
                     if let Some(p) = owner.get_mut(layer) {
                         p.source = *id;
                         p.order = *order;
+                        p.parent = *parent;
+                        p.position = *position;
                     } else {
                         owner.insert(
                             *layer,
@@ -256,6 +288,8 @@ impl CanvasSystem {
                                 source: *id,
                                 order: *order,
                                 generated: vec![],
+                                parent: *parent,
+                                position: *position,
                             },
                         );
                     }
@@ -305,9 +339,10 @@ impl CanvasSystem {
                 .collect::<Vec<_>>();
             let mut parent = spec(
                 root,
-                [0., 0., s.width as f32, s.height as f32],
+                [p.position[0], p.position[1], s.width as f32, s.height as f32],
                 Paint::Solid { color: [0; 4] },
             );
+            parent.parent = p.parent;
             parent.order = [p.order, -1];
             parent.clip = Some([0., 0., s.width as f32, s.height as f32]);
             commands.push(LayerCommand::Put { layer: parent });

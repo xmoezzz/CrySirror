@@ -3,6 +3,30 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## KiriKiri TJS2 adapter, first slice (ADR 0053)
+
+- **Source.** Kirakira `krkr-tjs2` and `krkr-kag` vendored unmodified from
+  `c451918023477620ff9055a2eb8a6714b947d9c1` (SHA-256 per file). AGPL is
+  confined to them and `crysirror-krkr`; the desktop `krkr` feature is not
+  in `default`. `tests/test_krkr_policy.py` checks both.
+- **Engine capabilities added first:** canvas presentations inside layer
+  trees (`present.parent/position`, 1024 surfaces) and a thread-safe
+  `image_metadata` handle.
+- **Translated natives:** Layer (tree, geometry, visibility, opacity,
+  `absolute`, loadImages, fillRect, colorRect, copyRect, operateRect,
+  assignImages, drawText), Window, Timer, System, Debug, Storages, Scripts.
+  Unsupported members throw TJS exceptions naming the missing capability.
+- **Behaviour.**
+  - `crysirror-krkr` tests: **3 passed** (layers/timer/click to engine
+    state; visible failures; Shift_JIS and case-insensitive storage), plus
+    1 unit test. `crysirror-scene` canvas tests: **7 passed**.
+  - `examples/krkr-demo` (self-authored) rendered through the release
+    desktop renderer (`--features krkr`, raster, Metal): 8 KiriKiri layers
+    as engine nodes, script subclass `Orbit extends Layer` driven by a Timer.
+  - Python 3.11: **169 passed**.
+  - No commercial title was run; KAG3 boot, XP3 mounts, font metrics,
+    audio, video, transitions and saves are not implemented.
+
 ## Latest: NFS Carbon canyon decoded and driven; arcade vehicles (ADR 0042, 0043)
 
 - **NFS Carbon geometry and textures** (`tools/nfsc_geometry.py`,

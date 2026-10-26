@@ -15,6 +15,8 @@ No fallback aliases to the data VM are provided.
 ## Current registry
 
 The desktop default registers `crysirror-script-v1`, `siglus` and `reallive`.
+The non-default desktop feature `krkr` also registers the AGPL KiriKiri
+adapter (ADR 0053).
 The bare Runtime registers the first two; hosts explicitly register other VMs.
 `siglus` is the independent subset in crysirror-siglus-vm; it is not a full
 Siglus integration. CD_TEXT/CD_NAME fail explicitly. AVG32 is not registered.
@@ -62,3 +64,15 @@ native layout/effect/resource variants remain unsupported or unproven.
 See [REALLIVE.md](REALLIVE.md),
 [ADR 0048](adr/0048-reallive-vm-engine-apis.md) and
 [reallive-source-audit.json](reallive-source-audit.json).
+
+## KiriKiri TJS2 adapter (2026-10-26)
+
+`crysirror-krkr` runs original TJS2 scripts on the vendored Kirakira VM and
+translates `Layer`, `Window`, `Timer`, `System`, `Storages` and `Scripts` onto
+engine Layer/Canvas services, the engine clock and capability storage. It
+added two shared capabilities first: canvas presentations attached inside a
+layer tree, and a thread-safe image metadata handle. It owns no pixels,
+renderer or mixer. Members without an equivalent engine operation throw a
+TJS exception naming the missing capability. KAG3 boot, XP3 mounts, fonts,
+audio, video, transitions and saves are pending; see
+[ADR 0053](adr/0053-krkr-tjs2-adapter.md).

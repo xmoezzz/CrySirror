@@ -4,6 +4,20 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `da2eda1e44d13887` (2026-10-26): canvas presentations inside layer trees
+
+- `CanvasCommand::Present` gains `parent` (optional existing client layer id)
+  and `position` (`[x, y]`, default `[0, 0]`). A presentation attached under a
+  layer inherits its transform, visibility, opacity and clip, so retained
+  layer trees can carry per-node surfaces (ADR 0053).
+- The per-client canvas surface budget rises from 128 to 1024.
+- Rust: `HostServices::image_metadata` returns a thread-safe
+  `ImageMetadata` handle over the shared decoders (default: unsupported).
+- Not breaking: both fields are optional and old snapshots deserialize with
+  the defaults. The optional AGPL `krkr` adapter config is documented in
+  ADR 0053, not in this generated reference, because the engine crate does
+  not depend on it.
+
 ## `e3a0831acf720cb7` (2026-10-26): frame task graph, streaming resources and profiler
 
 - Add the `Profiler` class and `profiler` singleton with `snapshot`, `trace` and

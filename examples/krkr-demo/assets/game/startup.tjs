@@ -1,0 +1,32 @@
+// Self-authored KiriKiri-style scene for the CrySirror `krkr` adapter (ADR 0053).
+// Uses only native classes the adapter translates onto engine Layer/Canvas services.
+Storages.addAutoPath("image/");
+Scripts.execStorage("system/Orbit.tjs");
+
+var win = new Window();
+win.caption = "CrySirror KiriKiri demo";
+win.setInnerSize(640, 480);
+
+var base = new Layer(win, null);
+base.loadImages("bg");
+
+var panel = new Layer(win, base);
+panel.setImageSize(280, 160);
+panel.setSizeToImageSize();
+panel.colorRect(0, 0, 280, 160, 0x101830, 160);
+panel.colorRect(0, 0, 280, 4, 0x80a0ff, 255);
+panel.setPos(180, 290);
+panel.visible = true;
+
+var button = new Layer(win, panel);
+button.loadImages("button");
+button.setPos(40, 70);
+button.visible = true;
+button.onClick = function(x, y) { Debug.message("button clicked", x, y); orbits.each(function(o) { o.speed = -o.speed; }); };
+
+var orbits = new OrbitSet(win, base, 5);
+win.visible = true;
+
+var clock = new Timer(function() { orbits.step(); }, "");
+clock.interval = 33;
+clock.enabled = true;

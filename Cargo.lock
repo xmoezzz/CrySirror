@@ -1222,6 +1222,7 @@ dependencies = [
  "crysirror-audio",
  "crysirror-core",
  "crysirror-engine",
+ "crysirror-krkr",
  "crysirror-puppet",
  "crysirror-puppet-eluna",
  "crysirror-reallive",
@@ -1300,6 +1301,23 @@ dependencies = [
  "image",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "crysirror-krkr"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "crysirror-core",
+ "crysirror-runtime",
+ "crysirror-scene",
+ "encoding_rs",
+ "image",
+ "krkr-kag",
+ "krkr-tjs2",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -3083,6 +3101,17 @@ dependencies = [
  "send_wrapper",
  "symphonia",
  "triple_buffer",
+]
+
+[[package]]
+name = "krkr-kag"
+version = "0.1.0"
+
+[[package]]
+name = "krkr-tjs2"
+version = "0.1.0"
+dependencies = [
+ "regex",
 ]
 
 [[package]]

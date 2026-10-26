@@ -5466,7 +5466,7 @@
           "default": null,
           "doc": "",
           "name": "present",
-          "rust_type": "id: u32, layer: u32, order: i32"
+          "rust_type": "id: u32, layer: u32, order: i32, parent: Option<u32>, position: [f32; 2]"
         },
         {
           "default": null,
@@ -7259,7 +7259,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "e3a0831acf720cb7",
+  "fingerprint": "da2eda1e44d13887",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

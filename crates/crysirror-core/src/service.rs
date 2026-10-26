@@ -206,6 +206,14 @@ pub trait ClientStorage: Send + Sync {
     }
 }
 
+/// Thread-safe, long-lived handle to the shared image decoders for one
+/// client's assets. Native VMs whose original API answers image metadata
+/// synchronously (for example a layer's image size right after a load) hold
+/// it between steps instead of borrowing the host or decoding privately.
+pub trait ImageMetadata: Send + Sync {
+    fn size(&self, asset: &str) -> Result<[u32; 2]>;
+}
+
 pub trait HostServices: FileSystem {
     fn audio_playing(&self, _client: ClientId, _channel: u32) -> Result<bool> {
         Err(crate::Error::Unsupported("engine audio status"))
@@ -259,6 +267,10 @@ pub trait HostServices: FileSystem {
         _rgba: &[u8],
     ) -> Result<VfsPath> {
         Err(crate::Error::Unsupported("decoded image upload"))
+    }
+    /// Thread-safe image metadata handle for this client (ADR 0053).
+    fn image_metadata(&mut self, _client: ClientId) -> Result<Arc<dyn ImageMetadata>> {
+        Err(crate::Error::Unsupported("image metadata handle"))
     }
     /// Thread-safe storage handle for this client (ADR 0008).
     fn storage(&mut self, _client: ClientId) -> Result<Arc<dyn ClientStorage>> {

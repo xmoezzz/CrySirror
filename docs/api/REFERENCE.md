@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `e3a0831acf720cb7`
+API fingerprint: `da2eda1e44d13887`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -1265,7 +1265,7 @@ Variants are tagged by `"op"`.
 | `draw` | `id: u32, layer: LayerSpec` | Issued by `Canvases.apply`. |
 | `set` | `id: u32, layer: LayerSpec` | Atomically replace this surface's contents with one logical resource draw. |
 | `copy` | `source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool` | Issued by `Canvases.apply`. |
-| `present` | `id: u32, layer: u32, order: i32` | Issued by `Canvases.apply`. |
+| `present` | `id: u32, layer: u32, order: i32, parent: Option<u32>, position: [f32; 2]` | Issued by `Canvases.apply`. |
 | `hide` | `layer: u32` | Issued by `Canvases.apply`. |
 
 ### ServiceBatch
