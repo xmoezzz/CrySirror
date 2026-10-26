@@ -31,10 +31,14 @@ Semantic differences are deliberate:
 - Geometry/pose inputs are immutable job snapshots. Clients own independent
   scene revisions. The render/mixer thread never traverses geometry or waits
   for a propagation job. This does not make all audio decoding/mixing async.
-- Absorption/scattering fields are validated metadata reserved for reflections;
-  they do not currently generate reflected energy. Travel time is reported,
-  not applied as playback delay. HRTF now has a separate worker-prepared module (ADR 0068);
-  diffraction, reflections and reverb remain follow-up work. Existing stereo panning remains in the engine mixer.
+- Absorption/scattering originally remained reserved in this direct profile.
+  ADR 0074 now uses them in the engine's first-order specular pressure model,
+  with per-crossing transmission shared by direct and reflected legs. That
+  model is not an imported phonon/Steam Audio reflection implementation.
+  Direct travel is still reported without delaying dry playback; early echoes
+  apply excess delay against that clock. HRTF (0068) and authored FDN late
+  reverb (0073) are separate modules. Diffraction and diffuse/higher-order
+  propagation remain open. Existing stereo panning remains in the mixer.
 
 BVH implementations are external libraries, not handwritten tree builders:
 

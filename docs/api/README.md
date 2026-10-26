@@ -207,3 +207,33 @@ clearing a room cuts its old history. Effects remain derived across saves and
 need preparation after restore. Shared Rust PreparedReverb/Mixer APIs work
 without a native VM or output device. See [ADR 0073](../adr/0073-shared-parametric-reverb-buses.md)
 for task ownership, limits, two-mixer publication and remaining async boundaries.
+
+## Captured geometric early reflections
+
+```typescript
+await audio.prepareAcousticsAsync('room.json');
+const voice = await audio.playSfxAsync({
+  asset: 'step.wav', paused: true, spatial: { position: [0, 0, 2] }
+});
+await audio.prepareVoiceReflectionsAsync(voice, { max_delay_seconds: 0.5 });
+audio.pauseVoice(voice, false);
+```
+
+Queries use finite single-bounce image sources with shared BVH leg queries and
+per-band material pressure, air/range/directivity and crossing transmission.
+traceReflectionsAsync accepts ReflectionQuery for inspection without a voice.
+Voice preparation captures the current source/listener/scene and requires a
+prepared HRTF voice if HRTF is enabled. Moving a pose or replacing geometry
+invalidates paths; prepare again explicitly. There is no automatic tracking yet.
+Starting short async sounds paused prevents source EOF before preparation starts.
+Published receipts are separate from current effect state; use reflectionsVoice
+to inspect pending work, current paths and invalidation errors. Promise.ticket
+identifies its receipt; result.revision identifies acoustic geometry.
+
+Sparse DSP uses linear fractional delays and a complementary three-band split.
+Dry playback retains its clock; wet uses excess travel delay and the direct HRTF
+bridge latency. Echo panning is stereo, without per-direction reflection HRIRs.
+Audio.voice.source_playing excludes derived tails; playing includes them. Native
+channel waits retain source completion while the engine drains echoes. Scene/path/
+crossing budget overflow fails visibly. See [ADR 0074](../adr/0074-captured-geometric-early-reflections.md)
+for energy convention, ownership, bounds and remaining propagation work.

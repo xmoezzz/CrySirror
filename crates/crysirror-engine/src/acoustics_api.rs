@@ -55,8 +55,8 @@ impl Drop for Charge {
         self.budget.fetch_sub(self.bytes, Ordering::Relaxed);
     }
 }
-struct PreparedScene {
-    scene: AcousticScene,
+pub(crate) struct PreparedScene {
+    pub(crate) scene: AcousticScene,
     _charge: Charge,
 }
 enum Product {
@@ -100,6 +100,7 @@ impl AcousticsRuntime {
     pub fn has_scene(&self, owner: u32) -> bool {
         self.scenes.contains_key(&owner)
     }
+    pub(crate) fn revision(&self,owner:u32)->Option<u64> {self.scenes.get(&owner).map(|s|s.0)}
     pub fn reset(&mut self) {
         self.jobs.clear();
         self.scenes.clear();
@@ -110,7 +111,7 @@ impl AcousticsRuntime {
         self.results.clear();
         self.epoch = None;
     }
-    fn scene(&self, owner: u32) -> Result<(u64, Arc<PreparedScene>)> {
+    pub(crate) fn scene(&self, owner: u32) -> Result<(u64, Arc<PreparedScene>)> {
         self.scenes
             .get(&owner)
             .cloned()

@@ -246,6 +246,21 @@ fn native_audio_event_stays_at_original_pc_until_shared_preparation_and_play_wai
         assert!(Instant::now() < end);
         std::thread::sleep(Duration::from_millis(1));
     }
+    // A real geometric echo remains in the shared mixer after the source EOF.
+    let scene=crysirror_acoustics::AcousticScene::build(serde_json::from_value(json!({
+        "materials":[{"absorption":[0,0,0],"transmission":[0,0,0],"scattering":0}],
+        "meshes":[{"id":7,"vertices":[[-10,-10,-2],[10,-10,-2],[10,10,-2],[-10,10,-2]],"triangles":[[0,1,2],[0,2,3]]}]
+    })).unwrap()).unwrap();
+    let query: crysirror_acoustics::reflections::ReflectionQuery =
+        serde_json::from_value(json!({"source":[0,0,2],"listener":[0,0,0]})).unwrap();
+    let paths = crysirror_acoustics::reflections::simulate(&scene, &query).unwrap();
+    assert_eq!(paths.paths.len(), 1);
+    let echoes =
+        crysirror_acoustics::reflection_dsp::EarlyReflections::prepare(48000, paths, 0).unwrap();
+    r.host
+        .channel_audio
+        .set_reflections(1, 100, Some(echoes))
+        .unwrap();
     r.tick(99, InputFrame::default()).unwrap();
     assert!(r.host.engine.ui.title.is_none());
     r.tick(1, InputFrame::default()).unwrap();
@@ -255,6 +270,10 @@ fn native_audio_event_stays_at_original_pc_until_shared_preparation_and_play_wai
         "after native audio"
     );
     assert!(!r.host.audio_playing(ClientId(1), 100).unwrap());
+    assert!(
+        r.host.channel_audio.mixer.stats().active > 0,
+        "native wait incorrectly consumed the derived echo tail"
+    );
     r.tick(50, InputFrame::default()).unwrap();
     assert!(
         r.host

@@ -47,6 +47,7 @@ pub struct AudioRuntime {
     pub acoustics: crate::acoustics_api::AcousticsRuntime,
     pub binaural: crate::binaural_api::BinauralRuntime,
     pub reverb: crate::reverb_api::ReverbRuntime,
+    pub reflections: crate::reflections_api::ReflectionsRuntime,
     pub(crate) music: BTreeMap<(u32, String), VoiceHandle>,
     listeners: BTreeMap<u32, Listener>,
     restored: Option<u64>,
@@ -65,6 +66,7 @@ impl Default for AudioRuntime {
             acoustics: Default::default(),
             binaural: Default::default(),
             reverb: Default::default(),
+            reflections: Default::default(),
             music: BTreeMap::new(),
             listeners: BTreeMap::new(),
             restored: None,
@@ -89,6 +91,7 @@ impl AudioRuntime {
         self.acoustics.reset();
         self.binaural.reset();
         self.reverb.reset();
+        self.reflections.reset();
     }
 }
 pub(crate) fn sync_generation(state: &mut crate::EngineState) {
@@ -155,6 +158,7 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
     crate::acoustics_api::poll(cx.state()?)?;
     crate::binaural_api::poll(cx.state()?)?;
     crate::reverb_api::poll(cx.state()?)?;
+    crate::reflections_api::poll(cx.state()?)?;
     {
         let s = cx.state()?;
         let runtime = &mut s.runtime;
@@ -354,6 +358,12 @@ fn info() -> &'static ClassInfo {
         method("play",vec![("channel",T::Int),("voice",T::Map)],T::Void,"Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics."),
         method("stop",vec![("channel",T::Int)],T::Void,"Stop a classic channel."),
         method("playAt",vec![("channel",T::Int),("voice",T::Map),("where",T::Map)],T::Void,"Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion."),
+        method("beginReflectionProbe",vec![("query",T::Map)],T::Int,"Trace bounded single-bounce specular ReflectionQuery paths on workers against this client's prepared acoustic scene. Includes material pressure gains, arrival directions and physical/excess delays. Exceeding budgets fails visibly."),
+        method("beginVoiceReflections",vec![("handle",T::Map),("options",T::Map)],T::Int,"Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate snapshots; explicitly prepare again, no automatic tracking yet."),
+        method("reflectionStatus",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed query/preparation receipt. Ready follows publication. Release using cancelReflectionJob."),
+        method("cancelReflectionJob",vec![("ticket",T::Int)],T::Void,"Cancel/release reflection work and release an initial clock hold. Releasing a published receipt keeps its effect."),
+        method("clearVoiceReflections",vec![("handle",T::Map)],T::Void,"Cancel pending reflection work and clear this voice's early echo history, preserving independent direct/HRTF/late-reverb processing."),
+        method("reflectionsVoice",vec![("handle",T::Map)],T::Map,"Current captured paths, acoustic scene revision, pending flag and invalidation/failure reason. Spatial/listener/scene changes require explicit re-preparation."),
         method("beginReverb",vec![("settings",T::Map)],T::Int,"Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections."),
         method("reverbStatus",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed preparation. Ready includes published revision, settings and both mixer rates. Release with cancelReverbJob."),
         method("cancelReverbJob",vec![("ticket",T::Int)],T::Void,"Cancel/release a scoped reverb preparation ticket. Releasing a published ticket keeps its installed effect."),
@@ -388,7 +398,7 @@ fn info() -> &'static ClassInfo {
         method("pauseVoice",vec![("handle",T::Map),("paused",T::Bool)],T::Void,"Pause without advancing the source or fade clock."),
         method("seekVoice",vec![("handle",T::Map),("frame",T::Int)],T::Void,"Synchronous exact seek. Worker-buffered streams require beginSeekVoice/seekVoiceAsync."),
         method("setVoice",vec![("handle",T::Map),("options",T::Map)],T::Void,"Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed."),
-        method("voice",vec![("handle",T::Map)],T::Map,"{playing,position_seconds?}; stale/stolen/ended handles are inactive."),
+        method("voice",vec![("handle",T::Map)],T::Map,"{playing,source_playing,position_seconds?}; playing includes effect tails, source_playing excludes them. Stale/stolen/ended handles are inactive."),
         method("setBus",vec![("bus",T::String),("settings",T::Map)],T::Void,"master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}."),
         method("bus",vec![("bus",T::String)],T::Map,"Read this client's bus settings."),
         method("setDucking",vec![("config",T::Map)],T::Void,"Dialogue-driven music ducking {gain,attack_ms,release_ms}."),
@@ -572,6 +582,9 @@ impl Class for AudioClass {
     ) -> Result<Value> {
         sync_generation(cx.state()?);
         if let Some(result) = crate::audio_async::call(cx, name, args)? {
+            return Ok(result);
+        }
+        if let Some(result) = crate::reflections_api::call(cx.state()?, name, args)? {
             return Ok(result);
         }
         if let Some(result) = crate::reverb_api::call(cx.state()?, name, args)? {
@@ -805,9 +818,9 @@ impl Class for AudioClass {
                 let mixer = &cx.state()?.mixer_audio.mixer;
                 let playing = mixer.is_playing(client, h);
                 return Ok(Value::from_json(if playing {
-                    serde_json::json!({"playing":true,"position_seconds":mixer.position(client,h)?})
+                    serde_json::json!({"playing":true,"source_playing":mixer.source_is_playing(client,h),"position_seconds":mixer.position(client,h)?})
                 } else {
-                    serde_json::json!({"playing":false})
+                    serde_json::json!({"playing":false,"source_playing":false})
                 }));
             }
             "setBus" => {

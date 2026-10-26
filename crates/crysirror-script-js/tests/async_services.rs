@@ -375,3 +375,31 @@ fn reverb_promise_publishes_engine_bus_resources_and_releases_its_ticket() {
     "#);
     app.init().unwrap();app.start().unwrap();until(&mut app,"reverb-ready");
 }
+
+#[test]
+fn reflection_promises_publish_captured_paths_and_a_prepared_shared_voice() {
+    let (dir,mut app)=app(r#"
+      async function onInit() {
+        await audio.prepareAcousticsAsync('wall.json');
+        const result=await audio.traceReflectionsAsync({source:[0,0,2],listener:[0,0,0]});
+        if(result.paths.paths.length!==1 || Math.abs(result.paths.paths[0].length_metres-6)>1e-5)throw Error('wrong image source path');
+        const voice=await audio.playSfxAsync({asset:'pulse.wav',paused:true,spatial:{position:[0,0,2]}});
+        const pending=audio.prepareVoiceReflectionsAsync(voice,{});const ticket=pending.ticket;
+        const echoes=await pending;
+        if(echoes.paths.paths.length!==1 || audio.reflectionsVoice(voice).paths===null)throw Error('effect not published');
+        let released=false;try{audio.reflectionStatus(ticket);}catch(error){released=true;}
+        if(!released)throw Error('helper leaked its actual receipt');
+        try{await audio.traceReflectionsAsync({source:[0,0,2],listener:[0,0,0],options:{triangle_budget:1}});throw Error('incomplete query accepted');}
+        catch(error){if(String(error).includes('incomplete query accepted'))throw error;}
+        audio.clearVoiceReflections(voice);if(audio.reflectionsVoice(voice).paths!==null)throw Error('echo survived clear');
+        await audio.prepareVoiceReflectionsAsync(voice,{});
+        audio.pauseVoice(voice,false);engine.log('reflections-ready');
+      }
+    "#);
+    std::fs::write(dir.path().join("assets/a/wall.json"),serde_json::to_vec(&serde_json::json!({"materials":[{"absorption":[0,0,0],"transmission":[0,0,0],"scattering":0}],"meshes":[{"id":7,"vertices":[[-10,-10,-2],[10,-10,-2],[10,10,-2],[-10,10,-2]],"triangles":[[0,1,2],[0,2,3]]}]})).unwrap()).unwrap();
+    let mut wave=Vec::new();let size=32u32;
+    wave.extend(b"RIFF");wave.extend((size+36).to_le_bytes());wave.extend(b"WAVEfmt ");wave.extend(16u32.to_le_bytes());wave.extend(1u16.to_le_bytes());wave.extend(1u16.to_le_bytes());wave.extend(48000u32.to_le_bytes());wave.extend(96000u32.to_le_bytes());wave.extend(2u16.to_le_bytes());wave.extend(16u16.to_le_bytes());wave.extend(b"data");wave.extend(size.to_le_bytes());
+    for _ in 0..16 {wave.extend(8192i16.to_le_bytes());}
+    std::fs::write(dir.path().join("assets/a/pulse.wav"),wave).unwrap();
+    app.init().unwrap();app.start().unwrap();until(&mut app,"reflections-ready");
+}

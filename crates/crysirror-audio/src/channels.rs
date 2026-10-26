@@ -279,9 +279,24 @@ impl ChannelAudio {
     pub fn is_playing(&self, client: u32, channel: u32) -> bool {
         self.voices
             .get(&(client, channel))
-            .is_some_and(|handle| self.mixer.is_playing(client, *handle))
+            .is_some_and(|handle| self.mixer.source_is_playing(client, *handle))
     }
 
+    /// Publish a shared echo resource on a scoped channel, with native completion
+    /// still defined by source EOF rather than the retained echo tail.
+    pub fn set_reflections(
+        &mut self,
+        client: u32,
+        channel: u32,
+        effect: Option<crysirror_acoustics::reflection_dsp::EarlyReflections>,
+    ) -> Result<()> {
+        let handle = *self
+            .voices
+            .get(&(client, channel))
+            .context("audio channel not found")?;
+        self.mixer.set_reflections(client, handle, effect)?;
+        Ok(())
+    }
     pub fn set_ducking(&mut self, client: u32, config: Ducking) -> Result<()> {
         self.mixer.set_ducking(client, config)?;
         self.clients.insert(client);

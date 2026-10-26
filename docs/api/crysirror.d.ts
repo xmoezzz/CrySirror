@@ -25,6 +25,18 @@ declare class Audio {
   stop(channel: number): void;
   /** Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion. */
   playAt(channel: number, voice: Record<string, any>, where: Record<string, any>): void;
+  /** Trace bounded single-bounce specular ReflectionQuery paths on workers against this client's prepared acoustic scene. Includes material pressure gains, arrival directions and physical/excess delays. Exceeding budgets fails visibly. */
+  beginReflectionProbe(query: Record<string, any>): number;
+  /** Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate snapshots; explicitly prepare again, no automatic tracking yet. */
+  beginVoiceReflections(handle: Record<string, any>, options: Record<string, any>): number;
+  /** Client/restore-scoped pending/ready/failed query/preparation receipt. Ready follows publication. Release using cancelReflectionJob. */
+  reflectionStatus(ticket: number): Record<string, any>;
+  /** Cancel/release reflection work and release an initial clock hold. Releasing a published receipt keeps its effect. */
+  cancelReflectionJob(ticket: number): void;
+  /** Cancel pending reflection work and clear this voice's early echo history, preserving independent direct/HRTF/late-reverb processing. */
+  clearVoiceReflections(handle: Record<string, any>): void;
+  /** Current captured paths, acoustic scene revision, pending flag and invalidation/failure reason. Spatial/listener/scene changes require explicit re-preparation. */
+  reflectionsVoice(handle: Record<string, any>): Record<string, any>;
   /** Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections. */
   beginReverb(settings: Record<string, any>): number;
   /** Client/restore-scoped pending/ready/failed preparation. Ready includes published revision, settings and both mixer rates. Release with cancelReverbJob. */
@@ -93,7 +105,7 @@ declare class Audio {
   seekVoice(handle: Record<string, any>, frame: number): void;
   /** Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed. */
   setVoice(handle: Record<string, any>, options: Record<string, any>): void;
-  /** {playing,position_seconds?}; stale/stolen/ended handles are inactive. */
+  /** {playing,source_playing,position_seconds?}; playing includes effect tails, source_playing excludes them. Stale/stolen/ended handles are inactive. */
   voice(handle: Record<string, any>): Record<string, any>;
   /** master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}. */
   setBus(bus: string, settings: Record<string, any>): void;
@@ -740,6 +752,8 @@ interface Audio { playSfxAsync(voice: Record<string, any>): CancellablePromise<R
 interface Audio { preloadSfxAsync(asset: string): CancellablePromise<Record<string, any>>; }
 interface Audio { playMusicAsync(name: string, voice: Record<string, any>, crossfade_ms: number): CancellablePromise<Record<string, any>>; }
 interface Audio { seekVoiceAsync(handle: Record<string, any>, source_frame: number): CancellablePromise<Record<string, any>>; }
+interface Audio { traceReflectionsAsync(query: Record<string, any>): CancellablePromise<Record<string, any>>; }
+interface Audio { prepareVoiceReflectionsAsync(handle: Record<string, any>, options: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareReverbAsync(settings: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareHrtfAsync(asset: string, options: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareAcousticsAsync(asset: string): CancellablePromise<Record<string, any>>; }

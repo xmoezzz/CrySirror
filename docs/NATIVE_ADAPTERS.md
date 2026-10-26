@@ -173,3 +173,14 @@ the bus owns remaining tails independently. Adapter source/opcodes/save semantic
 are unchanged. Original RealLive/AVG32 sound fixtures exercise that boundary.
 This parametric capability does not establish geometry reflections, a physical
 room model or additional whole-game compatibility.
+
+## Captured early reflections and native sound completion (ADR 0074)
+
+Finite one-bounce image-source paths, band transport, sparse delay histories and
+reflection preparation/publication are shared engine capabilities. Rust channel
+services can install those resources without adapter algorithms. Modern App
+clients also use reflection probes and prepareVoiceReflectionsAsync. Source
+completion is distinct from retained echo/HRTF tails: original RealLive/AVG32
+sound waits still advance at source EOF while engine echo state drains. Native
+adapter implementations/opcodes/save layouts are unchanged. This is a static
+pose profile; dynamic tracking and higher-order/diffuse propagation remain open.

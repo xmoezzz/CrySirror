@@ -130,3 +130,32 @@ fn immediate_offline_products_share_owner_generation_and_retention_rules() {
     assert!(table.status(1, 7, id).is_err());
     assert!(table.admit(1).is_ok());
 }
+
+#[test]
+fn owner_invalidation_keeps_a_failed_receipt_without_starting_queued_work() {
+    let pool = TaskPool::new("invalidate", 1, 1).unwrap();
+    let permit = pool.reserve().unwrap();
+    let count = Arc::new(AtomicUsize::new(0));
+    let ran = count.clone();
+    let mut table = OperationTable::new(4, 4).unwrap();
+    let id = table
+        .submit_deferred(1, 8, "stale", &pool, move |_| {
+            ran.fetch_add(1, Ordering::Relaxed);
+            Ok(17)
+        })
+        .unwrap();
+    assert!(table.fail(2, 8, id, "foreign".into()).is_err());
+    assert!(table.fail(1, 9, id, "wrong epoch".into()).is_err());
+    table
+        .fail(1, 8, id, "captured scene changed".into())
+        .unwrap();
+    drop(permit);
+    for _ in 0..8 {
+        let status = table.status(1, 8, id).unwrap();
+        assert_eq!(status.state, OperationState::Failed);
+        assert_eq!(status.error.as_deref(), Some("captured scene changed"));
+    }
+    assert_eq!(count.load(Ordering::Relaxed), 0);
+    assert!(table.poll(1, 8, id).is_err());
+    table.cancel(1, id).unwrap();
+}

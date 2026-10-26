@@ -2296,3 +2296,104 @@ Remaining boundaries:
   disposal, device queues and pool teardown remain synchronous boundaries.
   No complete engine/audio async migration, new GPU/hardware RT or Windows/Linux
   validation is claimed. The larger modern engine/VN objective remains active.
+
+## Captured geometric early reflections (ADR 0074, 2026-10-27)
+
+Implementation:
+- Added engine-owned finite-triangle, first-order image-source queries over the
+  existing pinned Parry/optional obvhs scene. Mirror candidates use Parry's
+  primitive intersection; both path legs use the shared BVH and direct-path
+  per-crossing amplitude transmission kernel. No legacy engine/renderer or new
+  handwritten BVH is imported. Scientific/source boundaries are in ADR 0074;
+  the pinned phonon_rs reverb parameter placeholder is not presented as a solver.
+- Absorption, transmission and scattering now determine specular pressure via
+  sqrt(max(0,1-absorption-transmission²)*(1-scattering)), with air/range/source
+  directivity and both legs' transmission. Shared-edge duplicates are removed;
+  finite surfaces, backfaces, units and ignored meshes retain explicit policies.
+  Whole-scene triangle, audible-path and crossing overflow fail visibly.
+- Added worker-prepared EarlyReflections with sparse linear fractional delays,
+  equal-power stereo arrivals and shared complementary-band history. No geometry
+  or ring allocation runs in sample processing. Seek uses a constant-time filled-
+  history reset. Natural EOF drains echoes; explicit stop/steal/clear cuts history.
+  Excess delay aligns to the existing dry clock and prepared direct HRTF bridge.
+  Echoes receive raw pre-direct-filter input, so direct occlusion alone does not
+  erase a separately visible indirect path.
+- Added scoped engine reflection probe/voice/status/cancel/clear/inspection APIs,
+  traceReflectionsAsync and prepareVoiceReflectionsAsync. Work uses immutable
+  scene/pose snapshots and bounded deferred CPU jobs. Initial preparation holds
+  only that source's clock. Obsolete pose/scene/latency work fails, releases the
+  hold and cannot publish; failed replacement keeps old valid paths. These are
+  captured-pose resources: automatic tracking is not implemented in this phase.
+- Added OperationTable::fail for observable owner/generation-scoped invalidation
+  without starting queued work. Worker/DSP leases retain actual ownership. Voice
+  staging reserves 8 MiB, then shrinks to ring/tap/path storage plus 8 KiB against
+  a 512 MiB estimated host budget. Jobs retain 16/client and 64/host. Restore
+  invalidates derived effects/history/tickets without serializing pointers.
+- Added Mixer::source_is_playing and Audio.voice.source_playing. Modern playing
+  includes processing tails; native channel waits use source completion. Shared
+  Rust channel/mixer effect APIs work without App/VM/device. Native adapter
+  implementations/opcodes/save formats are unchanged; bridge tests configure the
+  same engine resources rather than adding private native algorithms.
+- Generated docs/api changed 98b40f5f4c7c26d0 -> 079531ae354ff224; CHANGES records
+  APIs, snapshot semantics, source/tail distinction and initial paused-play recipe.
+
+Compilation:
+- Local release workspace/all-target check passed with desktop krkr, arc-formats
+  and acoustics-obvhs; desktop no-default-features reallive+avg32 also passed
+  without scripting or device output. Existing CBG/RealLive/minimal-CLI warnings
+  remain. No CI or remote build ran.
+
+Behavior validation:
+- Acoustics/audio/tasks suites with obvhs passed **91 tests** (two owner-resource
+  cases ignored); engine acoustics/HRTF/reverb/reflections suites **20**; JS async
+  services **8** (one font case ignored); original RealLive/AVG32 bridges **12**
+  (one font case ignored); API reference checks **6**. Total: **137 distinct Rust
+  tests passed**, four ignored excluded. Focused reruns are not counted twice.
+  Python 3.11 tooling: **189 passed**.
+- Six geometry tests cover finite-wall analytic points, 1/r pressure, absolute/
+  excess delays, shared-edge/backface identity on both BVHs, both-leg occlusion,
+  air/units/dipole/ignore policies, per-band transmission and crossing limits,
+  cancellation/overflow, and an opaque direct-path blocker with a visible echo.
+- Five sample-level tests verify fractional-delay/pan oracles, reset without old
+  history leakage, actual resource lifetime, pre-direct echo routing, source EOF
+  with remaining echo, native source completion, initial hold/cancel, pose/seek
+  invalidation and direct HRTF bridge alignment. Task tests prove invalidated
+  queued work never starts and failed receipts preserve scopes/errors.
+- Engine tests verify real isolated echo samples, shared scene queries, full-pool
+  progress of other voices, scoped/superseded/canceled work, pose/scene failure,
+  old-path preservation, restore invalidation and **64 installed voice effects
+  plus successful replacement** after staging reservations shrink. JS uses both
+  Promise helpers, checks actual receipt release, rejects incomplete queries,
+  clears/reprepares a paused short source, then starts it.
+- Original RealLive/AVG32 audio fixtures now install real geometric echo resources
+  through shared channel APIs. At original source EOF their next instructions/
+  arithmetic execute while the mixer still retains an active echo voice. Worker
+  failure/PC-boundary tests also pass. This is bounded native bytecode/service
+  evidence, not additional native opcode/save or commercial-game coverage.
+- Apple M5 dense-grid oracle: **262,088 triangles**, ten checked source positions
+  per backend. Parry build 0.027020 s / mean query 2.579733 ms; obvhs build
+  0.026347 s / mean query 2.530567 ms. Candidate enumeration dominates this flat
+  workload; these close timings do not establish a backend advantage or engine
+  frame-rate ranking. All ten analytic path/pressure/delay checks passed each.
+- Authored dry/hard-wall/absorber/blocked WAV demo: hard-wall excess delay
+  **0.069970846 s**, post-source energy **2.638427589**; absorber energy
+  **0.026384251** (about 1/100); dry/blocked post-source energy zero. All peaks
+  0.528611. One-second mixing: 0.002065–0.002616 s on this host. No game data,
+  measured HRIR, font, GPU or audio output device was used. WAVs remain ignored.
+- Evidence in target/verification: reflection-library-final-tests.log,
+  reflection-engine-final-tests.log, reflection-native-final-tests.log,
+  reflection-js-final-tests.log, reflection-api-final-tests.log,
+  reflection-workspace-check.log, reflection-minimal-check.log,
+  reflection-python-tests.log, reflection-large-scene.log and
+  reflection-demo-final.log.
+
+Remaining boundaries:
+- Automatic pose refresh, dynamic acoustic geometry/refit, higher-order/diffuse
+  paths, diffraction, Doppler, reflection HRIR/Ambisonics, physical room/RT60
+  inference and seamless tap transitions remain open. Echo DSP uses linear
+  fractional delay/one-pole bands, not a bandlimited wave solver. Its 10 ms
+  post-delay band-history horizon truncates tiny remaining IIR residue.
+- Final DSP/mixing, control/scratch allocation, last-reference disposal and device/
+  pool teardown retain owner/synchronous boundaries. No full engine-wide async
+  completion, new GPU/hardware RT or Windows/Linux behavior is claimed. The
+  broader modern engine/VN capability objective remains active.

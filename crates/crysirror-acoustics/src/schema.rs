@@ -14,11 +14,11 @@ pub enum AcousticBackend {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AcousticMaterial {
-    /// Absorbed fractions in low/mid/high frequency bands; reserved for reflection.
+    /// Absorbed energy fractions in low/mid/high bands; used by specular reflections.
     pub absorption: [f32; 3],
     /// Amplitude transmitted at each surface crossing, in low/mid/high bands.
     pub transmission: [f32; 3],
-    /// Diffuse scattering fraction, reserved for reflection simulation.
+    /// Diffuse energy fraction removed from the specular component; diffuse sound is not synthesized.
     pub scattering: f32,
 }
 impl Default for AcousticMaterial {
@@ -83,7 +83,7 @@ pub struct AcousticSource {
     pub ignore_mesh: Option<u32>,
     /// Conversion from world units to metres.
     pub metres_per_unit: f32,
-    /// Sound speed in metres/second; delay is reported, not applied by this profile.
+    /// Sound speed in metres/second. Direct travel is reported; reflection DSP applies excess delay.
     pub sound_speed: f32,
 }
 impl Default for AcousticSource {

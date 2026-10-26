@@ -256,6 +256,45 @@
       "status": "playbackStatus"
     },
     {
+      "cancel": "cancelReflectionJob",
+      "class": "Audio",
+      "completion": "result",
+      "name": "traceReflectionsAsync",
+      "params": [
+        {
+          "name": "query",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginReflectionProbe",
+      "status": "reflectionStatus"
+    },
+    {
+      "cancel": "cancelReflectionJob",
+      "class": "Audio",
+      "completion": "result",
+      "name": "prepareVoiceReflectionsAsync",
+      "params": [
+        {
+          "name": "handle",
+          "optional": false,
+          "type": "Record<string, any>"
+        },
+        {
+          "name": "options",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginVoiceReflections",
+      "status": "reflectionStatus"
+    },
+    {
       "cancel": "cancelReverbJob",
       "class": "Audio",
       "completion": "result",
@@ -678,6 +717,76 @@
           "returns": "void"
         },
         {
+          "doc": "Trace bounded single-bounce specular ReflectionQuery paths on workers against this client's prepared acoustic scene. Includes material pressure gains, arrival directions and physical/excess delays. Exceeding budgets fails visibly.",
+          "name": "beginReflectionProbe",
+          "params": [
+            {
+              "name": "query",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate snapshots; explicitly prepare again, no automatic tracking yet.",
+          "name": "beginVoiceReflections",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Client/restore-scoped pending/ready/failed query/preparation receipt. Ready follows publication. Release using cancelReflectionJob.",
+          "name": "reflectionStatus",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Cancel/release reflection work and release an initial clock hold. Releasing a published receipt keeps its effect.",
+          "name": "cancelReflectionJob",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Cancel pending reflection work and clear this voice's early echo history, preserving independent direct/HRTF/late-reverb processing.",
+          "name": "clearVoiceReflections",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Current captured paths, acoustic scene revision, pending flag and invalidation/failure reason. Spatial/listener/scene changes require explicit re-preparation.",
+          "name": "reflectionsVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
           "doc": "Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections.",
           "name": "beginReverb",
           "params": [
@@ -1069,7 +1178,7 @@
           "returns": "void"
         },
         {
-          "doc": "{playing,position_seconds?}; stale/stolen/ended handles are inactive.",
+          "doc": "{playing,source_playing,position_seconds?}; playing includes effect tails, source_playing excludes them. Stale/stolen/ended handles are inactive.",
           "name": "voice",
           "params": [
             {
@@ -4765,6 +4874,245 @@
   ],
   "data": [
     {
+      "doc": "Bounded point-source, single-specular-bounce profile. Diffuse/multiple reflections and diffraction require separate simulation.",
+      "fields": [
+        {
+          "default": {
+            "air_absorption": [
+              0.0002,
+              0.0017,
+              0.182
+            ],
+            "dipole_power": 1.0,
+            "dipole_weight": 0.0,
+            "forward": [
+              0.0,
+              0.0,
+              -1.0
+            ],
+            "ignore_mesh": null,
+            "metres_per_unit": 1.0,
+            "radius": 0.0,
+            "samples": 16,
+            "sound_speed": 343.0,
+            "transmission_hits": 32
+          },
+          "doc": "Physical units, air/directivity and ignored mesh; radius must be zero.",
+          "name": "propagation",
+          "rust_type": "AcousticSource"
+        },
+        {
+          "default": 0.5,
+          "doc": "Maximum excess delay relative to the undelayed direct clock, 0..2 seconds.",
+          "name": "max_delay_seconds",
+          "rust_type": "f32"
+        },
+        {
+          "default": 64,
+          "doc": "Maximum unique audible paths, 1..64. Overflow fails, rather than truncates.",
+          "name": "max_paths",
+          "rust_type": "usize"
+        },
+        {
+          "default": 262144,
+          "doc": "Complete-scene triangle budget, 1..262144. A larger scene fails visibly.",
+          "name": "triangle_budget",
+          "rust_type": "usize"
+        },
+        {
+          "default": 1.0,
+          "doc": "Pressure reference distance, 0.01..100 metres; attenuation is min(1,ref/r).",
+          "name": "reference_distance_metres",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Additional wet amplitude, 0..1; dry playback is independent.",
+          "name": "wet_gain",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "ReflectionOptions",
+      "used_by": "Audio.beginVoiceReflections options / ReflectionQuery.options"
+    },
+    {
+      "doc": "Immutable emission/listener snapshot captured by a worker.",
+      "fields": [
+        {
+          "default": [
+            0.0,
+            0.0,
+            2.0
+          ],
+          "doc": "Point emitter world position.",
+          "name": "source",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "Listener world position.",
+          "name": "listener",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "doc": "Listener facing direction; defaults to -Z.",
+          "name": "listener_forward",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "doc": "Listener up; defaults to +Y and must be independent of forward.",
+          "name": "listener_up",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": {
+            "max_delay_seconds": 0.5,
+            "max_paths": 64,
+            "propagation": {
+              "air_absorption": [
+                0.0002,
+                0.0017,
+                0.182
+              ],
+              "dipole_power": 1.0,
+              "dipole_weight": 0.0,
+              "forward": [
+                0.0,
+                0.0,
+                -1.0
+              ],
+              "ignore_mesh": null,
+              "metres_per_unit": 1.0,
+              "radius": 0.0,
+              "samples": 16,
+              "sound_speed": 343.0,
+              "transmission_hits": 32
+            },
+            "reference_distance_metres": 1.0,
+            "triangle_budget": 262144,
+            "wet_gain": 1.0
+          },
+          "doc": "Captured simulation and wet controls.",
+          "name": "options",
+          "rust_type": "ReflectionOptions"
+        }
+      ],
+      "name": "ReflectionQuery",
+      "used_by": "Audio.beginReflectionProbe"
+    },
+    {
+      "doc": "One physically visible mirror path; gain is pressure, not energy.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Stable acoustic mesh ID.",
+          "name": "mesh",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Scene insertion-order triangle ID; coplanar edge ties use the first.",
+          "name": "triangle",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Acoustic material table index.",
+          "name": "material",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "World-space specular reflection point.",
+          "name": "bounce",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Source-to-bounce plus bounce-to-listener distance in metres.",
+          "name": "length_metres",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Absolute physical travel time; direct playback is not delayed by this API.",
+          "name": "delay_seconds",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Actual DSP delay relative to a zero-latency direct clock.",
+          "name": "excess_delay_seconds",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Low/mid/high pressure gains including reflection, range, air and directivity.",
+          "name": "gains",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Multiplicative amplitude transmission across both legs, per band.",
+          "name": "leg_transmission",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Total crossed surfaces on both legs, excluding the reflector.",
+          "name": "crossings",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Unit listener-to-bounce arrival direction, in world coordinates.",
+          "name": "direction",
+          "rust_type": "[f32; 3]"
+        }
+      ],
+      "name": "ReflectionPath",
+      "used_by": "ReflectionPaths.paths"
+    },
+    {
+      "doc": "Complete-scene first-order result; all bounded output paths are retained.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Input snapshot; changing a pose requires a new simulation.",
+          "name": "query",
+          "rust_type": "ReflectionQuery"
+        },
+        {
+          "default": null,
+          "doc": "Visible single-bounce paths ordered by excess delay then triangle identity.",
+          "name": "paths",
+          "rust_type": "Vec<ReflectionPath>"
+        },
+        {
+          "default": null,
+          "doc": "All scene triangles considered, including rejected/ignored surfaces.",
+          "name": "tested_triangles",
+          "rust_type": "usize"
+        }
+      ],
+      "name": "ReflectionPaths",
+      "used_by": "Audio.reflectionStatus / reflectionsVoice"
+    },
+    {
       "doc": "Authored late-reverb parameters. These do not infer room dimensions or RT60 from scene geometry. The upstream decay parameter is approximate.",
       "fields": [
         {
@@ -5381,7 +5729,7 @@
             0.3,
             0.1
           ],
-          "doc": "Absorbed fractions in low/mid/high frequency bands; reserved for reflection.",
+          "doc": "Absorbed energy fractions in low/mid/high bands; used by specular reflections.",
           "name": "absorption",
           "rust_type": "[f32; 3]"
         },
@@ -5397,7 +5745,7 @@
         },
         {
           "default": 0.05,
-          "doc": "Diffuse scattering fraction, reserved for reflection simulation.",
+          "doc": "Diffuse energy fraction removed from the specular component; diffuse sound is not synthesized.",
           "name": "scattering",
           "rust_type": "f32"
         }
@@ -5472,7 +5820,7 @@
         },
         {
           "default": 343.0,
-          "doc": "Sound speed in metres/second; delay is reported, not applied by this profile.",
+          "doc": "Sound speed in metres/second. Direct travel is reported; reflection DSP applies excess delay.",
           "name": "sound_speed",
           "rust_type": "f32"
         }
@@ -11785,7 +12133,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "98b40f5f4c7c26d0",
+  "fingerprint": "079531ae354ff224",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

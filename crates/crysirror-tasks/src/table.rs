@@ -295,6 +295,34 @@ impl<T> OperationTable<T> {
             }
         }
     }
+    /// Invalidate queued/running/ready work without starting a queued task.
+    /// The retained scoped receipt becomes Failed. Dropped tasks request cancel;
+    /// captured resources still follow their actual worker lifetimes.
+    pub fn fail(
+        &mut self,
+        owner: u32,
+        generation: u64,
+        ticket: u64,
+        message: String,
+    ) -> Result<()> {
+        let entry = self
+            .entries
+            .get_mut(&ticket)
+            .context("operation ticket released or unknown")?;
+        ensure!(
+            entry.owner == owner,
+            "operation ticket belongs to another client"
+        );
+        ensure!(
+            entry.generation == generation,
+            "operation result belongs to an obsolete generation"
+        );
+        entry.pending = None;
+        entry.queued = None;
+        entry.result = None;
+        entry.error = Some(message.chars().take(4096).collect());
+        Ok(())
+    }
     pub fn tickets(&self) -> Vec<(u32, u64, u64)> {
         self.entries
             .iter()

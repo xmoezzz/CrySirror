@@ -17,6 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+crysirror-acoustics.workspace = true
 crysirror-audio.workspace = true
 crysirror-tasks.workspace = true
 tempfile = "3.12"

@@ -4,6 +4,32 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `079531ae354ff224` (2026-10-27): captured geometric early reflections
+
+- Add Audio.beginReflectionProbe/beginVoiceReflections/reflectionStatus/
+  cancelReflectionJob/clearVoiceReflections/reflectionsVoice, plus
+  traceReflectionsAsync and prepareVoiceReflectionsAsync. ReflectionOptions,
+  ReflectionQuery, ReflectionPath and ReflectionPaths describe bounded complete-
+  scene, single-specular-bounce results. Geometry/BVH queries and delay allocation
+  happen on workers; readiness follows owner publication.
+- Material absorption/scattering now affect specular pressure. Direct and
+  reflected legs share per-crossing amplitude transmission. Absolute physical
+  travel is reported; DSP applies excess delay against the existing direct clock,
+  including the prepared direct HRTF bridge latency when present.
+- These are captured-pose resources. Source/listener/scene/latency changes clear
+  or fail obsolete work and require explicit preparation again. Initial work
+  holds the voice clock; replacement preserves the old valid effect on failure.
+  Start very short async sounds paused, prepare, then unpause. No automatic
+  reflection tracking, diffuse/multiple bounces, diffraction or echo HRTF/ambisonic
+  rendering is claimed. Sparse DSP uses linear fractional-delay interpolation.
+- Audio.voice adds source_playing. Modern playing includes processing tails;
+  native ChannelAudio.is_playing now uses Mixer::source_is_playing to preserve
+  original source-completion waits independently of retained echo/HRTF tails.
+  Shared Rust channel/voice effect APIs remain usable without a native VM.
+- OperationTable::fail invalidates queued/running/ready work without launching a
+  queued task, preserving a client/generation-scoped failed receipt. See ADR 0074
+  for budgets, ownership, cancellation and remaining synchronous boundaries.
+
 ## `98b40f5f4c7c26d0` (2026-10-27): shared parametric reverb buses
 
 - Add Audio.beginReverb/reverbStatus/cancelReverbJob/clearReverb/reverbSettings

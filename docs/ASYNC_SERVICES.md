@@ -147,3 +147,18 @@ their DSP remains installed. A conservative 64 MiB pair reservation survives
 actual worker/DSP lifetimes against a 512 MiB estimated host budget.
 Per-frame DSP/mixing and last-reference disposal retain synchronous boundaries.
 This is parametric late reverb, separate from geometric reflection simulation.
+
+## Captured reflection preparation (ADR 0074)
+
+Reflection probe/voice APIs use immutable acoustic scene/pose snapshots and
+deferred CPU jobs. Image-source scans, segment transmission and delay-buffer
+allocation run on workers. Initial voice work holds only that source's clock;
+replacement keeps old valid playback. Changes to captured pose, scene or HRTF
+bridge latency fail pending work and invalidate installed paths. Explicit
+preparation is required again; automatic tracking is pending.
+OperationTable::fail preserves scoped failed receipts without launching queued
+work. Cancellation releases live reservations only when the actual worker/DSP
+drops. Each voice stages at 8 MiB, then shrinks to prepared storage plus an 8 KiB
+allowance against the 512 MiB host estimate. Source completion stays distinct from derived echo/HRTF tails, including
+native waits. Geometry/DSP pointers never enter VM saves.
+Mixing, control allocations and last-reference disposal retain owner boundaries.

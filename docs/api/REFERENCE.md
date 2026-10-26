@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `98b40f5f4c7c26d0`
+API fingerprint: `079531ae354ff224`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -15,7 +15,7 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 - [Globals](#globals)
 - Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [Vfx](#class-vfx), [World](#class-world)
 - [Commands](#commands)
-- Data: [ReverbSpec](#reverbspec), [ReverbSettings](#reverbsettings), [ReverbSend](#reverbsend), [SceneVoicePhase](#scenevoicephase), [SceneVoiceStatus](#scenevoicestatus), [AudioAsset](#audioasset), [AudioPreparePhase](#audiopreparephase), [AudioPreparation](#audiopreparation), [PcmAudioInfo](#pcmaudioinfo), [StreamBufferSpec](#streambufferspec), [SourceBufferStatus](#sourcebufferstatus), [SeekProgress](#seekprogress), [HrtfEarOrder](#hrtfearorder), [HrtfOptions](#hrtfoptions), [HrirAsset](#hrirasset), [HrirMeasurement](#hrirmeasurement), [AcousticBackend](#acousticbackend), [AcousticSceneSpec](#acousticscenespec), [AcousticMesh](#acousticmesh), [AcousticMaterial](#acousticmaterial), [AcousticSource](#acousticsource), [AcousticQuery](#acousticquery), [DirectPath](#directpath), [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand), [MenuSpec](#menuspec), [MenuItemSpec](#menuitemspec), [OperationStatus](#operationstatus), [OperationState](#operationstate), [UiEvent](#uievent), [WidgetId](#widgetid)
+- Data: [ReflectionOptions](#reflectionoptions), [ReflectionQuery](#reflectionquery), [ReflectionPath](#reflectionpath), [ReflectionPaths](#reflectionpaths), [ReverbSpec](#reverbspec), [ReverbSettings](#reverbsettings), [ReverbSend](#reverbsend), [SceneVoicePhase](#scenevoicephase), [SceneVoiceStatus](#scenevoicestatus), [AudioAsset](#audioasset), [AudioPreparePhase](#audiopreparephase), [AudioPreparation](#audiopreparation), [PcmAudioInfo](#pcmaudioinfo), [StreamBufferSpec](#streambufferspec), [SourceBufferStatus](#sourcebufferstatus), [SeekProgress](#seekprogress), [HrtfEarOrder](#hrtfearorder), [HrtfOptions](#hrtfoptions), [HrirAsset](#hrirasset), [HrirMeasurement](#hrirmeasurement), [AcousticBackend](#acousticbackend), [AcousticSceneSpec](#acousticscenespec), [AcousticMesh](#acousticmesh), [AcousticMaterial](#acousticmaterial), [AcousticSource](#acousticsource), [AcousticQuery](#acousticquery), [DirectPath](#directpath), [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand), [MenuSpec](#menuspec), [MenuItemSpec](#menuitemspec), [OperationStatus](#operationstatus), [OperationState](#operationstate), [UiEvent](#uievent), [WidgetId](#widgetid)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -73,6 +73,12 @@ Script global: `audio`.
 | `play(channel: number, voice: Record<string, any>)` | `void` | Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics. |
 | `stop(channel: number)` | `void` | Stop a classic channel. |
 | `playAt(channel: number, voice: Record<string, any>, where: Record<string, any>)` | `void` | Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion. |
+| `beginReflectionProbe(query: Record<string, any>)` | `number` | Trace bounded single-bounce specular ReflectionQuery paths on workers against this client's prepared acoustic scene. Includes material pressure gains, arrival directions and physical/excess delays. Exceeding budgets fails visibly. |
+| `beginVoiceReflections(handle: Record<string, any>, options: Record<string, any>)` | `number` | Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate snapshots; explicitly prepare again, no automatic tracking yet. |
+| `reflectionStatus(ticket: number)` | `Record<string, any>` | Client/restore-scoped pending/ready/failed query/preparation receipt. Ready follows publication. Release using cancelReflectionJob. |
+| `cancelReflectionJob(ticket: number)` | `void` | Cancel/release reflection work and release an initial clock hold. Releasing a published receipt keeps its effect. |
+| `clearVoiceReflections(handle: Record<string, any>)` | `void` | Cancel pending reflection work and clear this voice's early echo history, preserving independent direct/HRTF/late-reverb processing. |
+| `reflectionsVoice(handle: Record<string, any>)` | `Record<string, any>` | Current captured paths, acoustic scene revision, pending flag and invalidation/failure reason. Spatial/listener/scene changes require explicit re-preparation. |
 | `beginReverb(settings: Record<string, any>)` | `number` | Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections. |
 | `reverbStatus(ticket: number)` | `Record<string, any>` | Client/restore-scoped pending/ready/failed preparation. Ready includes published revision, settings and both mixer rates. Release with cancelReverbJob. |
 | `cancelReverbJob(ticket: number)` | `void` | Cancel/release a scoped reverb preparation ticket. Releasing a published ticket keeps its installed effect. |
@@ -107,7 +113,7 @@ Script global: `audio`.
 | `pauseVoice(handle: Record<string, any>, paused: boolean)` | `void` | Pause without advancing the source or fade clock. |
 | `seekVoice(handle: Record<string, any>, frame: number)` | `void` | Synchronous exact seek. Worker-buffered streams require beginSeekVoice/seekVoiceAsync. |
 | `setVoice(handle: Record<string, any>, options: Record<string, any>)` | `void` | Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed. |
-| `voice(handle: Record<string, any>)` | `Record<string, any>` | {playing,position_seconds?}; stale/stolen/ended handles are inactive. |
+| `voice(handle: Record<string, any>)` | `Record<string, any>` | {playing,source_playing,position_seconds?}; playing includes effect tails, source_playing excludes them. Stale/stolen/ended handles are inactive. |
 | `setBus(bus: string, settings: Record<string, any>)` | `void` | master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}. |
 | `bus(bus: string)` | `Record<string, any>` | Read this client's bus settings. |
 | `setDucking(config: Record<string, any>)` | `void` | Dialogue-driven music ducking {gain,attack_ms,release_ms}. |
@@ -705,6 +711,67 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 
 Field defaults are the serde defaults (`—`: required, or absent when unset).
 
+### ReflectionOptions
+
+Used by: Audio.beginVoiceReflections options / ReflectionQuery.options.
+
+Bounded point-source, single-specular-bounce profile. Diffuse/multiple reflections and diffraction require separate simulation.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `propagation` | `AcousticSource` | `{"air_absorption":[0.0002,0.0017,0.182],"dipole_power":1.0,"dipole_weight":0.0,"forward":[0.0,0.0,-1.0],"ignore_mesh":null,"metres_per_unit":1.0,"radius":0.0,"samples":16,"sound_speed":343.0,"transmission_hits":32}` | Physical units, air/directivity and ignored mesh; radius must be zero. |
+| `max_delay_seconds` | `f32` | `0.5` | Maximum excess delay relative to the undelayed direct clock, 0..2 seconds. |
+| `max_paths` | `usize` | `64` | Maximum unique audible paths, 1..64. Overflow fails, rather than truncates. |
+| `triangle_budget` | `usize` | `262144` | Complete-scene triangle budget, 1..262144. A larger scene fails visibly. |
+| `reference_distance_metres` | `f32` | `1.0` | Pressure reference distance, 0.01..100 metres; attenuation is min(1,ref/r). |
+| `wet_gain` | `f32` | `1.0` | Additional wet amplitude, 0..1; dry playback is independent. |
+
+### ReflectionQuery
+
+Used by: Audio.beginReflectionProbe.
+
+Immutable emission/listener snapshot captured by a worker.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `source` | `[f32; 3]` | `[0.0,0.0,2.0]` | Point emitter world position. |
+| `listener` | `[f32; 3]` | `[0.0,0.0,0.0]` | Listener world position. |
+| `listener_forward` | `[f32; 3]` | `[0.0,0.0,-1.0]` | Listener facing direction; defaults to -Z. |
+| `listener_up` | `[f32; 3]` | `[0.0,1.0,0.0]` | Listener up; defaults to +Y and must be independent of forward. |
+| `options` | `ReflectionOptions` | `{"max_delay_seconds":0.5,"max_paths":64,"propagation":{"air_absorption":[0.0002,0.0017,0.182],"dipole_power":1.0,"dipole_weight":0.0,"forward":[0.0,0.0,-1.0],"ignore_mesh":null,"metres_per_unit":1.0,"radius":0.0,"samples":16,"sound_speed":343.0,"transmission_hits":32},"reference_distance_metres":1.0,"triangle_budget":262144,"wet_gain":1.0}` | Captured simulation and wet controls. |
+
+### ReflectionPath
+
+Used by: ReflectionPaths.paths.
+
+One physically visible mirror path; gain is pressure, not energy.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `mesh` | `u32` | — | Stable acoustic mesh ID. |
+| `triangle` | `u32` | — | Scene insertion-order triangle ID; coplanar edge ties use the first. |
+| `material` | `u32` | — | Acoustic material table index. |
+| `bounce` | `[f32; 3]` | — | World-space specular reflection point. |
+| `length_metres` | `f32` | — | Source-to-bounce plus bounce-to-listener distance in metres. |
+| `delay_seconds` | `f32` | — | Absolute physical travel time; direct playback is not delayed by this API. |
+| `excess_delay_seconds` | `f32` | — | Actual DSP delay relative to a zero-latency direct clock. |
+| `gains` | `[f32; 3]` | — | Low/mid/high pressure gains including reflection, range, air and directivity. |
+| `leg_transmission` | `[f32; 3]` | — | Multiplicative amplitude transmission across both legs, per band. |
+| `crossings` | `u32` | — | Total crossed surfaces on both legs, excluding the reflector. |
+| `direction` | `[f32; 3]` | — | Unit listener-to-bounce arrival direction, in world coordinates. |
+
+### ReflectionPaths
+
+Used by: Audio.reflectionStatus / reflectionsVoice.
+
+Complete-scene first-order result; all bounded output paths are retained.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `query` | `ReflectionQuery` | — | Input snapshot; changing a pose requires a new simulation. |
+| `paths` | `Vec<ReflectionPath>` | — | Visible single-bounce paths ordered by excess delay then triangle identity. |
+| `tested_triangles` | `usize` | — | All scene triangles considered, including rejected/ignored surfaces. |
+
 ### ReverbSpec
 
 Used by: ReverbSettings.room.
@@ -952,9 +1019,9 @@ Frequency-band energy absorption and amplitude transmission at each crossing.
 
 | Field | Rust type | Default | Description |
 |---|---|---|---|
-| `absorption` | `[f32; 3]` | `[0.5,0.3,0.1]` | Absorbed fractions in low/mid/high frequency bands; reserved for reflection. |
+| `absorption` | `[f32; 3]` | `[0.5,0.3,0.1]` | Absorbed energy fractions in low/mid/high bands; used by specular reflections. |
 | `transmission` | `[f32; 3]` | `[0.1,0.05,0.01]` | Amplitude transmitted at each surface crossing, in low/mid/high bands. |
-| `scattering` | `f32` | `0.05` | Diffuse scattering fraction, reserved for reflection simulation. |
+| `scattering` | `f32` | `0.05` | Diffuse energy fraction removed from the specular component; diffuse sound is not synthesized. |
 
 ### AcousticSource
 
@@ -973,7 +1040,7 @@ Direct sound propagation settings, reusable by any client or native adapter.
 | `dipole_power` | `f32` | `1.0` | Directivity exponent, 0..16. |
 | `ignore_mesh` | `Option<u32>` | `null` | Explicit mesh to exclude (for example the emitter's own geometry). |
 | `metres_per_unit` | `f32` | `1.0` | Conversion from world units to metres. |
-| `sound_speed` | `f32` | `343.0` | Sound speed in metres/second; delay is reported, not applied by this profile. |
+| `sound_speed` | `f32` | `343.0` | Sound speed in metres/second. Direct travel is reported; reflection DSP applies excess delay. |
 
 ### AcousticQuery
 
@@ -3022,6 +3089,8 @@ These bindings return CancellablePromise values over the same bounded service jo
 | `Audio.preloadSfxAsync` | `asset: string` | `CancellablePromise<Record<string, any>>` | `beginPreloadSfx` |
 | `Audio.playMusicAsync` | `name: string, voice: Record<string, any>, crossfade_ms: number` | `CancellablePromise<Record<string, any>>` | `beginPlayMusic` |
 | `Audio.seekVoiceAsync` | `handle: Record<string, any>, source_frame: number` | `CancellablePromise<Record<string, any>>` | `beginSeekVoice` |
+| `Audio.traceReflectionsAsync` | `query: Record<string, any>` | `CancellablePromise<Record<string, any>>` | `beginReflectionProbe` |
+| `Audio.prepareVoiceReflectionsAsync` | `handle: Record<string, any>, options: Record<string, any>` | `CancellablePromise<Record<string, any>>` | `beginVoiceReflections` |
 | `Audio.prepareReverbAsync` | `settings: Record<string, any>` | `CancellablePromise<Record<string, any>>` | `beginReverb` |
 | `Audio.prepareHrtfAsync` | `asset: string, options: Record<string, any>` | `CancellablePromise<Record<string, any>>` | `beginHrtf` |
 | `Audio.prepareAcousticsAsync` | `asset: string` | `CancellablePromise<Record<string, any>>` | `beginAcousticScene` |

@@ -71,40 +71,20 @@ pub fn simulate(scene: &AcousticScene, query: &AcousticQuery) -> Result<DirectPa
     let mut transmission = [1.; 3];
     let mut crossings = 0u32;
     if visibility < 1. && distance > 0.002 {
-        let mut min = epsilon(distance);
-        let end = distance - epsilon(distance);
-        loop {
-            let Some(hit) = scene.closest_hit(listener, delta, min, end, settings.ignore_mesh)?
-            else {
-                break;
-            };
-            ensure!(
-                crossings < settings.transmission_hits,
-                "acoustic transmission crossing budget exceeded"
-            );
-            crossings += 1;
-            for (gain, t) in transmission
-                .iter_mut()
-                .zip(scene.material(hit.material).transmission)
-            {
-                *gain *= t;
-            }
-            min = hit.distance + epsilon(hit.distance);
-            if min >= end {
-                break;
-            }
-        }
+        (transmission, crossings) = segment_transmission(
+            scene,
+            listener,
+            source,
+            settings.ignore_mesh,
+            settings.transmission_hits,
+        )?;
     }
+
     let air_absorption = settings.air_absorption.map(|c| (-c * metres).exp());
     let directivity = if distance <= 0.002 {
         1.
     } else {
-        let cosine = Vec3::from(settings.forward)
-            .normalize()
-            .dot(-delta / distance);
-        ((1. - settings.dipole_weight) + settings.dipole_weight * cosine)
-            .abs()
-            .powf(settings.dipole_power)
+        source_directivity(settings, -delta / distance)
     };
     let gains = std::array::from_fn(|i| {
         air_absorption[i] * directivity * (visibility + (1. - visibility) * transmission[i])
@@ -136,4 +116,51 @@ fn volume_sample(index: u32) -> Vec3 {
     let r = radical_inverse(5, index).cbrt();
     let xy = (1. - z * z).max(0.).sqrt();
     r * Vec3::new(xy * phi.cos(), xy * phi.sin(), z)
+}
+
+pub(crate) fn source_directivity(settings: &crate::AcousticSource, departure: Vec3) -> f32 {
+    let cosine = Vec3::from(settings.forward)
+        .normalize()
+        .dot(departure)
+        .clamp(-1., 1.);
+    ((1. - settings.dipole_weight) + settings.dipole_weight * cosine)
+        .abs()
+        .powf(settings.dipole_power)
+}
+
+/// Shared per-crossing amplitude transport used by direct and reflected legs.
+pub(crate) fn segment_transmission(
+    scene: &AcousticScene,
+    from: Vec3,
+    to: Vec3,
+    ignore: Option<u32>,
+    limit: u32,
+) -> Result<([f32; 3], u32)> {
+    let delta = to - from;
+    let distance = delta.length();
+    if distance <= 0.002 {
+        return Ok(([1.; 3], 0));
+    }
+    let mut min = epsilon(distance);
+    let end = distance - epsilon(distance);
+    let mut transmission = [1.; 3];
+    let mut crossings = 0;
+    while let Some(hit) = scene.closest_hit(from, delta, min, end, ignore)? {
+        ensure!(
+            crossings < limit,
+            "acoustic transmission crossing budget exceeded"
+        );
+        crossings += 1;
+        for (gain, t) in transmission
+            .iter_mut()
+            .zip(scene.material(hit.material).transmission)
+        {
+            *gain *= t;
+        }
+        min = hit.distance + epsilon(hit.distance);
+        if min >= end {
+            break;
+        }
+    }
+    Ok((transmission, crossings))
 }

@@ -1389,6 +1389,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "avg32",
+ "crysirror-acoustics",
  "crysirror-audio",
  "crysirror-core",
  "crysirror-runtime",
@@ -1579,6 +1580,7 @@ name = "crysirror-reallive"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "crysirror-acoustics",
  "crysirror-audio",
  "crysirror-core",
  "crysirror-runtime",

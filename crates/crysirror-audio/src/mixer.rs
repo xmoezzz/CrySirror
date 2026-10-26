@@ -405,8 +405,11 @@ struct Voice {
     acoustic: Option<crysirror_acoustics::spectrum::BandFilter>,
     binaural: Option<crysirror_acoustics::binaural::BinauralVoice>,
     binaural_pending: bool,
+    reflections: Option<crysirror_acoustics::reflection_dsp::EarlyReflections>,
+    reflection_pending: bool,
     source_ended: bool,
     tail_left: usize,
+    tail_elapsed: usize,
 }
 /// A seek publishes only once the exact decoded frame is available.
 #[derive(Clone, Debug, Serialize)]
@@ -420,6 +423,16 @@ pub struct SeekProgress {
     /// Retained worker/seek failure, when present.
     pub error: Option<String>,
 }
+fn constrain_tail(v: &mut Voice) {
+    if v.source_ended {
+        let total = v
+            .binaural
+            .as_ref()
+            .map_or(0, |b| b.tail_frames())
+            .max(v.reflections.as_ref().map_or(0, |r| r.tail_frames()));
+        v.tail_left = v.tail_left.min(total.saturating_sub(v.tail_elapsed));
+    }
+}
 fn publish_seek(v: &mut Voice, frame: u64) {
     v.cursor.count = 0;
     v.cursor.edge = None;
@@ -429,8 +442,12 @@ fn publish_seek(v: &mut Voice, frame: u64) {
     if let Some(filter) = &mut v.acoustic {
         filter.reset_history();
     }
+    if let Some(effect) = &mut v.reflections {
+        effect.reset();
+    }
     v.source_ended = false;
     v.tail_left = 0;
+    v.tail_elapsed = 0;
     if let Some(voice) = &mut v.binaural {
         voice.reset();
     }
@@ -605,8 +622,27 @@ impl Mixer {
             "invalid audio listener basis"
         );
         self.client(client)?;
+        for v in self
+            .voices
+            .iter_mut()
+            .flatten()
+            .filter(|v| v.handle.client == client)
+        {
+            if v.reflections.as_ref().is_some_and(|r| {
+                let q = &r.paths().query;
+                q.listener != listener.position
+                    || q.listener_forward != listener.forward
+                    || q.listener_up != listener.up
+            }) {
+                v.reflections = None;
+                constrain_tail(v);
+            }
+        }
         self.listeners.insert(client, listener);
         Ok(())
+    }
+    pub fn listener(&self, client: u32) -> Listener {
+        self.listeners.get(&client).copied().unwrap_or_default()
     }
     pub fn play(
         &mut self,
@@ -687,8 +723,11 @@ impl Mixer {
             acoustic: None,
             binaural: None,
             binaural_pending: false,
+            reflections: None,
+            reflection_pending: false,
             source_ended: false,
             tail_left: 0,
+            tail_elapsed: 0,
         });
         self.generations[slot] = generation;
         self.sequence = sequence;
@@ -711,6 +750,24 @@ impl Mixer {
                 .get(h.slot as usize)
                 .and_then(Option::as_ref)
                 .is_some_and(|v| v.handle == h)
+    }
+    /// Source completion excludes derived HRTF/echo tails. Native waits consume
+    /// this state while modern is_playing retains an effect's natural tail.
+    pub fn source_is_playing(&self, client: u32, h: VoiceHandle) -> bool {
+        h.client == client
+            && self
+                .voices
+                .get(h.slot as usize)
+                .and_then(Option::as_ref)
+                .is_some_and(|v| {
+                    v.handle == h
+                        && !v.source_ended
+                        && (v.spec.looping
+                            || v.cursor
+                                .source
+                                .frame_count()
+                                .is_none_or(|n| v.position < n as f64))
+                })
     }
     pub fn stop(&mut self, client: u32, h: VoiceHandle, fade_ms: f32) -> Result<()> {
         duration(fade_ms)?;
@@ -840,8 +897,88 @@ impl Mixer {
         if let Some(s) = &spatial {
             s.validate()?
         }
-        self.voice(client, h)?.spec.spatial = spatial;
+        let v = self.voice(client, h)?;
+        if v.spec.spatial.as_ref().map(|s| s.position) != spatial.as_ref().map(|s| s.position) {
+            v.reflections = None;
+            constrain_tail(v);
+        }
+        v.spec.spatial = spatial;
         Ok(())
+    }
+    /// Hold an initial one-shot clock during worker preparation. Replacement of
+    /// an installed effect leaves its old source clock/effect running.
+    pub fn pending_reflections(&mut self, client: u32, h: VoiceHandle) -> Result<()> {
+        ensure!(
+            self.source_is_playing(client, h),
+            "reflection source has ended"
+        );
+        let v = self.voice(client, h)?;
+        ensure!(
+            !v.binaural_pending,
+            "wait for HRTF preparation before reflections"
+        );
+        v.reflection_pending = v.reflections.is_none();
+        Ok(())
+    }
+    pub fn cancel_reflection_preparation(&mut self, client: u32, h: VoiceHandle) -> Result<()> {
+        self.voice(client, h)?.reflection_pending = false;
+        Ok(())
+    }
+    pub fn direct_latency_frames(&self, client: u32, h: VoiceHandle) -> Result<usize> {
+        self.spec(client, h)?;
+        let v = self.voices[h.slot as usize].as_ref().unwrap();
+        ensure!(
+            !v.binaural_pending,
+            "wait for HRTF preparation before reflections"
+        );
+        Ok(v.binaural.as_ref().map_or(0, |b| b.latency_frames()))
+    }
+    pub fn set_reflections(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        effect: Option<crysirror_acoustics::reflection_dsp::EarlyReflections>,
+    ) -> Result<Option<crysirror_acoustics::reflection_dsp::EarlyReflections>> {
+        let rate = self.sample_rate();
+        let listener = self.listener(client);
+        let v = self.voice(client, h)?;
+        if let Some(effect) = &effect {
+            let q = &effect.paths().query;
+            ensure!(
+                effect.sample_rate() == rate
+                    && !v.binaural_pending
+                    && effect.direct_latency_frames()
+                        == v.binaural.as_ref().map_or(0, |b| b.latency_frames()),
+                "reflection sample rate/reference latency mismatch"
+            );
+            ensure!(
+                v.spec
+                    .spatial
+                    .as_ref()
+                    .is_none_or(|s| s.position == q.source)
+                    && listener.position == q.listener
+                    && listener.forward == q.listener_forward
+                    && listener.up == q.listener_up,
+                "reflection captured pose changed"
+            );
+        }
+        v.reflection_pending = false;
+        let old = std::mem::replace(&mut v.reflections, effect);
+        constrain_tail(v);
+        Ok(old)
+    }
+    pub fn reflection_paths(
+        &self,
+        client: u32,
+        h: VoiceHandle,
+    ) -> Result<Option<&crysirror_acoustics::reflections::ReflectionPaths>> {
+        self.spec(client, h)?;
+        Ok(self.voices[h.slot as usize]
+            .as_ref()
+            .unwrap()
+            .reflections
+            .as_ref()
+            .map(|r| r.paths()))
     }
     /// Apply prepared direct-path frequency gains. No geometry queries or I/O
     /// run in the mixer. Existing distance, pan, buses and envelopes still apply.
@@ -897,11 +1034,16 @@ impl Mixer {
                 "binaural voice sample rate/spatial mismatch"
             );
         }
+        let latency = voice.as_ref().map_or(0, |b| b.latency_frames());
+        if v.reflections
+            .as_ref()
+            .is_some_and(|r| r.direct_latency_frames() != latency)
+        {
+            v.reflections = None;
+        }
         v.binaural = voice;
         v.binaural_pending = false;
-        if v.binaural.is_none() && v.source_ended {
-            v.tail_left = 0;
-        }
+        constrain_tail(v);
         Ok(())
     }
     pub fn pause(&mut self, client: u32, h: VoiceHandle, paused: bool) -> Result<()> {
@@ -1197,6 +1339,7 @@ impl Mixer {
                 let Some(v) = slot else { continue };
                 if v.spec.paused
                     || v.binaural_pending
+                    || v.reflection_pending
                     || v.seek
                         .as_ref()
                         .is_some_and(|s| s.pending || s.error.is_some())
@@ -1254,9 +1397,14 @@ impl Mixer {
                             }
                         }
                         SampleRead::End => {
-                            if let Some(binaural) = &v.binaural {
+                            let tail = v
+                                .binaural
+                                .as_ref()
+                                .map_or(0, |b| b.tail_frames())
+                                .max(v.reflections.as_ref().map_or(0, |r| r.tail_frames()));
+                            if tail > 0 {
                                 v.source_ended = true;
-                                v.tail_left = binaural.tail_frames();
+                                v.tail_left = tail;
                                 [0.; 2]
                             } else {
                                 retire_dialogue(v, &mut self.clients);
@@ -1290,6 +1438,11 @@ impl Mixer {
                     }
                 };
                 let mut s = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                let echo = if let Some(effect) = &mut v.reflections {
+                    effect.process_frame((s[0] + s[1]) * 0.5)?
+                } else {
+                    [0.; 2]
+                };
                 let c = &self.clients[&v.handle.client];
                 let master_gain = c.level(Bus::Master);
                 let mut gain = v.gain.step() * v.envelope.step() * c.level(v.spec.bus);
@@ -1301,6 +1454,7 @@ impl Mixer {
                 if v.spec.bus == Bus::Music {
                     gain *= c.duck_output
                 }
+                let source_gain = gain;
                 if let Some(effect) = effect {
                     gain *= effect.gain;
                     let mono = (s[0] + s[1]) * 0.5;
@@ -1326,18 +1480,23 @@ impl Mixer {
                     s[0] *= (1. - pan).sqrt() * std::f32::consts::SQRT_2;
                     s[1] *= pan.sqrt() * std::f32::consts::SQRT_2;
                 }
-                sample[0] += s[0] * gain * master_gain;
-                sample[1] += s[1] * gain * master_gain;
+                let mixed = [
+                    s[0] * gain + echo[0] * source_gain,
+                    s[1] * gain + echo[1] * source_gain,
+                ];
+                sample[0] += mixed[0] * master_gain;
+                sample[1] += mixed[1] * master_gain;
                 // Post source-bus fader/duck/spatial, before Master. Master is
                 // applied once on the return, not squared with the input send.
                 let c = self.clients.get_mut(&v.handle.client).unwrap();
                 if let Some(reverb) = &mut c.reverb {
                     let send = reverb.send(v.spec.bus);
-                    reverb.input[0] += s[0] * gain * send;
-                    reverb.input[1] += s[1] * gain * send;
+                    reverb.input[0] += mixed[0] * send;
+                    reverb.input[1] += mixed[1] * send;
                 }
                 if v.source_ended {
                     v.tail_left = v.tail_left.saturating_sub(1);
+                    v.tail_elapsed = v.tail_elapsed.saturating_add(1);
                 } else {
                     v.position += step;
                 }
@@ -1347,6 +1506,7 @@ impl Mixer {
                 }
                 if (v.stop_after_fade && v.envelope.left == 0 && v.envelope.value == 0.)
                     || (v.binaural.is_none()
+                        && v.reflections.as_ref().is_none_or(|r| r.tail_frames() == 0)
                         && !v.spec.looping
                         && v.cursor
                             .source

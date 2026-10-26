@@ -261,6 +261,9 @@ impl AcousticScene {
         }
         anyhow::bail!("acoustic ignored-surface traversal budget exceeded")
     }
+    pub(crate) fn surfaces(&self) -> impl ExactSizeIterator<Item = &([Vec3; 3], u32, usize)> {
+        self.triangles.iter()
+    }
     pub fn blocked(&self, from: Vec3, to: Vec3, ignore: Option<u32>) -> Result<bool> {
         let delta = to - from;
         let d = delta.length();
