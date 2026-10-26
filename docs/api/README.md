@@ -152,6 +152,19 @@ and music require these async methods. `playRandom` requires preloaded variants.
 Offline synchronous methods remain supported. See [ADR 0069](../adr/0069-worker-audio-decoding-and-playback.md)
 for cancellation, budgets and the remaining native-channel/mix/output boundaries.
 
+## Canonical channel readiness
+
+`Audio.play(channel, voice)` and data VM Play commands declare canonical logical
+voices. `Audio.channelStatus(channel)` separately reports the desired epoch,
+queued/loading/playing/paused/ended/failed phase, position and error. Stop and
+restore invalidate stale jobs; natural EOF does not replay a persistent voice
+declaration. Time waits do not imply audio readiness. App and plain desktop use
+the same worker bridge, with explicit offline behavior retained.
+
+Desktop audio execution is independent of native image/scenario loading policy.
+Cold modern SFX/music also require the async helpers during live initialization.
+See [ADR 0071](../adr/0071-canonical-audio-worker-bridge.md) for these boundaries.
+
 ## Rules for changing the API
 
 `crates/crysirror-engine/tests/api_docs.rs` enforces these rules in the normal

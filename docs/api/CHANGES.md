@@ -4,6 +4,24 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `102009774599dc55` (2026-10-27): canonical audio readiness
+
+- Add Audio.channelStatus and SceneVoicePhase/SceneVoiceStatus data. Canonical
+  SceneState playback now shares worker preparation between App and the plain
+  desktop host. Logical declaration/epoch/save state remains distinct from
+  queued/loading/playing/paused/ended/failed readiness.
+- Gain/routing and pause preserve the source timeline. Stop/replacement/restore
+  invalidate stale preparations; naturally ended epochs do not restart without
+  a new Play or restore. Preparation failures remain visible frame errors.
+- Runtime has independent audio_is_nonblocking/set_audio_nonblocking policy;
+  desktop Run enables it before initialization, including native Assets profiles.
+  **Live initialization migration:** cold synchronous pooled SFX/music must use
+  the existing async helpers even in onInit or with blocking native image policy.
+  Canonical play still declares logical state; inspect channelStatus for readiness.
+- Trace/save formats and native opcodes are unchanged. Explicit offline playback
+  retains immediate preparation, including the full canonical voice limit.
+  See ADR 0071 for budgets and remaining synchronous output/media boundaries.
+
 ## `d36d62998490cf17` (2026-10-27): native channel preparation receipts
 
 - Add core AudioAsset, AudioPreparePhase and AudioPreparation data. The typed

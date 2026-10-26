@@ -28,10 +28,6 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-struct Legacy {
-    epoch: u64,
-    handle: VoiceHandle,
-}
 #[derive(Clone)]
 pub(crate) struct Attachment {
     pub(crate) handle: VoiceHandle,
@@ -43,8 +39,7 @@ pub(crate) struct Attachment {
 }
 pub struct AudioRuntime {
     pub mixer: Mixer,
-    legacy: BTreeMap<ChannelId, Legacy>,
-    routes: BTreeMap<ChannelId, Bus>,
+    pub scene_audio: crysirror_audio::scene::SceneAudio,
     pub(crate) clips: BTreeMap<(u32, String), Clip>,
     pub(crate) clip_bytes: usize,
     pub(crate) jobs: crate::audio_async::AudioJobs,
@@ -61,8 +56,7 @@ impl Default for AudioRuntime {
     fn default() -> Self {
         Self {
             mixer: Default::default(),
-            legacy: BTreeMap::new(),
-            routes: BTreeMap::new(),
+            scene_audio: Default::default(),
             clips: BTreeMap::new(),
             clip_bytes: 0,
             jobs: Default::default(),
@@ -85,7 +79,7 @@ impl AudioRuntime {
     pub fn reset_playback(&mut self) {
         self.jobs.reset();
         self.mixer.clear();
-        self.legacy.clear();
+        self.scene_audio.reset(&mut self.mixer);
         self.attachments.clear();
         self.music.clear();
         self.output.clear();
@@ -136,7 +130,7 @@ fn clip(cx: &mut EngineContext, client: u32, path: &str) -> Result<Clip> {
         return Ok(clip.clone());
     }
     ensure!(
-        !cx.state()?.runtime.assets.is_nonblocking(),
+        !cx.state()?.runtime.audio_is_nonblocking(),
         "uncached SFX requires Audio.playSfxAsync or preloadSfxAsync in a realtime host"
     );
     let clip = decoder::decode_clip(source(cx, client, path)?)?;
@@ -157,69 +151,26 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
     crate::audio_async::poll(cx.state()?)?;
     crate::acoustics_api::poll(cx.state()?)?;
     crate::binaural_api::poll(cx.state()?)?;
-    let current = {
+    {
         let s = cx.state()?;
-        s.runtime
-            .host
-            .scene
-            .voices()
-            .iter()
-            .map(|(id, v)| (*id, v.clone(), s.runtime.host.scene.voice_epoch(*id)))
-            .collect::<Vec<_>>()
-    };
-    let stale = {
-        let s = cx.state()?;
-        s.mixer_audio
-            .legacy
-            .keys()
-            .filter(|id| !current.iter().any(|(i, _, _)| i == *id))
-            .copied()
-            .collect::<Vec<_>>()
-    };
-    for id in stale {
-        let a = &mut cx.state()?.mixer_audio;
-        if let Some(old) = a.legacy.remove(&id) {
-            if a.mixer.is_playing(id.client.0, old.handle) {
-                a.mixer.stop(id.client.0, old.handle, 0.)?
-            }
-        }
-        a.routes.remove(&id);
-    }
-    for (id, v, epoch) in current {
-        let change = cx
-            .state()?
-            .mixer_audio
-            .legacy
-            .get(&id)
-            .is_none_or(|old| old.epoch != epoch);
-        if change {
-            let src = source(cx, id.client.0, v.asset.relative())?;
-            let a = &mut cx.state()?.mixer_audio;
-            if let Some(old) = a.legacy.remove(&id) {
-                if a.mixer.is_playing(id.client.0, old.handle) {
-                    a.mixer.stop(id.client.0, old.handle, 0.)?
-                }
-            }
-            let bus = a.routes.get(&id).copied().unwrap_or(Bus::Sfx);
-            let handle = a.mixer.play(
-                id.client.0,
-                src,
-                VoiceSpec {
-                    bus,
-                    gain: v.gain_milli as f32 / 1000.,
-                    looping: v.looping,
-                    ..Default::default()
-                },
-            )?;
-            a.legacy.insert(id, Legacy { epoch, handle });
-        } else {
-            let a = &mut cx.state()?.mixer_audio;
-            let handle = a.legacy[&id].handle;
-            if a.mixer.is_playing(id.client.0, handle) {
-                a.mixer
-                    .set_gain(id.client.0, handle, v.gain_milli as f32 / 1000.)?
-            }
-        }
+        let runtime = &mut s.runtime;
+        let pool = runtime.assets.io_tasks();
+        let live = runtime.audio_is_nonblocking();
+        let a = &mut s.mixer_audio;
+        a.scene_audio.sync(
+            &mut a.mixer,
+            &runtime.host.scene,
+            runtime.restored,
+            &pool,
+            live,
+            |client| {
+                runtime
+                    .host
+                    .fs
+                    .storage(client)
+                    .map_err(|e| anyhow::anyhow!("{e}"))
+            },
+        )?;
     }
     let (camera, clients) = {
         let s = cx.state()?;
@@ -395,6 +346,7 @@ fn method(
 fn info() -> &'static ClassInfo {
     static INFO: OnceLock<ClassInfo> = OnceLock::new();
     INFO.get_or_init(||ClassInfo{name:"Audio",doc:"Scoped voice pool, streaming music and deterministic CPU mixing; classic channels share this output.",properties:vec![PropertyInfo{name:"sampleRate",ty:T::Int,writable:false,doc:"Mixer output frames per second."}],methods:vec![
+        method("channelStatus",vec![("channel",T::Int)],T::Map,"Desired SceneState epoch and derived queued/loading/playing/paused/ended/failed readiness, position and error. Stopped declarations take precedence; frame synchronization prepares/publishes playback."),
         method("play",vec![("channel",T::Int),("voice",T::Map)],T::Void,"Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics."),
         method("stop",vec![("channel",T::Int)],T::Void,"Stop a classic channel."),
         method("playAt",vec![("channel",T::Int),("voice",T::Map),("where",T::Map)],T::Void,"Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion."),
@@ -621,6 +573,20 @@ impl Class for AudioClass {
         }
         let client = cx.state()?.client.0;
         match name {
+            "channelStatus" => {
+                let channel = u32::try_from(arg(args, 0, "channel")?.as_i64()?)?;
+                let s = cx.state()?;
+                return Ok(Value::from_json(serde_json::to_value(
+                    s.mixer_audio.scene_audio.status(
+                        &s.mixer_audio.mixer,
+                        &s.runtime.host.scene,
+                        ChannelId {
+                            client: ClientId(client),
+                            local: channel,
+                        },
+                    ),
+                )?));
+            }
             "play" | "stop" | "playAt" => {
                 let ch = u32::try_from(arg(args, 0, "channel")?.as_i64()?)?;
                 let route = if name != "stop" {
@@ -633,13 +599,13 @@ impl Class for AudioClass {
                 }
                 crate::services::AudioClass.call(cx, this, name, args)?;
                 if let Some(route) = route {
-                    cx.state()?.mixer_audio.routes.insert(
+                    cx.state()?.mixer_audio.scene_audio.set_route(
                         ChannelId {
                             client: ClientId(client),
                             local: ch,
                         },
                         route,
-                    );
+                    )?;
                 }
                 return Ok(Value::Null);
             }
@@ -716,7 +682,7 @@ impl Class for AudioClass {
             }
             "playMusic" => {
                 ensure!(
-                    !cx.state()?.runtime.assets.is_nonblocking(),
+                    !cx.state()?.runtime.audio_is_nonblocking(),
                     "realtime music requires Audio.playMusicAsync"
                 );
                 let name = arg(args, 0, "music name")?.as_str()?.to_owned();

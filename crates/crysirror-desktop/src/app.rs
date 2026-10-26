@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 use crate::audio::Audio;
-use anyhow::{bail, ensure, Context, Result};
-use crysirror_core::service::{buttons, InputFrame};
-use crysirror_runtime::{vfs, Runtime};
-use crysirror_wgpu::{geometry::Viewport, Gpu, RenderTarget, Renderer, RenderingPath};
+use anyhow::{Context, Result, bail, ensure};
+use crysirror_core::service::{InputFrame, buttons};
+use crysirror_runtime::{Runtime, vfs};
+use crysirror_wgpu::{Gpu, RenderTarget, Renderer, RenderingPath, geometry::Viewport};
 use std::{
     io::Read,
     path::{Path, PathBuf},
@@ -369,6 +369,7 @@ impl App {
             .iter()
             .all(|client| client.adapter == "crysirror-script-v1");
         self.core.rt().assets.set_nonblocking(progressive);
+        self.core.rt().set_audio_nonblocking(true);
         let canvas = self.core.rt().project.canvas;
         let window = Arc::new(
             el.create_window(
@@ -422,7 +423,7 @@ impl App {
         });
         self.last_tick = Instant::now();
         self.remainder = Duration::ZERO;
-        self.audio.resume();
+        self.audio.resume()?;
         Ok(())
     }
     fn fail(&mut self, el: &ActiveEventLoop, error: anyhow::Error) {
@@ -810,9 +811,11 @@ impl ApplicationHandler for App {
             self.fail(el, e);
         }
     }
-    fn suspended(&mut self, _: &ActiveEventLoop) {
+    fn suspended(&mut self, el: &ActiveEventLoop) {
         self.window = None;
-        self.audio.pause();
+        if let Err(error) = self.audio.pause() {
+            self.fail(el, error);
+        }
         self.input = InputFrame::default();
         #[cfg(feature = "gamepad")]
         if let Some(backend) = &mut self.gamepad {

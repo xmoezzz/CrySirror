@@ -200,6 +200,7 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-runtime/src/assets_async.rs",
         "crates/crysirror-tasks/src/lib.rs",
         "crates/crysirror-tasks/src/table.rs",
+        "crates/crysirror-audio/src/scene.rs",
         "crates/crysirror-audio/src/buffered.rs",
         "crates/crysirror-audio/src/decoder.rs",
         "crates/crysirror-audio/src/mixer.rs",
@@ -232,6 +233,8 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("SceneVoicePhase","SceneVoiceStatus.phase",None),
+        d("SceneVoiceStatus","Audio.channelStatus",None),
         d("AudioAsset","HostServices::begin_audio / AudioRequest::PlayAsset",None),
         d("AudioPreparePhase","AudioPreparation.phase",None),
         d("AudioPreparation","HostServices::audio_preparation",None),

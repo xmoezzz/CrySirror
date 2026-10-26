@@ -8,9 +8,35 @@ use crate::{
     mixer::{Bus, Ducking, LoopPoints, Mixer, MixerConfig, VoiceHandle, VoiceSpec},
 };
 use anyhow::{Context, Result, ensure};
-use crysirror_core::service::{AudioParameters, AudioRequest, EncodedAudio, PcmBus};
+use crysirror_core::{
+    path::Mount,
+    service::{AudioAsset, AudioParameters, AudioRequest, ClientStorage, EncodedAudio, PcmBus},
+};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub(super) fn asset(
+    input: AudioAsset,
+    gain: f32,
+    storage: &dyn ClientStorage,
+) -> Result<Box<dyn AudioSource>> {
+    ensure!(
+        input.path.mount() == Mount::Asset,
+        "audio input requires asset authority"
+    );
+    let extension = input.path.relative().rsplit_once('.').map(|v| v.1);
+    let reader = storage
+        .open_asset(&input.path)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    ensure!(
+        reader.len().map_err(|e| anyhow::anyhow!("{e}"))? <= 512 * 1024 * 1024,
+        "encoded stream size limit"
+    );
+    wrap_source(
+        crate::decoder::open_asset(reader, extension)?,
+        input.frame_limit,
+        gain,
+    )
+}
 struct Source {
     inner: Box<dyn AudioSource>,
     limit: Option<u64>,

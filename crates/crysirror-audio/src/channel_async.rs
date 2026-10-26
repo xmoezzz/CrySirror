@@ -4,14 +4,13 @@
 //! Native and ordinary clients share preparation receipts and one channel mixer.
 use crate::{
     buffered::{BufferedSource, StreamBufferSpec},
-    channels::{ChannelAudio, PreparedChannel, prepare, source, wrap_source},
-    decoder::{self, AudioSource},
+    channels::{ChannelAudio, PreparedChannel, asset, prepare, source},
     mixer::Ducking,
 };
 use anyhow::{Context, Result, ensure};
 use crysirror_core::{
     path::Mount,
-    service::{AudioAsset, AudioPreparation, AudioPreparePhase, AudioRequest, ClientStorage},
+    service::{AudioPreparation, AudioPreparePhase, AudioRequest, ClientStorage},
 };
 use crysirror_tasks::{
     Cancellation, TaskPool,
@@ -56,29 +55,6 @@ impl Drop for Charge {
     fn drop(&mut self) {
         self.budget.fetch_sub(self.bytes, Ordering::Relaxed);
     }
-}
-fn asset(
-    input: AudioAsset,
-    gain: f32,
-    storage: &dyn ClientStorage,
-) -> Result<Box<dyn AudioSource>> {
-    ensure!(
-        input.path.mount() == Mount::Asset,
-        "audio input requires asset authority"
-    );
-    let extension = input.path.relative().rsplit_once('.').map(|v| v.1);
-    let reader = storage
-        .open_asset(&input.path)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    ensure!(
-        reader.len().map_err(|e| anyhow::anyhow!("{e}"))? <= 512 * 1024 * 1024,
-        "encoded stream size limit"
-    );
-    wrap_source(
-        decoder::open_asset(reader, extension)?,
-        input.frame_limit,
-        gain,
-    )
 }
 fn channel(request: &AudioRequest) -> Result<u32> {
     match request {

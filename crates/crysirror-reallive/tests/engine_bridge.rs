@@ -210,7 +210,8 @@ fn native_audio_event_stays_at_original_pc_until_shared_preparation_and_play_wai
     let (t, mut r) = fixture(code);
     std::fs::create_dir(t.path().join("assets/WAV")).unwrap();
     std::fs::write(t.path().join("assets/WAV/tone.wav"), tone()).unwrap();
-    r.assets.set_nonblocking(true);
+    r.set_audio_nonblocking(true);
+    assert!(!r.assets.is_nonblocking());
     let pool = r.assets.io_tasks();
     let gate = Gate::block(&pool);
     r.tick(0, InputFrame::default()).unwrap();

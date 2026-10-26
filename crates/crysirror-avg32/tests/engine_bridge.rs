@@ -296,7 +296,8 @@ fn original_avg32_audio_event_waits_for_engine_workers_without_running_following
     code.extend(number(9));
     code.extend([0x60, 0x20]);
     let (_temp, mut r) = fixture(&code, json!({}));
-    r.assets.set_nonblocking(true);
+    r.set_audio_nonblocking(true);
+    assert!(!r.assets.is_nonblocking());
     let gate = Gate::block(&r.assets.io_tasks());
     r.tick(0, InputFrame::default()).unwrap();
     let first = diag(&r)["instructions"].clone();

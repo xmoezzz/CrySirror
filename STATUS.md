@@ -2053,3 +2053,90 @@ Remaining boundaries:
 - Near-field propagation, diffraction, acoustic reflections and room reverb
   remain open. These results advance the shared foundation without completing
   the broader modern 3D engine/VN integration objective.
+
+## Canonical SceneState audio worker bridge (ADR 0071, 2026-10-27)
+
+Implementation:
+- Added device-free SceneAudio over a caller-owned Mixer. Engine App and plain
+  desktop playback now use the same declaration/epoch reconciliation and worker
+  preparation. Removed the engine-private canonical voice bridge and the plain
+  desktop's live AudioSystem::sync/read_for path. The library's explicit
+  synchronous compatibility API remains available and is documented as such.
+- Reused native channel capability opening and source preparation, existing
+  BufferedSource and deferred task admission. Canonical cold assets are opened,
+  probed and primed off the realtime owner. No codec, mixer or general-purpose
+  algorithm was added to a VM. Canonical and pooled App voices retain their
+  existing shared Mixer, limits, buses and final PCM composition.
+- Stops/replacements/restore reconcile before result publication. Published
+  epochs remain distinct from desired epochs, so natural EOF/stolen handles do
+  not automatically restart. Gain/routing preserve the timeline. Pause includes
+  voices that finish preparation later. Failed preparation retains the prior
+  voice, records the error and produces the existing visible frame failure.
+- Added Audio.channelStatus, SceneVoicePhase and SceneVoiceStatus for scoped
+  queued/loading/playing/paused/ended/failed state, position and failures.
+  Streaming faults are visible while a valid predecoded prefix can still drain.
+  Logical time waits remain separate from audio readiness; save/trace voice data
+  contains no decoder, task or device handle.
+- Preparation is limited to 16 jobs/client and 64/bridge. Additional declarations
+  stay Queued and retry. A separate 512 MiB estimated bridge budget reserves
+  4 MiB per realtime source and follows actual worker/source ownership through
+  cancellation. These estimates are not comprehensive process-memory accounting.
+  Offline playback retains same-frame preparation at the canonical 128-voice
+  limit instead of inheriting realtime admission delays.
+- Added Runtime audio execution override and effective mode inspection. Desktop
+  Run enables audio workers before initialization, independently of native
+  image/scenario Assets mode. Setter also configures direct channel calls before
+  the first runtime tick. Explicit offline/test hosts inherit the Assets policy
+  unless overridden. Cold modern SFX/music guards now use the audio policy.
+- Regenerated docs/api and logged d36d62998490cf17 -> 102009774599dc55.
+  ADR 0071 records initialization migration and remaining subsystem boundaries.
+
+Compilation:
+- Release workspace/all-target check passed with desktop krkr, arc-formats and
+  acoustics-obvhs features. The desktop no-default-features reallive+avg32 check
+  also passed, without scripting or audio-device output enabled. Existing CBG,
+  RealLive and minimal-CLI warnings remain. No CI or remote build ran.
+
+Behavior validation:
+- Audio library suites passed **47 tests**, one owner-asset NWA case ignored.
+  Engine/native/JS bridge suites passed **41 tests**, three font-dependent cases
+  ignored. API documentation/signature checks passed **six tests**. Total:
+  **94 distinct Rust tests passed**, four ignored cases excluded. Separate
+  focused reruns are not counted again. Python 3.11 tooling passed **189 tests**.
+- Six standalone SceneAudio tests verify full-pool pressure, cancellation before
+  admission/publication, progress of unrelated voices, same-asset replay and
+  superseded results, gain/bus changes without epoch reset, restore at frame
+  zero, EOF without implicit replay, failure with old playback retained, pause
+  and all 128 offline declarations in one sync. Excess realtime declarations
+  eventually publish in bounded batches. Reader probes remain off the owner.
+- Authored NWA data with an injected read fault proves streaming status records
+  the error while already-valid PCM remains playable. No owner game/font asset
+  or audio device was used for this case.
+- Engine tests execute data VM Play/Wait/Stop while workers are blocked, check
+  Stop-before-ready cannot leak playback, verify two client roots/readiness,
+  inspect visible failed channel state, and reconstruct logical voices after
+  restore without saved handles. Existing pooled/canonical output and replay
+  regressions pass through the new bridge.
+- Original RealLive/AVG32 bytecode fixtures now explicitly keep native Assets
+  mode blocking while overriding audio async. Their original pending events,
+  sound waits and failure checks pass with that independent mode. Direct native
+  channel preparation before the first tick is also covered by restore tests.
+- Corrected two test timing assumptions: canceled worker inputs retain storage
+  until actually dropped, and an asynchronous onInit rejection may be observed
+  at init, start or frame. The tests retain their reservation/fault assertions;
+  production memory limits and error contracts were not weakened.
+- Evidence in target/verification: scene-audio-final-library-tests.log,
+  scene-audio-final-bridge-tests.log, scene-audio-final-api-tests.log,
+  scene-audio-core-tests.log, scene-audio-workspace-check.log,
+  scene-audio-minimal-check.log and scene-audio-python-tests.log.
+
+Remaining boundaries:
+- Final mixing, scratch/allocation/disposal, device output/queuing and final pool
+  destruction remain owner/synchronous work. Media's encoded AudioRequest path
+  still opens/decodes on the owner. No all-audio/all-engine async completion or
+  hard realtime guarantee is claimed by this stage.
+- Native directory discovery, boot/scenario and unmigrated image/video work
+  retain their existing boundaries. No new original opcode/save/game profile,
+  commercial-game run, device/GPU/hardware-RT or Windows/Linux result is claimed.
+- Reflection/reverb, diffraction and near-field propagation remain acoustic
+  work; the larger modern engine/VN capability objective remains active.

@@ -605,6 +605,17 @@
       "global": "audio",
       "methods": [
         {
+          "doc": "Desired SceneState epoch and derived queued/loading/playing/paused/ended/failed readiness, position and error. Stopped declarations take precedence; frame synchronization prepares/publishes playback.",
+          "name": "channelStatus",
+          "params": [
+            {
+              "name": "channel",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
           "doc": "Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics.",
           "name": "play",
           "params": [
@@ -4691,6 +4702,98 @@
     }
   ],
   "data": [
+    {
+      "doc": "Derived readiness, separate from the canonical voice declaration/save data.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "stopped",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "queued",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "loading",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "playing",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "paused",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "ended",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "SceneVoicePhase",
+      "used_by": "SceneVoiceStatus.phase"
+    },
+    {
+      "doc": "Client-scoped readiness product; no worker/device pointers or saved cursors.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Owning client namespace.",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Canonical client-local channel.",
+          "name": "channel",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Desired logical playback epoch, zero when stopped.",
+          "name": "epoch",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Current preparation/playback phase.",
+          "name": "phase",
+          "rust_type": "SceneVoicePhase"
+        },
+        {
+          "default": null,
+          "doc": "Ready playback position; not a saved sample cursor.",
+          "name": "position_seconds",
+          "rust_type": "Option<f64>"
+        },
+        {
+          "default": null,
+          "doc": "Retained preparation or streaming failure.",
+          "name": "error",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "SceneVoiceStatus",
+      "used_by": "Audio.channelStatus"
+    },
     {
       "doc": "Deferred, client-capability audio source. No bytes or device pointers in VM state.",
       "fields": [
@@ -11511,7 +11614,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "d36d62998490cf17",
+  "fingerprint": "102009774599dc55",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

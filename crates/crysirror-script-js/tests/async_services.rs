@@ -152,10 +152,11 @@ fn cancellation_and_failed_jobs_reject_catchably_and_async_hook_errors_fault() {
     assert_eq!(app.state(), AppState::Running);
     let (_dir, mut failed) =
         self::app("async function onInit(){await text.measureAsync('missing',20,'hello');}");
-    match failed.init() {
+    // A worker rejection can become observable at init, start or frame.
+    // Every lifecycle entry must preserve the same fault/error contract.
+    match failed.init().and_then(|_| failed.start()) {
         Err(error) => assert!(format!("{error:#}").contains("rejected")),
         Ok(()) => {
-            failed.start().unwrap();
             let end = Instant::now() + Duration::from_secs(5);
             loop {
                 if let Err(error) = failed.frame(0, InputFrame::default()) {

@@ -708,6 +708,12 @@ impl Mixer {
             *v = None
         }
     }
+    /// Route an existing voice without replacing its source or timeline.
+    pub fn set_voice_bus(&mut self, client: u32, h: VoiceHandle, bus: Bus) -> Result<()> {
+        ensure!(bus != Bus::Master, "master is not a voice bus");
+        self.voice(client, h)?.spec.bus = bus;
+        Ok(())
+    }
     pub fn set_gain(&mut self, client: u32, h: VoiceHandle, gain: f32) -> Result<()> {
         ensure!(
             gain.is_finite() && (0.0..=4.).contains(&gain),

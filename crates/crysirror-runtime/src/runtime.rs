@@ -565,6 +565,7 @@ pub struct Runtime {
     pub host: SharedHost,
     pub assets: Assets,
     pub restored: u64,
+    audio_nonblocking: Option<bool>,
     sessions: Vec<Session>,
     registry: AdapterRegistry,
     fingerprint: String,
@@ -813,6 +814,7 @@ impl Runtime {
             profiler: assets.profiler.clone(),
             assets,
             restored: 0,
+            audio_nonblocking: None,
             sessions,
             registry,
             fingerprint,
@@ -882,6 +884,20 @@ impl Runtime {
             frames_presented: p.player.revision,
         })
     }
+    /// Audio may migrate independently of native image/scenario loading.
+    /// Without an override, explicit offline/test hosts inherit Assets mode.
+    pub fn audio_is_nonblocking(&self) -> bool {
+        self.audio_nonblocking
+            .unwrap_or_else(|| self.assets.is_nonblocking())
+    }
+    /// Host execution policy, never project/VM save data. Desktop enables this
+    /// before script initialization and native VM execution.
+    pub fn set_audio_nonblocking(&mut self, enabled: bool) {
+        self.audio_nonblocking = Some(enabled);
+        self.host
+            .channel_audio
+            .configure_preparation(self.assets.io_tasks(), enabled);
+    }
     pub fn tick(&mut self, delta_ms: u64, input: InputFrame) -> Result<()> {
         let profile_frame = self.profiler.begin_frame();
         let _tick_span = self.profiler.span(profile_frame, "runtime.tick");
@@ -925,7 +941,7 @@ impl Runtime {
         self.host.decoders = self.assets.decoders.clone();
         self.host
             .channel_audio
-            .configure_preparation(self.assets.io_tasks(), self.assets.is_nonblocking());
+            .configure_preparation(self.assets.io_tasks(), self.audio_is_nonblocking());
         self.host.channel_audio.poll_preparations()?;
         let vm_span = self.profiler.span(profile_frame, "vm.step");
         for s in &mut self.sessions {
@@ -1072,7 +1088,7 @@ impl Runtime {
     pub fn inspect(&self) -> serde_json::Value {
         serde_json::json!({"name":self.project.name,"frame":self.host.scene.frame(),"time_ms":self.host.clock_ms,
             "visuals":self.host.scene.visuals().len(),"voices":self.host.scene.voices().len(),
-            "profile":self.profiler.snapshot(),"tasks":self.assets.tasks_inspect(),"channel_audio":self.host.channel_audio.mixer.stats(),"media":self.host.media.inspect(),"vfx":self.vfx.inspect(None),
+            "profile":self.profiler.snapshot(),"tasks":self.assets.tasks_inspect(),"channel_audio":self.host.channel_audio.mixer.stats(),"audio_nonblocking":self.audio_is_nonblocking(),"media":self.host.media.inspect(),"vfx":self.vfx.inspect(None),
             "engine":self.host.engine,
             "adapters":self.registry.names(),"sessions":self.sessions.iter().map(|s|serde_json::json!({
                 "name":s.name,"client":s.id.0,"engine":s.vm.engine_id(),"yield":format!("{:?}",s.yielded),"native":serde_json::from_slice::<serde_json::Value>(&s.vm.diagnostics()).ok()

@@ -30,6 +30,9 @@ fn wav(value: i16) -> Vec<u8> {
     b
 }
 fn app() -> (tempfile::TempDir, App) {
+    app_program(json!([]))
+}
+fn app_program(program: serde_json::Value) -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
     for (name, amplitude) in [("a", 16384), ("b", 8192)] {
         std::fs::create_dir_all(dir.path().join(format!("assets/{name}"))).unwrap();
@@ -39,7 +42,8 @@ fn app() -> (tempfile::TempDir, App) {
         )
         .unwrap();
     }
-    let project = json!({"schema":2,"name":"audio","content_revision":"1","assets":"assets","canvas":[64,64],"clients":[{"name":"a","adapter":"crysirror-script-v1","game":"a","asset_prefix":"a"},{"name":"b","adapter":"crysirror-script-v1","game":"b","asset_prefix":"b"}]});
+    let mut project = json!({"schema":2,"name":"audio","content_revision":"1","assets":"assets","canvas":[64,64],"clients":[{"name":"a","adapter":"crysirror-script-v1","game":"a","asset_prefix":"a"},{"name":"b","adapter":"crysirror-script-v1","game":"b","asset_prefix":"b"}]});
+    project["clients"][0]["program"] = program;
     let path = dir.path().join("project.json");
     std::fs::write(&path, serde_json::to_vec(&project).unwrap()).unwrap();
     let mut app = App::new(
@@ -314,11 +318,29 @@ fn retained_result_capacity_bounds_pending_and_published_jobs() {
         call(&mut app, "cancelPlaybackJob", &[t]);
     }
     gate.finish();
-    let t = call(
-        &mut app,
-        "beginPreloadSfx",
-        &[Value::Str("tone.wav".into())],
-    );
+    // Cancellation releases the ticket immediately. Worker-owned closures
+    // retain their memory reservations until those workers actually drop them.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let t = loop {
+        match invoke(
+            &mut app,
+            "beginPreloadSfx",
+            &[Value::Str("tone.wav".into())],
+        ) {
+            Ok(ticket) => break ticket,
+            Err(error) => {
+                assert!(
+                    format!("{error:#}").contains("audio residency reservation exceeded"),
+                    "{error:#}"
+                );
+                assert!(
+                    Instant::now() < deadline,
+                    "canceled worker storage was retained"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    };
     assert_eq!(wait(&mut app, &t)["state"], "ready");
 }
 
@@ -379,8 +401,8 @@ fn runtime_restore_cancels_native_channel_preparation_before_publication() {
         service::{AudioAsset, AudioParameters, AudioPreparePhase, AudioRequest, HostServices},
     };
     let (_dir, mut app) = app();
-    app.runtime_mut().unwrap().assets.set_nonblocking(true);
-    output(&mut app, 0);
+    app.runtime_mut().unwrap().set_audio_nonblocking(true);
+    assert!(!app.runtime().unwrap().assets.is_nonblocking());
     let saved = app.runtime().unwrap().snapshot().unwrap();
     let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
     let r = app.runtime_mut().unwrap();
@@ -414,4 +436,114 @@ fn runtime_restore_cancels_native_channel_preparation_before_publication() {
             .audio_playing(ClientId(1), 123)
             .unwrap()
     );
+}
+
+fn canonical_ready(app: &mut App, channel: i64) {
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        output(app, 0);
+        let s = call(app, "channelStatus", &[Value::Int(channel)]).to_json();
+        assert!(s["error"].is_null(), "{s}");
+        if s["phase"] == "playing" {
+            return;
+        }
+        assert!(Instant::now() < end, "{s}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+#[test]
+fn data_vm_canonical_play_is_deferred_and_stop_before_ready_cannot_leak_playback() {
+    let (_dir, mut app) = app_program(
+        json!([{"op":"play","channel":3,"asset":"tone.wav","looping":true,"gain_milli":500},{"op":"wait","ms":16},{"op":"stop","channel":3},{"op":"halt"}]),
+    );
+    app.runtime_mut().unwrap().assets.set_nonblocking(true);
+    let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
+    assert!(output(&mut app, 0).is_empty());
+    let pending = call(&mut app, "channelStatus", &[Value::Int(3)]).to_json();
+    assert_eq!(pending["phase"], "loading");
+    assert!(output(&mut app, 16).iter().flatten().all(|v| *v == 0.));
+    assert_eq!(
+        call(&mut app, "channelStatus", &[Value::Int(3)]).to_json()["phase"],
+        "stopped"
+    );
+    gate.finish();
+    assert!(output(&mut app, 16).iter().flatten().all(|v| *v == 0.));
+}
+#[test]
+fn canonical_worker_readiness_is_scoped_and_restore_keeps_logical_save_without_handles() {
+    let (_dir, mut app) = app();
+    app.runtime_mut().unwrap().set_audio_nonblocking(true);
+    assert!(!app.runtime().unwrap().assets.is_nonblocking());
+    let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
+    call(
+        &mut app,
+        "play",
+        &[
+            Value::Int(7),
+            v(json!({"asset":"tone.wav","looping":true,"gain":0.5,"bus":"music"})),
+        ],
+    );
+    assert_eq!(
+        call(&mut app, "channelStatus", &[Value::Int(7)]).to_json()["phase"],
+        "queued"
+    );
+    output(&mut app, 0);
+    let saved = app.runtime().unwrap().snapshot().unwrap();
+    app.context().state().unwrap().client = ClientId(2);
+    assert_eq!(
+        call(&mut app, "channelStatus", &[Value::Int(7)]).to_json()["phase"],
+        "stopped"
+    );
+    call(
+        &mut app,
+        "play",
+        &[Value::Int(7), v(json!({"asset":"tone.wav","looping":true}))],
+    );
+    output(&mut app, 0);
+    gate.finish();
+    canonical_ready(&mut app, 7);
+    app.context().state().unwrap().client = ClientId(1);
+    canonical_ready(&mut app, 7);
+    near(output(&mut app, 16)[0][0], 0.5); // a:0.5*0.5 + b:0.25
+    let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
+    app.runtime_mut().unwrap().restore(&saved).unwrap();
+    assert!(output(&mut app, 16).iter().flatten().all(|v| *v == 0.));
+    assert_eq!(
+        call(&mut app, "channelStatus", &[Value::Int(7)]).to_json()["phase"],
+        "loading"
+    );
+    app.context().state().unwrap().client = ClientId(2);
+    assert_eq!(
+        call(&mut app, "channelStatus", &[Value::Int(7)]).to_json()["phase"],
+        "stopped"
+    );
+    app.context().state().unwrap().client = ClientId(1);
+    gate.finish();
+    canonical_ready(&mut app, 7);
+    near(output(&mut app, 16)[0][0], 0.25);
+}
+#[test]
+fn canonical_failed_preparation_reports_channel_and_faults_the_frame_visibly() {
+    let (_dir, mut app) = app();
+    app.runtime_mut().unwrap().assets.set_nonblocking(true);
+    call(
+        &mut app,
+        "play",
+        &[Value::Int(5), v(json!({"asset":"missing.wav"}))],
+    );
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        match app.frame(0, InputFrame::default()) {
+            Ok(_) => {}
+            Err(e) => {
+                assert!(format!("{e:#}").contains("canonical audio client 1 channel 5"));
+                break;
+            }
+        }
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let status = call(&mut app, "channelStatus", &[Value::Int(5)]).to_json();
+    assert_eq!(status["phase"], "failed");
+    assert!(status["error"].as_str().is_some_and(|e| !e.is_empty()));
 }

@@ -13,6 +13,7 @@ pub mod decoder;
 pub mod legacy_pcm;
 pub mod mixer;
 pub mod native;
+pub mod scene;
 
 #[cfg(feature = "rodio-output")]
 pub mod pcm_output;
@@ -101,6 +102,8 @@ impl<D: AudioDevice> AudioSystem<D> {
             * u64::from(*self.buses.get(&bus).unwrap_or(&1000)))
             / 1_000_000) as u16
     }
+    /// Explicit synchronous compatibility path: load/device callbacks run on
+    /// this caller. Interactive hosts use SceneAudio with worker preparation.
     /// Device operations follow committed logical state. Device/asset failures
     /// are reported; this does not claim to roll back already-issued audio.
     pub fn sync(

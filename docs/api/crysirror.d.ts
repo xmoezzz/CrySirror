@@ -17,6 +17,8 @@ declare class Assets {
 declare class Audio {
   /** Mixer output frames per second. */
   readonly sampleRate: number;
+  /** Desired SceneState epoch and derived queued/loading/playing/paused/ended/failed readiness, position and error. Stopped declarations take precedence; frame synchronization prepares/publishes playback. */
+  channelStatus(channel: number): Record<string, any>;
   /** Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics. */
   play(channel: number, voice: Record<string, any>): void;
   /** Stop a classic channel. */

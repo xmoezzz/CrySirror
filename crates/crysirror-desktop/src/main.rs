@@ -345,6 +345,7 @@ fn run() -> Result<()> {
         } => {
             let state_dir = state_dir(&project, data_dir)?;
             let mut rt = load_runtime(&project, &state_dir)?;
+            rt.set_audio_nonblocking(true);
             app::load_fonts(&mut rt, font.as_deref())?;
             rt.assets
                 .set_prepared_budget(usize::try_from(u64::from(asset_cache_mib) * 1024 * 1024)?)?;

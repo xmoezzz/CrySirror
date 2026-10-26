@@ -113,3 +113,12 @@ and release the receipt. Ready is successful publication, separate from the
 voice's current playing/ended state. RealLive and AVG32 now use this boundary
 for their mapped playback operations. See [ADR 0070](adr/0070-native-channel-audio-readiness.md)
 for loop/start/intro policy, cancellation and remaining synchronous paths.
+
+
+SceneState/data-VM voice declarations now use the shared SceneAudio bridge in
+both App and plain desktop playback. `Audio.channelStatus(channel)` exposes
+queued/loading/playing/paused/ended/failed readiness and scoped errors. Logical
+Play/Wait/Stop and save epochs remain separate from worker completion. A time
+wait is not a readiness fence. Desktop audio runs asynchronously even when a
+native image/scenario profile retains blocking Assets mode; Runtime provides
+an independent audio execution override. See [ADR 0071](adr/0071-canonical-audio-worker-bridge.md).

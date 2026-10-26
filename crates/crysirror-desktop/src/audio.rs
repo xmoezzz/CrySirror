@@ -6,7 +6,9 @@ use crysirror_runtime::Runtime;
 pub struct Audio {
     muted: bool,
     #[cfg(feature = "audio")]
-    output: crysirror_audio::AudioSystem<crysirror_audio::legacy_pcm::MixerDevice>,
+    scene_audio: crysirror_audio::scene::SceneAudio,
+    #[cfg(feature = "audio")]
+    mixer: crysirror_audio::mixer::Mixer,
     #[cfg(feature = "audio")]
     mixer_output: crysirror_audio::pcm_output::PcmOutput,
     #[cfg(feature = "audio")]
@@ -21,7 +23,13 @@ impl Audio {
         Self {
             muted,
             #[cfg(feature = "audio")]
-            output: crysirror_audio::AudioSystem::new(Default::default()),
+            scene_audio: Default::default(),
+            #[cfg(feature = "audio")]
+            mixer: crysirror_audio::mixer::Mixer::new(crysirror_audio::mixer::MixerConfig {
+                max_voices: crysirror_core::state::Limits::default().voice_count,
+                ..Default::default()
+            })
+            .expect("canonical mixer limits"),
             #[cfg(feature = "audio")]
             mixer_output: Default::default(),
             #[cfg(feature = "audio")]
@@ -41,9 +49,21 @@ impl Audio {
         }
         #[cfg(feature = "audio")]
         {
-            self.output.sync(&rt.host.scene, rt.restored, |id, voice| {
-                rt.assets.read_for(id.client, voice.asset.relative())
-            })?;
+            let pool = rt.assets.io_tasks();
+            let live = rt.audio_is_nonblocking();
+            self.scene_audio.sync(
+                &mut self.mixer,
+                &rt.host.scene,
+                rt.restored,
+                &pool,
+                live,
+                |client| {
+                    rt.host
+                        .fs
+                        .storage(client)
+                        .map_err(|e| anyhow::anyhow!("{e}"))
+                },
+            )?;
             if self.mixer_restored != Some(rt.restored) {
                 self.mixer_output.reset();
                 self.mixer_restored = Some(rt.restored);
@@ -62,7 +82,9 @@ impl Audio {
             );
             let mut channels = vec![[0.; 2]; (numerator / 1000) as usize];
             self.remainder = numerator % 1000;
-            self.output.render_pcm(&mut channels)?;
+            for block in channels.chunks_mut(4096) {
+                self.mixer.render(block)?;
+            }
             self.mixer_output.submit(&mix_pcm(&channels, &native)?)
         }
         #[cfg(not(feature = "audio"))]
@@ -75,19 +97,21 @@ impl Audio {
             Ok(())
         }
     }
-    pub fn pause(&mut self) {
+    pub fn pause(&mut self) -> Result<()> {
         #[cfg(feature = "audio")]
         {
-            self.output.pause();
+            self.scene_audio.set_paused(&mut self.mixer, true)?;
             self.mixer_output.pause();
         }
+        Ok(())
     }
-    pub fn resume(&mut self) {
+    pub fn resume(&mut self) -> Result<()> {
         #[cfg(feature = "audio")]
         {
-            self.output.resume();
+            self.scene_audio.set_paused(&mut self.mixer, false)?;
             self.mixer_output.resume();
         }
+        Ok(())
     }
     #[cfg(feature = "scripting")]
     pub fn sync_mixed(
