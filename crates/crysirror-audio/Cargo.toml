@@ -11,6 +11,7 @@ rodio-output = ["dep:rodio"]
 
 [dependencies]
 crysirror-core.workspace = true
+crysirror-tasks.workspace = true
 crysirror-acoustics.workspace = true
 anyhow.workspace = true
 serde.workspace = true

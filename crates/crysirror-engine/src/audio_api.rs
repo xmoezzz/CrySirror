@@ -45,12 +45,13 @@ pub struct AudioRuntime {
     pub mixer: Mixer,
     legacy: BTreeMap<ChannelId, Legacy>,
     routes: BTreeMap<ChannelId, Bus>,
-    clips: BTreeMap<(u32, String), Clip>,
-    clip_bytes: usize,
+    pub(crate) clips: BTreeMap<(u32, String), Clip>,
+    pub(crate) clip_bytes: usize,
+    pub(crate) jobs: crate::audio_async::AudioJobs,
     pub(crate) attachments: BTreeMap<(u32, u32, u64), Attachment>,
     pub acoustics: crate::acoustics_api::AcousticsRuntime,
     pub binaural: crate::binaural_api::BinauralRuntime,
-    music: BTreeMap<(u32, String), VoiceHandle>,
+    pub(crate) music: BTreeMap<(u32, String), VoiceHandle>,
     listeners: BTreeMap<u32, Listener>,
     restored: Option<u64>,
     remainder: u64,
@@ -64,6 +65,7 @@ impl Default for AudioRuntime {
             routes: BTreeMap::new(),
             clips: BTreeMap::new(),
             clip_bytes: 0,
+            jobs: Default::default(),
             attachments: BTreeMap::new(),
             acoustics: Default::default(),
             binaural: Default::default(),
@@ -81,6 +83,7 @@ impl AudioRuntime {
         std::mem::take(&mut self.output)
     }
     pub fn reset_playback(&mut self) {
+        self.jobs.reset();
         self.mixer.clear();
         self.legacy.clear();
         self.attachments.clear();
@@ -90,6 +93,14 @@ impl AudioRuntime {
         self.acoustics.reset();
         self.binaural.reset();
     }
+}
+pub(crate) fn sync_generation(state: &mut crate::EngineState) {
+    let generation = state.runtime.restored;
+    let a = &mut state.mixer_audio;
+    if a.restored.is_some_and(|old| old != generation) {
+        a.reset_playback();
+    }
+    a.restored = Some(generation);
 }
 fn key(h: VoiceHandle) -> (u32, u32, u64) {
     (h.client, h.slot, h.generation)
@@ -124,6 +135,10 @@ fn clip(cx: &mut EngineContext, client: u32, path: &str) -> Result<Clip> {
     if let Some(clip) = cx.state()?.mixer_audio.clips.get(&k) {
         return Ok(clip.clone());
     }
+    ensure!(
+        !cx.state()?.runtime.assets.is_nonblocking(),
+        "uncached SFX requires Audio.playSfxAsync or preloadSfxAsync in a realtime host"
+    );
     let clip = decoder::decode_clip(source(cx, client, path)?)?;
     let bytes = clip.frames() * 8;
     let s = cx.state()?;
@@ -138,14 +153,8 @@ fn clip(cx: &mut EngineContext, client: u32, path: &str) -> Result<Clip> {
 /// Called after world/native VM updates and late update, once per App frame.
 pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
     ensure!(dt_ms <= 60000, "audio frame exceeds 60 seconds");
-    let restored = cx.state()?.runtime.restored;
-    {
-        let a = &mut cx.state()?.mixer_audio;
-        if a.restored.is_some_and(|n| n != restored) {
-            a.reset_playback()
-        }
-        a.restored = Some(restored);
-    }
+    sync_generation(cx.state()?);
+    crate::audio_async::poll(cx.state()?)?;
     crate::acoustics_api::poll(cx.state()?)?;
     crate::binaural_api::poll(cx.state()?)?;
     let current = {
@@ -403,12 +412,20 @@ fn info() -> &'static ClassInfo {
         method("clearAcousticScene",vec![],T::Void,"Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene."),
         method("acousticStats",vec![],T::Map,"Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement."),
         method("acousticVoice",vec![("handle",T::Map)],T::Map,"Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy."),
-        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Returns scoped generation handle."),
-        method("playRandom",vec![("name",T::String),("container",T::Map),("voice",T::Map)],T::Map,"Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec."),
-        method("playMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Map,"Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true."),
+        method("beginPlaySfx",vec![("voice",T::Map)],T::Int,"Prepare SFX on bounded workers and publish a shared mixer voice; playbackStatus returns result.handle."),
+        method("beginPreloadSfx",vec![("asset",T::String)],T::Int,"Decode and cache SFX on workers without starting a voice."),
+        method("beginPlayMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Int,"Open and prewarm bounded streaming music on workers; old music fades only after successful publication."),
+        method("playbackStatus",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed audio preparation or seek; owner polling publishes ready playback."),
+        method("cancelPlaybackJob",vec![("ticket",T::Int)],T::Void,"Cancel/release an audio job. Pending playback cannot publish; already published voices keep playing. Pending seek restores the prior logical position asynchronously."),
+        method("beginSeekVoice",vec![("handle",T::Map),("source_frame",T::Int)],T::Int,"Exact nonblocking seek for resident or worker-buffered sources. A newer seek supersedes an older one; pending seeks freeze the voice clock."),
+        method("sourceStatus",vec![("handle",T::Map)],T::Any,"Worker stream queue, decoded frame count, seek generation and errors, or null for a resident source."),
+        method("clearSfxCache",vec![],T::Void,"Drop this client's cached clips. Playing voices retain their own PCM and residency receipts."),
+        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle."),
+        method("playRandom",vec![("name",T::String),("container",T::Map),("voice",T::Map)],T::Map,"Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants."),
+        method("playMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Map,"Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync."),
         method("stopVoice",vec![("handle",T::Map),("fade_ms",T::Number)],T::Void,"Stop immediately or sample-accurate fade out."),
         method("pauseVoice",vec![("handle",T::Map),("paused",T::Bool)],T::Void,"Pause without advancing the source or fade clock."),
-        method("seekVoice",vec![("handle",T::Map),("frame",T::Int)],T::Void,"Seek exactly to a decoded source frame."),
+        method("seekVoice",vec![("handle",T::Map),("frame",T::Int)],T::Void,"Synchronous exact seek. Worker-buffered streams require beginSeekVoice/seekVoiceAsync."),
         method("setVoice",vec![("handle",T::Map),("options",T::Map)],T::Void,"Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed."),
         method("voice",vec![("handle",T::Map)],T::Map,"{playing,position_seconds?}; stale/stolen/ended handles are inactive."),
         method("setBus",vec![("bus",T::String),("settings",T::Map)],T::Void,"master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}."),
@@ -417,7 +434,7 @@ fn info() -> &'static ClassInfo {
         method("setVoiceLimit",vec![("limit",T::Int)],T::Void,"Set this client's pool limit within the host's global budget; stop voices before lowering below the active count."),
         method("setSeed",vec![("seed",T::Int)],T::Void,"Reset this client's deterministic variant generator and repeat history."),
         method("setListener",vec![("listener",T::Any)],T::Void,"{position,forward,up}; null restores automatic camera listener."),
-        method("stats",vec![],T::Map,"Mixer active/stolen/rejected voices, rendered frames and unclipped peak."),
+        method("stats",vec![],T::Map,"Mixer active/stolen/rejected voices, rendered frames, per-voice underrun frames and unclipped peak."),
     ]})
 }
 fn arg<'a>(args: &'a [Value], i: usize, name: &str) -> Result<&'a Value> {
@@ -455,7 +472,7 @@ fn entity(cx: &mut EngineContext, value: &Value) -> Result<EntityHandle> {
     s.runtime.host.engine.world.entity(h)?;
     Ok(h)
 }
-fn voice_options(
+pub(crate) fn voice_options(
     cx: &mut EngineContext,
     value: &Value,
     asset_required: bool,
@@ -541,9 +558,16 @@ fn attach(
     handle: VoiceHandle,
     attachment: Option<Attachment>,
 ) -> Result<()> {
+    attach_state(cx.state()?, handle, attachment)
+}
+pub(crate) fn attach_state(
+    state: &mut crate::EngineState,
+    handle: VoiceHandle,
+    attachment: Option<Attachment>,
+) -> Result<()> {
     if let Some(mut a) = attachment {
         a.handle = handle;
-        let runtime = &mut cx.state()?.mixer_audio;
+        let runtime = &mut state.mixer_audio;
         runtime
             .attachments
             .retain(|_, a| runtime.mixer.is_playing(a.handle.client, a.handle));
@@ -555,8 +579,8 @@ fn attach(
                 .set_acoustic_gains(handle.client, handle, Some([0.; 3]))?;
         }
         if binaural {
-            if let Err(error) = crate::binaural_api::enable(cx.state()?, handle) {
-                let a = &mut cx.state()?.mixer_audio;
+            if let Err(error) = crate::binaural_api::enable(state, handle) {
+                let a = &mut state.mixer_audio;
                 a.attachments.remove(&key(handle));
                 a.mixer.stop(handle.client, handle, 0.)?;
                 return Err(error);
@@ -570,6 +594,7 @@ impl Class for AudioClass {
         info()
     }
     fn get(&self, cx: &mut EngineContext, _: ObjectId, p: &str) -> Result<Value> {
+        sync_generation(cx.state()?);
         match p {
             "sampleRate" => Ok(Value::Int(
                 cx.state()?.mixer_audio.mixer.sample_rate().into(),
@@ -584,6 +609,10 @@ impl Class for AudioClass {
         name: &str,
         args: &[Value],
     ) -> Result<Value> {
+        sync_generation(cx.state()?);
+        if let Some(result) = crate::audio_async::call(cx, name, args)? {
+            return Ok(result);
+        }
         if let Some(result) = crate::binaural_api::call(cx.state()?, name, args)? {
             return Ok(result);
         }
@@ -686,6 +715,10 @@ impl Class for AudioClass {
                 ));
             }
             "playMusic" => {
+                ensure!(
+                    !cx.state()?.runtime.assets.is_nonblocking(),
+                    "realtime music requires Audio.playMusicAsync"
+                );
                 let name = arg(args, 0, "music name")?.as_str()?.to_owned();
                 ensure!(!name.is_empty() && name.len() <= 256, "music name");
                 let mut value = arg(args, 1, "voice")?.clone();

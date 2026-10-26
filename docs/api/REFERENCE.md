@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `c619eaa9bacd0fc3`
+API fingerprint: `2d945b181a39e802`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -15,7 +15,7 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 - [Globals](#globals)
 - Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [Vfx](#class-vfx), [World](#class-world)
 - [Commands](#commands)
-- Data: [HrtfEarOrder](#hrtfearorder), [HrtfOptions](#hrtfoptions), [HrirAsset](#hrirasset), [HrirMeasurement](#hrirmeasurement), [AcousticBackend](#acousticbackend), [AcousticSceneSpec](#acousticscenespec), [AcousticMesh](#acousticmesh), [AcousticMaterial](#acousticmaterial), [AcousticSource](#acousticsource), [AcousticQuery](#acousticquery), [DirectPath](#directpath), [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand), [MenuSpec](#menuspec), [MenuItemSpec](#menuitemspec), [OperationStatus](#operationstatus), [OperationState](#operationstate), [UiEvent](#uievent), [WidgetId](#widgetid)
+- Data: [StreamBufferSpec](#streambufferspec), [SourceBufferStatus](#sourcebufferstatus), [SeekProgress](#seekprogress), [HrtfEarOrder](#hrtfearorder), [HrtfOptions](#hrtfoptions), [HrirAsset](#hrirasset), [HrirMeasurement](#hrirmeasurement), [AcousticBackend](#acousticbackend), [AcousticSceneSpec](#acousticscenespec), [AcousticMesh](#acousticmesh), [AcousticMaterial](#acousticmaterial), [AcousticSource](#acousticsource), [AcousticQuery](#acousticquery), [DirectPath](#directpath), [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand), [MenuSpec](#menuspec), [MenuItemSpec](#menuitemspec), [OperationStatus](#operationstatus), [OperationState](#operationstate), [UiEvent](#uievent), [WidgetId](#widgetid)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -86,12 +86,20 @@ Script global: `audio`.
 | `clearAcousticScene(—)` | `void` | Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene. |
 | `acousticStats(—)` | `Record<string, any>` | Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement. |
 | `acousticVoice(handle: Record<string, any>)` | `Record<string, any>` | Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. |
-| `playSfx(voice: Record<string, any>)` | `Record<string, any>` | {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Returns scoped generation handle. |
-| `playRandom(name: string, container: Record<string, any>, voice: Record<string, any>)` | `Record<string, any>` | Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. |
-| `playMusic(name: string, voice: Record<string, any>, crossfade_ms: number)` | `Record<string, any>` | Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. |
+| `beginPlaySfx(voice: Record<string, any>)` | `number` | Prepare SFX on bounded workers and publish a shared mixer voice; playbackStatus returns result.handle. |
+| `beginPreloadSfx(asset: string)` | `number` | Decode and cache SFX on workers without starting a voice. |
+| `beginPlayMusic(name: string, voice: Record<string, any>, crossfade_ms: number)` | `number` | Open and prewarm bounded streaming music on workers; old music fades only after successful publication. |
+| `playbackStatus(ticket: number)` | `Record<string, any>` | Client/restore-scoped pending/ready/failed audio preparation or seek; owner polling publishes ready playback. |
+| `cancelPlaybackJob(ticket: number)` | `void` | Cancel/release an audio job. Pending playback cannot publish; already published voices keep playing. Pending seek restores the prior logical position asynchronously. |
+| `beginSeekVoice(handle: Record<string, any>, source_frame: number)` | `number` | Exact nonblocking seek for resident or worker-buffered sources. A newer seek supersedes an older one; pending seeks freeze the voice clock. |
+| `sourceStatus(handle: Record<string, any>)` | `any` | Worker stream queue, decoded frame count, seek generation and errors, or null for a resident source. |
+| `clearSfxCache(—)` | `void` | Drop this client's cached clips. Playing voices retain their own PCM and residency receipts. |
+| `playSfx(voice: Record<string, any>)` | `Record<string, any>` | {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle. |
+| `playRandom(name: string, container: Record<string, any>, voice: Record<string, any>)` | `Record<string, any>` | Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants. |
+| `playMusic(name: string, voice: Record<string, any>, crossfade_ms: number)` | `Record<string, any>` | Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync. |
 | `stopVoice(handle: Record<string, any>, fade_ms: number)` | `void` | Stop immediately or sample-accurate fade out. |
 | `pauseVoice(handle: Record<string, any>, paused: boolean)` | `void` | Pause without advancing the source or fade clock. |
-| `seekVoice(handle: Record<string, any>, frame: number)` | `void` | Seek exactly to a decoded source frame. |
+| `seekVoice(handle: Record<string, any>, frame: number)` | `void` | Synchronous exact seek. Worker-buffered streams require beginSeekVoice/seekVoiceAsync. |
 | `setVoice(handle: Record<string, any>, options: Record<string, any>)` | `void` | Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed. |
 | `voice(handle: Record<string, any>)` | `Record<string, any>` | {playing,position_seconds?}; stale/stolen/ended handles are inactive. |
 | `setBus(bus: string, settings: Record<string, any>)` | `void` | master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}. |
@@ -100,7 +108,7 @@ Script global: `audio`.
 | `setVoiceLimit(limit: number)` | `void` | Set this client's pool limit within the host's global budget; stop voices before lowering below the active count. |
 | `setSeed(seed: number)` | `void` | Reset this client's deterministic variant generator and repeat history. |
 | `setListener(listener: any)` | `void` | {position,forward,up}; null restores automatic camera listener. |
-| `stats(—)` | `Record<string, any>` | Mixer active/stolen/rejected voices, rendered frames and unclipped peak. |
+| `stats(—)` | `Record<string, any>` | Mixer active/stolen/rejected voices, rendered frames, per-voice underrun frames and unclipped peak. |
 
 Commands issued: `play` → `service.play_audio`, `stop` → `service.stop_audio`.
 
@@ -691,6 +699,45 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 
 Field defaults are the serde defaults (`—`: required, or absent when unset).
 
+### StreamBufferSpec
+
+Used by: Rust BufferedSource::prepare; engine music uses defaults.
+
+Read-ahead dimensions, independent of codec packet storage.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `chunk_frames` | `u32` | `4096` | Frames per decoded chunk, 256..16384. |
+| `prefetch_chunks` | `u32` | `3` | Ready chunks, 2..4, with at most 65536 frames in the regular queue. |
+
+### SourceBufferStatus
+
+Used by: Audio.sourceStatus.
+
+Bounded source-buffer state. Decoder work never enters project/save JSON.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `ready_frames` | `usize` | — | Ready decoded frames, excluding the mixer's small resampling cursor. |
+| `worker_pending` | `bool` | — | One read/seek job owns the decoder while true. |
+| `seek_pending` | `bool` | — | An uncached seek awaits exact decoded-frame completion. |
+| `generation` | `u64` | — | Source timeline generation; stale reads cannot enter a new timeline. |
+| `decoded_frames` | `u64` | — | Successfully decoded frames, including warmup and read-ahead. |
+| `error` | `Option<String>` | — | A visible decoder failure, retained until the source is replaced. |
+
+### SeekProgress
+
+Used by: Rust Mixer::seek_progress.
+
+A seek publishes only once the exact decoded frame is available.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `sequence` | `u64` | — | Monotonic voice-local request sequence; zero denotes cancellation recovery. |
+| `frame` | `u64` | — | Exact decoded source frame requested. |
+| `pending` | `bool` | — | The voice clock stays frozen until ready PCM is published. |
+| `error` | `Option<String>` | — | Retained worker/seek failure, when present. |
+
 ### HrtfEarOrder
 
 Used by: HrtfOptions.ear_order.
@@ -1086,6 +1133,7 @@ Used by: `Assets.stats()` CPU and I/O pools.
 | `workers` | `usize` | — | — |
 | `capacity` | `usize` | — | — |
 | `outstanding` | `usize` | — | — |
+| `reserved` | `usize` | — | Admitted slots not yet submitted; dropping a permit releases its slot. |
 | `running` | `usize` | — | — |
 | `completed` | `u64` | — | — |
 | `cancelled` | `u64` | — | — |
@@ -2850,6 +2898,10 @@ These bindings return CancellablePromise values over the same bounded service jo
 
 | Helper | Parameters | Returns | Native start |
 |---|---|---|---|
+| `Audio.playSfxAsync` | `voice: Record<string, any>` | `CancellablePromise<Record<string, any>>` | `beginPlaySfx` |
+| `Audio.preloadSfxAsync` | `asset: string` | `CancellablePromise<Record<string, any>>` | `beginPreloadSfx` |
+| `Audio.playMusicAsync` | `name: string, voice: Record<string, any>, crossfade_ms: number` | `CancellablePromise<Record<string, any>>` | `beginPlayMusic` |
+| `Audio.seekVoiceAsync` | `handle: Record<string, any>, source_frame: number` | `CancellablePromise<Record<string, any>>` | `beginSeekVoice` |
 | `Audio.prepareHrtfAsync` | `asset: string, options: Record<string, any>` | `CancellablePromise<Record<string, any>>` | `beginHrtf` |
 | `Audio.prepareAcousticsAsync` | `asset: string` | `CancellablePromise<Record<string, any>>` | `beginAcousticScene` |
 | `Audio.traceAcousticsAsync` | `query: Record<string, any>` | `CancellablePromise<Record<string, any>>` | `beginAcousticProbe` |

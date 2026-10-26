@@ -200,6 +200,9 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-runtime/src/assets_async.rs",
         "crates/crysirror-tasks/src/lib.rs",
         "crates/crysirror-tasks/src/table.rs",
+        "crates/crysirror-audio/src/buffered.rs",
+        "crates/crysirror-audio/src/decoder.rs",
+        "crates/crysirror-audio/src/mixer.rs",
         "crates/crysirror-acoustics/src/schema.rs",
         "crates/crysirror-acoustics/src/binaural.rs",
         "crates/crysirror-acoustics/src/direct.rs",
@@ -229,6 +232,9 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("StreamBufferSpec","Rust BufferedSource::prepare; engine music uses defaults",sample::<crysirror_audio::buffered::StreamBufferSpec>(json!({}))),
+        d("SourceBufferStatus","Audio.sourceStatus",None),
+        d("SeekProgress","Rust Mixer::seek_progress",None),
         d("HrtfEarOrder","HrtfOptions.ear_order",Some(json!("left_right"))),
         d("HrtfOptions","Audio.beginHrtf options",sample::<crysirror_acoustics::binaural::HrtfOptions>(json!({}))),
         d("HrirAsset","Audio.beginHrtf JSON asset",sample::<crysirror_acoustics::binaural::HrirAsset>(json!({"sample_rate":48000,"measurements":[{"direction":[0,0,-1],"left":[1],"right":[1]}]}))),

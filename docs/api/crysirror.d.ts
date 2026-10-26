@@ -51,17 +51,33 @@ declare class Audio {
   acousticStats(): Record<string, any>;
   /** Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. */
   acousticVoice(handle: Record<string, any>): Record<string, any>;
-  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Returns scoped generation handle. */
+  /** Prepare SFX on bounded workers and publish a shared mixer voice; playbackStatus returns result.handle. */
+  beginPlaySfx(voice: Record<string, any>): number;
+  /** Decode and cache SFX on workers without starting a voice. */
+  beginPreloadSfx(asset: string): number;
+  /** Open and prewarm bounded streaming music on workers; old music fades only after successful publication. */
+  beginPlayMusic(name: string, voice: Record<string, any>, crossfade_ms: number): number;
+  /** Client/restore-scoped pending/ready/failed audio preparation or seek; owner polling publishes ready playback. */
+  playbackStatus(ticket: number): Record<string, any>;
+  /** Cancel/release an audio job. Pending playback cannot publish; already published voices keep playing. Pending seek restores the prior logical position asynchronously. */
+  cancelPlaybackJob(ticket: number): void;
+  /** Exact nonblocking seek for resident or worker-buffered sources. A newer seek supersedes an older one; pending seeks freeze the voice clock. */
+  beginSeekVoice(handle: Record<string, any>, source_frame: number): number;
+  /** Worker stream queue, decoded frame count, seek generation and errors, or null for a resident source. */
+  sourceStatus(handle: Record<string, any>): any;
+  /** Drop this client's cached clips. Playing voices retain their own PCM and residency receipts. */
+  clearSfxCache(): void;
+  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle. */
   playSfx(voice: Record<string, any>): Record<string, any>;
-  /** Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. */
+  /** Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants. */
   playRandom(name: string, container: Record<string, any>, voice: Record<string, any>): Record<string, any>;
-  /** Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. */
+  /** Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync. */
   playMusic(name: string, voice: Record<string, any>, crossfade_ms: number): Record<string, any>;
   /** Stop immediately or sample-accurate fade out. */
   stopVoice(handle: Record<string, any>, fade_ms: number): void;
   /** Pause without advancing the source or fade clock. */
   pauseVoice(handle: Record<string, any>, paused: boolean): void;
-  /** Seek exactly to a decoded source frame. */
+  /** Synchronous exact seek. Worker-buffered streams require beginSeekVoice/seekVoiceAsync. */
   seekVoice(handle: Record<string, any>, frame: number): void;
   /** Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed. */
   setVoice(handle: Record<string, any>, options: Record<string, any>): void;
@@ -79,7 +95,7 @@ declare class Audio {
   setSeed(seed: number): void;
   /** {position,forward,up}; null restores automatic camera listener. */
   setListener(listener: any): void;
-  /** Mixer active/stolen/rejected voices, rendered frames and unclipped peak. */
+  /** Mixer active/stolen/rejected voices, rendered frames, per-voice underrun frames and unclipped peak. */
   stats(): Record<string, any>;
 }
 /** Client-scoped CPU RGBA bitmaps; paths feed Layers and share its surface limits. Transient pixels are not runtime snapshots. */
@@ -708,6 +724,10 @@ declare const vfx: Vfx;
 
 /** JS/TS service awaits; callbacks run on owner lifecycle entries. */
 interface CancellablePromise<T> extends Promise<T> { readonly ticket: number | null; cancel(): void; }
+interface Audio { playSfxAsync(voice: Record<string, any>): CancellablePromise<Record<string, any>>; }
+interface Audio { preloadSfxAsync(asset: string): CancellablePromise<Record<string, any>>; }
+interface Audio { playMusicAsync(name: string, voice: Record<string, any>, crossfade_ms: number): CancellablePromise<Record<string, any>>; }
+interface Audio { seekVoiceAsync(handle: Record<string, any>, source_frame: number): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareHrtfAsync(asset: string, options: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareAcousticsAsync(asset: string): CancellablePromise<Record<string, any>>; }
 interface Audio { traceAcousticsAsync(query: Record<string, any>): CancellablePromise<Record<string, any>>; }

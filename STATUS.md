@@ -1887,3 +1887,81 @@ Remaining boundaries:
   process-memory sandbox; library phases are not preemptible mid-call.
 - No new GPU, device-output or Windows/Linux behavior result is claimed. Native
   VM syscall/wait/save mappings retain their previous integration status.
+
+## Worker audio decoding and playback (ADR 0069, 2026-10-27)
+
+Implementation:
+- Added reusable TaskPermit admission so a caller reserves bounded queue
+  capacity before moving a decoder/resource into a closure. Unused permits
+  release their slots. TaskStats exposes reserved admission separately.
+- Added device-free BufferedSource and explicit Frames/Pending/End, service,
+  poll_seek, read_position and buffering status to shared AudioSource. One
+  idle owner or one worker owns the decoder; immutable PCM chunks cross the
+  boundary. Short positive reads are not mistaken for EOF. Regular read-ahead
+  is bounded; initial/custom loop prefixes remain resident. Existing blocking
+  decoder/seek contracts remain explicit and available to offline/native paths.
+- Mixer interpolation consumes ready PCM, retains the previous chunk's edge
+  sample and stalls only the starved voice's source/envelope/DSP clocks. Other
+  voices continue. Stats report per-voice underrun frames. Exact seek sequences
+  freeze until ready, discard stale generations and support cancellation back
+  to the previous fractional clock. Synchronous seek rejects buffered sources.
+- Added engine beginPreloadSfx/beginPlaySfx/beginPlayMusic/beginSeekVoice,
+  playbackStatus/cancelPlaybackJob/sourceStatus/clearSfxCache and corresponding
+  JS/TS await helpers. Capability reads, source probing, decode and priming run
+  on bounded I/O workers. Owner publication revalidates spatial dependencies
+  and uses the same mixer/acoustics/binaural attachment APIs. Named music only
+  replaces/fades previous playback after successful preparation and admission.
+- Retained jobs are limited to 16/client and 64/host. Shared residency receipts
+  follow cached/live clips and worker decoders; the 512 MiB estimated audio
+  budget survives reset while references remain. The cache has its own 128 MiB
+  bound. These estimates do not comprehensively account provider/codec/transient
+  allocations and are not a process-memory sandbox (see ADR 0069).
+- Realtime cold synchronous SFX and music now reject with the async migration
+  path; preloaded SFX/random variants and explicit offline calls remain usable.
+  Cache clearing does not stop playing clips. Added generation checks at Audio
+  API entry, fixing restore before the first frame leaving a prior voice alive.
+- Regenerated docs/api and recorded fingerprint c619eaa9bacd0fc3 ->
+  2d945b181a39e802 with realtime behavior migration instructions.
+
+Compilation:
+- Local release workspace/all-target check passed with desktop krkr,
+  arc-formats and acoustics-obvhs features. Existing CBG dead-code and RealLive
+  unused-variable warnings remain. No GitHub CI or remote build ran.
+
+Behavior validation:
+- Shared task/audio release validation passed 45 distinct tests (including
+  seven buffered-source cases), with one owner-asset NWA test ignored. Engine/
+  audio/acoustics/binaural/JS suites passed 31 tests, with one system-font demo
+  ignored. API documentation/signature checks passed six tests. Total: 82
+  distinct Rust tests passed; the two ignored cases are not passes.
+- Analytic PCM and worker gates verify blocked I/O leaves other voices/frames
+  progressing, pending PCM is not EOF, pool backpressure retains decoder
+  ownership, fractional chunk interpolation matches resident PCM without
+  backward decoder seeks, custom loops match, pinned heads obey queue limits,
+  exact seek generations supersede stale work, and cancellation restores the
+  prior fractional clock. Decoder read/seek probes execute off the owner.
+  A worker packet failure retains queued PCM and then reports its error,
+  rather than reporting a successful EOF or discarding the valid prefix.
+- Engine tests verify cancellation before and after worker completion cannot
+  start unpublished playback, per-client same-named assets/foreign tickets,
+  bounded result admission, shared cache lifetime, failed music replacement,
+  uncached seek readiness with different sample values at its destination,
+  stop-during-seek ticket release and restore before the first audio frame.
+- An authored NWA stream is opened through capability storage and decoded/
+  looped by the shared Audio API without a native VM. JS/TS awaits preload,
+  playback and seek, verifies helper ticket release and catches missing files.
+  This does not establish a new native game boot or opcode/wait/save profile.
+- Python 3.11 tooling passed 189 tests. Evidence is under target/verification:
+  audio-worker-final-library-tests.log, audio-worker-final-engine-js-tests.log,
+  audio-worker-workspace-check.log, audio-worker-python-tests.log,
+  audio-buffered-failure-tests.log and audio-worker-api-tests.log.
+
+Remaining boundaries:
+- Native SceneState/channel source opening and AudioRequest decoding still
+  retain synchronous boundaries; changing original native waits requires
+  explicit pending events and continuations. Final mix/output, scratch/voice
+  allocation/disposal and final task-pool joins remain synchronous/owner work.
+  This stage is not a hard realtime mixer or all-engine async completion.
+- Acoustic reflections, diffraction, near-field propagation and room reverb
+  remain open. No GPU/device-output/Windows/Linux behavior or additional
+  original VN compatibility is inferred from these offline results.

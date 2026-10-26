@@ -90,3 +90,17 @@ Consumption leaves other clients' events in place. The UI retains the latest
 adapters use the same engine queue and drain only their client's menu events.
 Menu trees, queued events and focus identities must belong to registered
 clients when a snapshot is validated.
+
+
+Audio opening/decoding (ADR 0069) now has explicit preparation and streaming
+boundaries. Use `await audio.preloadSfxAsync(path)` before synchronous
+`playSfx`/`playRandom`, or `await audio.playSfxAsync(options)`. Use
+`await audio.playMusicAsync(name, options, crossfade_ms)` for streaming music
+and `await audio.seekVoiceAsync(handle, source_frame)` for exact seeks. Helpers
+release completed tickets while playback retains its resources. A pending
+seek freezes that voice, and cancellation realigns to its prior logical clock.
+`sourceStatus` distinguishes ready PCM, pending workers and decoder errors.
+
+A realtime host rejects cold synchronous SFX and synchronous music opening.
+Native SceneState/channel decoder paths, final mixing/output and teardown
+remain synchronous; this stage does not change original VM wait semantics.

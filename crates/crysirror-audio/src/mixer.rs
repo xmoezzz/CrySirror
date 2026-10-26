@@ -3,7 +3,7 @@
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Deterministic, device-free stereo mixer. All controls are client scoped;
 //! decoded PCM and decoder handles are derived playback resources, never saves.
-use crate::decoder::{AudioSource, Clip, StereoFrame};
+use crate::decoder::{AudioSource, Clip, SourceBufferStatus, SourceRead, StereoFrame};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -284,12 +284,18 @@ impl RandomContainer {
     }
 }
 
+enum SampleRead {
+    Frame(StereoFrame),
+    Pending,
+    End,
+}
 struct Cursor {
     source: Box<dyn AudioSource>,
     buffer: Vec<StereoFrame>,
     start: u64,
     count: usize,
     next: u64,
+    edge: Option<(u64, StereoFrame)>,
 }
 impl Cursor {
     fn new(source: Box<dyn AudioSource>) -> Self {
@@ -299,34 +305,57 @@ impl Cursor {
             start: 0,
             count: 0,
             next: 0,
+            edge: None,
         }
     }
-    fn sample(&mut self, index: u64) -> Result<Option<StereoFrame>> {
-        if self
-            .source
-            .frame_count()
-            .is_some_and(|total| index >= total)
-        {
-            return Ok(None);
+    fn sample(&mut self, index: u64) -> Result<SampleRead> {
+        if self.source.frame_count().is_some_and(|n| index >= n) {
+            return Ok(SampleRead::End);
         }
         if index >= self.start && index < self.start + self.count as u64 {
-            return Ok(Some(self.buffer[(index - self.start) as usize]));
+            return Ok(SampleRead::Frame(
+                self.buffer[(index - self.start) as usize],
+            ));
         }
-        if index != self.next {
-            self.source.seek(index)?
+        // Linear interpolation can request the last frame of the preceding
+        // chunk again after fetching its successor. Retain that single frame
+        // rather than seeking a worker decoder backwards at every boundary.
+        if let Some((at, sample)) = self.edge {
+            if at == index {
+                return Ok(SampleRead::Frame(sample));
+            }
         }
-        self.start = index;
-        self.count = self.source.read(&mut self.buffer)?;
-        self.next = index + self.count as u64;
-        ensure!(
-            self.count <= self.buffer.len(),
-            "audio source returned invalid frame count"
-        );
-        Ok(if self.count > 0 {
-            Some(self.buffer[0])
-        } else {
-            None
-        })
+        let edge = (self.count > 0).then(|| {
+            (
+                self.start + self.count as u64 - 1,
+                self.buffer[self.count - 1],
+            )
+        });
+        if (index != self.next || self.source.read_position().is_some_and(|n| n != index))
+            && !self.source.poll_seek(index)?
+        {
+            return Ok(SampleRead::Pending);
+        }
+        match self.source.poll_read(&mut self.buffer)? {
+            SourceRead::Pending => Ok(SampleRead::Pending),
+            SourceRead::End => {
+                self.start = index;
+                self.count = 0;
+                self.next = index;
+                Ok(SampleRead::End)
+            }
+            SourceRead::Frames(n) => {
+                ensure!(
+                    n > 0 && n <= self.buffer.len(),
+                    "audio source returned invalid frame count"
+                );
+                self.edge = edge;
+                self.start = index;
+                self.count = n;
+                self.next = index + n as u64;
+                Ok(SampleRead::Frame(self.buffer[0]))
+            }
+        }
     }
 }
 #[derive(Clone, Copy)]
@@ -364,6 +393,8 @@ struct Voice {
     spec: VoiceSpec,
     cursor: Cursor,
     position: f64,
+    seek: Option<SeekProgress>,
+    seek_sequence: u64,
     sequence: u64,
     envelope: Ramp,
     gain: Ramp,
@@ -377,12 +408,41 @@ struct Voice {
     source_ended: bool,
     tail_left: usize,
 }
+/// A seek publishes only once the exact decoded frame is available.
+#[derive(Clone, Debug, Serialize)]
+pub struct SeekProgress {
+    /// Monotonic voice-local request sequence; zero denotes cancellation recovery.
+    pub sequence: u64,
+    /// Exact decoded source frame requested.
+    pub frame: u64,
+    /// The voice clock stays frozen until ready PCM is published.
+    pub pending: bool,
+    /// Retained worker/seek failure, when present.
+    pub error: Option<String>,
+}
+fn publish_seek(v: &mut Voice, frame: u64) {
+    v.cursor.count = 0;
+    v.cursor.edge = None;
+    v.cursor.next = frame;
+    v.position = frame as f64;
+    v.lowpass = [0.; 2];
+    if let Some(filter) = &mut v.acoustic {
+        filter.reset_history();
+    }
+    v.source_ended = false;
+    v.tail_left = 0;
+    if let Some(voice) = &mut v.binaural {
+        voice.reset();
+    }
+}
 #[derive(Clone, Copy, Default, Debug, Serialize)]
 pub struct MixStats {
     pub active: usize,
     pub stolen: u64,
     pub rejected: u64,
     pub rendered_frames: u64,
+    /// Output frames a voice could not consume because source PCM was pending.
+    pub underrun_frames: u64,
     pub peak: f32,
 }
 struct Client {
@@ -589,6 +649,8 @@ impl Mixer {
             spec,
             cursor: Cursor::new(source),
             position: 0.,
+            seek: None,
+            seek_sequence: 0,
             sequence,
             envelope,
             stop_after_fade: false,
@@ -842,18 +904,69 @@ impl Mixer {
     pub fn seek(&mut self, client: u32, h: VoiceHandle, source_frame: u64) -> Result<()> {
         let v = self.voice(client, h)?;
         v.cursor.source.seek(source_frame)?;
-        v.cursor.count = 0;
-        v.cursor.next = source_frame;
-        v.position = source_frame as f64;
-        v.lowpass = [0.; 2];
-        if let Some(filter) = &mut v.acoustic {
-            filter.reset_history();
+        v.seek = None;
+        publish_seek(v, source_frame);
+        Ok(())
+    }
+    /// Nonblocking sources only. A new sequence supersedes an older seek.
+    pub fn begin_seek(&mut self, client: u32, h: VoiceHandle, frame: u64) -> Result<u64> {
+        let v = self.voice(client, h)?;
+        ensure!(
+            v.cursor.source.is_nonblocking(),
+            "source requires synchronous seeking"
+        );
+        ensure!(
+            v.cursor.source.frame_count().is_none_or(|n| frame <= n),
+            "seek outside source"
+        );
+        let sequence = v
+            .seek_sequence
+            .checked_add(1)
+            .context("seek sequence exhausted")?;
+        let ready = v.cursor.source.poll_seek(frame)?;
+        v.seek_sequence = sequence;
+        v.seek = Some(SeekProgress {
+            sequence,
+            frame,
+            pending: !ready,
+            error: None,
+        });
+        if ready {
+            publish_seek(v, frame);
         }
-        v.source_ended = false;
-        v.tail_left = 0;
-        if let Some(voice) = &mut v.binaural {
-            voice.reset();
+        Ok(sequence)
+    }
+    pub fn seek_progress(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        sequence: u64,
+    ) -> Result<SeekProgress> {
+        let v = self.voice(client, h)?;
+        let seek = v.seek.as_ref().context("seek released")?;
+        ensure!(seek.sequence == sequence, "seek superseded");
+        Ok(seek.clone())
+    }
+    /// Restore the prior logical position. The decoder realigns asynchronously;
+    /// a canceled ticket cannot publish the discarded destination into playback.
+    pub fn cancel_seek(&mut self, client: u32, h: VoiceHandle, sequence: u64) -> Result<()> {
+        let v = self.voice(client, h)?;
+        if v.seek
+            .as_ref()
+            .is_none_or(|s| s.sequence != sequence || !s.pending)
+        {
+            return Ok(());
         }
+        let frame = v.position.floor() as u64;
+        let ready = v.cursor.source.poll_seek(frame)?;
+        v.seek = Some(SeekProgress {
+            sequence: 0,
+            frame,
+            pending: !ready,
+            error: None,
+        });
+        // Retain fractional source position on cancellation; cursor refill will
+        // observe read_position and realign without rewinding the audible clock.
         Ok(())
     }
     pub fn position(&self, client: u32, h: VoiceHandle) -> Result<f64> {
@@ -933,9 +1046,45 @@ impl Mixer {
             },
         ))
     }
+    /// Owner/control phase. It polls completion and submits prefetch without
+    /// waiting. Synchronous source backends preserve their existing behavior.
+    pub fn service_sources(&mut self) -> Result<()> {
+        for v in self.voices.iter_mut().flatten() {
+            v.cursor.source.service()?;
+            if let Some(seek) = v.seek.as_mut().filter(|s| s.pending) {
+                match v.cursor.source.poll_seek(seek.frame) {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        let frame = seek.frame;
+                        let canceled = seek.sequence == 0;
+                        seek.pending = false;
+                        if !canceled {
+                            publish_seek(v, frame);
+                        }
+                    }
+                    Err(error) => {
+                        seek.pending = false;
+                        seek.error = Some(format!("{error:#}"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn source_status(&self, client: u32, h: VoiceHandle) -> Result<Option<SourceBufferStatus>> {
+        ensure!(client == h.client, "foreign audio handle");
+        let v = self
+            .voices
+            .get(h.slot as usize)
+            .and_then(Option::as_ref)
+            .context("audio voice ended")?;
+        ensure!(v.handle == h, "stale audio handle");
+        Ok(v.cursor.source.buffer_status())
+    }
     /// Overwrites the destination with unclipped linear stereo PCM. One output
     /// limiter/clamp belongs at the hardware/export boundary, not per voice.
     pub fn render(&mut self, out: &mut [StereoFrame]) -> Result<()> {
+        self.service_sources()?;
         ensure!(
             out.len() <= self.config.sample_rate as usize * 10,
             "audio render block exceeds 10 seconds"
@@ -1009,7 +1158,12 @@ impl Mixer {
             }
             for (slot, (effect, step)) in self.voices.iter_mut().zip(spatial.iter().zip(&rates)) {
                 let Some(v) = slot else { continue };
-                if v.spec.paused || v.binaural_pending {
+                if v.spec.paused
+                    || v.binaural_pending
+                    || v.seek
+                        .as_ref()
+                        .is_some_and(|s| s.pending || s.error.is_some())
+                {
                     continue;
                 }
                 if v.source_ended && v.tail_left == 0 {
@@ -1039,19 +1193,30 @@ impl Mixer {
                     [0.; 2]
                 } else {
                     match v.cursor.sample(index)? {
-                        Some(a) => a,
-                        None if v.spec.looping => {
+                        SampleRead::Frame(a) => a,
+                        SampleRead::Pending => {
+                            self.stats.underrun_frames =
+                                self.stats.underrun_frames.saturating_add(1);
+                            continue;
+                        }
+                        SampleRead::End if v.spec.looping => {
                             v.position = 0.;
                             index = 0;
-                            if let Some(a) = v.cursor.sample(0)? {
-                                a
-                            } else {
-                                retire_dialogue(v, &mut self.clients);
-                                *slot = None;
-                                continue;
+                            match v.cursor.sample(0)? {
+                                SampleRead::Frame(a) => a,
+                                SampleRead::Pending => {
+                                    self.stats.underrun_frames =
+                                        self.stats.underrun_frames.saturating_add(1);
+                                    continue;
+                                }
+                                SampleRead::End => {
+                                    retire_dialogue(v, &mut self.clients);
+                                    *slot = None;
+                                    continue;
+                                }
                             }
                         }
-                        None => {
+                        SampleRead::End => {
                             if let Some(binaural) = &v.binaural {
                                 v.source_ended = true;
                                 v.tail_left = binaural.tail_frames();
@@ -1073,12 +1238,20 @@ impl Mixer {
                 } else {
                     index + 1
                 };
-                let b = if v.source_ended || next == index {
+                let t = (v.position - index as f64) as f32;
+                let b = if v.source_ended || next == index || t == 0. {
                     a
                 } else {
-                    v.cursor.sample(next)?.unwrap_or(a)
+                    match v.cursor.sample(next)? {
+                        SampleRead::Frame(b) => b,
+                        SampleRead::End => a,
+                        SampleRead::Pending => {
+                            self.stats.underrun_frames =
+                                self.stats.underrun_frames.saturating_add(1);
+                            continue;
+                        }
+                    }
                 };
-                let t = (v.position - index as f64) as f32;
                 let mut s = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
                 let c = &self.clients[&v.handle.client];
                 let mut gain =
@@ -1146,6 +1319,7 @@ impl Mixer {
             self.stats.peak = self.stats.peak.max(sample[0].abs()).max(sample[1].abs());
         }
         self.stats.rendered_frames = self.stats.rendered_frames.saturating_add(out.len() as u64);
+        self.service_sources()?;
         Ok(())
     }
 }

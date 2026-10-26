@@ -76,7 +76,7 @@ replacement succeeds. Example script usage:
 
 ```typescript
 const scene = await audio.prepareAcousticsAsync('room.json');
-const voice = audio.playSfx({
+const voice = await audio.playSfxAsync({
   asset: 'step.wav', spatial: { position: [0, 0, -4] },
   acoustics: { radius: 0.2, samples: 16 }
 });
@@ -106,7 +106,7 @@ limits and source attribution. The device-free synthesized demo runs with
 
 ```typescript
 await audio.prepareHrtfAsync('listener.sofa', { partition_frames: 64 });
-const voice = audio.playSfx({
+const voice = await audio.playSfxAsync({
   asset: 'step.wav', spatial: { position: [2, 0, -4] }, binaural: true
 });
 ```
@@ -132,6 +132,25 @@ An offline, device-free example synthesizes its own source and reads an
 explicit external profile:
 `cargo run --release -p crysirror-audio --example binaural_orbit -- profile.sofa /tmp/orbit.wav`.
 No measured HRIR, game sound or font is bundled with the example.
+
+## Worker audio preparation
+
+```typescript
+await audio.preloadSfxAsync('click.wav');
+const click = audio.playSfx({ asset: 'click.wav' });
+const music = await audio.playMusicAsync('explore', {
+  asset: 'explore.ogg', loop_points: { start: 48000, end: 960000 }
+}, 500);
+await audio.seekVoiceAsync(music, 96000);
+```
+
+Async helpers return shared mixer handles, release their operation tickets and
+retain the playing resources. `sourceStatus(music)` reports bounded decoded
+PCM, pending worker/seek state and errors. A pending seek freezes only that
+voice; a failed music replacement preserves the old music. Realtime cold SFX
+and music require these async methods. `playRandom` requires preloaded variants.
+Offline synchronous methods remain supported. See [ADR 0069](../adr/0069-worker-audio-decoding-and-playback.md)
+for cancellation, budgets and the remaining native-channel/mix/output boundaries.
 
 ## Rules for changing the API
 

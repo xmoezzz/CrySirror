@@ -48,6 +48,7 @@ impl Cancellation {
 #[derive(Default)]
 struct Counters {
     outstanding: AtomicUsize,
+    reserved: AtomicUsize,
     running: AtomicUsize,
     completed: AtomicU64,
     cancelled: AtomicU64,
@@ -59,6 +60,8 @@ pub struct TaskStats {
     pub workers: usize,
     pub capacity: usize,
     pub outstanding: usize,
+    /// Admitted slots not yet submitted; dropping a permit releases its slot.
+    pub reserved: usize,
     pub running: usize,
     pub completed: u64,
     pub cancelled: u64,
@@ -84,7 +87,7 @@ impl Drop for Owner {
         }
     }
 }
-/// Cloneable pool. Capacity bounds all queued + running jobs, not only the queue.
+/// Cloneable pool. Capacity bounds reserved + queued + running work.
 #[derive(Clone)]
 pub struct TaskPool(Arc<Owner>);
 impl TaskPool {
@@ -126,20 +129,59 @@ impl TaskPool {
             capacity,
         })))
     }
+    /// Reserve admission before moving a resource into a job. A rejected
+    /// reservation leaves the caller's decoder/buffer ownership intact.
+    pub fn reserve(&self) -> Result<TaskPermit> {
+        let c = &self.0.counts;
+        if c.outstanding
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < self.0.capacity).then_some(n + 1)
+            })
+            .is_err()
+        {
+            c.rejected.fetch_add(1, Ordering::Relaxed);
+            return Err(CapacityExceeded.into());
+        }
+        c.reserved.fetch_add(1, Ordering::AcqRel);
+        Ok(TaskPermit {
+            pool: self.clone(),
+            submitted: false,
+        })
+    }
     pub fn spawn<T: Send + 'static>(
         &self,
         work: impl FnOnce(Cancellation) -> Result<T> + Send + 'static,
     ) -> Result<Task<T>> {
-        let c = self.0.counts.clone();
-        let admitted = c
-            .outstanding
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < self.0.capacity).then_some(n + 1)
-            });
-        if admitted.is_err() {
-            c.rejected.fetch_add(1, Ordering::Relaxed);
-            return Err(CapacityExceeded.into());
+        self.reserve()?.spawn(work)
+    }
+    pub fn stats(&self) -> TaskStats {
+        let c = &self.0.counts;
+        TaskStats {
+            workers: self.0.workers.len(),
+            capacity: self.0.capacity,
+            outstanding: c.outstanding.load(Ordering::Acquire),
+            reserved: c.reserved.load(Ordering::Acquire),
+            running: c.running.load(Ordering::Acquire),
+            completed: c.completed.load(Ordering::Relaxed),
+            cancelled: c.cancelled.load(Ordering::Relaxed),
+            panicked: c.panicked.load(Ordering::Relaxed),
+            rejected: c.rejected.load(Ordering::Relaxed),
         }
+    }
+}
+/// One admitted slot, owned by the submitter until consumed or dropped.
+/// It keeps the pool alive. An unused permit releases admission; final pool
+/// shutdown still follows the pool owner's join contract.
+pub struct TaskPermit {
+    pool: TaskPool,
+    submitted: bool,
+}
+impl TaskPermit {
+    pub fn spawn<T: Send + 'static>(
+        mut self,
+        work: impl FnOnce(Cancellation) -> Result<T> + Send + 'static,
+    ) -> Result<Task<T>> {
+        let c = self.pool.0.counts.clone();
         let cancel = Cancellation::default();
         let token = cancel.clone();
         let (tx, rx) = oneshot::channel();
@@ -169,32 +211,33 @@ impl TaskPool {
             counts.completed.fetch_add(1, Ordering::Relaxed);
             let _ = tx.send(result);
         });
-        if self.0.sender.as_ref().unwrap().try_send(job).is_err() {
-            c.outstanding.fetch_sub(1, Ordering::AcqRel);
+        if self.pool.0.sender.as_ref().unwrap().try_send(job).is_err() {
             c.rejected.fetch_add(1, Ordering::Relaxed);
             anyhow::bail!("task pool is closed");
         }
+        self.submitted = true;
+        c.reserved.fetch_sub(1, Ordering::AcqRel);
         Ok(Task {
             receiver: rx,
             cancel,
-            pool: self.0.id,
+            pool: self.pool.0.id,
             finished: false,
         })
     }
-    pub fn stats(&self) -> TaskStats {
-        let c = &self.0.counts;
-        TaskStats {
-            workers: self.0.workers.len(),
-            capacity: self.0.capacity,
-            outstanding: c.outstanding.load(Ordering::Acquire),
-            running: c.running.load(Ordering::Acquire),
-            completed: c.completed.load(Ordering::Relaxed),
-            cancelled: c.cancelled.load(Ordering::Relaxed),
-            panicked: c.panicked.load(Ordering::Relaxed),
-            rejected: c.rejected.load(Ordering::Relaxed),
+}
+impl Drop for TaskPermit {
+    fn drop(&mut self) {
+        if !self.submitted {
+            self.pool.0.counts.reserved.fetch_sub(1, Ordering::AcqRel);
+            self.pool
+                .0
+                .counts
+                .outstanding
+                .fetch_sub(1, Ordering::AcqRel);
         }
     }
 }
+
 /// Real Future: polling never blocks. Dropping it requests cancellation.
 /// `wait` is an explicit offline/frame-barrier operation, forbidden inside its own pool.
 pub struct Task<T> {
@@ -255,6 +298,36 @@ impl<T> Drop for Task<T> {
 mod tests {
     use super::*;
     use std::sync::Barrier;
+    #[test]
+    fn reservations_preserve_caller_ownership_on_backpressure() {
+        let pool = TaskPool::new("permit", 1, 1).unwrap();
+        let permit = pool.reserve().unwrap();
+        assert_eq!(pool.stats().reserved, 1);
+        let mut owned = Some(String::from("decoder"));
+        match pool.reserve() {
+            Err(e) => assert!(e.is::<CapacityExceeded>()),
+            Ok(p) => {
+                let value = owned.take().unwrap();
+                let _ = p.spawn(move |_| Ok(value));
+                panic!("must reject before capture");
+            }
+        }
+        assert_eq!(owned.as_deref(), Some("decoder"));
+        drop(permit);
+        assert_eq!(pool.stats().outstanding, 0);
+        assert_eq!(pool.stats().reserved, 0);
+        let value = owned.take().unwrap();
+        assert_eq!(
+            pool.reserve()
+                .unwrap()
+                .spawn(move |_| Ok(value))
+                .unwrap()
+                .wait()
+                .unwrap(),
+            "decoder"
+        );
+        assert_eq!(pool.stats().outstanding, 0);
+    }
     #[test]
     fn two_jobs_run_concurrently_and_futures_wake() {
         let pool = TaskPool::new("test", 2, 4).unwrap();

@@ -1360,6 +1360,7 @@ dependencies = [
  "anyhow",
  "crysirror-acoustics",
  "crysirror-core",
+ "crysirror-tasks",
  "rodio",
  "serde",
  "serde_json",

@@ -4,6 +4,26 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `2d945b181a39e802` (2026-10-27): worker audio playback and seeks
+
+- Add Audio beginPreloadSfx/beginPlaySfx/beginPlayMusic/beginSeekVoice,
+  playbackStatus/cancelPlaybackJob/sourceStatus/clearSfxCache and JS/TS
+  preloadSfxAsync/playSfxAsync/playMusicAsync/seekVoiceAsync. Completed helpers
+  release tickets while the published cache/voice retains its resource.
+- Add StreamBufferSpec, SourceBufferStatus and SeekProgress reference data;
+  TaskStats now includes reserved admission slots. Mixer stats add per-voice
+  underrun_frames. Unknown source buffering returns null.
+- **Breaking in realtime hosts:** cold playSfx/playRandom decoding and synchronous
+  playMusic opening now reject. Preload variants asynchronously or use the
+  async playback helpers. Offline blocking APIs retain their behavior.
+  Worker-buffered streams require beginSeekVoice/seekVoiceAsync; synchronous
+  seekVoice fails before mutation on those sources.
+- Pending exact seeks freeze the voice clock. Newer seeks supersede older ones;
+  cancel restores the prior logical position with background realignment.
+  Failed music preparation preserves previous playback. Restore invalidates
+  jobs and derived voices even when playback began before the first frame.
+  See ADR 0069 for bounded ownership and remaining synchronous/native paths.
+
 ## `c619eaa9bacd0fc3` (2026-10-27): worker-prepared HRTF resources
 
 - Add HrtfEarOrder, HrtfOptions, HrirAsset and HrirMeasurement data; Audio beginHrtf/hrtfStatus/

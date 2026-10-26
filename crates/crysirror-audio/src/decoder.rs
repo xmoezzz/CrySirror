@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 CrySirror contributors.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Bounded packet decoding over caller-owned seekable media sources. No device
 //! or ambient filesystem access. File authority belongs to the host VFS.
 use anyhow::{Context, Result, bail, ensure};
@@ -11,21 +13,74 @@ use symphonia::core::{
     codecs::{Decoder, DecoderOptions},
     errors::Error,
     formats::{FormatOptions, FormatReader, SeekMode, SeekTo},
-    io::{MediaSource, MediaSourceStream},
+    io::MediaSourceStream,
     meta::MetadataOptions,
     probe::Hint,
 };
+
+pub use symphonia::core::io::MediaSource;
 
 pub type StereoFrame = [f32; 2];
 pub const MAX_PACKET_FRAMES: usize = 65536;
 pub const MAX_CLIP_FRAMES: usize = 4_194_304;
 
+/// A nonblocking source distinguishes temporary starvation from actual EOF.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceRead {
+    Frames(usize),
+    Pending,
+    End,
+}
+/// Bounded source-buffer state. Decoder work never enters project/save JSON.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SourceBufferStatus {
+    /// Ready decoded frames, excluding the mixer's small resampling cursor.
+    pub ready_frames: usize,
+    /// One read/seek job owns the decoder while true.
+    pub worker_pending: bool,
+    /// An uncached seek awaits exact decoded-frame completion.
+    pub seek_pending: bool,
+    /// Source timeline generation; stale reads cannot enter a new timeline.
+    pub generation: u64,
+    /// Successfully decoded frames, including warmup and read-ahead.
+    pub decoded_frames: u64,
+    /// A visible decoder failure, retained until the source is replaced.
+    pub error: Option<String>,
+}
 pub trait AudioSource: Send {
     fn sample_rate(&self) -> u32;
     fn frame_count(&self) -> Option<u64>;
     fn read(&mut self, out: &mut [StereoFrame]) -> Result<usize>;
     /// Exact decoded-frame position; packet seeks decode/discard the prefix.
     fn seek(&mut self, frame: u64) -> Result<()>;
+    /// Poll ready PCM. Synchronous decoders keep their original contract;
+    /// worker-buffered sources override this to report Pending without I/O.
+    fn poll_read(&mut self, out: &mut [StereoFrame]) -> Result<SourceRead> {
+        Ok(match self.read(out)? {
+            0 => SourceRead::End,
+            n => SourceRead::Frames(n),
+        })
+    }
+    /// True only when the exact frame is ready. Repeated polling is idempotent.
+    fn poll_seek(&mut self, frame: u64) -> Result<bool> {
+        self.seek(frame)?;
+        Ok(true)
+    }
+    /// Owner/control phase: collect completed work and submit bounded prefetch.
+    fn service(&mut self) -> Result<()> {
+        Ok(())
+    }
+    /// Position of the next poll_read result, when the backend exposes it.
+    fn read_position(&self) -> Option<u64> {
+        None
+    }
+    /// True only when poll_read/poll_seek/service execute no decoder I/O.
+    fn is_nonblocking(&self) -> bool {
+        false
+    }
+    fn buffer_status(&self) -> Option<SourceBufferStatus> {
+        None
+    }
 }
 
 /// Unified resident-resource decoder used by channels, data-VM playback and
@@ -64,10 +119,11 @@ pub fn open_reader(
     Ok(Box::new(Stream::open(reader, extension)?))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Clip {
     rate: u32,
     samples: Arc<[StereoFrame]>,
+    storage: Option<Arc<dyn Send + Sync>>,
 }
 impl Clip {
     pub fn new(rate: u32, samples: Vec<StereoFrame>) -> Result<Self> {
@@ -89,7 +145,12 @@ impl Clip {
         Ok(Self {
             rate,
             samples: samples.into(),
+            storage: None,
         })
+    }
+    /// The receipt follows every cached/live clone until the last PCM owner drops.
+    pub fn retain_storage(&mut self, storage: Arc<dyn Send + Sync>) {
+        self.storage = Some(storage);
     }
     pub fn source(&self) -> Box<dyn AudioSource> {
         Box::new(ClipSource {
@@ -101,11 +162,22 @@ impl Clip {
         self.samples.len()
     }
 }
+impl std::fmt::Debug for Clip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Clip")
+            .field("rate", &self.rate)
+            .field("frames", &self.frames())
+            .finish()
+    }
+}
 struct ClipSource {
     clip: Clip,
     at: usize,
 }
 impl AudioSource for ClipSource {
+    fn is_nonblocking(&self) -> bool {
+        true
+    }
     fn sample_rate(&self) -> u32 {
         self.clip.rate
     }

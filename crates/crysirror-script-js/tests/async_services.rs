@@ -287,7 +287,7 @@ fn acoustic_promises_publish_engine_owned_scenes_and_report_native_errors() {
 
 #[test]
 fn hrtf_promises_prepare_scoped_engine_resources_and_release_owned_tickets() {
-    let (dir,mut app)=app(r#"
+    let (dir, mut app) = app(r#"
       async function onInit() {
         const profile=await audio.prepareHrtfAsync('ears.json',{max_delay_seconds:0});
         if(profile.taps!==1 || profile.sample_rate!==48000 || profile.latency_frames!==64) throw Error('bad HRTF metadata');
@@ -300,6 +300,59 @@ fn hrtf_promises_prepare_scoped_engine_resources_and_release_owned_tickets() {
         engine.log('hrtf-ready');
       }
     "#);
-    std::fs::write(dir.path().join("assets/a/ears.json"),br#"{"sample_rate":48000,"measurements":[{"direction":[0,0,-1],"left":[1],"right":[1]}]}"#).unwrap();
-    app.init().unwrap();app.start().unwrap();until(&mut app,"hrtf-ready");
+    std::fs::write(
+        dir.path().join("assets/a/ears.json"),
+        br#"{"sample_rate":48000,"measurements":[{"direction":[0,0,-1],"left":[1],"right":[1]}]}"#,
+    )
+    .unwrap();
+    app.init().unwrap();
+    app.start().unwrap();
+    until(&mut app, "hrtf-ready");
+}
+
+#[test]
+fn audio_promises_prepare_play_seek_release_and_preserve_shared_mixer_handles() {
+    let (dir, mut app) = app(r#"
+      async function onInit() {
+        let forbidden=false;try {audio.playSfx({asset:'tone.wav'});}catch(e){forbidden=true;}
+        if(!forbidden)throw Error('cold realtime SFX did synchronous decoding');
+        const preload=audio.preloadSfxAsync('tone.wav');const ticket=preload.ticket;
+        const clip=await preload;if(clip.frames!==16000)throw Error('bad decoded clip');
+        let released=false;try{audio.playbackStatus(ticket);}catch(e){released=true;}
+        if(!released)throw Error('retained preload ticket');
+        const voice=await audio.playSfxAsync({asset:'tone.wav',looping:true});
+        if(!audio.voice(voice).playing)throw Error('SFX not published');
+        audio.clearSfxCache();if(!audio.voice(voice).playing)throw Error('cache clear stopped live PCM');
+        audio.stopVoice(voice,0);
+        const music=await audio.playMusicAsync('bgm',{asset:'tone.wav'},0);
+        if(audio.sourceStatus(music)===null)throw Error('music not worker-buffered');
+        const seek=await audio.seekVoiceAsync(music,9000);
+        if(seek.source_frame!==9000)throw Error('seek not exact');
+        try{await audio.playMusicAsync('bgm',{asset:'missing.wav'},0);throw Error('missing accepted');}
+        catch(e){if(String(e).includes('missing accepted'))throw e;}
+        if(!audio.voice(music).playing)throw Error('failed replacement stopped music');
+        engine.log('audio-async-ready');
+      }
+    "#);
+    let size = 32000u32;
+    let mut bytes = Vec::new();
+    bytes.extend(b"RIFF");
+    bytes.extend((36 + size).to_le_bytes());
+    bytes.extend(b"WAVEfmt ");
+    bytes.extend(16u32.to_le_bytes());
+    bytes.extend(1u16.to_le_bytes());
+    bytes.extend(1u16.to_le_bytes());
+    bytes.extend(8000u32.to_le_bytes());
+    bytes.extend(16000u32.to_le_bytes());
+    bytes.extend(2u16.to_le_bytes());
+    bytes.extend(16u16.to_le_bytes());
+    bytes.extend(b"data");
+    bytes.extend(size.to_le_bytes());
+    for _ in 0..16000 {
+        bytes.extend(8192i16.to_le_bytes());
+    }
+    std::fs::write(dir.path().join("assets/a/tone.wav"), bytes).unwrap();
+    app.init().unwrap();
+    app.start().unwrap();
+    until(&mut app, "audio-async-ready");
 }

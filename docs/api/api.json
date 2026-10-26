@@ -173,6 +173,89 @@
   ],
   "async_bindings": [
     {
+      "cancel": "cancelPlaybackJob",
+      "class": "Audio",
+      "completion": "result.handle",
+      "name": "playSfxAsync",
+      "params": [
+        {
+          "name": "voice",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginPlaySfx",
+      "status": "playbackStatus"
+    },
+    {
+      "cancel": "cancelPlaybackJob",
+      "class": "Audio",
+      "completion": "result",
+      "name": "preloadSfxAsync",
+      "params": [
+        {
+          "name": "asset",
+          "optional": false,
+          "type": "string"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginPreloadSfx",
+      "status": "playbackStatus"
+    },
+    {
+      "cancel": "cancelPlaybackJob",
+      "class": "Audio",
+      "completion": "result.handle",
+      "name": "playMusicAsync",
+      "params": [
+        {
+          "name": "name",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "voice",
+          "optional": false,
+          "type": "Record<string, any>"
+        },
+        {
+          "name": "crossfade_ms",
+          "optional": false,
+          "type": "number"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginPlayMusic",
+      "status": "playbackStatus"
+    },
+    {
+      "cancel": "cancelPlaybackJob",
+      "class": "Audio",
+      "completion": "result",
+      "name": "seekVoiceAsync",
+      "params": [
+        {
+          "name": "handle",
+          "optional": false,
+          "type": "Record<string, any>"
+        },
+        {
+          "name": "source_frame",
+          "optional": false,
+          "type": "number"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginSeekVoice",
+      "status": "playbackStatus"
+    },
+    {
       "cancel": "cancelHrtfJob",
       "class": "Audio",
       "completion": "result",
@@ -709,7 +792,102 @@
           "returns": "Record<string, any>"
         },
         {
-          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Returns scoped generation handle.",
+          "doc": "Prepare SFX on bounded workers and publish a shared mixer voice; playbackStatus returns result.handle.",
+          "name": "beginPlaySfx",
+          "params": [
+            {
+              "name": "voice",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Decode and cache SFX on workers without starting a voice.",
+          "name": "beginPreloadSfx",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Open and prewarm bounded streaming music on workers; old music fades only after successful publication.",
+          "name": "beginPlayMusic",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "voice",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "crossfade_ms",
+              "type": "number"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Client/restore-scoped pending/ready/failed audio preparation or seek; owner polling publishes ready playback.",
+          "name": "playbackStatus",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Cancel/release an audio job. Pending playback cannot publish; already published voices keep playing. Pending seek restores the prior logical position asynchronously.",
+          "name": "cancelPlaybackJob",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Exact nonblocking seek for resident or worker-buffered sources. A newer seek supersedes an older one; pending seeks freeze the voice clock.",
+          "name": "beginSeekVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "source_frame",
+              "type": "number"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Worker stream queue, decoded frame count, seek generation and errors, or null for a resident source.",
+          "name": "sourceStatus",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "Drop this client's cached clips. Playing voices retain their own PCM and residency receipts.",
+          "name": "clearSfxCache",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle.",
           "name": "playSfx",
           "params": [
             {
@@ -720,7 +898,7 @@
           "returns": "Record<string, any>"
         },
         {
-          "doc": "Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec.",
+          "doc": "Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants.",
           "name": "playRandom",
           "params": [
             {
@@ -739,7 +917,7 @@
           "returns": "Record<string, any>"
         },
         {
-          "doc": "Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true.",
+          "doc": "Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync.",
           "name": "playMusic",
           "params": [
             {
@@ -788,7 +966,7 @@
           "returns": "void"
         },
         {
-          "doc": "Seek exactly to a decoded source frame.",
+          "doc": "Synchronous exact seek. Worker-buffered streams require beginSeekVoice/seekVoiceAsync.",
           "name": "seekVoice",
           "params": [
             {
@@ -899,7 +1077,7 @@
           "returns": "void"
         },
         {
-          "doc": "Mixer active/stolen/rejected voices, rendered frames and unclipped peak.",
+          "doc": "Mixer active/stolen/rejected voices, rendered frames, per-voice underrun frames and unclipped peak.",
           "name": "stats",
           "params": [],
           "returns": "Record<string, any>"
@@ -4514,6 +4692,99 @@
   ],
   "data": [
     {
+      "doc": "Read-ahead dimensions, independent of codec packet storage.",
+      "fields": [
+        {
+          "default": 4096,
+          "doc": "Frames per decoded chunk, 256..16384.",
+          "name": "chunk_frames",
+          "rust_type": "u32"
+        },
+        {
+          "default": 3,
+          "doc": "Ready chunks, 2..4, with at most 65536 frames in the regular queue.",
+          "name": "prefetch_chunks",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "StreamBufferSpec",
+      "used_by": "Rust BufferedSource::prepare; engine music uses defaults"
+    },
+    {
+      "doc": "Bounded source-buffer state. Decoder work never enters project/save JSON.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Ready decoded frames, excluding the mixer's small resampling cursor.",
+          "name": "ready_frames",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "One read/seek job owns the decoder while true.",
+          "name": "worker_pending",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "An uncached seek awaits exact decoded-frame completion.",
+          "name": "seek_pending",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Source timeline generation; stale reads cannot enter a new timeline.",
+          "name": "generation",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Successfully decoded frames, including warmup and read-ahead.",
+          "name": "decoded_frames",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "A visible decoder failure, retained until the source is replaced.",
+          "name": "error",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "SourceBufferStatus",
+      "used_by": "Audio.sourceStatus"
+    },
+    {
+      "doc": "A seek publishes only once the exact decoded frame is available.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Monotonic voice-local request sequence; zero denotes cancellation recovery.",
+          "name": "sequence",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Exact decoded source frame requested.",
+          "name": "frame",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "The voice clock stays frozen until ready PCM is published.",
+          "name": "pending",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Retained worker/seek failure, when present.",
+          "name": "error",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "SeekProgress",
+      "used_by": "Rust Mixer::seek_progress"
+    },
+    {
       "doc": "SOFA receiver-record mapping to output ears. Explicit overrides handle datasets whose position metadata differs from their authored channel order.",
       "fields": [
         {
@@ -5722,6 +5993,12 @@
           "default": null,
           "doc": "",
           "name": "outstanding",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "Admitted slots not yet submitted; dropping a permit releases its slot.",
+          "name": "reserved",
           "rust_type": "usize"
         },
         {
@@ -11165,7 +11442,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "c619eaa9bacd0fc3",
+  "fingerprint": "2d945b181a39e802",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {
