@@ -12,8 +12,8 @@ pub struct KeyMaterial(Arc<Zeroizing<Vec<u8>>>);
 impl KeyMaterial {
     pub fn new(bytes: Vec<u8>) -> Result<Self> {
         ensure!(
-            !bytes.is_empty() && bytes.len() <= 4096,
-            "key material size must be 1..4096"
+            !bytes.is_empty() && bytes.len() <= 1024 * 1024,
+            "key material size must be 1..1048576"
         );
         Ok(Self(Arc::new(Zeroizing::new(bytes))))
     }

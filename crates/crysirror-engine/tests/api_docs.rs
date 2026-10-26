@@ -188,6 +188,12 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-scene/src/canvas.rs",
         "crates/crysirror-core/src/service.rs",
         "crates/crysirror-image/src/associated.rs",
+        "crates/crysirror-image/src/bitmap.rs",
+        "crates/crysirror-resource/src/context.rs",
+        "crates/crysirror-resource/src/transforms.rs",
+        "crates/crysirror-resource/src/file.rs",
+        "crates/crysirror-resource/src/lzss.rs",
+        "crates/crysirror-resource/src/wave.rs",
         "crates/crysirror-siglus-vm/src/message.rs",
         "crates/crysirror-runtime/src/media.rs",
         "crates/crysirror-runtime/src/assets_async.rs",
@@ -217,6 +223,18 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("DecodeLimits", "Resources.defineProfile limits", sample::<crysirror_resource::DecodeLimits>(e.clone())),
+        d("TransformSpec", "Resources.defineProfile rules and native format pipelines", sample::<crysirror_resource::TransformSpec>(json!({"algorithm":"identity"}))),
+        d("LzssMode", "LzssParams.mode", Some(json!("bytewise"))),
+        d("LzssParams", "TransformSpec parameters for lzss", sample::<crysirror_resource::LzssParams>(e.clone())),
+        d("FileKind", "Resources file/audio decoder registry", Some(json!("file"))),
+        d("WaveLoop", "WaveSpec.loops; native sample positions", sample::<crysirror_resource::WaveLoop>(json!({"start":0,"end":1,"play_count":0}))),
+        d("WaveSpec", "Shared native resource WAVE serialization", sample::<crysirror_resource::WaveSpec>(e.clone())),
+        d("BitmapRect", "Bitmap.blit and Bitmap.stretch source/destination rectangles", Some(json!({"x":0,"y":0,"width":1,"height":1}))),
+        d("PixelMath", "Bitmap.blit and Bitmap.stretch mode", Some(json!("copy"))),
+        d("Sampling", "Bitmap.stretch sampling", Some(json!("nearest"))),
+        d("BlitOptions", "Bitmap.blit options", sample::<crysirror_image::bitmap::BlitOptions>(json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":[0,0]}))),
+        d("StretchOptions", "Bitmap.stretch options", sample::<crysirror_image::bitmap::StretchOptions>(json!({"source_rect":{"x":0,"y":0,"width":1,"height":1},"destination":{"x":0,"y":0,"width":1,"height":1}}))),
         d(
             "MessageWindow",
             "Siglus `Config.message_window` (ADR 0061)",

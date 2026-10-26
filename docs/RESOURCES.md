@@ -6,12 +6,14 @@ The format plugins have no CLI, renderer, window, audio device or native VM.
 Archive entries become normal client asset VFS paths. This work does not replace
 or re-register the existing BGI VM adapter (ADR 0039).
 
-The same optional plugin crate now supplies **all 96 image decoder IDs** from
-the pinned inventory: 80 ported and 16 with explicit partial/variant/evidence
-boundaries. Together with the five archive IDs, 101 decoders have concrete
-implementations; 188 other archive/audio/file decoders remain pending.
-The authoritative per-format ledger is [arc-image-support.json](arc-image-support.json).
-These counts describe named decoder implementations, not complete-game coverage.
+The optional plugin implements all **289 named upstream decoder IDs**: 152
+archives, 96 images, 16 audio decoders and 25 encoded-file converters. The
+reviewed inventory records **258 ported and 31 partial** implementations;
+registration is not a claim that every version, encrypted title or game works.
+[arc-resource-support.json](arc-resource-support.json) records archive/audio/file
+variants and evidence; [arc-image-support.json](arc-image-support.json) retains
+image-specific boundaries. Unsupported variants and missing native profiles
+fail explicitly. There is no pending ID hidden behind a registered stub.
 
 Select the plugins explicitly:
 
@@ -115,7 +117,11 @@ decode profiles and keys are host configuration, not a portable save snapshot.
 Hosts can register a format through `ArchiveFormat`, a byte transform through
 `ByteTransform`, and a key service through `KeyProvider`. `PipelineSelector`
 chooses transforms by format and native entry metadata. The built-ins are
-`identity`, `zlib`, `deflate`, `xor`, `aes-ctr128be` and `aes-ctr128le`.
+`identity`, `zlib`, `deflate`, `lzss`, `xor`, `aes-ctr128be`, `aes-ctr128le`,
+`aes-cbc`, `aes256-cbc` and `rc4`. Shared Rust primitives additionally implement
+Blowfish little-endian blocks, PKCS#1 type-1 RSA public decoding and caller-IV
+MD5 for native layouts. CBC validates complete blocks and selected padding;
+LZSS distinguishes bytewise and configurable bitwise layouts.
 XOR and CTR streams support unaligned random reads. CTR and XOR are not
 authenticated encryption; their output alone does not establish a correct key.
 Format-specific integrity checks or authenticated transforms must enforce any
@@ -155,3 +161,61 @@ independent expected plaintext, cross-block seeks, malformed compressed data,
 budget rollback and a synthetic 3 GiB random-access source. Engine integration
 tests generate their own SAR and PNG data at runtime and exercise the existing
 Bitmap, Fs and Assets APIs; no game data or fonts are included.
+
+## Native file and audio conversion
+
+`FileRegistry`/`FileFormat` return engine-owned `DecodedFile` readers with an
+extension hint and native metadata. `Resources.fileFormats()` lists 25 file
+converters and `audioFormats()` lists 16 audio converters. Converted images
+remain ordinary image resources; sound conversions use the shared `WaveSpec`
+serializer and feed the existing CrySirror audio decoder/mixer through VFS.
+No external unpacker or legacy engine process is invoked. HCA uses the safe
+Rust `cridecoder` library; MIO, NWA and the other native codecs are Rust ports.
+
+Realtime callers schedule work on the existing bounded CPU task pool. Source
+opening happens there too, including materializing a compressed mounted entry:
+
+```ts
+const ticket = resources.beginDecode("sound/line.p16", "file", {
+  format: "leaf/p16"
+});
+// On a later update, after status.state becomes "ready":
+resources.decodeStatus(ticket);
+resources.mountDecode(ticket, "decoded/line.wav");
+resources.cancelDecode(ticket); // releases the ticket; mounted readers survive
+```
+
+Use the registered format ID returned by `fileFormats()`/`audioFormats()`;
+headerless or ambiguous formats require an explicit ID. `beginDecode` accepts
+`file` (including audio) or `archive`. `readDecode` pages retained file bytes or
+archive entry metadata. Polling, paging and publication never join a worker or
+run a codec on the realtime thread. Pending/failed reads and invalid tickets
+fail visibly. A client may retain 64 tickets, with 256 per host; completed and
+failed tickets count until cancelled. Late outputs after cancellation are
+released. Ready resources retain their original profile and byte reservation.
+Offline `detectFile` probes formats; `readDecoded`/`mountDecoded` provide the same decode path synchronously;
+realtime hosts reject these synchronous calls. Byte pages are capped at 64 KiB,
+archive metadata pages at 1024 entries. Opening an entry of a mounted archive
+may decode that entry; realtime consumers should use ordinary async Assets
+loading. The initial archive mount does not predecode every contained file.
+
+Profiles also accept `parameters`, keyed by native format ID, for binary layout
+options and host key aliases. These are checked by the individual parser;
+unknown options, unresolved keys and unsupported versions are errors. Title
+key catalogues, logos and region images are supplied by the host when required.
+Companion resolver calls detect cycles and stop after 16 nested resolutions.
+Companion files resolve through a stable client storage capability, never an
+ambient OS path. The resolver is weakly held by mounted providers to avoid a
+VFS ownership cycle. Relative siblings, cross-client separation and symlink
+escape rejection have engine API tests. Profiles, mounted resources and jobs
+are runtime capabilities and are not serialized as portable saves.
+
+The WARC implementation supports version 1.70 with explicit native profiles.
+Its table-sized essential cipher has three differential vectors compiled from
+the pinned original C++ functions (`tools/verify_arc_warc_cipher.py`); this does
+not validate title-dependent entry keys or every encryption hook. Rust defines
+negative floating-to-u32 conversion as truncation followed by modulo 2^32;
+the original C++ expression has undefined out-of-range conversion behavior.
+YLZ is rejected, as it is unimplemented in the pinned source. Other partial
+families, including Unity serialized-file versions and palette variants, remain
+listed individually in the ledgers.

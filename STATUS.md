@@ -1567,3 +1567,57 @@ extraction. ADR 0038 records this delivered capability increment.
   vfx-render-{gpu,cull-gpu,geometry,cpu}.log, vfx-demo-final.json,
   vfx-stress-final.json, vfx-demo-rt.json, vfx-live.log and PNGs/movies plus
   live-profile.json in target/verification/vfx-demo/.
+
+## 2026-10-26 — Native resource migration and asynchronous conversion (ADR 0065)
+
+Implementation:
+- Continued the unfinished arc_unpacker batches and wired every concrete named
+  decoder from clean pin `456834ecf2e5686813802c37efd829310485c57d`: 152 archives,
+  96 images, 16 audio and 25 file converters. The reviewed ledger records
+  **258 ported / 31 partial**, including original-source unsupported branches,
+  explicit encrypted-title profiles and bounded Unity/PSB/pickle/XP3 variants.
+  There is no pending ID registered as a success stub. This is resource-codec
+  migration, not a new native VM or full-game compatibility claim.
+- Shared engine contracts now include FileRegistry/DecodedFile, capability-only
+  companions, cycle/depth checks, LZSS, generic crypto primitives, WAVE/loop
+  serialization, PNG output, channel masks and nontransparent pixel copying.
+  Format-specific layouts/codecs stay in the optional GPL plugin. HCA uses
+  safe Rust cridecoder; no original-engine process or C/C++ codec is hosted.
+- Resources exposes file/audio discovery, paging, converted-file mounts and
+  bounded client-scoped decode jobs. Provider-backed source opening and codec
+  work both run on CPU workers; owner polling/publication never joins them.
+  Cancellation discards late results; mounted readers retain their original
+  profile/budget. Synchronous file probe/conversion APIs are offline-only.
+- Fixed companion authority lifetime without a VFS/provider reference cycle;
+  checked WARC short-tail/index/region-image limits and S25 aggregate row and
+  predictor-work limits. Native keys remain host aliases, not bundled tables.
+- Regenerated docs/api with fingerprint `d4f4c6edc250ee72`; CHANGES records the
+  new APIs, data specs and Rust PixelMath exhaustive-match compatibility change.
+
+Compilation:
+- Local `cargo check --workspace --all-targets`: passed.
+- Local engine + desktop `arc-formats` all-target check: passed.
+- Latest arc-enabled API/file-resource tests compiled the realtime probe gate
+  and worker-side mounted-source opening. Existing unrelated warnings remain.
+
+Behavior validation:
+- Full local `cargo test --workspace`, including documentation tests: **780
+  passed, 0 failed, 85 ignored**. Ignored GPU/font/external tests are not passes.
+- Arc-enabled engine resource/image/file suites plus API docs: **19 passed**;
+  final realtime-source/gate/API rerun: **13 passed**. These overlapping runs
+  are not added together as distinct tests. No VM, GPU or audio device required.
+- Final i-family review: **8 native unit tests passed** and **4 archive tests
+  passed with the external S25 corpus explicitly enabled**.
+- Final external pinned corpus: **15 test groups passed**. The separate FC01
+  external-key test was excluded and is not claimed as a pass. Fixture media
+  remains outside Git. Existing lossy-image tolerances and alpha0 hidden-RGB
+  comparison rules remain explicit in the ledgers.
+- Original pinned WARC C++ table-cipher functions compiled and reproduced
+  **3 portable vectors**; Rust matches them. This excludes title-key branches
+  and upstream's undefined negative floating-to-unsigned conversion behavior.
+- Python 3.11 tooling: **187 tests passed**, including inventory/source-linkage
+  checks. No GitHub CI/workflow or remote build automation was added.
+
+No commercial-game run, console validation or hardware-render result is claimed
+from these CPU codec/API checks. Per-format limits remain in RESOURCES.md,
+arc-resource-support.json and arc-image-support.json.

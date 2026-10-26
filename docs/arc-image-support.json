@@ -10,15 +10,18 @@
   "summary": {
     "upstream_decoders": 289,
     "implemented_registered_images": 96,
-    "existing_registered_archives": 5,
-    "pending_nonimage_decoders": 188,
+    "existing_registered_archives": 152,
+    "pending_nonimage_decoders": 0,
     "reported_ordinary_image_tests": 88,
     "reported_external_image_test_cases": 7,
     "reported_external_image_comparisons": 177,
     "reported_exact_rgba_comparisons": 174,
     "reported_lossy_codec_comparisons": 3,
     "cbg_smoke_already_in_d_test_count": true,
-    "all_values_are_reported_evidence_not_tests_executed_by_inventory": true
+    "all_values_are_reported_evidence_not_tests_executed_by_inventory": true,
+    "implemented_registered_audio": 16,
+    "implemented_registered_files": 25,
+    "resource_ledger": "docs/arc-resource-support.json"
   },
   "groups": {
     "a": {

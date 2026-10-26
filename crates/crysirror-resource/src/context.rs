@@ -17,10 +17,15 @@ use std::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DecodeLimits {
+    /// Maximum number of published entries per archive.
     pub max_entries: usize,
+    /// Maximum logical bytes per decoded resource.
     pub max_entry_size: u64,
+    /// Maximum bytes read or inflated for an index.
     pub max_index_size: u64,
+    /// Retained decoded bytes shared by this client's profiles.
     pub max_resident_bytes: u64,
+    /// Maximum read bytes per format probe.
     pub max_probe_bytes: u64,
 }
 impl Default for DecodeLimits {
@@ -34,6 +39,34 @@ impl Default for DecodeLimits {
         }
     }
 }
+thread_local! {
+    // Resolving a mounted entry can synchronously decode another entry before
+    // returning its reader. Bound that call graph independently of format keys.
+    static DEPENDENCY_STACK: std::cell::RefCell<Vec<(ClientId, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+struct DependencyGuard;
+impl DependencyGuard {
+    fn enter(client: ClientId, path: &str) -> Result<Self> {
+        DEPENDENCY_STACK.with(|stack| {
+            let mut stack = stack.borrow_mut();
+            ensure!(stack.len() < 16, "resource companion recursion limit");
+            ensure!(
+                !stack.iter().any(|(c, p)| *c == client && p == path),
+                "resource companion dependency cycle"
+            );
+            stack.push((client, path.to_owned()));
+            Ok(Self)
+        })
+    }
+}
+impl Drop for DependencyGuard {
+    fn drop(&mut self) {
+        DEPENDENCY_STACK.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
+
 pub trait PipelineSelector: Send + Sync {
     fn pipeline(&self, format: &str, entry: &ArchiveEntry) -> Result<Vec<TransformSpec>>;
 }
@@ -58,6 +91,13 @@ pub struct DecodeContext {
     pub transforms: Arc<TransformRegistry>,
     pub keys: Arc<dyn KeyProvider>,
     pub pipelines: Arc<dyn PipelineSelector>,
+    /// Logical source name relative to this client's capability root.
+    pub source_name: Option<String>,
+    /// Explicit format-specific options. Secret bytes belong in KeyProvider;
+    /// options may refer to key aliases, never ambient paths/device pointers.
+    pub parameters: BTreeMap<String, serde_json::Value>,
+    /// Scoped companion resources; workers capture the same immutable authority.
+    pub resolver: Option<Arc<dyn crate::DependencyResolver>>,
     budget: Arc<AtomicU64>,
 }
 impl DecodeContext {
@@ -68,6 +108,9 @@ impl DecodeContext {
             transforms: Arc::new(TransformRegistry::default()),
             keys: Arc::new(MemoryKeyProvider::default()),
             pipelines: Arc::new(PipelineRules::default()),
+            source_name: None,
+            parameters: BTreeMap::new(),
+            resolver: None,
             budget: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -114,6 +157,41 @@ impl DecodeContext {
     pub fn resident_bytes(&self) -> u64 {
         self.budget.load(Ordering::Relaxed)
     }
+    pub fn open_dependency(&self, path: &str) -> Result<Arc<dyn AssetReader>> {
+        let canonical =
+            crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Asset, path)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        ensure!(
+            canonical.relative() == path,
+            "resource dependency path must be canonical"
+        );
+        let _dependency = DependencyGuard::enter(self.client, path)?;
+        self.resolver
+            .as_ref()
+            .ok_or_else(|| {
+                anyhow::anyhow!("format requires an explicit client-scoped companion resolver")
+            })?
+            .open(path)
+    }
+    pub fn open_sibling(&self, name: &str) -> Result<Arc<dyn AssetReader>> {
+        ensure!(
+            !name.is_empty()
+                && !name.starts_with('/')
+                && !name.contains(['\\', ':', '\0'])
+                && name
+                    .split('/')
+                    .all(|s| !s.is_empty() && s != "." && s != ".."),
+            "invalid companion resource name"
+        );
+        let source = self
+            .source_name
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("companion resource requires a logical source_name"))?;
+        let path = source
+            .rsplit_once('/')
+            .map_or_else(|| name.to_owned(), |(parent, _)| format!("{parent}/{name}"));
+        self.open_dependency(&path)
+    }
     pub fn memory(&self, bytes: Vec<u8>) -> Result<Arc<dyn AssetReader>> {
         ensure!(
             bytes.len() as u64 <= self.limits.max_entry_size,
@@ -144,6 +222,47 @@ impl DecodeContext {
             _reservation: reservation,
         }))
     }
+    /// Admit the maximum before running a variable-size codec, then retain
+    /// only its actual output charge. The codec must enforce this bound while
+    /// producing data, not allocate unbounded output and truncate afterward.
+    pub fn decode_bounded(
+        &self,
+        limit: u64,
+        decode: impl FnOnce() -> Result<Vec<u8>>,
+    ) -> Result<Arc<dyn AssetReader>> {
+        ensure!(
+            limit <= self.limits.max_entry_size && limit <= usize::MAX as u64,
+            "decoded entry byte limit"
+        );
+        let mut reservation = self.reserve(limit)?;
+        let bytes = decode()?;
+        ensure!(
+            bytes.len() as u64 <= limit,
+            "codec exceeded declared output bound"
+        );
+        reservation.shrink(bytes.len() as u64);
+        Ok(Arc::new(Resident {
+            reader: MemoryAssetReader(Arc::from(bytes)),
+            _reservation: reservation,
+        }))
+    }
+    /// Admit transient codec working storage before allocation and release its
+    /// charge on return/error. The closure must not let that allocation escape;
+    /// retained output uses decode_with/decode_bounded instead. This accounts
+    /// caller-declared storage, not all allocations inside third-party codecs.
+    pub fn with_temporary_bytes<T>(
+        &self,
+        bytes: u64,
+        work: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        ensure!(
+            bytes <= usize::MAX as u64,
+            "temporary codec allocation size"
+        );
+        let _reservation = self.reserve(bytes)?;
+        work()
+    }
+
     pub(crate) fn reserve(&self, bytes: u64) -> Result<Reservation> {
         let limit = self.limits.max_resident_bytes;
         ensure!(

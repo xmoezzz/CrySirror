@@ -375,15 +375,15 @@ fn large_plain_entries_stay_streamed_even_when_resident_budget_is_tiny() {
 fn explicit_registration_lists_only_implemented_decoders() {
     let mut registry = FormatRegistry::default();
     crysirror_formats_arc::register(&mut registry).unwrap();
-    assert_eq!(
-        registry.names(),
-        [
-            "bgi/arc",
-            "kirikiri/xp3",
-            "majiro/arc",
-            "nscripter/nsa",
-            "nscripter/sar"
-        ]
-    );
+    let mut expected = vec![
+        "bgi/arc",
+        "kirikiri/xp3",
+        "majiro/arc",
+        "nscripter/nsa",
+        "nscripter/sar",
+    ];
+    expected.extend(crysirror_formats_arc::legacy_archive_ids());
+    expected.sort();
+    assert_eq!(registry.names(), expected);
     assert!(crysirror_formats_arc::register(&mut registry).is_err());
 }

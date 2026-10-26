@@ -23,7 +23,7 @@ impl Probe {
     pub const NO: Self = Self { confidence: 0 };
     pub const YES: Self = Self { confidence: 100 };
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct FormatRegistry {
     formats: BTreeMap<&'static str, Arc<dyn ArchiveFormat>>,
 }

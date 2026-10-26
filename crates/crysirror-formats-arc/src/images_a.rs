@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! CPU image codecs translated from the pinned arc_unpacker source (rr-, GPLv3+).
 mod alice;
-mod common;
+pub(crate) mod common;
 mod eri;
-mod eri_entropy;
+pub(crate) mod eri_entropy;
 mod extra;
 mod jbp1;
 mod kaguya;

@@ -23,7 +23,7 @@ and a test keeps it current.
   `pub enum` declarations in `crysirror-scene`, plus shared media/asset declarations in core/runtime and task statistics in
   `crysirror-tasks`. Modular effect authoring declarations, CPU particle/event
   records and reservation limits come from `crysirror-vfx/src/schema.rs` and
-  `simulation.rs`. Descriptions come from their
+  `simulation.rs`. Shared native-resource limits, transforms, LZSS, file kinds, WAVE containers and bitmap operations come from `crysirror-resource` and `crysirror-image`. Descriptions come from their
   `///` comments. Defaults come from serde: a minimal value is parsed and
   then serialized again.
 - **Adapter configs.** The `Config` structs of the Siglus, native RealLive and

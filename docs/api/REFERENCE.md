@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `ff5f3d2050247846`
+API fingerprint: `d4f4c6edc250ee72`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -15,7 +15,7 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 - [Globals](#globals)
 - Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [Vfx](#class-vfx), [World](#class-world)
 - [Commands](#commands)
-- Data: [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
+- Data: [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -433,11 +433,21 @@ Script global: `resources`.
 | Method | Returns | Description |
 |---|---|---|
 | `formats(—)` | `string[]` | List installed archive decoder IDs; unavailable formats are never reported as supported. |
+| `fileFormats(—)` | `string[]` | List installed encoded-file converters. They return shared resource bytes, not a private extractor process. |
+| `audioFormats(—)` | `string[]` | List installed native audio converters producing standard WAVE resources for the engine decoder/mixer. |
+| `detectFile(asset: string, options: Record<string, any> \| null)` | `Record<string, any>[]` | Offline probe of native file/audio decoders with per-plugin read budgets. Options {profile?}; live hosts use beginDecode with automatic detection, and ambiguous formats require an explicit decoder. |
+| `readDecoded(asset: string, options: Record<string, any> \| null)` | `Record<string, any>` | Decode a file/audio resource and return metadata plus a bounded byte page. Options {format?,profile?,offset?,limit?}, default 4096 and maximum 65536 bytes. Decoding is CPU work; live callers should schedule it as an asset task. |
+| `mountDecoded(asset: string, target: string, options: Record<string, any> \| null)` | `Record<string, any>` | Decode once and publish a client-scoped VFS resource at target. Normal Bitmap/Assets/Audio calls can consume it. Options {format?,profile?}; retained output shares the client's decode budget and no extracted file is written. |
+| `beginDecode(asset: string, kind: string, options: Record<string, any> \| null)` | `number` | Schedule file/audio conversion (kind=file) or archive indexing (kind=archive) on the bounded CPU pool. Options {format?,profile?}. Returns a scoped ticket; owner calls never join. At most 64 retained tickets per client and 256 per host. |
+| `decodeStatus(ticket: number)` | `Record<string, any>` | Poll pending/ready/failed resource work without blocking. A completed decoder failure remains visible until cancelled. |
+| `readDecode(ticket: number, offset: number \| null, limit: number \| null)` | `Record<string, any>` | Read a ready file's bounded byte page (maximum 65536) or archive metadata page (maximum 1024 entries). Pending work fails visibly rather than waiting or returning fabricated data. |
+| `mountDecode(ticket: number, target: string)` | `Record<string, any>` | Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. No CPU decoder runs during publication. |
+| `cancelDecode(ticket: number)` | `void` | Cancel pending work or release a retained result. Late worker output is discarded. Already mounted readers retain their own decoded-resource reservation. |
 | `transforms(—)` | `string[]` | List installed byte transform IDs; profiles refer to keys supplied by the Rust host. |
 | `imageFormats(—)` | `Record<string, any>` | List installed native image format IDs and standard image extensions; the runtime, Bitmap, text icons and renderer use this same registry. |
 | `probeImage(asset: string)` | `string[]` | Return recognized native image IDs from bounded client asset bytes. Specific wrappers outrank their generic embedded codec during automatic decode. |
 | `decodeImage(slot: number, asset: string, options: Record<string, any> \| null)` | `string` | Decode a client image into __surface/<slot> for Bitmap/Layer/UI/3D use. Options {format?,profile?}; external bases/masks use the same scoped VFS and keys remain in the host provider. |
-| `defineProfile(name: string, profile: Record<string, any>)` | `void` | Define an immutable client profile {limits?,rules:[{format,path?,transforms:[{algorithm,key_id?,parameters?,expected_size?}]}]}. No raw keys. Up to 32 profiles; default is created lazily. |
+| `defineProfile(name: string, profile: Record<string, any>)` | `void` | Define an immutable client profile {limits?,parameters?:{format:options},rules:[{format,path?,transforms:[{algorithm,key_id?,parameters?,expected_size?}]}]}. Native options name client key aliases/companions; secret bytes remain in the host KeyProvider. Up to 32 profiles; default is created lazily. |
 | `probe(asset: string)` | `Record<string, any>[]` | Probe an asset using installed formats with bounded reads. Ambiguous signatures require an explicit format when opening. |
 | `list(asset: string, options: Record<string, any> \| null)` | `Record<string, any>` | Inspect archive metadata. Options {format?,profile?,offset?,limit?}; default 128 and at most 1024 entries per page. |
 | `mount(asset: string, mountPoint: string, options: Record<string, any> \| null)` | `Record<string, any>` | Mount archive entries in this client's asset VFS, then use normal bitmap, audio and model APIs. Options {format?,profile?}. Native paths are validated; keys and decoded bytes are not saved. |
@@ -641,6 +651,144 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 ## Data
 
 Field defaults are the serde defaults (`—`: required, or absent when unset).
+
+### DecodeLimits
+
+Used by: Resources.defineProfile limits.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `max_entries` | `usize` | `100000` | Maximum number of published entries per archive. |
+| `max_entry_size` | `u64` | `67108864` | Maximum logical bytes per decoded resource. |
+| `max_index_size` | `u64` | `16777216` | Maximum bytes read or inflated for an index. |
+| `max_resident_bytes` | `u64` | `268435456` | Retained decoded bytes shared by this client's profiles. |
+| `max_probe_bytes` | `u64` | `1048576` | Maximum read bytes per format probe. |
+
+### TransformSpec
+
+Used by: Resources.defineProfile rules and native format pipelines.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `algorithm` | `String` | `"identity"` | Registered byte-transform identifier. |
+| `key_id` | `Option<String>` | `null` | Optional client-scoped host key alias; never raw secret bytes. |
+| `parameters` | `serde_json::Value` | `null` | Explicit algorithm options; unknown options fail. |
+| `expected_size` | `Option<u64>` | `null` | Optional exact logical output size, required by LZSS. |
+
+### LzssMode
+
+Used by: LzssParams.mode.
+
+`bytewise`: 8-flag control byte (LSB first, 1 = literal), 12-bit position and 4-bit length+3 in two bytes over a 4 KiB ring. `bitwise`: MSB-first bit stream, flag bit 1 = literal, configurable position/length widths. Truncated input stops decoding and the remainder stays zero, which is the behavior legacy decoders rely on for archives with padded size fields.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `bytewise` | — | — |
+| `bitwise` | — | — |
+
+### LzssParams
+
+Used by: TransformSpec parameters for lzss.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `mode` | `LzssMode` | `"bytewise"` | Byte-control or MSB-first bitstream layout. |
+| `initial` | `usize` | `4078` | Initial ring write position, wrapped to dictionary size. |
+| `position_bits` | `u32` | `12` | Dictionary position width; bytewise requires 12. |
+| `size_bits` | `u32` | `4` | Match length width; bytewise requires 4. |
+| `min_match` | `usize` | `3` | Minimum match length; bytewise requires 3. |
+| `invert_length` | `bool` | `false` | Bytewise only: the 4-bit length field is stored inverted (GLib). |
+
+### FileKind
+
+Used by: Resources file/audio decoder registry.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `file` | — | — |
+| `audio` | — | — |
+
+### WaveLoop
+
+Used by: WaveSpec.loops; native sample positions.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `start` | `u32` | `0` | Inclusive first sample frame. |
+| `end` | `u32` | `1` | Native final sample frame. |
+| `play_count` | `u32` | `0` | Zero means repeat indefinitely. |
+
+### WaveSpec
+
+Used by: Shared native resource WAVE serialization.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `format` | `u16` | `1` | Native WAVE format tag; PCM is 1. |
+| `channels` | `u16` | `1` | Interleaved channel count, 1..=32. |
+| `sample_rate` | `u32` | `44100` | Sample frames per second. |
+| `bits_per_sample` | `u16` | `16` | Native sample depth, retained without conversion. |
+| `extra` | `Vec<u8>` | `[]` | Native WAVEFORMATEX extension bytes. |
+| `loops` | `Vec<WaveLoop>` | `[]` | Sample loop metadata serialized in a smpl chunk. |
+| `block_align` | `u16` | `0` | Zero derives channel_count * bits / 8. Explicit compressed formats may supply their native packet alignment and byte rate. |
+| `byte_rate` | `u32` | `0` | Zero derives sample_rate * block_align. |
+
+### BitmapRect
+
+Used by: Bitmap.blit and Bitmap.stretch source/destination rectangles.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `x` | `i32` | `0` | — |
+| `y` | `i32` | `0` | — |
+| `width` | `u32` | `1` | — |
+| `height` | `u32` | `1` | — |
+
+### PixelMath
+
+Used by: Bitmap.blit and Bitmap.stretch mode.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `copy` | — | Copy/opacity-lerp all four channels; /255 with nearest rounding. |
+| `copy_rgb` | — | Copy/opacity-lerp RGB only, retaining destination alpha. |
+| `copy_non_transparent` | — | Copy all four channels only when the source alpha is nonzero. Alpha selects coverage; it does not become an additional blend weight. |
+| `source_over` | — | Conventional straight RGBA source-over, including destination alpha. |
+| `mask255` | — | Straight mask blend: truncate opacity*source_alpha/255, rounded RGB, alpha = dst_alpha + floor((255-dst_alpha)*effective_alpha/255). |
+| `premultiplied_mask256` | — | Premultiplied RGB + byte mask: src + floor((256-mask)*dst/256), saturating; mask zero skips, destination alpha is retained. Only opacity=255 is supported; native fade parameters need a separate operation. |
+
+### Sampling
+
+Used by: Bitmap.stretch sampling.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `nearest` | — | — |
+
+### BlitOptions
+
+Used by: Bitmap.blit options.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `source_rect` | `BitmapRect` | `{"height":1,"width":1,"x":0,"y":0}` | — |
+| `destination` | `[i32; 2]` | `[0,0]` | — |
+| `opacity` | `u8` | `255` | — |
+| `mode` | `PixelMath` | `"copy"` | — |
+| `color_key` | `Option<[u8; 3]>` | `null` | Exact RGB key, compared before blending; keyed pixels do not write any channel. |
+
+### StretchOptions
+
+Used by: Bitmap.stretch options.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `source_rect` | `BitmapRect` | `{"height":1,"width":1,"x":0,"y":0}` | — |
+| `destination` | `BitmapRect` | `{"height":1,"width":1,"x":0,"y":0}` | — |
+| `opacity` | `u8` | `255` | — |
+| `mode` | `PixelMath` | `"copy"` | — |
+| `sampling` | `Sampling` | `"nearest"` | — |
+| `color_key` | `Option<[u8; 3]>` | `null` | — |
 
 ### MessageWindow
 

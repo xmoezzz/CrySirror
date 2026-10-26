@@ -4,6 +4,23 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `d4f4c6edc250ee72` (2026-10-26): shared native file/audio resources
+
+- Add `Resources.fileFormats`, `audioFormats`, `detectFile`, `readDecoded` and
+  `mountDecoded` for engine-owned converted readers. `defineProfile` additionally
+  accepts native `parameters` keyed by decoder ID, with host key aliases.
+- Add `beginDecode`, `decodeStatus`, `readDecode`, `mountDecode` and
+  `cancelDecode`: bounded client-scoped CPU jobs retain their original profile
+  and publish completed readers/archives through ordinary VFS. Live hosts must
+  use these jobs instead of synchronous `detectFile`/`readDecoded`/`mountDecoded`.
+- Document `DecodeLimits`, `TransformSpec`, bytewise/bitwise `LzssParams`,
+  `FileKind`, `WaveSpec`/`WaveLoop` and bitmap rect/blit/stretch/pixel modes from
+  their Rust declarations. Add `PixelMath.copy_non_transparent`, preserving
+  source alpha as a coverage selector. Existing mode/default names are retained.
+  **Breaking (Rust):** exhaustive `PixelMath` matches must handle the new variant.
+- Key bytes remain host-only. Jobs, profiles and mounts are runtime capabilities;
+  no portable save representation or all-variant decoder guarantee is added.
+
 ## `ff5f3d2050247846` (2026-10-26): engine-owned modular VFX
 
 - Add the `Vfx` class and `vfx` singleton: compile/play, typed parameter updates,

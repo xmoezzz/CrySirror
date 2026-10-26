@@ -130,3 +130,16 @@ simulator or render a legacy engine framebuffer. This capability addition does
 not itself establish new native Siglus/AVG32/RealLive opcode coverage. See
 [ADR 0064](adr/0064-modular-vfx-cpu-gpu.md) for supported modules and explicit
 backend gaps.
+
+## Native resource codecs (2026-10-26)
+
+The complete named arc_unpacker inventory is now exposed by CrySirror resource
+registries: archives become client VFS providers, pictures use the shared image
+registry, and encoded files/audio become engine-owned readers. A VM adapter
+requests these APIs and translates native names/parameters; it must not run an
+unpacker or retain a private media engine. `Resources.beginDecode` and ordinary
+async Assets loading provide the task/completion boundary. Keys are host aliases
+and companion paths stay under the same client capability. Codec availability
+alone does not establish VM/opcode, game, save or renderer compatibility. See
+[ADR 0065](adr/0065-native-resource-codecs-and-async-decode.md) and the explicit
+[resource](arc-resource-support.json)/[image](arc-image-support.json) ledgers.

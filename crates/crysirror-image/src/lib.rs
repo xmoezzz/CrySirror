@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 //! CPU-only image surfaces and decoder dispatch. No GPU, window or VM policy.
 #![forbid(unsafe_code)]
-use anyhow::{Result, ensure};
+use anyhow::{ensure, Result};
 use std::{collections::BTreeMap, io::Cursor, sync::Arc};
 mod formats;
 pub use formats::{ImageDecodeContext, ImageFormat, ImageSource};
 
 pub const MAX_DECODED_BYTES: usize = 64 * 1024 * 1024;
+mod png;
+pub use png::{encode_png_uncompressed, png_uncompressed_len};
 pub fn rgba_len(width: u32, height: u32) -> Result<usize> {
     ensure!(
         width > 0 && height > 0 && width <= 8192 && height <= 8192,
@@ -49,8 +51,8 @@ pub trait ImageDecoder: Send + Sync {
     /// resolved explicitly by their frontend before using this generic surface.
     fn decode(&self, bytes: &[u8]) -> Result<ImageSurface>;
 }
-pub mod bitmap;
 pub mod associated;
+pub mod bitmap;
 pub mod composition;
 mod dds;
 pub mod packed;
@@ -157,20 +159,16 @@ mod tests {
     #[test]
     fn invalid_surfaces_and_unknown_formats_fail() {
         assert!(rgba_len(u32::MAX, 2).is_err());
-        assert!(
-            ImageSurface {
-                width: 1,
-                height: 1,
-                rgba: vec![0; 3]
-            }
-            .validate()
-            .is_err()
-        );
-        assert!(
-            DecoderRegistry::default()
-                .decode("native.g00", &[])
-                .is_err()
-        );
+        assert!(ImageSurface {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 3]
+        }
+        .validate()
+        .is_err());
+        assert!(DecoderRegistry::default()
+            .decode("native.g00", &[])
+            .is_err());
     }
     #[test]
     fn channels_and_registration() {
@@ -178,11 +176,9 @@ mod tests {
         swap_red_blue(&mut p).unwrap();
         assert_eq!(p, [3, 2, 1, 4]);
         assert!(swap_red_blue(&mut [0; 3]).is_err());
-        assert!(
-            DecoderRegistry::default()
-                .register("png", Arc::new(Standard))
-                .is_err()
-        );
+        assert!(DecoderRegistry::default()
+            .register("png", Arc::new(Standard))
+            .is_err());
     }
 }
 

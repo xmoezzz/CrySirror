@@ -2,16 +2,29 @@
 //! Shared archive and transform contracts. No VM, window or device dependency.
 #![forbid(unsafe_code)]
 mod context;
+mod crypto;
+mod jobs;
+mod wave;
+pub use jobs::{ResourceResult, ResourceTasks, MAX_RESOURCE_JOBS, MAX_RESOURCE_JOBS_PER_CLIENT};
+mod file;
 pub mod io;
 pub mod keys;
+pub mod lzss;
 pub mod registry;
 pub mod transforms;
 
 pub use context::{DecodeContext, DecodeLimits, PipelineRules, PipelineSelector};
+pub use crypto::rsa_public_decrypt;
+pub use crypto::{
+    aes256_cbc_decrypt, aes_cbc_decrypt, blowfish_le_decrypt, md5_with_iv, rc4_crypt,
+};
+pub use file::{DecodedFile, DependencyResolver, FileFormat, FileKind, FileRegistry};
 pub use io::{concat, read_all, read_exact_at, subrange, AssetIo};
 pub use keys::{KeyMaterial, KeyProvider, MemoryKeyProvider};
+pub use lzss::{lzss_decompress, LzssMode, LzssParams};
 pub use registry::{ArchiveMount, FormatRegistry, Probe};
 pub use transforms::{ByteTransform, TransformRegistry, TransformSpec};
+pub use wave::{WaveLoop, WaveSpec};
 
 use anyhow::Result;
 use crysirror_core::service::AssetReader;

@@ -46,7 +46,7 @@ impl<'a> Cursor<'a> {
         Self { data, at: 0 }
     }
     pub fn left(&self) -> usize {
-        self.data.len() - self.at
+        self.data.len().saturating_sub(self.at)
     }
     pub fn take(&mut self, n: usize) -> Result<&'a [u8]> {
         let end = self.at.checked_add(n).context("archive cursor overflow")?;
@@ -71,7 +71,10 @@ impl<'a> Cursor<'a> {
         Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
     pub fn zero(&mut self) -> Result<&'a [u8]> {
-        let size = self.data[self.at..]
+        let size = self
+            .data
+            .get(self.at..)
+            .context("archive cursor outside table")?
             .iter()
             .position(|b| *b == 0)
             .context("unterminated archive filename")?;
@@ -119,8 +122,22 @@ pub(crate) enum EntryPlan {
     NsaLzss {
         offset: u64,
     },
+    /// Stored bytes run through shared engine transforms (zlib, lzss, ...).
+    Transform {
+        offset: u64,
+        specs: Vec<TransformSpec>,
+    },
+    /// Format-specific byte decode whose output size is the entry size.
+    Decode {
+        offset: u64,
+        decode: DecodeFn,
+    },
+    Profile {
+        offset: u64,
+    },
     Unsupported(&'static str),
 }
+pub(crate) type DecodeFn = Arc<dyn Fn(&[u8], &ArchiveEntry) -> Result<Vec<u8>> + Send + Sync>;
 pub(crate) struct ParsedArchive {
     pub format: &'static str,
     pub source: Arc<dyn AssetReader>,
@@ -142,6 +159,10 @@ impl Archive for ParsedArchive {
             "archive entry decoded byte limit"
         );
         let (data, required) = match &self.plans[id as usize] {
+            EntryPlan::Profile { offset } => (
+                subrange(self.source.clone(), *offset, entry.stored_size)?,
+                true,
+            ),
             EntryPlan::Raw { offset } => (
                 subrange(self.source.clone(), *offset, entry.stored_size)?,
                 false,
@@ -182,6 +203,23 @@ impl Archive for ParsedArchive {
                 )?;
                 (
                     context.decode_with(entry.size, || nsa_lzss(&input, entry.size))?,
+                    false,
+                )
+            }
+            EntryPlan::Transform { offset, specs } => {
+                let mut reader = subrange(self.source.clone(), *offset, entry.stored_size)?;
+                for spec in specs {
+                    reader = context.apply(spec, reader, &entry.metadata)?;
+                }
+                (reader, false)
+            }
+            EntryPlan::Decode { offset, decode } => {
+                let input = read_all(
+                    subrange(self.source.clone(), *offset, entry.stored_size)?.as_ref(),
+                    context.limits.max_resident_bytes,
+                )?;
+                (
+                    context.decode_with(entry.size, || decode(&input, entry))?,
                     false,
                 )
             }

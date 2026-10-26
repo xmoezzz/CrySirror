@@ -15,8 +15,8 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-cli | Original schema-1 replay CLI, binary crysirror-contract |
 | crysirror-runtime | Schema-2 data, capability VFS/assets, factories, scheduler, snapshots |
 | crysirror-image | Shared safe CPU surfaces, content/extension decoder registry, scoped dependency/key contexts and bitmap operations; explicit native pixel-math profiles |
-| crysirror-resource | CPU archive registry, random-access streams, decode budgets, client-scoped transform/key contracts and VFS mounts |
-| crysirror-formats-arc | Optional GPL Rust archive and 96 native image plugins from pinned arc_unpacker; explicit per-format coverage inventory (ADR 0044/0046) |
+| crysirror-resource | CPU archive/file/audio contracts, bounded decode tasks and streams, transform/key/companion capabilities, WAVE containers and VFS mounts |
+| crysirror-formats-arc | Optional GPL Rust plugins for 152 archives, 96 images, 16 audio and 25 files from pinned arc_unpacker; explicit partial-format ledger (ADR 0065) |
 | crysirror-physics | Persistent Rapier 3D CPU backend; rigid bodies, CCD, joints, queries, event queues and scoped handles (ADR 0045) |
 | crysirror-wgpu | GPU uploads, clipped/blended 2D/text, extracted dynamic 3D and readback |
 | crysirror-desktop | winit lifecycle/input, audio sink, CLI and persistent state location |
@@ -291,3 +291,16 @@ budgets, timeline backpressure and remaining Niagara gaps. GPU capacity and
 submission work are not reported as measured live counts. Save/restore retains
 declarations and resets derived visuals rather than claiming exact particle
 checkpoint persistence. No Unreal runtime or source was copied or hosted.
+
+## Native resource conversion and scheduling (2026-10-26)
+
+The optional arc resource plugin now supplies every named decoder in the pinned
+inventory through shared archive/image/file/audio registries. It contains native
+layouts and codecs, without hosting another engine. `crysirror-resource` owns
+key aliases, transforms, bounds, companion capabilities, WAVE serialization and
+`ResourceTasks`; `crysirror-image` owns masks/pixel operations and PNG output.
+`Resources.beginDecode` submits immutable inputs to the bounded engine CPU pool;
+owner polling and VFS publication retain client/profile/resident ownership.
+Offline synchronous conversion is rejected in realtime hosts. Lazy mounted
+entries still use normal async Assets loading. See [ADR 0065](adr/0065-native-resource-codecs-and-async-decode.md)
+and [RESOURCES](RESOURCES.md) for boundaries and the reviewed partial-format ledger.

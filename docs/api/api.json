@@ -2361,6 +2361,142 @@
           "returns": "string[]"
         },
         {
+          "doc": "List installed encoded-file converters. They return shared resource bytes, not a private extractor process.",
+          "name": "fileFormats",
+          "params": [],
+          "returns": "string[]"
+        },
+        {
+          "doc": "List installed native audio converters producing standard WAVE resources for the engine decoder/mixer.",
+          "name": "audioFormats",
+          "params": [],
+          "returns": "string[]"
+        },
+        {
+          "doc": "Offline probe of native file/audio decoders with per-plugin read budgets. Options {profile?}; live hosts use beginDecode with automatic detection, and ambiguous formats require an explicit decoder.",
+          "name": "detectFile",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Decode a file/audio resource and return metadata plus a bounded byte page. Options {format?,profile?,offset?,limit?}, default 4096 and maximum 65536 bytes. Decoding is CPU work; live callers should schedule it as an asset task.",
+          "name": "readDecoded",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Decode once and publish a client-scoped VFS resource at target. Normal Bitmap/Assets/Audio calls can consume it. Options {format?,profile?}; retained output shares the client's decode budget and no extracted file is written.",
+          "name": "mountDecoded",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "target",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Schedule file/audio conversion (kind=file) or archive indexing (kind=archive) on the bounded CPU pool. Options {format?,profile?}. Returns a scoped ticket; owner calls never join. At most 64 retained tickets per client and 256 per host.",
+          "name": "beginDecode",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Poll pending/ready/failed resource work without blocking. A completed decoder failure remains visible until cancelled.",
+          "name": "decodeStatus",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Read a ready file's bounded byte page (maximum 65536) or archive metadata page (maximum 1024 entries). Pending work fails visibly rather than waiting or returning fabricated data.",
+          "name": "readDecode",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            },
+            {
+              "name": "offset",
+              "type": "number | null"
+            },
+            {
+              "name": "limit",
+              "type": "number | null"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. No CPU decoder runs during publication.",
+          "name": "mountDecode",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            },
+            {
+              "name": "target",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Cancel pending work or release a retained result. Late worker output is discarded. Already mounted readers retain their own decoded-resource reservation.",
+          "name": "cancelDecode",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "List installed byte transform IDs; profiles refer to keys supplied by the Rust host.",
           "name": "transforms",
           "params": [],
@@ -2403,7 +2539,7 @@
           "returns": "string"
         },
         {
-          "doc": "Define an immutable client profile {limits?,rules:[{format,path?,transforms:[{algorithm,key_id?,parameters?,expected_size?}]}]}. No raw keys. Up to 32 profiles; default is created lazily.",
+          "doc": "Define an immutable client profile {limits?,parameters?:{format:options},rules:[{format,path?,transforms:[{algorithm,key_id?,parameters?,expected_size?}]}]}. Native options name client key aliases/companions; secret bytes remain in the host KeyProvider. Up to 32 profiles; default is created lazily.",
           "name": "defineProfile",
           "params": [
             {
@@ -3630,6 +3766,420 @@
     }
   ],
   "data": [
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 100000,
+          "doc": "Maximum number of published entries per archive.",
+          "name": "max_entries",
+          "rust_type": "usize"
+        },
+        {
+          "default": 67108864,
+          "doc": "Maximum logical bytes per decoded resource.",
+          "name": "max_entry_size",
+          "rust_type": "u64"
+        },
+        {
+          "default": 16777216,
+          "doc": "Maximum bytes read or inflated for an index.",
+          "name": "max_index_size",
+          "rust_type": "u64"
+        },
+        {
+          "default": 268435456,
+          "doc": "Retained decoded bytes shared by this client's profiles.",
+          "name": "max_resident_bytes",
+          "rust_type": "u64"
+        },
+        {
+          "default": 1048576,
+          "doc": "Maximum read bytes per format probe.",
+          "name": "max_probe_bytes",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "DecodeLimits",
+      "used_by": "Resources.defineProfile limits"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": "identity",
+          "doc": "Registered byte-transform identifier.",
+          "name": "algorithm",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Optional client-scoped host key alias; never raw secret bytes.",
+          "name": "key_id",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": null,
+          "doc": "Explicit algorithm options; unknown options fail.",
+          "name": "parameters",
+          "rust_type": "serde_json::Value"
+        },
+        {
+          "default": null,
+          "doc": "Optional exact logical output size, required by LZSS.",
+          "name": "expected_size",
+          "rust_type": "Option<u64>"
+        }
+      ],
+      "name": "TransformSpec",
+      "used_by": "Resources.defineProfile rules and native format pipelines"
+    },
+    {
+      "doc": "`bytewise`: 8-flag control byte (LSB first, 1 = literal), 12-bit position and 4-bit length+3 in two bytes over a 4 KiB ring. `bitwise`: MSB-first bit stream, flag bit 1 = literal, configurable position/length widths. Truncated input stops decoding and the remainder stays zero, which is the behavior legacy decoders rely on for archives with padded size fields.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "bytewise",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "bitwise",
+          "rust_type": ""
+        }
+      ],
+      "name": "LzssMode",
+      "used_by": "LzssParams.mode"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": "bytewise",
+          "doc": "Byte-control or MSB-first bitstream layout.",
+          "name": "mode",
+          "rust_type": "LzssMode"
+        },
+        {
+          "default": 4078,
+          "doc": "Initial ring write position, wrapped to dictionary size.",
+          "name": "initial",
+          "rust_type": "usize"
+        },
+        {
+          "default": 12,
+          "doc": "Dictionary position width; bytewise requires 12.",
+          "name": "position_bits",
+          "rust_type": "u32"
+        },
+        {
+          "default": 4,
+          "doc": "Match length width; bytewise requires 4.",
+          "name": "size_bits",
+          "rust_type": "u32"
+        },
+        {
+          "default": 3,
+          "doc": "Minimum match length; bytewise requires 3.",
+          "name": "min_match",
+          "rust_type": "usize"
+        },
+        {
+          "default": false,
+          "doc": "Bytewise only: the 4-bit length field is stored inverted (GLib).",
+          "name": "invert_length",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "LzssParams",
+      "used_by": "TransformSpec parameters for lzss"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "file",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "audio",
+          "rust_type": ""
+        }
+      ],
+      "name": "FileKind",
+      "used_by": "Resources file/audio decoder registry"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 0,
+          "doc": "Inclusive first sample frame.",
+          "name": "start",
+          "rust_type": "u32"
+        },
+        {
+          "default": 1,
+          "doc": "Native final sample frame.",
+          "name": "end",
+          "rust_type": "u32"
+        },
+        {
+          "default": 0,
+          "doc": "Zero means repeat indefinitely.",
+          "name": "play_count",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "WaveLoop",
+      "used_by": "WaveSpec.loops; native sample positions"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "Native WAVE format tag; PCM is 1.",
+          "name": "format",
+          "rust_type": "u16"
+        },
+        {
+          "default": 1,
+          "doc": "Interleaved channel count, 1..=32.",
+          "name": "channels",
+          "rust_type": "u16"
+        },
+        {
+          "default": 44100,
+          "doc": "Sample frames per second.",
+          "name": "sample_rate",
+          "rust_type": "u32"
+        },
+        {
+          "default": 16,
+          "doc": "Native sample depth, retained without conversion.",
+          "name": "bits_per_sample",
+          "rust_type": "u16"
+        },
+        {
+          "default": [],
+          "doc": "Native WAVEFORMATEX extension bytes.",
+          "name": "extra",
+          "rust_type": "Vec<u8>"
+        },
+        {
+          "default": [],
+          "doc": "Sample loop metadata serialized in a smpl chunk.",
+          "name": "loops",
+          "rust_type": "Vec<WaveLoop>"
+        },
+        {
+          "default": 0,
+          "doc": "Zero derives channel_count * bits / 8. Explicit compressed formats may supply their native packet alignment and byte rate.",
+          "name": "block_align",
+          "rust_type": "u16"
+        },
+        {
+          "default": 0,
+          "doc": "Zero derives sample_rate * block_align.",
+          "name": "byte_rate",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "WaveSpec",
+      "used_by": "Shared native resource WAVE serialization"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 0,
+          "doc": "",
+          "name": "x",
+          "rust_type": "i32"
+        },
+        {
+          "default": 0,
+          "doc": "",
+          "name": "y",
+          "rust_type": "i32"
+        },
+        {
+          "default": 1,
+          "doc": "",
+          "name": "width",
+          "rust_type": "u32"
+        },
+        {
+          "default": 1,
+          "doc": "",
+          "name": "height",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "BitmapRect",
+      "used_by": "Bitmap.blit and Bitmap.stretch source/destination rectangles"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Copy/opacity-lerp all four channels; /255 with nearest rounding.",
+          "name": "copy",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Copy/opacity-lerp RGB only, retaining destination alpha.",
+          "name": "copy_rgb",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Copy all four channels only when the source alpha is nonzero. Alpha selects coverage; it does not become an additional blend weight.",
+          "name": "copy_non_transparent",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Conventional straight RGBA source-over, including destination alpha.",
+          "name": "source_over",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Straight mask blend: truncate opacity*source_alpha/255, rounded RGB, alpha = dst_alpha + floor((255-dst_alpha)*effective_alpha/255).",
+          "name": "mask255",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Premultiplied RGB + byte mask: src + floor((256-mask)*dst/256), saturating; mask zero skips, destination alpha is retained. Only opacity=255 is supported; native fade parameters need a separate operation.",
+          "name": "premultiplied_mask256",
+          "rust_type": ""
+        }
+      ],
+      "name": "PixelMath",
+      "used_by": "Bitmap.blit and Bitmap.stretch mode"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "nearest",
+          "rust_type": ""
+        }
+      ],
+      "name": "Sampling",
+      "used_by": "Bitmap.stretch sampling"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": {
+            "height": 1,
+            "width": 1,
+            "x": 0,
+            "y": 0
+          },
+          "doc": "",
+          "name": "source_rect",
+          "rust_type": "BitmapRect"
+        },
+        {
+          "default": [
+            0,
+            0
+          ],
+          "doc": "",
+          "name": "destination",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "default": 255,
+          "doc": "",
+          "name": "opacity",
+          "rust_type": "u8"
+        },
+        {
+          "default": "copy",
+          "doc": "",
+          "name": "mode",
+          "rust_type": "PixelMath"
+        },
+        {
+          "default": null,
+          "doc": "Exact RGB key, compared before blending; keyed pixels do not write any channel.",
+          "name": "color_key",
+          "rust_type": "Option<[u8; 3]>"
+        }
+      ],
+      "name": "BlitOptions",
+      "used_by": "Bitmap.blit options"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": {
+            "height": 1,
+            "width": 1,
+            "x": 0,
+            "y": 0
+          },
+          "doc": "",
+          "name": "source_rect",
+          "rust_type": "BitmapRect"
+        },
+        {
+          "default": {
+            "height": 1,
+            "width": 1,
+            "x": 0,
+            "y": 0
+          },
+          "doc": "",
+          "name": "destination",
+          "rust_type": "BitmapRect"
+        },
+        {
+          "default": 255,
+          "doc": "",
+          "name": "opacity",
+          "rust_type": "u8"
+        },
+        {
+          "default": "copy",
+          "doc": "",
+          "name": "mode",
+          "rust_type": "PixelMath"
+        },
+        {
+          "default": "nearest",
+          "doc": "",
+          "name": "sampling",
+          "rust_type": "Sampling"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "color_key",
+          "rust_type": "Option<[u8; 3]>"
+        }
+      ],
+      "name": "StretchOptions",
+      "used_by": "Bitmap.stretch options"
+    },
     {
       "doc": "Explicit native-to-project resource mapping for the plain horizontal MWND slice. This is not an automatic conversion of arbitrary Gameexe windows.",
       "fields": [
@@ -9145,7 +9695,7 @@
       "used_by": "UI mutation batches (`ServiceBatch.ui`)"
     }
   ],
-  "fingerprint": "ff5f3d2050247846",
+  "fingerprint": "d4f4c6edc250ee72",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

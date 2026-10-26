@@ -31,6 +31,9 @@ pub enum PixelMath {
     Copy,
     /// Copy/opacity-lerp RGB only, retaining destination alpha.
     CopyRgb,
+    /// Copy all four channels only when the source alpha is nonzero. Alpha
+    /// selects coverage; it does not become an additional blend weight.
+    CopyNonTransparent,
     /// Conventional straight RGBA source-over, including destination alpha.
     SourceOver,
     /// Straight mask blend: truncate opacity*source_alpha/255, rounded RGB,
@@ -94,8 +97,11 @@ fn combine(d: &mut [u8], s: &[u8], opacity: u8, mode: PixelMath) {
         return;
     }
     match mode {
-        PixelMath::Copy | PixelMath::CopyRgb => {
-            let channels = if mode == PixelMath::Copy { 4 } else { 3 };
+        PixelMath::Copy | PixelMath::CopyRgb | PixelMath::CopyNonTransparent => {
+            if mode == PixelMath::CopyNonTransparent && s[3] == 0 {
+                return;
+            }
+            let channels = if mode == PixelMath::CopyRgb { 3 } else { 4 };
             for c in 0..channels {
                 d[c] = lerp(d[c], s[c], op);
             }
@@ -142,6 +148,20 @@ fn clipped(rect: BitmapRect, width: u32, height: u32) -> (i64, i64, i64, i64) {
     )
 }
 impl ImageSurface {
+    /// Replace alpha with one channel of an equally sized engine surface.
+    /// Both inputs are validated before any destination pixel is changed.
+    pub fn apply_channel_mask(&mut self, mask: &ImageSurface, channel: usize) -> Result<()> {
+        self.validate()?;
+        mask.validate()?;
+        ensure!(
+            channel < 4 && self.width == mask.width && self.height == mask.height,
+            "channel mask dimensions/channel mismatch"
+        );
+        for (dst, src) in self.rgba.chunks_exact_mut(4).zip(mask.rgba.chunks_exact(4)) {
+            dst[3] = src[channel];
+        }
+        Ok(())
+    }
     pub fn filled(width: u32, height: u32, rgba: [u8; 4]) -> Result<Self> {
         let len = crate::rgba_len(width, height)?;
         let mut pixels = vec![0; len];
@@ -340,6 +360,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(dst.rgba, vec![10, 0, 0, 77, 99, 0, 0, 77, 30, 0, 0, 77]);
+    }
+    #[test]
+    fn nontransparent_copy_uses_alpha_as_a_selector() {
+        let src = ImageSurface {
+            width: 2,
+            height: 1,
+            rgba: vec![99, 88, 77, 0, 90, 80, 70, 1],
+        };
+        let mut dst = ImageSurface::filled(2, 1, [1, 2, 3, 255]).unwrap();
+        dst.blit(
+            &src,
+            options(
+                BitmapRect::new(0, 0, 2, 1),
+                [0, 0],
+                PixelMath::CopyNonTransparent,
+            ),
+        )
+        .unwrap();
+        assert_eq!(dst.rgba, [1, 2, 3, 255, 90, 80, 70, 1]);
     }
     #[test]
     fn invalid_surfaces_fail_before_mutation() {

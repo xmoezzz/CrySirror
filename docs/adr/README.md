@@ -98,3 +98,4 @@ moves to `done` only with recorded behavior evidence.
 | [0062](0062-avg32-portable-vm-engine-apis.md) | Original AVG32 portable VM library over engine services; shared associated-RGB operations | bounded ADV profile; original saves and complex drawing remain unsupported |
 | [0063](0063-native-font-measurement.md) | Immutable engine font metrics, unwrapped Canvas text and KiriKiri Font callbacks | implemented; system-font and original TJS2 behavior validated |
 | [0064](0064-modular-vfx-cpu-gpu.md) | Engine-owned modular CPU/GPU VFX, typed data/parameters, events, sprites/meshes/ribbons and asynchronous submission | implemented profile; remaining Niagara gaps explicit |
+| [0065](0065-native-resource-codecs-and-async-decode.md) | Shared native archive/image/audio/file codecs, capability companions and bounded owner-polled resource decode tasks | all 289 named IDs implemented; partial variants explicit |

@@ -1,6 +1,7 @@
 # 0044 — Capability archive resources and explicit format plugins
 
-Date: 2026-10-25. Status: implemented first archive families; remaining formats pending.
+Date: 2026-10-25. Status: implemented first archive families at acceptance.
+The expanded migration and current per-format limits are recorded in [ADR 0065](0065-native-resource-codecs-and-async-decode.md).
 
 ## Decision
 

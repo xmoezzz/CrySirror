@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-use crate::{context::Resident, io::AssetIo, DecodeContext, KeyMaterial};
+use crate::{context::Resident, io::AssetIo, read_all, DecodeContext, KeyMaterial};
 use anyhow::{bail, ensure, Context, Result};
 use crysirror_core::service::{AssetReader, MemoryAssetReader};
 use ctr::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
@@ -9,12 +9,16 @@ use std::{collections::BTreeMap, io::Read, sync::Arc};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransformSpec {
+    /// Registered byte-transform identifier.
     pub algorithm: String,
     #[serde(default)]
+    /// Optional client-scoped host key alias; never raw secret bytes.
     pub key_id: Option<String>,
     #[serde(default)]
+    /// Explicit algorithm options; unknown options fail.
     pub parameters: serde_json::Value,
     #[serde(default)]
+    /// Optional exact logical output size, required by LZSS.
     pub expected_size: Option<u64>,
 }
 impl TransformSpec {
@@ -51,9 +55,14 @@ impl Default for TransformRegistry {
             "xor",
             "aes-ctr128be",
             "aes-ctr128le",
+            "aes-cbc",
+            "aes256-cbc",
+            "rc4",
         ] {
             out.transforms.insert(id.into(), Arc::new(Builtin));
         }
+        out.transforms
+            .insert("lzss".into(), Arc::new(crate::lzss::Lzss));
         out
     }
 }
@@ -110,6 +119,57 @@ impl ByteTransform for Builtin {
         context: &DecodeContext,
     ) -> Result<Arc<dyn AssetReader>> {
         match spec.algorithm.as_str() {
+            "aes-cbc" | "aes256-cbc" => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Params {
+                    iv: [u8; 16],
+                    #[serde(default = "pkcs7")]
+                    padding: String,
+                }
+                fn pkcs7() -> String {
+                    "pkcs7".into()
+                }
+                let p: Params = serde_json::from_value(spec.parameters.clone())
+                    .context("AES CBC parameters")?;
+                ensure!(
+                    ["none", "pkcs7"].contains(&p.padding.as_str()),
+                    "unsupported CBC padding"
+                );
+                let key = context.keys.key(
+                    context.client,
+                    spec.key_id.as_deref().context("AES CBC requires key_id")?,
+                )?;
+                if spec.algorithm == "aes256-cbc" {
+                    ensure!(
+                        key.with_bytes(|b| b.len() == 32),
+                        "AES256 CBC needs 32-byte key"
+                    );
+                }
+                let n = input.len().map_err(|e| anyhow::anyhow!("{e}"))?;
+                context.decode_bounded(n, || {
+                    let bytes = read_all(input.as_ref(), n)?;
+                    key.with_bytes(|key| {
+                        crate::aes_cbc_decrypt(&bytes, &p.iv, key, p.padding == "pkcs7")
+                    })
+                })
+            }
+            "rc4" => {
+                ensure!(
+                    spec.parameters.is_null()
+                        || spec.parameters.as_object().is_some_and(|m| m.is_empty()),
+                    "RC4 takes no parameters"
+                );
+                let key = context.keys.key(
+                    context.client,
+                    spec.key_id.as_deref().context("RC4 requires key_id")?,
+                )?;
+                let n = input.len().map_err(|e| anyhow::anyhow!("{e}"))?;
+                context.decode_with(n, || {
+                    let bytes = read_all(input.as_ref(), n)?;
+                    key.with_bytes(|key| crate::rc4_crypt(&bytes, key))
+                })
+            }
             "identity" => {
                 no_parameters(spec)?;
                 Ok(input)

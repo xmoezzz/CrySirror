@@ -264,6 +264,10 @@ pub struct Entropy<'a> {
     aug: u32,
 }
 impl<'a> Entropy<'a> {
+    pub(crate) fn set_input(&mut self, bytes: &'a [u8]) {
+        self.bits = Bits::new(bytes, true);
+    }
+
     pub fn new(bytes: &'a [u8], architecture: i32) -> Result<Self> {
         ensure!(
             matches!(architecture, -1 | -4 | -16),

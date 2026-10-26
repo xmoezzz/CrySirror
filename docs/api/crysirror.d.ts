@@ -440,6 +440,26 @@ declare class Puppets {
 declare class Resources {
   /** List installed archive decoder IDs; unavailable formats are never reported as supported. */
   formats(): string[];
+  /** List installed encoded-file converters. They return shared resource bytes, not a private extractor process. */
+  fileFormats(): string[];
+  /** List installed native audio converters producing standard WAVE resources for the engine decoder/mixer. */
+  audioFormats(): string[];
+  /** Offline probe of native file/audio decoders with per-plugin read budgets. Options {profile?}; live hosts use beginDecode with automatic detection, and ambiguous formats require an explicit decoder. */
+  detectFile(asset: string, options: Record<string, any> | null): Record<string, any>[];
+  /** Decode a file/audio resource and return metadata plus a bounded byte page. Options {format?,profile?,offset?,limit?}, default 4096 and maximum 65536 bytes. Decoding is CPU work; live callers should schedule it as an asset task. */
+  readDecoded(asset: string, options: Record<string, any> | null): Record<string, any>;
+  /** Decode once and publish a client-scoped VFS resource at target. Normal Bitmap/Assets/Audio calls can consume it. Options {format?,profile?}; retained output shares the client's decode budget and no extracted file is written. */
+  mountDecoded(asset: string, target: string, options: Record<string, any> | null): Record<string, any>;
+  /** Schedule file/audio conversion (kind=file) or archive indexing (kind=archive) on the bounded CPU pool. Options {format?,profile?}. Returns a scoped ticket; owner calls never join. At most 64 retained tickets per client and 256 per host. */
+  beginDecode(asset: string, kind: string, options: Record<string, any> | null): number;
+  /** Poll pending/ready/failed resource work without blocking. A completed decoder failure remains visible until cancelled. */
+  decodeStatus(ticket: number): Record<string, any>;
+  /** Read a ready file's bounded byte page (maximum 65536) or archive metadata page (maximum 1024 entries). Pending work fails visibly rather than waiting or returning fabricated data. */
+  readDecode(ticket: number, offset: number | null, limit: number | null): Record<string, any>;
+  /** Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. No CPU decoder runs during publication. */
+  mountDecode(ticket: number, target: string): Record<string, any>;
+  /** Cancel pending work or release a retained result. Late worker output is discarded. Already mounted readers retain their own decoded-resource reservation. */
+  cancelDecode(ticket: number): void;
   /** List installed byte transform IDs; profiles refer to keys supplied by the Rust host. */
   transforms(): string[];
   /** List installed native image format IDs and standard image extensions; the runtime, Bitmap, text icons and renderer use this same registry. */
@@ -448,7 +468,7 @@ declare class Resources {
   probeImage(asset: string): string[];
   /** Decode a client image into __surface/<slot> for Bitmap/Layer/UI/3D use. Options {format?,profile?}; external bases/masks use the same scoped VFS and keys remain in the host provider. */
   decodeImage(slot: number, asset: string, options: Record<string, any> | null): string;
-  /** Define an immutable client profile {limits?,rules:[{format,path?,transforms:[{algorithm,key_id?,parameters?,expected_size?}]}]}. No raw keys. Up to 32 profiles; default is created lazily. */
+  /** Define an immutable client profile {limits?,parameters?:{format:options},rules:[{format,path?,transforms:[{algorithm,key_id?,parameters?,expected_size?}]}]}. Native options name client key aliases/companions; secret bytes remain in the host KeyProvider. Up to 32 profiles; default is created lazily. */
   defineProfile(name: string, profile: Record<string, any>): void;
   /** Probe an asset using installed formats with bounded reads. Ambiguous signatures require an explicit format when opening. */
   probe(asset: string): Record<string, any>[];
