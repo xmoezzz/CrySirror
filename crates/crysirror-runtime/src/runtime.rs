@@ -148,6 +148,90 @@ impl FileSystem for SharedHost {
     }
 }
 impl HostServices for SharedHost {
+    fn create_audio_sequence(
+        &mut self,
+        client: ClientId,
+        spec: crysirror_core::service::AudioSequenceSpec,
+        seed: u32,
+    ) -> crysirror_core::Result<crysirror_core::service::AudioSequenceHandle> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .sequences
+            .create(client.0, spec, seed)
+            .map_err(|e| Error::Io(format!("audio cue sequence: {e:#}")))
+    }
+    fn advance_audio_sequence(
+        &mut self,
+        client: ClientId,
+        handle: crysirror_core::service::AudioSequenceHandle,
+        game_ms: u64,
+        real_ms: u64,
+    ) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .sequences
+            .advance(client.0, handle, game_ms, real_ms)
+            .map_err(|e| Error::Io(format!("audio cue sequence: {e:#}")))
+    }
+    fn poll_audio_sequence(
+        &mut self,
+        client: ClientId,
+        handle: crysirror_core::service::AudioSequenceHandle,
+        seed: Option<u32>,
+    ) -> crysirror_core::Result<Option<crysirror_core::service::AudioSequenceEmission>> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .sequences
+            .poll(client.0, handle, seed)
+            .map_err(|e| Error::Io(format!("audio cue sequence: {e:#}")))
+    }
+    fn complete_audio_sequence(
+        &mut self,
+        client: ClientId,
+        handle: crysirror_core::service::AudioSequenceHandle,
+        serial: u64,
+        duration_ms: u64,
+    ) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .sequences
+            .complete(client.0, handle, serial, duration_ms)
+            .map_err(|e| Error::Io(format!("audio cue sequence: {e:#}")))
+    }
+    fn audio_sequence_info(
+        &self,
+        client: ClientId,
+        handle: crysirror_core::service::AudioSequenceHandle,
+    ) -> crysirror_core::Result<crysirror_core::service::AudioSequenceInfo> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .sequences
+            .info(client.0, handle)
+            .map_err(|e| Error::Io(format!("audio cue sequence: {e:#}")))
+    }
+    fn release_audio_sequence(
+        &mut self,
+        client: ClientId,
+        handle: crysirror_core::service::AudioSequenceHandle,
+    ) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .sequences
+            .release(client.0, handle)
+            .map_err(|e| Error::Io(format!("audio cue sequence: {e:#}")))
+    }
     fn audio_mix_group(
         &self,
         client: ClientId,

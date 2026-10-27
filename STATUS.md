@@ -3394,3 +3394,74 @@ Remaining boundaries:
   requirements remain open. No full native game, cross-platform/hardware result,
   performance ranking, listening-quality comparison or complete-engine claim is
   established by this CPU release validation.
+
+## 2026-10-27: Shared cue programs, PCMEVENT prerequisite (ADR 0085)
+
+Implementation:
+- Reviewed complete pinned Siglus PCMEVENT source (472 lines), plus selected
+  complete state/wait/source/save functions, at commit
+  5f358ef1360b0439e92aed2b749e8f25d8721954. All audited local reference blobs
+  match the pin; hashes/scope are in siglus-pcmevent-source-audit.json. No original
+  PCMEVENT scheduler module, player, decoder or renderer is copied/imported.
+- Added engine-owned once/loop/weighted cue programs to crysirror-audio, with
+  device-free Core DTOs and HostServices methods. SharedHost and the public Audio
+  class use the same scoped ChannelAudio bank. Six Audio operations create,
+  advance, poll, acknowledge, inspect and release scheduling state.
+- Programs select game/real owner clocks, signed/exclusive interval ranges,
+  optional acknowledged source duration, reset/carry timing and softened repeats.
+  Default uniform rejection sampling is separate from explicit original modulo32
+  RNG semantics. Native shared-RNG injection is possible at a new due selection;
+  interval RNG runs only once at acknowledgement. Keys convey no file authority.
+- Pending emission serials freeze scheduling time across worker resource/voice
+  dependencies; repeated polling is idempotent. Stale/foreign handles/receipts
+  fail. Zero/negative intervals have a visible 1024-emission budget per explicit
+  owner advance. Bank/program/key/weight/time bounds are documented in ADR 0085.
+- Restore/clear invalidates scheduling state while retaining generation counters.
+  Final DSP controls are fenced; immutable info stays readable. Scheduling release
+  leaves independently published voices alone. App does not implicitly advance
+  caller-owned sequence clocks, and working cursors are not implicitly saved.
+
+Compilation and reference validation:
+- Release workspace/all-targets check passed with desktop krkr, arc-formats,
+  acoustics-obvhs and audio rodio-output enabled. Minimal desktop no-default
+  reallive+avg32 release check also passed. Existing image/RealLive/CLI warnings
+  remain. No GitHub workflow or remote build automation was added or enabled.
+- Generated reference/JSON/TypeScript and logged actual API fingerprint
+  **768ebdf0e5892411 -> 2077f8fd45fb4b36**. Reference and command coverage checks
+  passed. Initial generation attempts hit the expected changed-reference and
+  missing-fingerprint guards; those attempts are not counted as passes.
+
+Behavior validation:
+- Shared audio library/integration scopes: **124 passed**, one owner-NWA-data
+  test ignored and excluded. Engine cue/API/reference/frame scopes: **16 passed**.
+  Real JS/TS cue Promise scope: **1 passed**. **141 distinct Rust tests passed**;
+  focused/initial reruns are not counted again. Python 3.11 tooling: **189 passed**.
+- Independent sequence cases verify real/game clocks, pending time freeze, exact
+  original repeat-weight/RNG draw order, deterministic uniform distributions,
+  reset versus overdue carry, last-interval completion, malformed-loop bounds,
+  zero-weight fallback, capacity, invalid update atomicity and generation scope.
+- Public engine tests prove native HostServices and scripts inspect the same bank,
+  restore invalidates identities, and real DSP capacity backpressure admits only
+  frozen observation without advancing sequence clocks. Real JS resolves an
+  emitted key through actual shared resource and voice Promises, acknowledges
+  decoded duration, and verifies releasing scheduling does not stop that voice.
+- Independent authored cue_sequence demo renders actual stereo PCM at **8000 Hz /
+  160 frames**: positive cue starts frame 0, negative cue starts frame 56 (7 ms),
+  inputs end at frames 24/72, and scheduling finishes at 13 ms. Every PCM sample
+  is checked. Sync and final-worker exports are byte-identical; Python independently
+  decodes the WAVE and checks amplitudes, timing and SHA-256. No VM, game, font,
+  hardware output device or proprietary data is used by this demo.
+- Evidence: target/verification/cue-sequence-{audio-regression,engine-final,js,
+  workspace-check,minimal-check,api-final,python,demo-worker,demo-sync}.log,
+  cue-sequence-{summary,demo-inspection}.json and cue-sequence-{worker,sync}.wav.
+
+Remaining boundaries:
+- **Native Siglus PCMEVENT is not yet mapped.** Dispatch, script-global RNG
+  reconciliation, native channel/source/routing policy, waits/key behavior and
+  original/runtime save reconstruction must translate onto this shared bank.
+  Existing unsupported dispatch still fails visibly. This phase establishes an
+  independently usable engine capability, not a running native game result.
+- Program clocks/acknowledged durations are caller-supplied, not automatic sample
+  timestamps. Scheduling is owner-frame granular; voice DSP remains sample-based.
+  No hardware, cross-platform playback, performance ranking, propagation-delay or
+  complete-engine claim is established. Broader 3D/VN/async work remains active.

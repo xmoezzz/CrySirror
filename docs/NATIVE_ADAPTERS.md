@@ -341,3 +341,15 @@ This phase adds no native spatial opcode or HostServices spatial facade. Existin
 native two-dimensional audio does not opt in automatically and retains its
 resource, wait and original-save policies. Per-path reflected Doppler and direct
 propagation delay remain unimplemented; see ADR 0084.
+
+## PCMEVENT shared prerequisites (ADR 0085)
+
+The complete pinned PCMEVENT scheduler and selected native state/wait/save/source
+functions have been reviewed. CrySirror now provides a shared owner-clock cue bank
+through Audio/HostServices: ordered/weighted emission, interval/duration policy,
+original modulo RNG option and async dependency receipts. No scheduler algorithm
+is added privately to the VM. This is a reusable prerequisite, **not completed
+PCMEVENT integration**: native opcode dispatch, RNG reconciliation, source/channel
+policy, waits and original/runtime save reconstruction remain unmapped. The
+original Siglus adapter still rejects that unsupported form. See
+[siglus-pcmevent-source-audit.json](siglus-pcmevent-source-audit.json).

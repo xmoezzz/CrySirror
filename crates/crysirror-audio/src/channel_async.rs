@@ -68,6 +68,7 @@ impl ChannelAudio {
     /// Restore/shutdown boundary. Receipts cancel without waiting; reservations
     /// stay alive while any worker or stream still owns the corresponding data.
     pub fn reset(&mut self) {
+        self.sequences.clear();
         self.jobs.jobs.clear();
         self.jobs.intent.clear();
         self.jobs.channels.clear();

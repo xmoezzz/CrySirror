@@ -1380,6 +1380,96 @@
           "returns": "Record<string, any>"
         },
         {
+          "doc": "Create a client-owned CueSequenceSpec. Returns {client,generation}. Emits symbolic cues; opens no files or voices. Explicit owner clocks and completion tokens allow async resource/voice dependencies.",
+          "name": "createCueSequence",
+          "params": [
+            {
+              "name": "spec",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "seed",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "One owner-frame clock update, each delta 0..60000. Pending cue dependencies freeze time. Resets the 1024-emission frame budget. App does not advance these caller-owned clocks automatically.",
+          "name": "advanceCueSequence",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "game_ms",
+              "type": "number"
+            },
+            {
+              "name": "real_ms",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Return pending {serial,index,key}, or null. Repeated polling is idempotent and consumes no extra RNG/time. Options seed?:u32 overrides RNG only on a new due selection, for native shared-RNG semantics. Uniform total weights (including repeat bias) <= u32::MAX.",
+          "name": "pollCueSequence",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "Acknowledge a successfully published cue or explicit failed-cue policy. Reject stale receipts. Select signed interval [min,max), then optionally add known decoded duration (0..7 days). Does not start/stop audio itself.",
+          "name": "completeCueSequence",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "serial",
+              "type": "number"
+            },
+            {
+              "name": "duration_ms",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Immutable scheduling observation: active,elapsed_ms,next_ms,last_index,rng_state,emissions,pending,budget_exhausted. Does not poll, select or advance. Once completes at last interval, independently of voice EOF/tails.",
+          "name": "cueSequence",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Cancel/free scheduling and pending dependency tokens. Already emitted voices remain caller-owned. Restore invalidates all sequence handles; definitions/cursors are not implicitly saved.",
+          "name": "releaseCueSequence",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync.",
           "name": "playMusic",
           "params": [
@@ -5227,6 +5317,267 @@
     }
   ],
   "data": [
+    {
+      "doc": "Owner-clock cue program; it does not open or play resources by itself.",
+      "fields": [
+        {
+          "default": "once",
+          "doc": "once, loop, or weighted. A once program completes after its last interval.",
+          "name": "mode",
+          "rust_type": "CueSequenceMode"
+        },
+        {
+          "default": "game",
+          "doc": "Clock selected from each explicit advanceCueSequence(game_ms, real_ms).",
+          "name": "clock",
+          "rust_type": "CueSequenceClock"
+        },
+        {
+          "default": "reset",
+          "doc": "reset discards late time at emission; carry retains positive overdue time.",
+          "name": "timing",
+          "rust_type": "CueSequenceTiming"
+        },
+        {
+          "default": "uniform",
+          "doc": "uniform rejection sampling; modulo32 preserves legacy native RNG draws.",
+          "name": "random",
+          "rust_type": "CueSequenceRandom"
+        },
+        {
+          "default": false,
+          "doc": "Weighted mode halves the last selected line's relative weight.",
+          "name": "soften_repeat",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "Add acknowledged decoded-source duration to each sampled interval.",
+          "name": "include_duration",
+          "rust_type": "bool"
+        },
+        {
+          "default": [],
+          "doc": "At most 1024 lines and 64 KiB of key bytes. Empty completes on first poll.",
+          "name": "lines",
+          "rust_type": "Vec<CueSequenceLine>"
+        }
+      ],
+      "name": "CueSequenceSpec",
+      "used_by": "Audio.createCueSequence"
+    },
+    {
+      "doc": "A symbolic cue. The caller maps the emitted key to an engine resource.",
+      "fields": [
+        {
+          "default": "cue",
+          "doc": "Nonempty logical key, up to 2048 UTF-8 bytes; no filesystem authority.",
+          "name": "key",
+          "rust_type": "String"
+        },
+        {
+          "default": 1,
+          "doc": "Nonnegative relative weight. All-zero weighted lists select line zero.",
+          "name": "weight",
+          "rust_type": "u32"
+        },
+        {
+          "default": 0,
+          "doc": "Signed millisecond interval bounds; reversed bounds are accepted.",
+          "name": "min_ms",
+          "rust_type": "i64"
+        },
+        {
+          "default": 0,
+          "doc": "Upper bound is exclusive unless equal to min_ms. Each bound <= 7 days.",
+          "name": "max_ms",
+          "rust_type": "i64"
+        }
+      ],
+      "name": "CueSequenceLine",
+      "used_by": "CueSequenceSpec.lines"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "once",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "loop",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "weighted",
+          "rust_type": ""
+        }
+      ],
+      "name": "CueSequenceMode",
+      "used_by": "CueSequenceSpec.mode"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "game",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "real",
+          "rust_type": ""
+        }
+      ],
+      "name": "CueSequenceClock",
+      "used_by": "CueSequenceSpec.clock"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "reset",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "carry",
+          "rust_type": ""
+        }
+      ],
+      "name": "CueSequenceTiming",
+      "used_by": "CueSequenceSpec.timing"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "uniform",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "modulo32",
+          "rust_type": ""
+        }
+      ],
+      "name": "CueSequenceRandom",
+      "used_by": "CueSequenceSpec.random"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "generation",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "AudioSequenceHandle",
+      "used_by": "Audio cue sequence operations / HostServices"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "serial",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "index",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "key",
+          "rust_type": "String"
+        }
+      ],
+      "name": "AudioSequenceEmission",
+      "used_by": "Audio.pollCueSequence"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "active",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "elapsed_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "next_ms",
+          "rust_type": "i64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "last_index",
+          "rust_type": "Option<usize>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "rng_state",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "emissions",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "pending",
+          "rust_type": "Option<AudioSequenceEmission>"
+        },
+        {
+          "default": null,
+          "doc": "True after this owner-frame's 1024 emissions; advance opens a new budget.",
+          "name": "budget_exhausted",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "AudioSequenceInfo",
+      "used_by": "Audio.cueSequence"
+    },
     {
       "doc": "Direct radial Doppler controls; opt in through Spatial.doppler.",
       "fields": [
@@ -13447,7 +13798,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "768ebdf0e5892411",
+  "fingerprint": "2077f8fd45fb4b36",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

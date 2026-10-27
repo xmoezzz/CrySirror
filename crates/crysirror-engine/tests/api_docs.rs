@@ -201,6 +201,8 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-tasks/src/lib.rs",
         "crates/crysirror-tasks/src/table.rs",
         "crates/crysirror-engine/src/audio_resources_api.rs",
+        "crates/crysirror-engine/src/audio_sequences_api.rs",
+        "crates/crysirror-core/src/service/audio_sequence.rs",
         "crates/crysirror-audio/src/scene.rs",
         "crates/crysirror-audio/src/buffered.rs",
         "crates/crysirror-audio/src/decoder.rs",
@@ -241,6 +243,15 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("CueSequenceSpec","Audio.createCueSequence",sample::<crysirror_engine::CueSequenceSpec>(e.clone())),
+        d("CueSequenceLine","CueSequenceSpec.lines",sample::<crysirror_engine::CueSequenceLine>(json!({"key":"cue"}))),
+        d("CueSequenceMode","CueSequenceSpec.mode",None),
+        d("CueSequenceClock","CueSequenceSpec.clock",None),
+        d("CueSequenceTiming","CueSequenceSpec.timing",None),
+        d("CueSequenceRandom","CueSequenceSpec.random",None),
+        d("AudioSequenceHandle","Audio cue sequence operations / HostServices",None),
+        d("AudioSequenceEmission","Audio.pollCueSequence",None),
+        d("AudioSequenceInfo","Audio.cueSequence",None),
         d("DopplerSettings","Spatial.doppler",sample::<crysirror_audio::doppler::DopplerSettings>(e.clone())),
         d("DopplerCalculation","DopplerInfo.target / Rust doppler::calculate",None),
         d("DopplerInfo","Audio.dopplerVoice / Rust Mixer::doppler_info",None),

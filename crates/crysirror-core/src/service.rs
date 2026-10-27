@@ -7,6 +7,8 @@ use crate::{
     state::{ClientId, Command, SceneState, TextRun},
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
+mod audio_sequence;
+pub use audio_sequence::*;
 
 pub const SIMPLE_TEXT_LAYOUT: &str = "simple-horizontal-v1";
 /// The same horizontal glyph metrics without automatic width wrapping.
@@ -546,6 +548,60 @@ pub trait TextMeasurement: Send + Sync {
 }
 
 pub trait HostServices: FileSystem {
+    /// Create an owner-scoped cue scheduler. It opens no assets or voices.
+    fn create_audio_sequence(
+        &mut self,
+        _client: ClientId,
+        _spec: AudioSequenceSpec,
+        _seed: u32,
+    ) -> Result<AudioSequenceHandle> {
+        Err(crate::Error::Unsupported("audio cue sequences"))
+    }
+    /// Exactly one owner update supplies both clocks. Pending dependency work
+    /// freezes the sequence; polling alone never advances time or a frame budget.
+    fn advance_audio_sequence(
+        &mut self,
+        _client: ClientId,
+        _handle: AudioSequenceHandle,
+        _game_ms: u64,
+        _real_ms: u64,
+    ) -> Result<()> {
+        Err(crate::Error::Unsupported("audio cue sequences"))
+    }
+    /// Return the same pending emission until acknowledged. Optional seed is
+    /// installed only when selecting a new due cue, for native shared RNGs.
+    fn poll_audio_sequence(
+        &mut self,
+        _client: ClientId,
+        _handle: AudioSequenceHandle,
+        _seed: Option<u32>,
+    ) -> Result<Option<AudioSequenceEmission>> {
+        Err(crate::Error::Unsupported("audio cue sequences"))
+    }
+    fn complete_audio_sequence(
+        &mut self,
+        _client: ClientId,
+        _handle: AudioSequenceHandle,
+        _serial: u64,
+        _duration_ms: u64,
+    ) -> Result<()> {
+        Err(crate::Error::Unsupported("audio cue sequences"))
+    }
+    fn audio_sequence_info(
+        &self,
+        _client: ClientId,
+        _handle: AudioSequenceHandle,
+    ) -> Result<AudioSequenceInfo> {
+        Err(crate::Error::Unsupported("audio cue sequences"))
+    }
+    /// Cancel scheduling only. Previously emitted voices remain caller-owned.
+    fn release_audio_sequence(
+        &mut self,
+        _client: ClientId,
+        _handle: AudioSequenceHandle,
+    ) -> Result<()> {
+        Err(crate::Error::Unsupported("audio cue sequences"))
+    }
     /// Inspect a native/media mixer's client-owned logical group, if present.
     fn audio_mix_group(&self, _client: ClientId, _name: &str) -> Result<Option<AudioMixGroupInfo>> {
         Err(crate::Error::Unsupported("audio mix group inspection"))

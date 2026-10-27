@@ -450,6 +450,12 @@ fn info() -> &'static ClassInfo {
         method("clearSfxCache",vec![],T::Void,"Drop this client's cached clips. Playing voices retain their own PCM and residency receipts."),
         method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,mix_group?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle."),
         method("playRandom",vec![("name",T::String),("container",T::Map),("voice",T::Map)],T::Map,"Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants."),
+        method("createCueSequence",vec![("spec",T::Map),("seed",T::Int)],T::Map,"Create a client-owned CueSequenceSpec. Returns {client,generation}. Emits symbolic cues; opens no files or voices. Explicit owner clocks and completion tokens allow async resource/voice dependencies."),
+        method("advanceCueSequence",vec![("handle",T::Map),("game_ms",T::Int),("real_ms",T::Int)],T::Void,"One owner-frame clock update, each delta 0..60000. Pending cue dependencies freeze time. Resets the 1024-emission frame budget. App does not advance these caller-owned clocks automatically."),
+        method("pollCueSequence",vec![("handle",T::Map),("options",T::Map)],T::Any,"Return pending {serial,index,key}, or null. Repeated polling is idempotent and consumes no extra RNG/time. Options seed?:u32 overrides RNG only on a new due selection, for native shared-RNG semantics. Uniform total weights (including repeat bias) <= u32::MAX."),
+        method("completeCueSequence",vec![("handle",T::Map),("serial",T::Int),("duration_ms",T::Int)],T::Void,"Acknowledge a successfully published cue or explicit failed-cue policy. Reject stale receipts. Select signed interval [min,max), then optionally add known decoded duration (0..7 days). Does not start/stop audio itself."),
+        method("cueSequence",vec![("handle",T::Map)],T::Map,"Immutable scheduling observation: active,elapsed_ms,next_ms,last_index,rng_state,emissions,pending,budget_exhausted. Does not poll, select or advance. Once completes at last interval, independently of voice EOF/tails."),
+        method("releaseCueSequence",vec![("handle",T::Map)],T::Void,"Cancel/free scheduling and pending dependency tokens. Already emitted voices remain caller-owned. Restore invalidates all sequence handles; definitions/cursors are not implicitly saved."),
         method("playMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Map,"Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync."),
         method("stopVoice",vec![("handle",T::Map),("fade_ms",T::Number)],T::Void,"Stop immediately or sample-accurate fade out."),
         method("pauseVoice",vec![("handle",T::Map),("paused",T::Bool)],T::Void,"Pause without advancing the source or fade clock."),
@@ -662,6 +668,7 @@ impl Class for AudioClass {
                 matches!(
                     name,
                     "playbackInfo"
+                        | "cueSequence"
                         | "dopplerVoice"
                         | "motionSettings"
                         | "nativeChannelInfo"
@@ -683,6 +690,9 @@ impl Class for AudioClass {
             );
         }
         if let Some(result) = crate::audio_motion::call(cx, name, args)? {
+            return Ok(result);
+        }
+        if let Some(result) = crate::audio_sequences_api::call(cx, name, args)? {
             return Ok(result);
         }
         if let Some(result) = crate::audio_groups_api::call(cx, name, args)? {

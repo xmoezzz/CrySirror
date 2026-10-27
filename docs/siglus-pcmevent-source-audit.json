@@ -1,0 +1,50 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "upstream_license": "MPL-2.0",
+  "scope": "PCMEVENT source review and shared cue-scheduler prerequisites; native opcode mapping remains open",
+  "implementation": "Engine-owned bounded cue program, explicit owner clocks and dependency receipts. No upstream PCMEVENT module/player/routing/decoder implementation imported.",
+  "limits": "Native dispatch, shared script RNG reconciliation, sound source declarations and original/runtime saves are not connected by this phase. Legacy modulo sampler is opt-in; uniform rejection sampling is the default.",
+  "files": [
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/pcmevent.rs",
+      "bytes": 16073,
+      "sha256": "d5838068bf29aaad0cfd1fe76cd700bbec0042be0c0635d0a9c1d2cf60613145",
+      "existing_reference_matches_pin": true,
+      "review": "Complete 472-line original dispatch, selection, interval/duration acknowledgement, frame loop and 1024 guard.",
+      "copied_into_engine": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/globals.rs",
+      "bytes": 264470,
+      "sha256": "b00eb432bf4c005e5a64c95e544faa4e0c65ab890a4c24f5944bf5268958f7dd",
+      "existing_reference_matches_pin": true,
+      "review": "Complete PcmEventLine and PcmEventState declarations/default/start/reinit methods.",
+      "copied_into_engine": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/wait.rs",
+      "bytes": 72576,
+      "sha256": "75aae7791c1683e9f5fb22f3b0d377a957efe18ebdc72febdef94e1f14fbe9f3",
+      "existing_reference_matches_pin": true,
+      "review": "Complete PCMEVENT wait, polling and key-release branches.",
+      "copied_into_engine": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/vm.rs",
+      "bytes": 610381,
+      "sha256": "e0bbd6546ef6e1375c36ceadbd321ce8f7af8d180c61f011ef28da60e2db8d62",
+      "existing_reference_matches_pin": true,
+      "review": "Complete write_cpp_pcm_event/read_cpp_pcm_event functions; LOOP/RANDOM original restore policy.",
+      "copied_into_engine": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/pcmch.rs",
+      "bytes": 21263,
+      "sha256": "3b9adac29ce1bcad4bdfa9df641eae6c550471c2342b1fd7e102f20542eb583d",
+      "existing_reference_matches_pin": true,
+      "review": "play_event_line and native channel source/routing policy reviewed for future mapping.",
+      "copied_into_engine": false
+    }
+  ]
+}

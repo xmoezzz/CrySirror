@@ -452,3 +452,14 @@ history. A final DSP worker owns rate progression and immutable observations
 freeze while pending. Audio.dopplerVoice exposes desired/installed state and reset
 reasons; native spatial mappings and retarded-time/per-reflection physics remain
 open. See ADR 0084 and doppler-source-audit.json for scope and source decisions.
+
+## Owner-clock cue programs (ADR 0085)
+
+Core's AudioSequence contract is implemented by the shared audio scheduler bank,
+owned by ChannelAudio. SharedHost and Audio's six cue-sequence methods access the
+same scoped state. An explicit owner supplies game/real time; selection produces
+an idempotent serial that waits for resource/voice publication before interval
+acknowledgement. Pending dependencies freeze time. Once/loop/weighted programs,
+reset/carry timing and bounded immediate-cue draining are usable without any VM.
+Final DSP gates controls; info stays frozen. Clear/restore invalidates identities.
+See ADR 0085 for limits and the still-open original PCMEVENT semantic mapping.

@@ -276,6 +276,7 @@ pub(super) fn prepare(
     })
 }
 pub struct ChannelAudio {
+    pub sequences: crate::sequence::Sequences,
     pub mixer: Mixer,
     pub resources: crate::resources::AudioResources,
     pub(super) voices: BTreeMap<(u32, u32), VoiceHandle>,
@@ -287,6 +288,7 @@ pub struct ChannelAudio {
 impl Default for ChannelAudio {
     fn default() -> Self {
         Self {
+            sequences: Default::default(),
             mixer: Mixer::new(MixerConfig {
                 max_voices: 256,
                 ..Default::default()

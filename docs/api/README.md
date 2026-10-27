@@ -501,3 +501,9 @@ without App or any VM/device. See ADR 0084 for physical and async limits.
 
 An authored release demo asserts crossing frequencies and exports a two-second
 pass-by: `cargo run --release -p crysirror-audio --example doppler_passby -- /tmp/passby.wav --worker`.
+
+Cue sequence declarations/defaults come from audio_sequences_api.rs; device-free
+handle/emission/info fields come from core/service/audio_sequence.rs. Audio's six
+cue-sequence operations share the native HostServices bank. Clocks are explicitly
+advanced by one caller; poll/ack model asynchronous resource dependencies and do
+not automatically start/stop voices. ADR 0085 documents limits and restore policy.

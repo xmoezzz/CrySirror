@@ -23,6 +23,7 @@ pub mod resources;
 pub mod voice_compression;
 pub mod render_job;
 pub mod scene;
+pub mod sequence;
 
 pub mod pcm_output;
 #[cfg(feature = "cpal-output")]

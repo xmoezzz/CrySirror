@@ -4,6 +4,22 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `2077f8fd45fb4b36` (2026-10-27): owner-clock cue programs
+
+- Audio adds createCueSequence, advanceCueSequence, pollCueSequence,
+  completeCueSequence, cueSequence and releaseCueSequence. Rust HostServices and
+  scripts share the same client/generation-scoped bank in ChannelAudio.
+- Once/loop/weighted modes support signed interval ranges, optional decoded
+  duration, repeat bias and reset/carry timing. Uniform rejection is the default;
+  explicit modulo32 preserves native RNG draw order. Keys carry no asset authority.
+- Idempotent emission serials hold asynchronous source/voice dependencies; owner
+  clocks freeze until acknowledgement. 1024 emissions per explicit owner advance
+  bound zero-interval loops. App does not implicitly advance these program clocks.
+- Info is readable during pending final DSP; mutations are gated. Release cancels
+  scheduling, leaving independent voices alone. Restore invalidates all handles;
+  no working cursors are implicitly saved. Native PCMEVENT mapping remains open.
+  Limits and lifecycle are in ADR 0085. Existing methods/save schemas are unchanged.
+
 ## `768ebdf0e5892411` (2026-10-27): direct Doppler and world motion capture
 
 - Spatial accepts optional velocity (m/s) and DopplerSettings; the default remains

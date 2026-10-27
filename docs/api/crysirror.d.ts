@@ -133,6 +133,18 @@ declare class Audio {
   playSfx(voice: Record<string, any>): Record<string, any>;
   /** Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants. */
   playRandom(name: string, container: Record<string, any>, voice: Record<string, any>): Record<string, any>;
+  /** Create a client-owned CueSequenceSpec. Returns {client,generation}. Emits symbolic cues; opens no files or voices. Explicit owner clocks and completion tokens allow async resource/voice dependencies. */
+  createCueSequence(spec: Record<string, any>, seed: number): Record<string, any>;
+  /** One owner-frame clock update, each delta 0..60000. Pending cue dependencies freeze time. Resets the 1024-emission frame budget. App does not advance these caller-owned clocks automatically. */
+  advanceCueSequence(handle: Record<string, any>, game_ms: number, real_ms: number): void;
+  /** Return pending {serial,index,key}, or null. Repeated polling is idempotent and consumes no extra RNG/time. Options seed?:u32 overrides RNG only on a new due selection, for native shared-RNG semantics. Uniform total weights (including repeat bias) <= u32::MAX. */
+  pollCueSequence(handle: Record<string, any>, options: Record<string, any>): any;
+  /** Acknowledge a successfully published cue or explicit failed-cue policy. Reject stale receipts. Select signed interval [min,max), then optionally add known decoded duration (0..7 days). Does not start/stop audio itself. */
+  completeCueSequence(handle: Record<string, any>, serial: number, duration_ms: number): void;
+  /** Immutable scheduling observation: active,elapsed_ms,next_ms,last_index,rng_state,emissions,pending,budget_exhausted. Does not poll, select or advance. Once completes at last interval, independently of voice EOF/tails. */
+  cueSequence(handle: Record<string, any>): Record<string, any>;
+  /** Cancel/free scheduling and pending dependency tokens. Already emitted voices remain caller-owned. Restore invalidates all sequence handles; definitions/cursors are not implicitly saved. */
+  releaseCueSequence(handle: Record<string, any>): void;
   /** Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync. */
   playMusic(name: string, voice: Record<string, any>, crossfade_ms: number): Record<string, any>;
   /** Stop immediately or sample-accurate fade out. */

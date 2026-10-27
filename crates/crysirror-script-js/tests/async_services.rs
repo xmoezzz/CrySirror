@@ -583,3 +583,29 @@ fn doppler_options_and_motion_inspection_cross_the_real_js_promise_boundary() {
     std::fs::write(dir.path().join("assets/a/doppler.wav"),b).unwrap();
     app.init().unwrap();app.start().unwrap();until(&mut app,"doppler-ready");
 }
+
+#[test]
+fn cue_sequence_dependency_receipt_crosses_actual_js_resource_and_voice_promises() {
+    let (dir,mut app)=app(r#"
+      async function onInit() {
+        const h=audio.createCueSequence({include_duration:true,clock:'real',lines:[{key:'cue.wav',min_ms:10,max_ms:10}]},1);
+        const e=audio.pollCueSequence(h,{});
+        const resource=await audio.prepareSourceAsync(e.key);
+        audio.advanceCueSequence(h,500,500);
+        if(audio.cueSequence(h).elapsed_ms!==0)throw Error('pending cue clock advanced');
+        if(audio.pollCueSequence(h,{seed:999}).serial!==e.serial)throw Error('dependency replaced');
+        const voice=await audio.playSourceAsync(resource.resource,{paused:true});
+        audio.completeCueSequence(h,e.serial,resource.info.source_frames*1000/resource.info.source_rate);
+        audio.releaseSource(resource.resource);
+        audio.advanceCueSequence(h,0,17);
+        if(!audio.cueSequence(h).active)throw Error('last interval ended early');
+        audio.advanceCueSequence(h,0,1);
+        if(audio.cueSequence(h).active)throw Error('last interval not complete');
+        audio.releaseCueSequence(h);
+        if(!audio.voice(voice).source_playing)throw Error('scheduler stopped an independent voice');
+        audio.stopVoice(voice,0);engine.log('cue-sequence-ready');
+      }
+    "#);
+    let mut b=b"RIFF".to_vec();b.extend(164u32.to_le_bytes());b.extend(b"WAVEfmt ");b.extend(16u32.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(8000u32.to_le_bytes());b.extend(16000u32.to_le_bytes());b.extend(2u16.to_le_bytes());b.extend(16u16.to_le_bytes());b.extend(b"data");b.extend(128u32.to_le_bytes());for _ in 0..64{b.extend(8192i16.to_le_bytes());}
+    std::fs::write(dir.path().join("assets/a/cue.wav"),b).unwrap();app.init().unwrap();app.start().unwrap();until(&mut app,"cue-sequence-ready");
+}
