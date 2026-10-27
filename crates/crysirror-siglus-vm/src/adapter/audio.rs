@@ -15,6 +15,18 @@ pub(super) struct Pending {
     ticket: Option<Stage>,
 }
 enum Stage {
+    SpeechResource {
+        ticket: u64,
+        number: i64,
+        percent: u16,
+    },
+    SpeechVoice {
+        ticket: u64,
+        number: i64,
+        percent: u16,
+        resource: crysirror_core::service::AudioResourceHandle,
+        fresh: bool,
+    },
     NativeResource {
         ticket: u64,
         channel: u32,
@@ -67,6 +79,12 @@ impl SiglusVm {
         host: &dyn HostServices,
         client: ClientId,
     ) -> Result<()> {
+        if vm.ctx.koe.current_no() >= 0 {
+            vm.ctx.koe.sync(
+                host.audio_info(client, crate::koe_bridge::CHANNEL)
+                    .map_err(err)?,
+            )?;
+        }
         if vm.ctx.pcm.has_source() {
             vm.ctx.pcm.sync(
                 host.audio_info(client, crate::sfx_bridge::PCM_CHANNEL)
@@ -103,6 +121,7 @@ impl SiglusVm {
         let mut ordered = std::mem::take(&mut vm.ctx.bgm.pending).entries();
         ordered.extend(vm.ctx.pcm.take().entries());
         ordered.extend(vm.ctx.se.take().entries());
+        ordered.extend(std::mem::take(&mut vm.ctx.koe.pending).entries());
         ordered.sort_unstable_by_key(|(serial, _)| *serial);
         let operations: VecDeque<_> = ordered.into_iter().map(|(_, op)| op).collect();
         if operations.is_empty() {
@@ -124,10 +143,14 @@ impl SiglusVm {
         loop {
             if let Some(stage) = pending.ticket.take() {
                 let result = match &stage {
-                    Stage::Resource { ticket, .. } | Stage::NativeResource { ticket, .. } => host
+                    Stage::SpeechResource { ticket, .. }
+                    | Stage::Resource { ticket, .. }
+                    | Stage::NativeResource { ticket, .. } => host
                         .audio_resource_preparation(client, *ticket)
                         .map(|s| (s.phase, s.error, s.resource)),
-                    Stage::Voice { ticket, .. } | Stage::Native { ticket } => host
+                    Stage::SpeechVoice { ticket, .. }
+                    | Stage::Voice { ticket, .. }
+                    | Stage::Native { ticket } => host
                         .audio_preparation(client, *ticket)
                         .map(|s| (s.phase, s.error, None)),
                 };
@@ -145,6 +168,79 @@ impl SiglusVm {
                     return Ok(false);
                 }
                 match stage {
+                    Stage::SpeechResource {
+                        ticket,
+                        number,
+                        percent,
+                    } => {
+                        host.release_audio_resource_preparation(client, ticket)
+                            .map_err(err)?;
+                        ensure!(
+                            phase == AudioPreparePhase::Ready,
+                            "{}",
+                            error.unwrap_or_else(
+                                || "Siglus voice resource preparation failed".into()
+                            )
+                        );
+                        let resource = resource.context("prepared voice resource missing")?;
+                        let voice = host.begin_audio(
+                            client,
+                            AudioRequest::PlayResource {
+                                channel: crate::koe_bridge::CHANNEL,
+                                resource,
+                                parameters: AudioParameters {
+                                    bus: PcmBus::Voice,
+                                    mix_group: Some(crate::koe_bridge::GROUP.into()),
+                                    ..Default::default()
+                                },
+                            },
+                        );
+                        let voice = match voice {
+                            Ok(ticket) => ticket,
+                            Err(e) => {
+                                host.release_audio_resource(client, resource).map_err(err)?;
+                                return Err(anyhow::anyhow!("{e}"));
+                            }
+                        };
+                        pending.ticket = Some(Stage::SpeechVoice {
+                            ticket: voice,
+                            number,
+                            percent,
+                            resource,
+                            fresh: true,
+                        });
+                        continue;
+                    }
+                    Stage::SpeechVoice {
+                        ticket,
+                        number,
+                        percent,
+                        resource,
+                        fresh,
+                    } => {
+                        host.release_audio(client, ticket).map_err(err)?;
+                        if phase != AudioPreparePhase::Ready {
+                            if fresh {
+                                host.release_audio_resource(client, resource).map_err(err)?;
+                            }
+                            anyhow::bail!(
+                                "{}",
+                                error.unwrap_or_else(|| "Siglus voice preparation failed".into())
+                            );
+                        }
+                        if fresh {
+                            if pending.after.ctx.koe.bindings.len() < 24 {
+                                pending
+                                    .after
+                                    .ctx
+                                    .koe
+                                    .bindings
+                                    .insert((number, percent), resource);
+                            } else {
+                                host.release_audio_resource(client, resource).map_err(err)?;
+                            }
+                        }
+                    }
                     Stage::NativeResource {
                         ticket,
                         channel,
@@ -278,6 +374,54 @@ impl SiglusVm {
             };
             let retain = matches!(&operation, Operation::Retain(_));
             match operation {
+                Operation::Speech { number, percent } => {
+                    if let Some(&resource) = pending.after.ctx.koe.bindings.get(&(number, percent))
+                    {
+                        let ticket = host
+                            .begin_audio(
+                                client,
+                                AudioRequest::PlayResource {
+                                    channel: crate::koe_bridge::CHANNEL,
+                                    resource,
+                                    parameters: AudioParameters {
+                                        bus: PcmBus::Voice,
+                                        mix_group: Some(crate::koe_bridge::GROUP.into()),
+                                        ..Default::default()
+                                    },
+                                },
+                            )
+                            .map_err(err)?;
+                        pending.ticket = Some(Stage::SpeechVoice {
+                            ticket,
+                            number,
+                            percent,
+                            resource,
+                            fresh: false,
+                        });
+                    } else {
+                        let key = format!("koe/{number}");
+                        let asset = self.state.config.resources.get(&key).with_context(|| {
+                            format!("Siglus voice requires config.resources alias for {key:?}")
+                        })?;
+                        let ticket = host
+                            .begin_transformed_audio_resource(
+                                client,
+                                AudioAsset {
+                                    path: VfsPath::new(Mount::Asset, asset).map_err(err)?,
+                                    frame_limit: None,
+                                },
+                                crysirror_core::service::AudioResourceTransform::SiglusJitan {
+                                    percent,
+                                },
+                            )
+                            .map_err(err)?;
+                        pending.ticket = Some(Stage::SpeechResource {
+                            ticket,
+                            number,
+                            percent,
+                        });
+                    }
+                }
                 Operation::Start {
                     channel,
                     key,

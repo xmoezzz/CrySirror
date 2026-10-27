@@ -1,0 +1,76 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "upstream_license": "MPL-2.0",
+  "scope": "Historical no-trailing-read-flag global single-slot KOE/EXKOE native policy over engine resources/transforms/Voice bus/groups/completion; newer trailing KOE read-flag ABI rejects explicitly; not full Siglus speech compatibility",
+  "implementation": "New engine PCM16 numeric profile and bounded prepared-resource transform; native bridge retains only logical identity/config/wait/save and scoped resource handles. No original Kira/SfxEngine/decoder/JITAN implementation is linked or copied into the adapter.",
+  "reference_validation": {
+    "authored_vectors": 784,
+    "comparison": "Full PCM16 samples compared before retaining length/FNV-1a hashes",
+    "matrix": "4 rates x 2 durations x 2 channel counts x 7 patterns x 7 compression percentages",
+    "evidence": "target/verification/koe-reference-comparison-final.log",
+    "fixture": "crates/crysirror-audio/tests/fixtures/jitan_reference.json"
+  },
+  "prior_audits": [
+    "siglus-bgm-source-audit.json",
+    "siglus-sfx-source-audit.json"
+  ],
+  "remaining": [
+    "Native pack/path/append-directory voice discovery requires explicit aliases here",
+    "MWND/KOE_ST/backlog replay/menu integration",
+    "Native mouth-volume table and emote mapping",
+    "Full per-character/category routing and BGM duck policies",
+    "Exact wall/device timing and all codec parity",
+    "Newer global KOE trailing read-flag ABI is rejected before audio; MWND/read-skip semantics are not emulated"
+  ],
+  "files": [
+    {
+      "path": "crates/siglus_scene_vm/src/audio/jitan.rs",
+      "sha256": "3da9828b1b68a268d1050631c13fc982bcfb66bc659d526e4c0da82b17f98d99",
+      "bytes": 23497,
+      "review": "complete source file, including all helpers and golden tests",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/audio/sfx_engine.rs",
+      "sha256": "48d732ae36d1e5876cd71d4e52b9dd578d4a311adff18fe05dcef9b8e376deea",
+      "bytes": 45457,
+      "review": "complete source file; KOE initialization, cache, source stop ordering, integer-ms duration and mouth-table distinction",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/global.rs",
+      "sha256": "932ea4aab87291357319275d9c6b40e9dafc45516dd85932ee23fa3a91bd9258",
+      "bytes": 94618,
+      "review": "complete global KOE/EXKOE dispatch, named/positional helpers and metadata functions (lines 111-125, 1130-1314); other forms are outside this phase",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/mod.rs",
+      "sha256": "6e2826deddcdc22d3cd146dc12e3ab2052b1c16fa417f380b517e689585d87e0",
+      "bytes": 657443,
+      "review": "Complete selected koe_jitan_rate and request/take/discard/submit read-flag functions, plus current-read/skip update helpers (lines 1123-1155); other context policy is outside this phase",
+      "existing_reference_matches_pin": false,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/syscom.rs",
+      "sha256": "9a6eab7ce406cacdbd649018e549b1a5e1be9d432063d06296d14bf60dab0445",
+      "bytes": 247483,
+      "review": "complete selected JITAN config SET/DEFAULT/GET arms (lines 5838-5888); other SYSCOM commands are not implemented",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/wait.rs",
+      "sha256": "75aae7791c1683e9f5fb22f3b0d377a957efe18ebdc72febdef94e1f14fbe9f3",
+      "bytes": 72576,
+      "review": "complete original audio predicate, skip, wait registration and completed-decide handling functions (previous BGM/SFX audit); reused without a second wait clock",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    }
+  ]
+}

@@ -4552,6 +4552,22 @@ impl<'a> SceneVm<'a> {
                 let _ = self.ctx.take_read_flag_no_request();
                 let block_generation = self.ctx.wait.block_generation();
                 let proc_generation = self.ctx.proc_generation();
+                let global_koe = elm.first().is_some_and(|head| {
+                    matches!(
+                        self.canonical_runtime_form_id(*head as u32) as i32,
+                        constants::elm_value::GLOBAL_KOE
+                            | constants::elm_value::GLOBAL_KOE_PLAY_WAIT
+                            | constants::elm_value::GLOBAL_KOE_PLAY_WAIT_KEY
+                    )
+                });
+                if global_koe
+                    && (!self.stream.has_resolved_command_read_flag_layout()
+                        || self.stream.command_read_flag_no_at_current_pc().is_some())
+                {
+                    let reason = "Siglus KOE trailing read-flag requires unmapped MWND/read-skip bookkeeping";
+                    self.ctx.backend_faults.borrow_mut().push(reason.into());
+                    bail!(reason);
+                }
                 self.exec_command(elm, arg_list_id, ret_form, &mut args)?;
                 self.drain_runtime_save_load_requests()?;
                 if self.ctx.take_read_flag_no_request() {
@@ -13806,6 +13822,7 @@ impl<'a> SceneVm<'a> {
 impl SceneVm<'static> {
     pub fn engine_validate(&self) -> Result<()> {
         self.ctx.bgm.validate()?;
+        self.ctx.koe.validate()?;
         self.ctx.pcm.validate()?;
         self.ctx.se.validate()?;
         crate::message::validate(&self.ctx)?;

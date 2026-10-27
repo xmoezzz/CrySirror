@@ -380,3 +380,26 @@ Run the optional silent-level device probe with
 `cargo run --release -p crysirror-audio --features cpal-output --example output_probe`.
 See [ADR 0080](../adr/0080-async-output-worker-and-bounded-pcm-transfer.md) for
 library pins, migration and remaining clock/resampling/device-switch limits.
+
+
+### Prepared voice compression
+
+```ts
+const compressed = await audio.prepareSourceAsync("voice.wav", {
+  transform: {kind: "siglus_jitan", percent: 200}
+});
+const voice = await audio.playSourceAsync(compressed.resource, {bus: "voice"});
+audio.releaseSource(compressed.resource);
+```
+
+AudioSourcePrepareSpec exposes measure_frames, an input frame_limit and an
+optional AudioTransformSpec. The named PCM16 profile preserves sample rate,
+folds stereo to mono at nonidentity rates and compresses through native splice
+search/smoothing. It is separate from playback rate/pitch. Percent 100 retains
+original encoded bytes; other rates bake bounded WAVE on the preparation worker.
+A native-profile cue below 100 ms becomes same-length silence. Layout/rate/frame/
+residency limits and resource ownership remain explicit; failures are retained
+in the preparation receipt. No VM or audio device is required. See ADR 0081.
+
+An authored offline demo: `cargo run --release -p crysirror-audio --example
+voice_compression -- /tmp/crysirror-voice-compression`.

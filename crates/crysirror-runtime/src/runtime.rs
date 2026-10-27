@@ -175,6 +175,20 @@ impl HostServices for SharedHost {
             .begin_resource_preparation(client.0, asset, measure_frames, storage)
             .map_err(|e| Error::Io(format!("audio resource preparation: {e:#}")))
     }
+    fn begin_transformed_audio_resource(
+        &mut self,
+        client: ClientId,
+        asset: crysirror_core::service::AudioAsset,
+        transform: crysirror_core::service::AudioResourceTransform,
+    ) -> crysirror_core::Result<u64> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        let storage = self.fs.storage(client)?;
+        self.channel_audio
+            .begin_transformed_resource_preparation(client.0, asset, transform, storage)
+            .map_err(|e| Error::Io(format!("transformed audio resource: {e:#}")))
+    }
     fn audio_resource_preparation(
         &mut self,
         client: ClientId,

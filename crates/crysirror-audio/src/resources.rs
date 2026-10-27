@@ -184,6 +184,37 @@ impl AudioResources {
         pool: Option<TaskPool>,
         nonblocking: bool,
     ) -> Result<u64> {
+        self.begin_transformed(
+            client,
+            asset,
+            measure_frames,
+            None,
+            storage,
+            pool,
+            nonblocking,
+        )
+    }
+    pub fn begin_transformed(
+        &mut self,
+        client: u32,
+        asset: AudioAsset,
+        measure_frames: bool,
+        transform: Option<crysirror_core::service::AudioResourceTransform>,
+        storage: Arc<dyn ClientStorage>,
+        pool: Option<TaskPool>,
+        nonblocking: bool,
+    ) -> Result<u64> {
+        if let Some(t) = transform {
+            t.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
+        let compression = match transform {
+            Some(crysirror_core::service::AudioResourceTransform::SiglusJitan { percent })
+                if percent != 100 =>
+            {
+                Some(percent)
+            }
+            _ => None,
+        };
         ensure!(
             asset.path.mount() == Mount::Asset,
             "prepared audio requires asset authority"
@@ -207,7 +238,12 @@ impl AudioResources {
                 len > 0 && len <= RESOURCE_BYTES,
                 "prepared audio snapshot exceeds 128 MiB or is empty"
             );
-            let charge = Charge::new(budget, len + SCRATCH_BYTES)?;
+            let scratch = if compression.is_some() {
+                128 * 1024 * 1024
+            } else {
+                SCRATCH_BYTES
+            };
+            let charge = Charge::new(budget.clone(), len + scratch)?;
             let mut bytes = vec![0; len];
             let mut at = 0;
             while at < len {
@@ -232,13 +268,98 @@ impl AudioResources {
                 bytes,
                 _charge: charge,
             });
-            let extension = asset
+            let mut extension = asset
                 .path
                 .relative()
                 .rsplit_once('.')
                 .map(|v| v.1.to_owned());
             let mut source = decoder::open_asset(snapshot.clone(), extension.as_deref())?;
             let rate = source.sample_rate();
+            let mut frame_limit = asset.frame_limit;
+            let mut stored_len = len;
+            if let Some(percent) = compression {
+                let channels = source
+                    .channel_count()
+                    .context("audio transform requires an explicit mono/stereo layout")?;
+                ensure!(
+                    (1..=2).contains(&channels),
+                    "unsupported transformed source channels"
+                );
+                let cap = crate::voice_compression::MAX_INPUT_FRAMES;
+                ensure!(
+                    asset.frame_limit != Some(0),
+                    "empty transformed source range"
+                );
+                if let Some(n) = source.frame_count() {
+                    ensure!(
+                        n.min(asset.frame_limit.unwrap_or(u64::MAX)) <= cap as u64,
+                        "audio transform decoded-frame budget"
+                    );
+                }
+                let mut pcm = Vec::new();
+                let mut block = vec![[0.; 2]; 4096];
+                let mut total = 0usize;
+                loop {
+                    cancel.check()?;
+                    let count = block.len().min(asset.frame_limit.map_or(usize::MAX, |n| {
+                        n.saturating_sub(total as u64).min(usize::MAX as u64) as usize
+                    }));
+                    if count == 0 {
+                        break;
+                    }
+                    let n = source.read(&mut block[..count])?;
+                    ensure!(n <= count, "invalid transform decoder read");
+                    if n == 0 {
+                        break;
+                    }
+                    total = total
+                        .checked_add(n)
+                        .context("audio transform frame overflow")?;
+                    ensure!(total <= cap, "audio transform decoded-frame budget");
+                    for frame in &block[..n] {
+                        for &sample in &frame[..channels as usize] {
+                            ensure!(sample.is_finite(), "nonfinite transform input");
+                            pcm.push(
+                                (sample.clamp(-1., 1.) * 32768.)
+                                    .round()
+                                    .clamp(-32768., 32767.) as i16,
+                            );
+                        }
+                    }
+                }
+                drop(source);
+                let converted = crate::voice_compression::siglus_jitan_cancellable(
+                    &pcm, channels, rate, percent, &cancel,
+                )?;
+                drop(pcm);
+                let raw = converted
+                    .samples
+                    .iter()
+                    .flat_map(|s| s.to_le_bytes())
+                    .collect::<Vec<_>>();
+                let encoded = crysirror_resource::WaveSpec {
+                    sample_rate: rate,
+                    channels: converted.channels,
+                    ..Default::default()
+                }
+                .encode(&raw)?;
+                drop(raw);
+                drop(converted);
+                stored_len = encoded.len();
+                // Keep original+transform scratch charged until input and output
+                // buffers no longer overlap; the final snapshot retains actual bytes.
+                let mut output_charge = Charge::new(budget, stored_len + 8192)?;
+                drop(snapshot);
+                cancel.check()?;
+                output_charge.shrink(stored_len + 8192);
+                snapshot = Arc::new(Snapshot {
+                    bytes: encoded,
+                    _charge: output_charge,
+                });
+                extension = Some("wav".into());
+                frame_limit = None;
+                source = decoder::open_asset(snapshot.clone(), Some("wav"))?;
+            }
             let mut frames = source.frame_count();
             ensure!(
                 (8000..=192000).contains(&rate),
@@ -261,7 +382,7 @@ impl AudioResources {
                 frames = Some(count);
             }
             drop(source);
-            frames = match (asset.frame_limit, frames) {
+            frames = match (frame_limit, frames) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (Some(_), None) => None,
                 (None, b) => b,
@@ -271,15 +392,15 @@ impl AudioResources {
             Arc::get_mut(&mut snapshot)
                 .context("decoder retained unexpected snapshot owner")?
                 ._charge
-                .shrink(len + 8192);
+                .shrink(stored_len + 8192);
             Ok(Product::Prepared(Arc::new(PreparedSound {
                 snapshot,
                 extension,
-                frame_limit: asset.frame_limit,
+                frame_limit,
                 info: AudioResourceInfo {
                     source_rate: rate,
                     source_frames: frames,
-                    encoded_bytes: len as u64,
+                    encoded_bytes: stored_len as u64,
                 },
             })))
         };

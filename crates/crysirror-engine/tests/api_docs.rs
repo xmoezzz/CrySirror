@@ -200,6 +200,7 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-runtime/src/assets_async.rs",
         "crates/crysirror-tasks/src/lib.rs",
         "crates/crysirror-tasks/src/table.rs",
+        "crates/crysirror-engine/src/audio_resources_api.rs",
         "crates/crysirror-audio/src/scene.rs",
         "crates/crysirror-audio/src/buffered.rs",
         "crates/crysirror-audio/src/decoder.rs",
@@ -237,6 +238,9 @@ fn generate() -> api_doc::ApiDocs {
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
         d("AudioResourceHandle","Audio.prepareSourceAsync / beginPlaySource / HostServices",None),
+        d("AudioSourcePrepareSpec","Audio.beginPrepareSource / prepareSourceAsync options",sample::<crysirror_engine::AudioSourcePrepareSpec>(e.clone())),
+        d("AudioTransformSpec","AudioSourcePrepareSpec.transform",sample::<crysirror_engine::AudioTransformSpec>(json!({"kind":"siglus_jitan","percent":200}))),
+        d("AudioResourceTransform","Rust HostServices transformed resource preparation",None),
         d("AudioResourceInfo","Audio.sourceInfo / sourcePreparation / HostServices",None),
         d("AudioResourcePreparation","Rust HostServices.audio_resource_preparation",None),
         d("AudioMixGroupSettings","Audio.setMixGroup / Mixer / HostServices audio requests",None),

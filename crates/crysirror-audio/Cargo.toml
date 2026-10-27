@@ -13,6 +13,7 @@ rodio-output = ["dep:rodio", "cpal-output"]
 
 [dependencies]
 crysirror-io.workspace = true
+crysirror-resource.workspace = true
 crysirror-core.workspace = true
 crysirror-tasks.workspace = true
 crysirror-acoustics.workspace = true

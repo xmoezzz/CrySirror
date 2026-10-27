@@ -319,3 +319,171 @@ fn compressed_resources_reopen_independent_decoders_after_worker_metadata_scan()
         assert_eq!(storage.calls.lock().unwrap().len(), 1);
     }
 }
+
+#[test]
+fn transformed_resource_bakes_pcm_on_worker_and_retains_scoped_immutable_audio() {
+    use crysirror_core::service::AudioResourceTransform::SiglusJitan;
+    let storage = Storage::new();
+    let pcm = (0..8000usize)
+        .map(|i| (((i * 7919 + 12345) % 60001) as i32 - 30000) as i16)
+        .flat_map(i16::to_le_bytes)
+        .collect::<Vec<_>>();
+    *storage.data.lock().unwrap() = crysirror_resource::WaveSpec {
+        sample_rate: 8000,
+        ..Default::default()
+    }
+    .encode(&pcm)
+    .unwrap();
+    let pool = TaskPool::new("transform-resource", 1, 8).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let blocker = pool
+        .spawn(move |_| {
+            rx.recv_timeout(Duration::from_secs(5))?;
+            Ok(())
+        })
+        .unwrap();
+    let mut bank = AudioResources::default();
+    let t = bank
+        .begin_transformed(
+            1,
+            asset(None),
+            false,
+            Some(SiglusJitan { percent: 200 }),
+            storage.clone(),
+            Some(pool.clone()),
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        bank.preparation(1, t).unwrap().phase,
+        AudioPreparePhase::Pending
+    );
+    assert_eq!(bank.resource_count(), 0);
+    tx.send(()).unwrap();
+    blocker.wait().unwrap();
+    let h = ready(&mut bank, 1, t);
+    bank.release_preparation(1, t).unwrap();
+    assert!(bank.capture(2, h).is_err());
+    let sound = bank.capture(1, h).unwrap();
+    assert_eq!(sound.info().source_frames, Some(4130));
+    assert_eq!(sound.info().source_rate, 8000);
+    assert_eq!(sound.info().encoded_bytes, 46 + 4130 * 2);
+    *storage.data.lock().unwrap() = vec![];
+    let mut a = sound.open().unwrap();
+    let mut b = sound.open().unwrap();
+    let mut out = vec![[0.; 2]; 4130];
+    assert_eq!(a.read(&mut out).unwrap(), 4130);
+    let hash = out
+        .iter()
+        .flat_map(|s| ((s[0] * 32768.) as i16).to_le_bytes())
+        .fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+        });
+    assert_eq!(hash, 0x7422c527b9b4de3d);
+    let mut first = [[0.; 2]; 1];
+    b.read(&mut first).unwrap();
+    assert_eq!(first[0], out[0]);
+    assert!(out.iter().all(|s| s[0] == s[1]));
+    assert!(
+        storage
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|id| *id != thread::current().id())
+    );
+    bank.release(1, h).unwrap();
+    bank.clear();
+    assert!(bank.resident_bytes() > 0);
+    drop(a);
+    drop(b);
+    drop(sound);
+    assert_eq!(bank.resident_bytes(), 0);
+}
+
+#[test]
+fn transform_identity_input_limit_and_canceled_worker_keep_resource_boundaries() {
+    use crysirror_core::service::AudioResourceTransform::SiglusJitan;
+    let storage = Storage::new();
+    let mut bank = AudioResources::default();
+    assert!(
+        bank.begin_transformed(
+            1,
+            asset(None),
+            true,
+            Some(SiglusJitan { percent: 99 }),
+            storage.clone(),
+            None,
+            false
+        )
+        .is_err()
+    );
+    assert_eq!(bank.resident_bytes(), 0);
+    let t = bank
+        .begin_transformed(
+            1,
+            asset(Some(61)),
+            true,
+            Some(SiglusJitan { percent: 100 }),
+            storage.clone(),
+            None,
+            false,
+        )
+        .unwrap();
+    let h = ready(&mut bank, 1, t);
+    bank.release_preparation(1, t).unwrap();
+    let original = bank.capture(1, h).unwrap();
+    assert_eq!(original.info().encoded_bytes, wave().len() as u64);
+    let mut first = [[0.; 2]; 2];
+    original.open().unwrap().read(&mut first).unwrap();
+    assert!((first[1][0] - 20. / 32768.).abs() < 1e-6);
+    let t = bank
+        .begin_transformed(
+            1,
+            asset(Some(61)),
+            false,
+            Some(SiglusJitan { percent: 200 }),
+            storage.clone(),
+            None,
+            false,
+        )
+        .unwrap();
+    let h2 = ready(&mut bank, 1, t);
+    bank.release_preparation(1, t).unwrap();
+    let transformed = bank.capture(1, h2).unwrap();
+    assert_eq!(transformed.info().source_frames, Some(61));
+    let mut out = [[1.; 2]; 62];
+    assert_eq!(transformed.open().unwrap().read(&mut out).unwrap(), 61);
+    assert!(out[..61].iter().flatten().all(|s| *s == 0.));
+    drop(original);
+    drop(transformed);
+    bank.clear();
+    assert_eq!(bank.resident_bytes(), 0);
+    let pool = TaskPool::new("cancel-transform", 1, 8).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let blocker = pool
+        .spawn(move |_| {
+            rx.recv_timeout(Duration::from_secs(5))?;
+            Ok(())
+        })
+        .unwrap();
+    let count = storage.calls.lock().unwrap().len();
+    let t = bank
+        .begin_transformed(
+            1,
+            asset(None),
+            false,
+            Some(SiglusJitan { percent: 200 }),
+            storage.clone(),
+            Some(pool.clone()),
+            true,
+        )
+        .unwrap();
+    bank.release_preparation(1, t).unwrap();
+    tx.send(()).unwrap();
+    blocker.wait().unwrap();
+    pool.spawn(|_| Ok(())).unwrap().wait().unwrap();
+    assert_eq!(storage.calls.lock().unwrap().len(), count);
+    assert_eq!(bank.resident_bytes(), 0);
+    assert_eq!(bank.resource_count(), 0);
+}

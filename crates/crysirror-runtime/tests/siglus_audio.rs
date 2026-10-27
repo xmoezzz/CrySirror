@@ -933,3 +933,319 @@ fn original_wait_and_restore_use_worker_mix_publication_without_repeating_native
     assert!(r.all_halted(), "{}", native(&r));
     assert_eq!(native(&r)["int_stack"], json!([42]));
 }
+
+fn voice(s: &mut SceneBuilder, code: i32, args: &[i32], ret: i32) {
+    s.command(&[code], 0, args, ret);
+}
+#[test]
+fn original_koe_wait_uses_shared_resource_voice_bus_and_source_completion() {
+    let mut s = SceneBuilder::default();
+    voice(&mut s, c::ELM_GLOBAL_KOE_PLAY_WAIT, &[12, 7], fm::VOID);
+    finish(&mut s);
+    let (dir, _) = fixture(s, 61);
+    let path = dir.path().join("project.json");
+    let mut project: Json = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    project["clients"][0]["config"]["resources"]["koe/12"] = json!("tone.wav");
+    std::fs::write(&path, serde_json::to_vec(&project).unwrap()).unwrap();
+    let mut r = Runtime::load(&path, &dir.path().join("state")).unwrap();
+    r.set_audio_nonblocking(true);
+    let gate = Gate::block(r.assets.io_tasks());
+    tick(&mut r, 0);
+    assert_ne!(native(&r)["int_stack"], json!([42]));
+    assert!(r.host.audio_info(ClientId(1), 3).unwrap().is_none());
+    gate.release();
+    until(&mut r, |r| {
+        r.host.audio_info(ClientId(1), 3).unwrap().is_some()
+    });
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["koe"]["number"], json!(12));
+    assert_eq!(native(&r)["koe"]["cached"], json!(1));
+    r.host
+        .channel_audio
+        .mixer
+        .set_bus(
+            1,
+            crysirror_audio::mixer::Bus::Voice,
+            crysirror_audio::mixer::BusSettings {
+                gain: 1.,
+                muted: true,
+            },
+        )
+        .unwrap();
+    tick(&mut r, 1);
+    assert!(r.host.take_pcm_output().iter().flatten().all(|s| *s == 0.));
+    r.host
+        .channel_audio
+        .mixer
+        .set_bus(
+            1,
+            crysirror_audio::mixer::Bus::Voice,
+            crysirror_audio::mixer::BusSettings {
+                gain: 1.,
+                muted: false,
+            },
+        )
+        .unwrap();
+    tick(&mut r, 1);
+    assert!(r.host.take_pcm_output().iter().flatten().any(|s| *s != 0.));
+    tick(&mut r, 21);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([42]));
+}
+#[test]
+fn original_koe_jitan_config_prepares_transformed_resource_and_cache_replays_without_file() {
+    let mut s = SceneBuilder::default();
+    s.command(
+        &[c::ELM_GLOBAL_SYSCOM, c::syscom_op::SET_JITAN_SPEED],
+        0,
+        &[200],
+        fm::VOID,
+    );
+    s.command(
+        &[c::ELM_GLOBAL_SYSCOM, c::syscom_op::SET_JITAN_NORMAL_ONOFF],
+        0,
+        &[1],
+        fm::VOID,
+    );
+    voice(&mut s, c::ELM_GLOBAL_KOE_PLAY_WAIT, &[12], fm::VOID);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[50], fm::VOID);
+    voice(&mut s, c::ELM_GLOBAL_KOE_PLAY_WAIT, &[12], fm::VOID);
+    finish(&mut s);
+    let (dir, _) = fixture(s, 61);
+    let path = dir.path().join("project.json");
+    let mut p: Json = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    p["clients"][0]["config"]["resources"]["koe/12"] = json!("tone.wav");
+    std::fs::write(&path, serde_json::to_vec(&p).unwrap()).unwrap();
+    let mut r = Runtime::load(&path, &dir.path().join("state")).unwrap();
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["koe"]["compression_percent"], json!(200));
+    assert_eq!(
+        r.host
+            .audio_info(ClientId(1), 3)
+            .unwrap()
+            .unwrap()
+            .source_frames,
+        Some(1000)
+    ); // <100 ms legacy silent cue
+    let pcm = {
+        tick(&mut r, 21);
+        r.host.take_pcm_output()
+    };
+    assert!(pcm.iter().flatten().all(|s| *s == 0.));
+    tick(&mut r, 0);
+    std::fs::remove_file(dir.path().join("assets/a/tone.wav")).unwrap();
+    tick(&mut r, 51);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["koe"]["cached"], json!(1));
+    assert_eq!(native(&r)["int_stack"], json!([42]));
+}
+
+fn koe_fixture(s: SceneBuilder) -> (tempfile::TempDir, Runtime) {
+    let (dir, initial) = fixture(s, 1000);
+    drop(initial);
+    let path = dir.path().join("project.json");
+    let mut p: Json = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for n in [12, 13] {
+        p["clients"][0]["config"]["resources"][format!("koe/{n}")] = json!("tone.wav");
+    }
+    std::fs::write(&path, serde_json::to_vec(&p).unwrap()).unwrap();
+    let r = Runtime::load(&path, &dir.path().join("state")).unwrap();
+    (dir, r)
+}
+fn config(s: &mut SceneBuilder, op: i32, args: &[i32]) {
+    s.command(&[c::ELM_GLOBAL_SYSCOM, op], 0, args, fm::VOID);
+}
+
+#[test]
+fn original_koe_long_compression_waits_on_native_integer_ms_boundary() {
+    let mut s = SceneBuilder::default();
+    config(&mut s, c::syscom_op::SET_JITAN_SPEED, &[200]);
+    config(&mut s, c::syscom_op::SET_JITAN_NORMAL_ONOFF, &[1]);
+    voice(&mut s, c::ELM_GLOBAL_KOE_PLAY_WAIT, &[12], fm::INT);
+    finish(&mut s);
+    let (dir, mut r) = koe_fixture(s);
+    let pcm = (0..8000usize)
+        .map(|i| (((i * 7919 + 12345) % 60001) as i32 - 30000) as i16)
+        .flat_map(i16::to_le_bytes)
+        .collect::<Vec<_>>();
+    std::fs::write(
+        dir.path().join("assets/a/tone.wav"),
+        crysirror_resource::WaveSpec {
+            sample_rate: 8000,
+            ..Default::default()
+        }
+        .encode(&pcm)
+        .unwrap(),
+    )
+    .unwrap();
+    tick(&mut r, 0);
+    let info = r.host.audio_info(ClientId(1), 3).unwrap().unwrap();
+    assert_eq!((info.source_frames, info.source_rate), (Some(4130), 8000));
+    tick(&mut r, 515);
+    tick(&mut r, 0);
+    assert_ne!(native(&r)["int_stack"], json!([0, 42]));
+    tick(&mut r, 1);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([0, 42]));
+    assert!(
+        r.host
+            .audio_info(ClientId(1), 3)
+            .unwrap()
+            .unwrap()
+            .source_playing
+    );
+}
+
+#[test]
+fn original_exkoe_named_policy_keeps_message_identity_and_decide_wait_does_not_stop_voice() {
+    let mut s = SceneBuilder::default();
+    config(&mut s, c::syscom_op::SET_JITAN_SPEED, &[200]);
+    voice(&mut s, c::ELM_GLOBAL_KOE, &[12, 7], fm::VOID);
+    // Original CD_COMMAND stores named ids in reverse argument order.
+    s.element(&[c::ELM_GLOBAL_EXKOE]);
+    for v in [13, 9, 1, 1, 1] {
+        s.int(v);
+    }
+    s.code.push(cd::COMMAND);
+    s.i32(0);
+    s.i32(5);
+    for _ in 0..5 {
+        s.i32(fm::INT);
+    }
+    s.i32(5);
+    for id in [4, 3, 2, 1, 0] {
+        s.i32(id);
+    }
+    s.i32(fm::INT);
+    finish(&mut s);
+    let (_dir, mut r) = koe_fixture(s);
+    tick(&mut r, 0);
+    let koe = native(&r)["koe"].clone();
+    assert_eq!(koe["number"], 13);
+    assert_eq!(koe["message_number"], 12);
+    assert_eq!(koe["message_character"], 7);
+    assert_eq!(koe["compression_percent"], 200);
+    assert_eq!(koe["is_ex"], true);
+    assert_eq!(koe["cached"], 2);
+    // Arrow input is not a completed DECIDE. Space is also DECIDE.
+    r.tick(
+        0,
+        InputFrame {
+            buttons_down: 4,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    tick(&mut r, 0);
+    assert_ne!(native(&r)["int_stack"], json!([1, 42]));
+    r.tick(
+        0,
+        InputFrame {
+            buttons_down: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([1, 42]));
+    assert!(
+        r.host
+            .audio_info(ClientId(1), 3)
+            .unwrap()
+            .unwrap()
+            .source_playing
+    );
+}
+
+#[test]
+fn failed_new_koe_stops_previous_source_retains_original_command_and_retries() {
+    let mut s = SceneBuilder::default();
+    voice(&mut s, c::ELM_GLOBAL_KOE, &[12], fm::VOID);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[2], fm::VOID);
+    voice(&mut s, c::ELM_GLOBAL_KOE_PLAY_WAIT, &[13], fm::INT);
+    finish(&mut s);
+    let (dir, mut r) = koe_fixture(s);
+    tick(&mut r, 0);
+    assert!(r.host.channel_audio.is_playing(1, 3));
+    std::fs::write(dir.path().join("assets/a/tone.wav"), b"broken").unwrap();
+    r.set_audio_nonblocking(true);
+    tick(&mut r, 2);
+    let pc = native(&r)["pc"].clone();
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        if r.tick(0, InputFrame::default()).is_err() {
+            break;
+        }
+        assert!(Instant::now() < end);
+        std::thread::yield_now();
+    }
+    assert_eq!(native(&r)["pc"], pc);
+    assert!(!r.host.channel_audio.is_playing(1, 3));
+    assert_ne!(native(&r)["int_stack"], json!([0, 42]));
+    assert_eq!(native(&r)["koe"]["cached"], 1);
+    std::fs::write(dir.path().join("assets/a/tone.wav"), wave()).unwrap();
+    until(&mut r, |r| native(r)["koe"]["number"] == 13);
+    assert!(r.host.channel_audio.is_playing(1, 3));
+    tick(&mut r, 21);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([0, 42]));
+}
+
+#[test]
+fn koe_runtime_restore_rebuilds_handles_and_original_save_restores_volume_without_voice() {
+    let mut s = SceneBuilder::default();
+    voice(&mut s, c::ELM_GLOBAL_KOE_SET_VOLUME, &[128], fm::VOID);
+    voice(&mut s, c::ELM_GLOBAL_KOE, &[12, 7], fm::VOID);
+    s.command(&[c::ELM_GLOBAL_SAVEPOINT], 0, &[], fm::INT);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[10000], fm::VOID);
+    finish(&mut s);
+    let (_dir, mut r) = koe_fixture(s);
+    tick(&mut r, 0);
+    let save = r.snapshot().unwrap();
+    let original = r.export_original_save(ClientId(1)).unwrap();
+    assert_eq!(native(&r)["koe"]["volume"], 128);
+    r.restore(&save).unwrap();
+    assert!(r.host.audio_info(ClientId(1), 3).unwrap().is_none());
+    tick(&mut r, 0);
+    assert!(r.host.channel_audio.is_playing(1, 3));
+    assert_eq!(native(&r)["koe"]["cached"], 1);
+    assert_eq!(native(&r)["koe"]["message_number"], 12);
+    let group = r
+        .host
+        .channel_audio
+        .mixer
+        .mix_group(1, "siglus.koe")
+        .unwrap()
+        .unwrap();
+    assert!((group.settings.gain - 128. / 255.).abs() < 1e-6);
+    r.import_original_save(ClientId(1), &original).unwrap();
+    tick(&mut r, 0);
+    assert!(!r.host.channel_audio.is_playing(1, 3));
+    assert_eq!(native(&r)["koe"]["volume"], 128);
+}
+
+#[test]
+fn koe_with_trailing_read_flag_fails_before_audio_instead_of_marking_unread_text_read() {
+    let mut s = SceneBuilder::default();
+    voice(&mut s, c::ELM_GLOBAL_KOE, &[12], fm::VOID);
+    s.i32(0);
+    finish(&mut s);
+    let mut scene = s.finish();
+    let flags = scene.len() as i32;
+    scene[31 * 4..32 * 4].copy_from_slice(&flags.to_le_bytes());
+    scene[32 * 4..33 * 4].copy_from_slice(&1i32.to_le_bytes());
+    scene.extend(0i32.to_le_bytes());
+    let (dir, mut r) = koe_fixture(SceneBuilder::default());
+    std::fs::write(
+        dir.path().join("assets/a/Scene.pck"),
+        crysirror_siglus_vm::fixture::pack_scene(&scene),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let error = format!("{:#}",r.tick(0, InputFrame::default()).unwrap_err());
+        assert!(error.contains("MWND/read-skip"), "{error}");
+        assert!(r.host.audio_info(ClientId(1), 3).unwrap().is_none());
+        assert_eq!(r.host.channel_audio.resources.resource_count(), 0);
+        assert_ne!(native(&r)["int_stack"], json!([42]));
+    }
+}

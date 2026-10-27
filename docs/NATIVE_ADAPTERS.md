@@ -212,14 +212,16 @@ An explicit resources alias maps each native music file to a client engine asset
 Optional decoded UTF-8 Gameexe BGM rows supply start/end/repeat frames, bounded
 at 4096 entries. Discovery/append dirs, encrypted Gameexe and native pack-entry
 selection are not inferred. Unsupported opcodes/property fallbacks fail visibly.
-ADR 0078 adds global PCM and SE below; PCMCH and KOE speech remain unbound.
+ADR 0078 adds global PCM and SE below; ADR 0081 adds the bounded global KOE
+profile. PCMCH remains unbound.
 ADR 0077 adds immutable
 CrySirror resource handles: native PLAY/READY commits after resource and voice
 preparation; RESUME after EOF/stop replays the retained resource without reopening
 its original path. Stopped runtime snapshots reconstruct resources without hidden
 playback. Handles are ephemeral; rebuilding a snapshot still needs the assets.
 
-Runtime Siglus payload schema is 3 (ADR 0078); schema-2 snapshots require migration.
+ADR 0078 used runtime Siglus payload schema 3; ADR 0081 advances it to 4
+without automatic schema-2/3 migration.
 Pending checkpoints replay uncommitted native
 commands; active restores reprepare declarations at authored start. Original file
 codecs remain intact, with BGM persistence translated through shared preparation.
@@ -244,11 +246,12 @@ source needs a canonical resources alias; `koe/{number}` is an explicit CrySirro
 mapping for SE voice-number calls, without automatic pack/filename discovery.
 Missing/unknown operations fail visibly.
 
-Runtime payload schema is 3 for PCM/SE logical declarations. Active snapshots
+PCM/SE declarations entered runtime payload schema 3; current schema 4 adds
+KOE declarations (ADR 0081). Active snapshots
 reconstruct after commit, without exact sample/age/DSP history. Original file
 layouts remain unchanged; import stops nonpersistent PCM/SE and restores their
 category volume while preserving host group parents/mute. PCMCH, PCM events,
-general KOE/JITAN/mouth tables, native UI sound slots and full game/save coverage
+full KOE/MWND/mouth tables, native UI sound slots and full game/save coverage
 remain open. Source audit: [siglus-sfx-source-audit.json](siglus-sfx-source-audit.json).
 
 ## Final audio worker dependency (ADR 0079)
@@ -270,3 +273,30 @@ worker, with separate readiness/failure/close observations and bounded stereo
 PCM transfer. Native waits still observe logical source/DSP publication, not
 hardware playback counters. No device handle is given to a native VM, and no
 legacy engine audio runtime is introduced. See [ADR 0080](adr/0080-async-output-worker-and-bounded-pcm-transfer.md).
+
+
+## Siglus global KOE/EXKOE (2026-10-27, ADR 0081)
+
+Global voice operations now translate to shared prepared sources, Voice bus,
+siglus.koe gain group and channel 3. The JITAN numeric processing belongs to
+crysirror-audio and is also available to public Rust/JS/TS clients without this
+VM. Configure resources explicitly, for example {"koe/12":"voice.wav"}. The
+24-entry number/rate cache contains engine handles, with source bytes and
+decoders owned by the shared bank. It is not a private native sound engine.
+
+Historical no-trailing-operand KOE establishes message identity; newer trailing
+read-flag operands fail before audio admission because MWND/read-skip bookkeeping
+is missing. EXKOE named flags preserve the
+message voice while controlling playback/wait/JITAN. The selected JITAN SYSCOM
+config commands are mapped; replay switches alone do not implement backlog
+replay. Native integer-ms completion and DECIDE down-up waits retain original
+semantics within the shared frame timing model. Replacement stops the old slot
+before preparing the new source; failure remains visible at the original command.
+
+Runtime adapter snapshots use schema 4, restarting active logical cues through
+engine preparation; prior schema 3 snapshots are not migrated. Original Siglus
+save-file codecs/layouts are unchanged and restore KOE volume with playback
+stopped. Native pack/path discovery, append-directory policy, MWND/KOE_ST,
+backlog/menu replay, mouth tables/emotes and full character/system/BGM duck
+routing remain unimplemented. This is a bounded global profile, not full-game
+compatibility. Source scope and hashes: siglus-koe-source-audit.json.

@@ -99,6 +99,23 @@ impl ChannelAudio {
             self.jobs.nonblocking,
         )
     }
+    pub fn begin_transformed_resource_preparation(
+        &mut self,
+        client: u32,
+        asset: crysirror_core::service::AudioAsset,
+        transform: crysirror_core::service::AudioResourceTransform,
+        storage: Arc<dyn ClientStorage>,
+    ) -> Result<u64> {
+        self.resources.begin_transformed(
+            client,
+            asset,
+            true,
+            Some(transform),
+            storage,
+            self.jobs.pool.clone(),
+            self.jobs.nonblocking,
+        )
+    }
     /// Native callers retain their current event until preparation reports Ready.
     pub fn begin_preparation(
         &mut self,

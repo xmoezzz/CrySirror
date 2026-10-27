@@ -470,6 +470,52 @@ fn prepared_audio_promises_publish_resources_independent_of_receipts_and_voices(
 }
 
 #[test]
+fn prepared_voice_compression_options_cross_the_js_promise_boundary() {
+    let (dir, mut app) = app(r#"
+        async function onInit(){
+            let rejected=false;
+            try{await audio.prepareSourceAsync('tone.wav',{transform:{kind:'siglus_jitan',percent:99}});}catch(e){rejected=true;}
+            if(!rejected)throw Error('invalid transform accepted');
+            const source=await audio.prepareSourceAsync('tone.wav',{frame_limit:400,transform:{kind:'siglus_jitan',percent:200}});
+            if(source.info.source_frames!==400 || source.info.source_rate!==8000)throw Error('transformed metadata');
+            const voice=await audio.playSourceAsync(source.resource,{paused:true,bus:'voice'});
+            audio.releaseSource(source.resource);
+            if(audio.playbackInfo(voice).source_frames!==400)throw Error('voice used original source');
+            audio.stopVoice(voice,0);engine.log('compression-promises-ready');
+        }
+    "#);
+    let mut b = b"RIFF".to_vec();
+    b.extend(1636u32.to_le_bytes());
+    b.extend(b"WAVEfmt ");
+    b.extend(16u32.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(8000u32.to_le_bytes());
+    b.extend(16000u32.to_le_bytes());
+    b.extend(2u16.to_le_bytes());
+    b.extend(16u16.to_le_bytes());
+    b.extend(b"data");
+    b.extend(1600u32.to_le_bytes());
+    for _ in 0..800 {
+        b.extend(8192i16.to_le_bytes());
+    }
+    std::fs::write(dir.path().join("assets/a/tone.wav"), b).unwrap();
+    app.init().unwrap();
+    app.start().unwrap();
+    until(&mut app, "compression-promises-ready");
+    assert_eq!(
+        app.runtime()
+            .unwrap()
+            .host
+            .channel_audio
+            .resources
+            .resource_count(),
+        0
+    );
+}
+
+
+#[test]
 fn js_gain_groups_route_prepared_sources_and_preserve_partial_parent_settings(){
     let (dir,mut app)=app(r#"
         async function onInit(){

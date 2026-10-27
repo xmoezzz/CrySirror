@@ -24,7 +24,7 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-author | Optional Oxc TS/JS compiler + Boa offline project builder; no player dependency |
 | crysirror-siglus | Native G00 resource frontend and metadata policies; independent VM lives in crysirror-siglus-vm |
 | crysirror-acoustics | Device-free acoustic meshes/materials, default Parry and optional obvhs BVH2, volume visibility/direct propagation and SOFA/HRIR resources with worker-prepared convolution, standalone FunDSP late-reverb DSP, and worker-prepared first-order image-source paths/sparse echoes (ADR 0067/0068/0073/0074/0075) |
-| crysirror-audio | Engine voice scheduling/buses, shared canonical SceneState bridge, worker-owned buffered decoders, exact seek completion and client reverb bus sends/returns; AudioDevice boundary with optional rodio output |
+| crysirror-audio | Engine voice scheduling/buses, shared canonical SceneState bridge, worker-owned buffered decoders, exact seek completion and client reverb bus sends/returns; worker-owned final DSP and PcmOutput lifecycle, optional CPAL and compatibility rodio output |
 | crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, fixed-cell layout, synchronous font-resource measurement handles, reveal and CPU SDF data |
 | crysirror-scene | Safe CPU World/Layer/UI state, migrated input/animation/projection, transactional mutations and frame extraction |
 | crysirror-reallive | Original RealLive bytecode VM and thin semantic/syscall adapter; retained Canvas/Layer/GlyphRun/UI and engine audio/Media services, no hosted renderer |
@@ -362,8 +362,10 @@ publication age in output frames are distinct reusable observations.
 Native PCM/global SE translates opcode/value/resource/wait/save policy onto the
 same resource, channel and group APIs. Cross-category semantic queues retain
 original call order; workers never own a borrowed VM/host. Siglus runtime payload
-schema is 3; original file layouts are unchanged. PCMCH/KOE, exact legacy timing
-and full async final mixing/output remain open. Details: ADR 0078.
+schema is now 4 (ADR 0081); original file layouts are unchanged. PCMCH, full
+KOE/MWND, exact legacy timing
+and an independent audio/device clock remain open. Final mix/output workers
+are covered by ADR 0079/0080. Details: ADR 0078/0081.
 
 ## Worker final audio frames (ADR 0079)
 
@@ -388,3 +390,19 @@ without new PCM. Explicit retry isolates sessions. CPU fake backends and a real
 silent-level device probe exercise the same endpoint. Final DSP remains frame-
 dependent; CPAL internals, clock independence and portability limits are in
 [ADR 0080](adr/0080-async-output-worker-and-bounded-pcm-transfer.md).
+
+
+## Prepared voice processing (ADR 0081)
+
+Shared audio resources can bake the bounded Siglus JITAN PCM16 profile on their
+preparation worker through AudioSourcePrepareSpec.transform. Core declares the
+transform; crysirror-audio owns capability reads, decoder layout, PCM conversion,
+processing, WAVE bytes, memory charges and resource publication. Percent 100
+preserves the original encoded snapshot. Modern scripts and original native
+channels use independent decoder leases from the same bank.
+
+The Siglus global KOE/EXKOE adapter retains only native identity/config/wait/save
+policy and up to 24 engine resource handles. Native snapshot schema 4 rebuilds
+these derived resources; original save-file layouts are unchanged. This profile
+requires explicit koe/{number} aliases. MWND, mouth tables, full routing/ducking
+and native archive discovery remain open; see ADR 0081 and NATIVE_ADAPTERS.md.

@@ -413,6 +413,9 @@ impl CommandContext {
     pub fn take_pending_sel_point_result(&mut self) -> Option<i32> {
         None
     }
+    pub fn request_read_flag_no(&mut self) {
+        self.pending_read_flag_no = true;
+    }
     pub fn take_read_flag_no_request(&mut self) -> bool {
         std::mem::take(&mut self.pending_read_flag_no)
     }
@@ -486,6 +489,9 @@ pub fn dispatch_form_code(ctx: &mut CommandContext, id: u32, args: &[Value]) -> 
     }
     if constants::matches_form_id(id, ctx.ids.form_global_se, gf::SE) {
         return crate::sfx_bridge::se(ctx, args);
+    }
+    if crate::koe_bridge::dispatch(ctx, id, args)? || crate::koe_bridge::config(ctx, id, args)? {
+        return Ok(true);
     }
     if id == gf::TIMEWAIT {
         return forms::timewait::dispatch(ctx, false, args);

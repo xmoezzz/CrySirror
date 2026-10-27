@@ -49,6 +49,10 @@ pub struct SourceBufferStatus {
     pub error: Option<String>,
 }
 pub trait AudioSource: Send {
+    /// Encoded channel layout before the stereo projection, when known.
+    fn channel_count(&self) -> Option<u16> {
+        None
+    }
     fn sample_rate(&self) -> u32;
     fn frame_count(&self) -> Option<u64>;
     fn read(&mut self, out: &mut [StereoFrame]) -> Result<usize>;
@@ -181,6 +185,9 @@ struct PcmSource {
     at: usize,
 }
 impl AudioSource for PcmSource {
+    fn channel_count(&self) -> Option<u16> {
+        Some(2)
+    }
     fn sample_rate(&self) -> u32 {
         self.pcm.sample_rate()
     }
@@ -215,6 +222,9 @@ struct ClipSource {
     at: usize,
 }
 impl AudioSource for ClipSource {
+    fn channel_count(&self) -> Option<u16> {
+        Some(2)
+    }
     fn is_nonblocking(&self) -> bool {
         true
     }
@@ -410,6 +420,9 @@ impl Stream {
     }
 }
 impl AudioSource for Stream {
+    fn channel_count(&self) -> Option<u16> {
+        Some(self.channels as u16)
+    }
     fn sample_rate(&self) -> u32 {
         self.rate
     }

@@ -1364,6 +1364,7 @@ dependencies = [
  "crysirror-acoustics",
  "crysirror-core",
  "crysirror-io",
+ "crysirror-resource",
  "crysirror-tasks",
  "rodio",
  "serde",

@@ -85,7 +85,7 @@ declare class Audio {
   acousticStats(): Record<string, any>;
   /** Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. */
   acousticVoice(handle: Record<string, any>): Record<string, any>;
-  /** Snapshot a client asset and probe its decoder on bounded workers. Options: measure_frames=false (scan when the header has no count), frame_limit. At most 128 MiB encoded per resource; bounded host bytes and handles. sourcePreparation publishes an immutable resource handle, without playback. */
+  /** Snapshot a client asset and probe its decoder on bounded workers. Options are AudioSourcePrepareSpec: measure_frames=false (scan when the header has no count), frame_limit before processing, optional transform:{kind:siglus_jitan,percent:100..400}. Nonidentity compression decodes bounded PCM16 and bakes mono WAVE on workers; it preserves sample rate rather than changing playback rate. At most 128 MiB encoded/input and 4194304 transformed input frames; shared resident/scratch bytes and handles are bounded. sourcePreparation publishes an immutable resource handle, without playback. */
   beginPrepareSource(asset: string, options: Record<string, any> | null): number;
   /** Client/restore-scoped pending/ready/failed preparation; ready result has resource:{client,id} and AudioResourceInfo. Release the receipt separately from its resource. */
   sourcePreparation(ticket: number): Record<string, any>;

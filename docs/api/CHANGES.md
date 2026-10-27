@@ -4,6 +4,24 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `24e44c371ca52eb7` (2026-10-27): prepared voice compression and native KOE
+
+- Audio.beginPrepareSource / prepareSourceAsync options now expose
+  AudioSourcePrepareSpec with optional AudioTransformSpec:
+  {kind:"siglus_jitan",percent:100..400}. Frame limits apply to decoded input
+  before the worker-owned numeric transform. Percent 100 preserves the original
+  encoded resource; other rates bake bounded mono PCM16 WAVE at the same sample
+  rate. This named splice profile is separate from transport rate/pitch and has
+  native short-cue silence semantics. Existing defaults are retained.
+- Add plain core AudioResourceTransform and HostServices transformed-resource
+  preparation. The shared bank owns bytes, decoder, scratch, completion and
+  client-scoped leases; native adapters only translate semantic calls.
+- Siglus global KOE/EXKOE now uses this shared path, Voice bus, mix groups and
+  source completion. **Breaking for CrySirror runtime snapshots:** its adapter
+  schema is now 4; schema 3 is not migrated. Original Siglus save-file codecs and
+  layouts remain unchanged. Full native voice discovery/MWND/routing remain
+  incomplete; newer trailing KOE read-flag layouts fail explicitly. See ADR 0081.
+
 ## `bec05c019d833cb0` (2026-10-27): worker final audio frame completion
 
 - Host-only follow-up (ADR 0080; reflective fingerprint unchanged): PcmOutput

@@ -676,3 +676,112 @@ fn restore_invalidates_source_resources_and_canceling_preparation_does_not_publi
         0
     );
 }
+
+#[test]
+fn public_prepared_transform_is_device_and_vm_independent_and_plays_its_baked_pcm() {
+    let (dir, mut app) = app();
+    let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
+    let t = call(
+        &mut app,
+        "beginPrepareSource",
+        &[
+            v(json!("tone.wav")),
+            v(json!({"frame_limit":400,"transform":{"kind":"siglus_jitan","percent":200}})),
+        ],
+    );
+    assert_eq!(
+        call(&mut app, "sourcePreparation", &[t.clone()]).to_json()["state"],
+        "pending"
+    );
+    assert!(output(&mut app, 1).iter().flatten().all(|s| *s == 0.));
+    gate.finish();
+    let end = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        let s = call(&mut app, "sourcePreparation", &[t.clone()]).to_json();
+        if s["state"] != "pending" {
+            break s;
+        }
+        assert!(Instant::now() < end);
+        std::thread::yield_now();
+    };
+    assert_eq!(status["state"], "ready", "{status}");
+    assert_eq!(status["result"]["info"]["source_rate"], 8000);
+    assert_eq!(status["result"]["info"]["source_frames"], 400);
+    let resource = v(status["result"]["resource"].clone());
+    call(&mut app, "cancelSourcePreparation", &[t]);
+    std::fs::remove_file(dir.path().join("assets/a/tone.wav")).unwrap();
+    let t = call(
+        &mut app,
+        "beginPlaySource",
+        &[resource.clone(), v(json!({"paused":true}))],
+    );
+    call(&mut app, "releaseSource", &[resource]);
+    let result = wait(&mut app, &t);
+    assert_eq!(result["state"], "ready", "{result}");
+    let handle = v(result["result"]["handle"].clone());
+    call(&mut app, "cancelPlaybackJob", &[t]);
+    call(
+        &mut app,
+        "pauseVoice",
+        &[handle.clone(), Value::Bool(false)],
+    );
+    let pcm = output(&mut app, 50);
+    assert_eq!(pcm.len(), 2400);
+    assert!(pcm.iter().flatten().all(|s| *s == 0.));
+    assert_eq!(
+        call(&mut app, "voice", &[handle]).to_json()["source_playing"],
+        false
+    );
+}
+
+#[test]
+fn invalid_transform_options_fail_before_admission_and_valid_pending_transform_cancels() {
+    let (_dir, mut app) = app();
+    for options in [
+        json!({"transform":{"kind":"siglus_jitan","percent":99}}),
+        json!({"transform":{"kind":"unknown","percent":200}}),
+        json!({"transform":{"kind":"siglus_jitan","percent":200,"typo":true}}),
+    ] {
+        assert!(
+            invoke(
+                &mut app,
+                "beginPrepareSource",
+                &[v(json!("tone.wav")), v(options)]
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(
+        app.runtime()
+            .unwrap()
+            .host
+            .channel_audio
+            .resources
+            .resource_count(),
+        0
+    );
+    let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
+    let t = call(
+        &mut app,
+        "beginPrepareSource",
+        &[
+            v(json!("tone.wav")),
+            v(json!({"transform":{"kind":"siglus_jitan","percent":200}})),
+        ],
+    );
+    app.context().state().unwrap().client = ClientId(2);
+    assert!(invoke(&mut app, "sourcePreparation", &[t.clone()]).is_err());
+    app.context().state().unwrap().client = ClientId(1);
+    call(&mut app, "cancelSourcePreparation", &[t.clone()]);
+    gate.finish();
+    assert!(invoke(&mut app, "sourcePreparation", &[t]).is_err());
+    assert_eq!(
+        app.runtime()
+            .unwrap()
+            .host
+            .channel_audio
+            .resources
+            .resource_count(),
+        0
+    );
+}

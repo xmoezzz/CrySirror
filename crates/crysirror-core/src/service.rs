@@ -261,6 +261,20 @@ pub struct AudioAsset {
     /// Optional native declared decoded-frame boundary.
     pub frame_limit: Option<u64>,
 }
+/// Worker-prepared numeric transform, separate from source transport/pitch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AudioResourceTransform {
+    /// Pinned mono PCM16 splice profile; 100..400 percent, 100 exact identity.
+    SiglusJitan { percent: u16 },
+}
+impl AudioResourceTransform {
+    pub fn validate(self) -> Result<()> {
+        match self {
+            Self::SiglusJitan { percent } if (100..=400).contains(&percent) => Ok(()),
+            _ => Err(crate::Error::Invalid("audio transform parameters")),
+        }
+    }
+}
 /// Ephemeral client-scoped immutable audio resource. IDs are not reused during
 /// a host process; handles never enter project or native/runtime save bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -509,6 +523,15 @@ pub trait HostServices: FileSystem {
         _measure_frames: bool,
     ) -> Result<u64> {
         Err(crate::Error::Unsupported("prepared audio resources"))
+    }
+    /// Prepare a new immutable resource using a bounded CPU transform.
+    fn begin_transformed_audio_resource(
+        &mut self,
+        _client: ClientId,
+        _asset: AudioAsset,
+        _transform: AudioResourceTransform,
+    ) -> Result<u64> {
+        Err(crate::Error::Unsupported("transformed audio resources"))
     }
     fn audio_resource_preparation(
         &mut self,

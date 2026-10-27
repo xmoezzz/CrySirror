@@ -20,6 +20,7 @@ pub mod audio_api;
 mod audio_async;
 mod audio_groups_api;
 mod audio_resources_api;
+pub use audio_resources_api::{AudioSourcePrepareSpec, AudioTransformSpec};
 pub mod binaural_api;
 pub mod bitmap_api;
 pub mod builtin;

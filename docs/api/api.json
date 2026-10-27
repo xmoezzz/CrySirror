@@ -1074,7 +1074,7 @@
           "returns": "Record<string, any>"
         },
         {
-          "doc": "Snapshot a client asset and probe its decoder on bounded workers. Options: measure_frames=false (scan when the header has no count), frame_limit. At most 128 MiB encoded per resource; bounded host bytes and handles. sourcePreparation publishes an immutable resource handle, without playback.",
+          "doc": "Snapshot a client asset and probe its decoder on bounded workers. Options are AudioSourcePrepareSpec: measure_frames=false (scan when the header has no count), frame_limit before processing, optional transform:{kind:siglus_jitan,percent:100..400}. Nonidentity compression decodes bounded PCM16 and bakes mono WAVE on workers; it preserves sample rate rather than changing playback rate. At most 128 MiB encoded/input and 4194304 transformed input frames; shared resident/scratch bytes and handles are bounded. sourcePreparation publishes an immutable resource handle, without playback.",
           "name": "beginPrepareSource",
           "params": [
             {
@@ -5138,6 +5138,57 @@
       ],
       "name": "AudioResourceHandle",
       "used_by": "Audio.prepareSourceAsync / beginPlaySource / HostServices"
+    },
+    {
+      "doc": "Immutable source preparation; transform runs before independent playback.",
+      "fields": [
+        {
+          "default": false,
+          "doc": "Decode/discard to measure sources with unknown frame count.",
+          "name": "measure_frames",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Optional decoded-input frame boundary, before any transform.",
+          "name": "frame_limit",
+          "rust_type": "Option<u64>"
+        },
+        {
+          "default": null,
+          "doc": "Optional named PCM numeric profile; ordinary playback rate is separate.",
+          "name": "transform",
+          "rust_type": "Option<AudioTransformSpec>"
+        }
+      ],
+      "name": "AudioSourcePrepareSpec",
+      "used_by": "Audio.beginPrepareSource / prepareSourceAsync options"
+    },
+    {
+      "doc": "CPU-baked voice processing, usable without a VM or device. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Native-compatible PCM16 splice compression, preserving sample rate.",
+          "name": "siglus_jitan",
+          "rust_type": "percent: u16"
+        }
+      ],
+      "name": "AudioTransformSpec",
+      "used_by": "AudioSourcePrepareSpec.transform"
+    },
+    {
+      "doc": "Worker-prepared numeric transform, separate from source transport/pitch.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Pinned mono PCM16 splice profile; 100..400 percent, 100 exact identity.",
+          "name": "SiglusJitan",
+          "rust_type": "percent: u16"
+        }
+      ],
+      "name": "AudioResourceTransform",
+      "used_by": "Rust HostServices transformed resource preparation"
     },
     {
       "doc": "Encoded snapshot metadata, independent of playback cursors and devices.",
@@ -12781,7 +12832,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "bec05c019d833cb0",
+  "fingerprint": "24e44c371ca52eb7",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

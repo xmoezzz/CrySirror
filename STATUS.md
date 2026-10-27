@@ -2995,3 +2995,98 @@ Remaining boundaries:
   dependency graph first. The local CoreAudio result establishes neither other
   hardware/platform behavior nor a complete implementation of ADR 0050. Native
   opcode/save/timing/resource discovery gaps and broader acoustics remain active.
+
+
+## 2026-10-27 — prepared voice compression and original global KOE (ADR 0081)
+
+Implementation:
+- Added engine-owned, safe PCM16 Siglus JITAN numeric processing. It preserves
+  rate, performs native stereo sum/clamp and splice/search/smoothing, handles
+  sub-100-ms cues as same-length silence and retains the native final fade. This
+  is separate from playback rate/pitch. No original converter/player/mixer code
+  is linked into the native adapter. Reference pin and exact reviewed blobs are
+  recorded in docs/siglus-koe-source-audit.json.
+- Added plain core AudioResourceTransform and transformed-resource preparation,
+  plus public AudioSourcePrepareSpec/AudioTransformSpec options for the existing
+  beginPrepareSource / JS prepareSourceAsync API. Shared audio owns capability
+  reads, explicit decoder layout, bounded finite PCM conversion, processing,
+  WAVE serialization, memory charges, worker products and owner publication.
+  Voices retain independent shared decoder leases. Percent 100 preserves the
+  encoded source; frame_limit applies to decoded input before processing.
+- Nonidentity processing admits at most 4194304 input frames, mono/stereo and
+  8–192 kHz, reserving 128 MiB scratch inside the shared 512 MiB resource budget.
+  Temporary output overlap is charged; final storage shrinks to actual WAVE
+  bytes plus 8 KiB. Existing receipt/handle scopes, cancellation and restore
+  invalidation remain. Processing runs in the bounded asset/preparation pool,
+  not a separate CPU DAG stage or a realtime streaming time-stretch effect.
+- Replaced the volume-only global KOE stub with native identity/config/wait/save
+  translation onto shared Voice bus, siglus.koe mix group and channel 3. KOE and
+  EXKOE retain distinct message/playback identity; named wait/key/JITAN flags and
+  selected JITAN config SET/DEFAULT/GET operations are mapped. Explicit canonical
+  koe/{number} aliases supply resources. The 24-key number/rate cache contains
+  engine handles; it owns no private generic audio buffers or decoding engine.
+- Original replacement order stops the old voice before resource preparation,
+  including failure/negative numbers. Readiness gates the original instruction
+  commit. Failure is visible and repaired resources can retry. Native integer-ms
+  completion uses shared output publication age; DECIDE releases a key wait
+  without stopping the voice. Source completion excludes derived effect tails.
+- Runtime adapter snapshots advance from schema 3 to 4 without old-schema
+  migration. Active logical cues reconstruct at cue start, without preserving
+  decoder/DSP history. Original Siglus file layouts/codecs are unchanged: local
+  load stops speech and restores its volume.
+- Review found that newer trailing KOE read-flag operands need unmapped MWND/
+  read-skip bookkeeping. They now fail before audio admission and retain the
+  unsupported diagnostic across subsequent steps; no fallback marks text read.
+  The accepted global KOE profile uses the historical no-trailing-operand ABI.
+
+Compilation:
+- Final release workspace/all-target check passed with desktop krkr, arc-formats,
+  acoustics-obvhs and optional rodio-output compatibility; minimal no-default
+  desktop reallive+avg32 check also passed after the native read-flag guard.
+- Generated API reference/JSON/TypeScript and logged fingerprint change from
+  bec05c019d833cb0 to **24e44c371ca52eb7**. Final API reference tests pass.
+  Existing CBG/RealLive/minimal CLI warnings remain. No CI/workflow, remote
+  build, font/game data or proprietary SDK was added.
+
+Behavior validation:
+- Final release scopes: shared audio **106 passed**; engine audio/frame/API
+  **28 passed**; JS async services **11 passed**; runtime library **50 passed**,
+  authored original Siglus audio **28 passed** and original VM **12 passed**.
+  **235 distinct Rust passed**, three ignored excluded. Earlier/focused reruns
+  are not counted again. Python 3.11 tooling: **189 passed**.
+- A temporary standalone harness executed the complete unmodified pinned JITAN
+  converter and compared full PCM samples for **784 authored vectors**: four
+  rates, two durations, mono/stereo, seven patterns and seven percentages. All
+  matched after fixing an exclusive search-window boundary in the new profile.
+  Permanent length/FNV-1a regression fixtures retain the independent results;
+  the reference implementation/harness is not shipped in the engine.
+- Worker-gated tests verify no early resource/playback publication, canceled work,
+  strict transform options, client ownership, lease lifetime/file removal, exact
+  transformed PCM hash, identity samples/encoded length, input-range semantics and measured output
+  frames. Public Audio and real JS Promise calls exercise the same capability
+  without a native VM or output device.
+- Native Scene.pck tests additionally cover Voice bus PCM mute/unmute, JITAN
+  config/cache replay after file deletion, shortened-source integer-ms wait,
+  EXKOE named flags and preserved message identity, completed DECIDE versus
+  unrelated direction input, replacement failure/repair, both save paths and
+  repeated refusal of the newer unmapped read-flag ABI before any sound/resource.
+  Early test assumptions about Space and anyhow's outer error text were fixed.
+- The independent release voice_compression example exported authored 16-bit
+  mono 48 kHz WAVE: **48000 input frames -> 24839 output frames** at 200 percent.
+  Python's WAVE reader confirmed both headers/counts. No listening-quality,
+  device, GPU, cross-platform or whole-game result is implied.
+- Evidence: target/verification/koe-{audio-final,engine-final,js-final,native-final,
+  workspace-check,minimal-check,api-final,demo,python-final}.log, koe-summary.json,
+  koe-final-run.json and koe-reference-comparison-final.log. The initial API
+  generation log retains the expected missing-fingerprint entry failure.
+
+Remaining boundaries:
+- Native speech pack/path/append-directory discovery, full MWND/KOE_ST and newer
+  KOE read flags, backlog/menu replay, mouth-volume tables/emotes and complete
+  character/system/BGM duck routing remain open. Storing a replay switch does
+  not implement its consumer. At 100 percent the shared cache retains encoded
+  bytes and redecodes per play; original decoded-cache performance is not claimed.
+- Codec parity beyond the tested PCM profile, general high-quality streaming
+  time stretching, an independent device render clock and the broader async/
+  acoustics/3D backlog remain open. This is reusable engine processing plus a
+  bounded native speech profile, not full Siglus/game or engine completion.

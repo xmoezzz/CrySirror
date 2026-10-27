@@ -210,6 +210,9 @@ struct NwaSource {
     frames: u64,
 }
 impl AudioSource for NwaSource {
+    fn channel_count(&self) -> Option<u16> {
+        Some(self.channels)
+    }
     fn sample_rate(&self) -> u32 {
         self.rate
     }

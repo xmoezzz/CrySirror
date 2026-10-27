@@ -45,4 +45,5 @@ mod native_save_tests;
 mod bgm_bridge;
 
 mod audio_queue;
+mod koe_bridge;
 mod sfx_bridge;

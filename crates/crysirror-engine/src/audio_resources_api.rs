@@ -8,9 +8,37 @@ use crysirror_core::{
     path::{Mount, VfsPath},
     service::{AudioAsset, AudioPreparePhase, AudioResourceHandle, AudioResourceInfo},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+/// Immutable source preparation; transform runs before independent playback.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AudioSourcePrepareSpec {
+    /// Decode/discard to measure sources with unknown frame count.
+    pub measure_frames: bool,
+    /// Optional decoded-input frame boundary, before any transform.
+    pub frame_limit: Option<u64>,
+    /// Optional named PCM numeric profile; ordinary playback rate is separate.
+    pub transform: Option<AudioTransformSpec>,
+}
+/// CPU-baked voice processing, usable without a VM or device.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AudioTransformSpec {
+    /// Native-compatible PCM16 splice compression, preserving sample rate.
+    SiglusJitan {
+        /// Integer compression percent, 100..400; 100 is identity.
+        percent: u16,
+    },
+}
+impl From<AudioTransformSpec> for crysirror_core::service::AudioResourceTransform {
+    fn from(t: AudioTransformSpec) -> Self {
+        match t {
+            AudioTransformSpec::SiglusJitan { percent } => Self::SiglusJitan { percent },
+        }
+    }
+}
 pub(crate) fn handle(owner: u32, value: &Value) -> Result<AudioResourceHandle> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -46,13 +74,7 @@ pub(crate) fn call(cx: &mut EngineContext, method: &str, args: &[Value]) -> Resu
     let owner = state.client.0;
     let result = match method {
         "beginPrepareSource" => {
-            #[derive(Default, Deserialize)]
-            #[serde(default, deny_unknown_fields)]
-            struct Options {
-                measure_frames: bool,
-                frame_limit: Option<u64>,
-            }
-            let options: Options = args
+            let options: AudioSourcePrepareSpec = args
                 .get(1)
                 .filter(|v| !matches!(v, Value::Null))
                 .map(|v| serde_json::from_value(v.to_json()))
@@ -68,17 +90,23 @@ pub(crate) fn call(cx: &mut EngineContext, method: &str, args: &[Value]) -> Resu
                 .storage(state.client)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let pool = state.runtime.assets.io_tasks();
-            let ticket = state.runtime.host.channel_audio.resources.begin(
-                owner,
-                AudioAsset {
-                    path,
-                    frame_limit: options.frame_limit,
-                },
-                options.measure_frames,
-                storage,
-                Some(pool),
-                true,
-            )?;
+            let ticket = state
+                .runtime
+                .host
+                .channel_audio
+                .resources
+                .begin_transformed(
+                    owner,
+                    AudioAsset {
+                        path,
+                        frame_limit: options.frame_limit,
+                    },
+                    options.measure_frames,
+                    options.transform.map(Into::into),
+                    storage,
+                    Some(pool),
+                    true,
+                )?;
             json!(ticket)
         }
         "sourcePreparation" => {

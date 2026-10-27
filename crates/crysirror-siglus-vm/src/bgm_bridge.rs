@@ -35,6 +35,10 @@ pub(crate) struct Binding {
 }
 #[derive(Clone)]
 pub(crate) enum Operation {
+    Speech {
+        number: i64,
+        percent: u16,
+    },
     Play(Play),
     Start {
         channel: u32,

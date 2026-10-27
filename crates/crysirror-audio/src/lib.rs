@@ -18,6 +18,7 @@ pub mod native;
 pub mod pcm;
 pub mod reverb;
 pub mod resources;
+pub mod voice_compression;
 pub mod render_job;
 pub mod scene;
 
