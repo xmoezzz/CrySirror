@@ -1,0 +1,215 @@
+{
+  "scope": "Bounded KAG3 semantic facade and shared prerequisites (ADR 0088)",
+  "integration": "Original existing TJS2/KAG crates unchanged; no new source copied from upstream general engine/render/audio/font/media implementations. Stock KAG3 scripts are external test inputs only.",
+  "limitations": "No complete game compatibility, TJS runtime snapshot, full native save stacks, XP3 auto-mount, nonuniform alpha query, native focus/modal/video or nonidentity gamma claim.",
+  "repositories": [
+    {
+      "repository": "https://github.com/liulifox233/Kirakira.git",
+      "commit": "c451918023477620ff9055a2eb8a6714b947d9c1",
+      "files": [
+        {
+          "path": "crates/krkr-engine/src/native/kag.rs",
+          "bytes": 54614,
+          "sha256": "d3997ce97624ddb5d007d2041258bd1ca104ea97d043ceef725f3dd9103f92cd",
+          "reference_matches_pin": true,
+          "review": "Complete original 1557-line native parser facade, including callbacks, tag conversion, properties and save/restore mapping. Reference only; not imported.",
+          "new_code_copied": false
+        },
+        {
+          "path": "crates/krkr-kag/src/parser.rs",
+          "bytes": 118674,
+          "sha256": "1d1693b8268ad772b2f433d87b2ad3c9a63baff741343dd23832d3360341c5bd",
+          "reference_matches_pin": true,
+          "review": "Complete KagHost trait and selected complete parser load/tag/control/macro/callback/save conversion functions. The existing parser remains unchanged.",
+          "new_code_copied": false
+        },
+        {
+          "path": "crates/krkr-tjs2/src/vm/mod.rs",
+          "bytes": 76257,
+          "sha256": "e06780cda65058d4af0d138bdf61b958a930861d03ec9844b8c44ece71959956",
+          "reference_matches_pin": true,
+          "review": "Complete selected execute/resume and nested execution frame merge paths, to preserve the original VM continuation instead of emulating a second stack.",
+          "new_code_copied": false
+        },
+        {
+          "path": "crates/krkr-engine/src/native/classes.rs",
+          "bytes": 574005,
+          "sha256": "fcb5c4b287ac081e8c1d5b5e42b73d4f8d1c6aed372f03921d753951056511e9",
+          "reference_matches_pin": true,
+          "review": "Selected complete WaveSoundBuffer property/open/play/stop/fade functions; selected native Layer getter and Window/Timer declarations. No general engine modules imported.",
+          "new_code_copied": false
+        },
+        {
+          "path": "crates/krkr-engine/src/globals/constants.rs",
+          "bytes": 15300,
+          "sha256": "d1c5f954f24f8cef7dc52fa87d5d98aff9682cd89f57a6976e2a7a7c18d6907f",
+          "reference_matches_pin": true,
+          "review": "Native shift state constants and existing native identifier values; source reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "crates/krkr-tjs2/src/vm/dispatch.rs",
+          "bytes": 243283,
+          "sha256": "3b1927cf26b38aabddadbb5ed115ac6628bbdbecb810f734e6f2e3d2332610fd",
+          "reference_matches_pin": true,
+          "review": "Complete invalidate_object path: script finalize is dispatched before native host invalidation, even when a script overrides the native finalize. Shared audio cleanup is attached to the native instance boundary as well.",
+          "new_code_copied": false
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/krkrz/kag3.git",
+      "commit": "1f3ab309106d210e3169bbbe0fb4e066ae463b42",
+      "files": [
+        {
+          "path": "data/startup.tjs",
+          "bytes": 494,
+          "sha256": "7ac20eded2cccd26a7a91b2893ea000934e27ca015ff29a2c24402d3b2d7f0af",
+          "reference_matches_pin": true,
+          "review": "Complete stock startup; retained unchanged as external runtime input.",
+          "new_code_copied": false
+        },
+        {
+          "path": "data/system/Initialize.tjs",
+          "bytes": 7903,
+          "sha256": "e820e114ec7576c6ca91656851f8b7b3cc4a33fd13e0c96c2085f0a079527d14",
+          "reference_matches_pin": true,
+          "review": "Complete 280-line original initialization sequence.",
+          "new_code_copied": false
+        },
+        {
+          "path": "data/system/Conductor.tjs",
+          "bytes": 12141,
+          "sha256": "74ccdefb7a1112b58049c536a5cecb11657f40c23f584a1083f573e235bbace5",
+          "reference_matches_pin": true,
+          "review": "Complete 531-line native conductor, deferred trigger and timer/wait/stop flow.",
+          "new_code_copied": false
+        },
+        {
+          "path": "data/system/MainWindow.tjs",
+          "bytes": 158849,
+          "sha256": "e9de9048ea58a01a2762a045b4006377957d46a35015d20da2ee36e50a78eec3",
+          "reference_matches_pin": true,
+          "review": "Selected complete constructor, scenario/tag, input, save variable and wait glyph handlers.",
+          "new_code_copied": false
+        },
+        {
+          "path": "data/system/MessageLayer.tjs",
+          "bytes": 79655,
+          "sha256": "5825ffefc5ea24881fd84e8a4ec48f3dfcccc7b2d09a933333dee3fae692cec1",
+          "reference_matches_pin": true,
+          "review": "Selected complete initialization, draw and click/hit-test handlers.",
+          "new_code_copied": false
+        },
+        {
+          "path": "data/system/AnimationLayer.tjs",
+          "bytes": 35654,
+          "sha256": "b26b76177cf662c4453fe0491d943c024def93bd8bbce21fa582fbac1bca81d0",
+          "reference_matches_pin": true,
+          "review": "Selected complete image/color correction, atlas load/copy and animation task handlers.",
+          "new_code_copied": false
+        },
+        {
+          "path": "data/system/GraphicLayer.tjs",
+          "bytes": 16064,
+          "sha256": "72fae626abaef894903b43c54f67bb5e8e4ae37fd66da1eca1169fc3562f80bc",
+          "reference_matches_pin": true,
+          "review": "Selected complete primary click/province routing and native mouse handlers.",
+          "new_code_copied": false
+        },
+        {
+          "path": "data/system/LineBreak.asd",
+          "bytes": 574,
+          "sha256": "0143869a071d71ac59ba03e8a0496f1f3f736966f915272ed4a981ea83c3580d",
+          "reference_matches_pin": true,
+          "review": "Complete stock 24-pixel cell animation commands; external generated test sheet matches its 384x24 extent.",
+          "new_code_copied": false
+        },
+        {
+          "path": "data/system/PageBreak.asd",
+          "bytes": 574,
+          "sha256": "0143869a071d71ac59ba03e8a0496f1f3f736966f915272ed4a981ea83c3580d",
+          "reference_matches_pin": true,
+          "review": "Complete stock page wait animation commands; external generated test sheet matches its 384x24 extent.",
+          "new_code_copied": false
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/krkrz/KAGParser.git",
+      "commit": "c2269b26b390bd09aa1f2b39d7d779cb79c26f2e",
+      "files": [
+        {
+          "path": "KAGParser.h",
+          "bytes": 9621,
+          "sha256": "24efd1a415c92575290516973ae0ec43d92addcec817c9c06e7412fa73da6c30",
+          "reference_matches_pin": true,
+          "review": "Complete 342-line parser declaration/state layout.",
+          "new_code_copied": false
+        },
+        {
+          "path": "Main.cpp",
+          "bytes": 4055,
+          "sha256": "80fccf8ceaec30ac765107dcd9026b0df30722bd88b94189d6e96b31fdb533d1",
+          "reference_matches_pin": true,
+          "review": "Selected complete native store/restore functions and method/property registration, checked against original reload/GoToLabel and field meanings.",
+          "new_code_copied": false
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/krkrz/krkrz.git",
+      "commit": "fd5c4baa6a2ef5978db1bd043634351f48667daf",
+      "files": [
+        {
+          "path": "visual/LayerIntf.cpp",
+          "bytes": 304542,
+          "sha256": "9cf4cb58f0d63c53ba2c7ec7b0f09ca44a51bb43a92f09fb4aad6b1f90441556",
+          "reference_matches_pin": true,
+          "review": "Complete _HitTestNoVisibleCheck, HitTestNoVisibleCheck and native onHitTest entry: only a positive primitive hit invokes the callback; super.onHitTest writes native work state, return values are ignored. Also reviewed complete GetMostFrontChildAt traversal/disabled-hit blocking and native adjustGamma entry.",
+          "new_code_copied": false
+        },
+        {
+          "path": "visual/WindowIntf.cpp",
+          "bytes": 63702,
+          "sha256": "14ae7ad6f7548646170fd2b165badff775b6ed64af56e2bb7e696ed1f33c87d4",
+          "reference_matches_pin": true,
+          "review": "Complete native hideMouseCursor entry, delegates to the window instance.",
+          "new_code_copied": false
+        },
+        {
+          "path": "visual/win32/WindowImpl.cpp",
+          "bytes": 75888,
+          "sha256": "ed8015afe98e7004356105e95544815b57b7f75730f4c653eea15a7f064a3221",
+          "reference_matches_pin": true,
+          "review": "Complete native HideMouseCursor delegation.",
+          "new_code_copied": false
+        },
+        {
+          "path": "environ/win32/WindowFormUnit.cpp",
+          "bytes": 60475,
+          "sha256": "ef96ce7117281a8ce524bd6b9a2a9a7e0eba9ebb0a209c61dd5d0f112b6ec550",
+          "reference_matches_pin": true,
+          "review": "Complete HideMouseCursor, SetMouseCursorState, RestoreMouseCursor and SetMouseCursorVisibleState: temporary hiding ends when the observed mouse position moves.",
+          "new_code_copied": false
+        },
+        {
+          "path": "visual/LayerIntf.h",
+          "bytes": 38012,
+          "sha256": "f27f0a252475b7f94e00ab3f6175f01c4f04ccce67ac4673e3ced0d8ba25d52e",
+          "reference_matches_pin": true,
+          "review": "Complete inline GetNodeVisible/GetNodeEnabled semantics and parent visibility/enable declarations; modal entry remains unsupported.",
+          "new_code_copied": false
+        },
+        {
+          "path": "visual/LayerBitmapIntf.cpp",
+          "bytes": 120594,
+          "sha256": "4c384e485bd04d89f5af318e1d721ffa87ae991ae6c9da07cde2607a68bbda7b",
+          "reference_matches_pin": true,
+          "review": "Intact gamma data and complete AdjustGamma function: exact identity returns without pixel mutation. Other gamma algorithms are not implemented/copied.",
+          "new_code_copied": false
+        }
+      ]
+    }
+  ]
+}

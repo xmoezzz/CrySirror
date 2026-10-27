@@ -223,6 +223,7 @@ fn info() -> &'static ClassInfo {
             m("beginMeasure",vec![("font",T::String),("size",T::Number),("text",T::String)],T::Int,"Measure an arbitrarily sized bounded single line on a worker; status returns metrics after completion."),
             m("status",vec![("ticket",T::Int)],T::Map,"Poll and publish completed text work without joining. Ready drawing includes surface metadata; errors and obsolete generations fail visibly."),
             m("cancel",vec![("ticket",T::Int)],T::Void,"Release a ticket and cancel pending preparation. Already published blocks remain owned by Text until remove."),
+            m("positionSimple",vec![("font",T::String),("size",T::Number),("text",T::String)],T::List(Box::new(T::Map)),"Unwrapped simple-horizontal glyph placements {character,baseline:[x,y]} for retained GlyphRun paint. Integer size 1..512; no surface or native VM. Live calls are bounded to 4096 UTF-8 bytes; complex shaping uses the rich text API."),
             m("measureSimple",vec![("font",T::String),("size",T::Number),("text",T::String)],T::Map,"Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface."),
             m("draw",vec![("name",T::String),("markup",T::String),("options",T::Map)],T::String,"Offline rich-text preparation; live hosts use beginDraw/drawAsync. Returns a shared surface path for a layer."),
             m("state",vec![("name",T::String)],T::Map,"Read content/options/reveal state for explicit persistence."),
@@ -251,7 +252,7 @@ impl Class for TextClass {
         if let Some(value) = crate::text_async::call(cx.state()?, method, args)? {
             return Ok(value);
         }
-        if method == "measureSimple" {
+        if matches!(method,"measureSimple"|"positionSimple") {
             let font = args.first().context("font alias")?.as_str()?;
             let size = args.get(1).context("font size")?.as_f32()?;
             let text = args.get(2).context("text")?.as_str()?;
@@ -259,6 +260,11 @@ impl Class for TextClass {
                 !cx.state()?.runtime.assets.is_nonblocking() || text.len() <= 4096,
                 "large text measurement needs beginMeasure in a live host"
             );
+            if method=="positionSimple" {
+                ensure!(size.is_finite() && size.fract()==0. && (1.0..=512.0).contains(&size),"integer font size 1..512");
+                let placements=cx.state()?.runtime.assets.text.position_simple(font,size as u16,text)?;
+                return Ok(Value::from_json(serde_json::json!(placements.into_iter().map(|g|serde_json::json!({"character":g.character.to_string(),"baseline":g.baseline})).collect::<Vec<_>>())));
+            }
             let metrics = cx
                 .state()?
                 .runtime

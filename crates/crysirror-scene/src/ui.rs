@@ -134,6 +134,13 @@ pub struct UiEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub menu_bar: Option<u32>,
 }
+/// Requested desktop decorations and resizing, owned by the submitting client.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowPolicy {
+    pub decorated: bool,
+    pub resizable: bool,
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiSystem {
@@ -143,6 +150,10 @@ pub struct UiSystem {
     pub cursor: Option<(u32, bool)>,
     #[serde(default)]
     pub title: Option<(u32, String)>,
+    #[serde(default)]
+    pub window_policy: Option<(u32, WindowPolicy)>,
+    #[serde(default)]
+    pub fullscreen: Option<(u32,bool)>,
     clients: BTreeMap<u32, BTreeMap<u32, Widget>>,
     pub focus: Option<WidgetId>,
     pub events: Vec<UiEvent>,
@@ -205,6 +216,8 @@ pub enum UiCommand {
     SetTitle {
         text: String,
     },
+    SetWindowPolicy { decorated: bool, resizable: bool },
+    SetFullscreen { enabled: bool },
     Put {
         widget: WidgetSpec,
     },
@@ -279,6 +292,8 @@ impl UiSystem {
                 UiCommand::SetCursorVisible { visible } => {
                     staged.cursor = Some((client.0, *visible))
                 }
+                UiCommand::SetFullscreen{enabled}=>{staged.fullscreen=Some((client.0,*enabled));}
+                UiCommand::SetWindowPolicy{decorated,resizable} => {staged.window_policy=Some((client.0,WindowPolicy{decorated:*decorated,resizable:*resizable}));}
                 UiCommand::SetTitle { text } => {
                     ensure!(
                         text.len() <= 1024 && !text.chars().any(char::is_control),
@@ -375,6 +390,8 @@ impl UiSystem {
             .copied()
             .chain(self.cursor.map(|v| v.0))
             .chain(self.title.as_ref().map(|v| v.0))
+            .chain(self.window_policy.as_ref().map(|v| v.0))
+            .chain(self.fullscreen.as_ref().map(|v|v.0))
             .chain(self.menus.client_ids())
             .chain(self.focus.map(|v| v.owner))
             .chain(self.events.iter().map(|v| v.widget.owner))

@@ -65,6 +65,7 @@ fn make(rt: &mut Rt, h: ObjectHandle, window: usize, caption: String) -> Result<
             group: 0,
         },
     );
+    rt.set_object_member(h,"owner",Variant::Object(ObjectHandle(window)));
     let children = rt.alloc_array_object(vec![]);
     rt.set_object_member(h, "__crysirror_menu_children", Variant::Object(children));
     rt.set_object_member(
@@ -462,14 +463,6 @@ pub fn install(rt: &mut Rt) {
                         rt.array_push(array, Variant::self_bound(ObjectHandle(child)));
                     }
                     Ok(Variant::Object(array))
-                },
-                read_only,
-            ),
-            (
-                "owner",
-                |rt, this| {
-                    let h = this_of(rt, this, "MenuItem.owner")?;
-                    Ok(Variant::Object(ObjectHandle(state(rt, h)?.window)))
                 },
                 read_only,
             ),

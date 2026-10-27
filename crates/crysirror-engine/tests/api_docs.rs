@@ -244,6 +244,8 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("SimpleTextPlacement","Text.positionSimple / TextMeasurement::position_simple",None),
+        d("WindowPolicy","Ui.setWindowPolicy / UiSystem.window_policy",None),
         d("InputSample","Input.events samples; journal JSON u64 fields are decimal strings",None),
         d("InputReceipt","Input.events receipt / ackEvents; JSON epoch/sequence are decimal strings",None),
         d("InputBufferSnapshot","Input.captureEvents / restoreEvents; schema 1, JSON u64 fields are decimal strings",None),

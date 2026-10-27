@@ -2093,16 +2093,17 @@ mod siglus_pack_tests {
 struct SharedImageMetadata {
     storage: Arc<dyn crysirror_core::service::ClientStorage>,
     decoders: crysirror_image::DecoderRegistry,
-    sizes: std::sync::Mutex<BTreeMap<String, [u32; 2]>>,
+    sizes: std::sync::Mutex<BTreeMap<String, ([u32; 2],bool)>>,
 }
 impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
+    fn opaque(&self,asset:&str)->crysirror_core::Result<bool>{self.size(asset)?;self.sizes.lock().map_err(|_|Error::Io("image metadata lock".into()))?.get(asset).map(|v|v.1).ok_or(Error::NotFound)}
     fn size(&self, asset: &str) -> crysirror_core::Result<[u32; 2]> {
         let mut sizes = self
             .sizes
             .lock()
             .map_err(|_| Error::Io("image metadata lock".into()))?;
         if let Some(size) = sizes.get(asset) {
-            return Ok(*size);
+            return Ok(size.0);
         }
         let path = VfsPath::new(crysirror_core::path::Mount::Asset, asset)?;
         let bytes = self.storage.read(&path)?;
@@ -2117,7 +2118,8 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
         if sizes.len() >= 4096 {
             sizes.clear();
         }
-        sizes.insert(asset.to_owned(), [image.width, image.height]);
+        let opaque=image.rgba.chunks_exact(4).all(|p|p[3]==255);
+        sizes.insert(asset.to_owned(), ([image.width, image.height],opaque));
         Ok([image.width, image.height])
     }
 }

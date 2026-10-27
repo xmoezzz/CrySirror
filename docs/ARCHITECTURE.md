@@ -28,7 +28,7 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, fixed-cell layout, synchronous font-resource measurement handles, reveal and CPU SDF data |
 | crysirror-scene | Safe CPU World/Layer/UI state, migrated input/animation/projection, transactional mutations and frame extraction |
 | crysirror-reallive | Original RealLive bytecode VM and thin semantic/syscall adapter; retained Canvas/Layer/GlyphRun/UI and engine audio/Media services, no hosted renderer |
-| crysirror-krkr | Optional AGPL KiriKiri adapter: vendored Kirakira TJS2 VM (crates/krkr-upstream) with native classes translated onto engine Layer/Canvas, clock and storage (ADR 0053); not in default builds |
+| crysirror-krkr | Optional AGPL KiriKiri adapter: vendored Kirakira TJS2 VM (crates/krkr-upstream) and KAG parser with native KAG3 classes translated onto shared Layer/Canvas/Text/UI/audio/clock/storage (ADR 0053/0088); not in default builds |
 | crysirror-avg32 | Original AVG32 Scenario library at a pinned siglus_rs Git revision, portable-vm only; semantic events call engine Canvas/GlyphRun/UI/audio, without the old System/renderer (ADR 0062) |
 | crysirror-siglus-vm | Independent original SceneVm subset registered as `siglus`; native operations call shared engine services, including the explicit plain TEXT/NAME profile (ADR 0061) |
 | crysirror-engine | Unity-style public API: reflective classes/objects, App lifecycle, behaviours, plugins, ScriptHost contract (ADR 0004/0005) |
@@ -485,3 +485,22 @@ clients atomically. Siglus captures before audio readiness checks and preserves
 its script/event continuation, consuming one ordered input at a fresh owner pass.
 Runtime payload 7 saves logical intents; original files discard pre-load backlog.
 See ADR 0087 for exact JSON u64 transport and remaining raw/callback boundaries.
+
+## KAG3 prerequisites and native owner phases (ADR 0088)
+
+Core DeferredDispatch and RegionMap own notification ordering/turn fences and
+nonvisual interaction regions independently of VMs. Shared font resources expose
+simple scalar placements to public Text and native GlyphRun drawing. Requested
+window policy/fullscreen are logical client state consumed by the winit owner;
+they contain no OS/GPU handles. Shared VFS workers commit capability-scoped atomic
+writes and publish retained poll completion. Native saveStruct keeps the original
+serializer rather than creating another persistence format.
+
+The optional KAG3 facade translates the unchanged original parser and TJS native
+classes onto these shared services plus existing retained canvases, menus and
+prepared audio. Its exclusive/input/normal/continuous/idle owner phase resumes
+after dependency completion without replaying input or callback dispatch. Nested
+Rust callbacks that cannot retain a TJS continuation fail on async admission.
+Source reads/metadata still include synchronous paths; full engine async remains
+an ADR 0050 requirement. See ADR 0088 for native save, hit testing, media/effect
+and plugin limits. There is no second general-purpose engine in this adapter.

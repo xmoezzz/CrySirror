@@ -490,11 +490,33 @@ pub enum EngineQuery {
     MenuEvents,
 }
 
+/// Retained completion of an accepted worker-backed atomic write.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StorageWriteState {
+    Pending,
+    Ready,
+    Failed(String),
+}
+/// Owner-polled acknowledgement of an atomic capability write. Dropping it
+/// requests cancellation; a commit already in progress cannot be revoked.
+pub trait StorageWrite: Send {
+    fn poll(&mut self) -> Result<StorageWriteState>;
+}
+
 /// A thread-safe capability handle to one client's namespaces, for engines
 /// that read synchronously from their own threads or stream large packs
 /// (ADR 0008). It carries no authority beyond that client's asset (read-only,
 /// including provider mounts), save and cache roots.
 pub trait ClientStorage: Send + Sync {
+    /// Reserve worker capacity before moving immutable bytes. Ready means the
+    /// atomic commit completed; unsupported providers reject before admission.
+    fn begin_write_atomic(
+        &self,
+        _path: &VfsPath,
+        _data: Arc<[u8]>,
+    ) -> Result<alloc::boxed::Box<dyn StorageWrite>> {
+        Err(crate::Error::Unsupported("worker atomic storage write"))
+    }
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>>;
     /// Open only the asset namespace. Default providers use bounded memory;
     /// filesystem hosts override this to stream without reading the full pack.
@@ -528,6 +550,10 @@ pub trait ClientStorage: Send + Sync {
 /// it between steps instead of borrowing the host or decoding privately.
 pub trait ImageMetadata: Send + Sync {
     fn size(&self, asset: &str) -> Result<[u32; 2]>;
+    /// True only when every decoded texel has alpha 255.
+    fn opaque(&self, _asset: &str) -> Result<bool> {
+        Err(crate::Error::Unsupported("image alpha metadata"))
+    }
 }
 
 /// Logical extents of the engine's simple horizontal text layout, before
@@ -540,11 +566,27 @@ pub struct TextExtent {
     pub descent: f32,
 }
 
+/// One Unicode scalar at an unwrapped floating-point baseline. Synthetic bold
+/// does not change this simple layout's advance; shaping has a separate API.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SimpleTextPlacement {
+    pub character: char,
+    pub baseline: [f32; 2],
+}
+
 /// Immutable CPU font-resource snapshot. Native script callbacks can measure
 /// synchronously on any thread without borrowing the owner host or a renderer.
 /// This is the simple-horizontal-v1 layout, not a native layout substitution.
 pub trait TextMeasurement: Send + Sync {
     fn measure_simple(&self, font: &str, size: f32, text: &str) -> Result<TextExtent>;
+    fn position_simple(
+        &self,
+        _font: &str,
+        _size: u16,
+        _text: &str,
+    ) -> Result<Vec<SimpleTextPlacement>> {
+        Err(crate::Error::Unsupported("simple text placement"))
+    }
 }
 
 pub trait HostServices: FileSystem {

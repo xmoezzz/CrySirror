@@ -57,6 +57,13 @@ impl TextSystem {
             descent: scaled.descent(),
         })
     }
+    /// Reuse the exact unwrapped simple painter placements for retained runs.
+    pub fn position_simple(&self,font:&str,size:u16,text:&str)->Result<Vec<crysirror_core::service::SimpleTextPlacement>> {
+        self.measure_simple(font,size as f32,text)?;
+        let run=TextRun{text:text.into(),font:font.into(),size_px:size,bounds:crysirror_core::state::Rect{x:0,y:0,width:1,height:size as u32*2},color:crysirror_core::state::Color([255;4]),layout_profile:UNWRAPPED_TEXT_LAYOUT.into()};
+        let glyphs=self.positioned(&run)?;
+        Ok(text.chars().filter(|c|*c!='\t').zip(glyphs).map(|(character,g)|crysirror_core::service::SimpleTextPlacement{character,baseline:[g.position.x,g.position.y]}).collect())
+    }
     /// Metrics from the same engine font resource used by retained glyph runs.
     pub fn metrics(
         &self,
@@ -277,6 +284,7 @@ impl TextSystem {
     }
 }
 impl crysirror_core::service::TextMeasurement for TextSystem {
+    fn position_simple(&self,font:&str,size:u16,text:&str)->crysirror_core::Result<Vec<crysirror_core::service::SimpleTextPlacement>>{TextSystem::position_simple(self,font,size,text).map_err(|e|crysirror_core::Error::Io(e.to_string()))}
     fn measure_simple(&self, font: &str, size: f32, text: &str) -> crysirror_core::Result<crysirror_core::service::TextExtent> {
         TextSystem::measure_simple(self, font, size, text)
             .map_err(|e| crysirror_core::Error::Io(e.to_string()))

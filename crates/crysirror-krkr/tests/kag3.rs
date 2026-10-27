@@ -36,7 +36,29 @@ fn original_kag3_startup_executes_scenario_through_engine_services() {
     let assets = temp.path().join("assets");
     copy_tree(&source.join("data"), &assets);
     // The unmodified stock system loads a self-authored scenario and test images.
-    std::fs::write(assets.join("scenario/first.ks"),"*start\n[iscript]\nDebug.message(\"CRYSIRROR_KAG3_SCENARIO_STARTED\");\n[endscript]\nHello CrySirror.[l][r]\nA second line.[p]\n[s]\n").unwrap();
+    std::fs::write(
+        assets.join("scenario/first.ks"),
+        r#"*start
+[iscript]
+Debug.message("CRYSIRROR_KAG3_SCENARIO_STARTED");
+[endscript]
+Hello CrySirror.[l]
+[iscript]
+Debug.message("CRYSIRROR_KAG3_AFTER_LINE");
+[endscript]
+[r]A second line.[p]
+[iscript]
+Debug.message("CRYSIRROR_KAG3_AFTER_PAGE");
+[endscript]
+[s]
+"#,
+    )
+    .unwrap();
+    for name in ["LineBreak.png", "PageBreak.png"] {
+        image::RgbaImage::from_pixel(384, 24, image::Rgba([255, 255, 255, 255]))
+            .save(assets.join("image").join(name))
+            .unwrap();
+    }
     let project:crysirror_runtime::Project=serde_json::from_value(json!({"schema":2,"name":"original KAG3","content_revision":"1","canvas":[640,480],"assets":"assets","clients":[{"name":"native","adapter":"krkr","game":"test-kag3","config":{"canvas":[640,480]}}]})).unwrap();
     std::fs::write(
         temp.path().join("project.json"),
@@ -59,29 +81,85 @@ fn original_kag3_startup_executes_scenario_through_engine_services() {
         .add_font("default", std::fs::read(font).unwrap())
         .unwrap();
     runtime.host.text = runtime.assets.text.clone();
-    for _ in 0..300 {
-        if let Err(error) = runtime.tick(16, InputFrame::default()) {
-            panic!("{error:#}\n{}", runtime.inspect());
+    fn native(r: &Runtime) -> serde_json::Value {
+        r.inspect()["sessions"][0]["native"].clone()
+    }
+    fn wait(r: &mut Runtime, tag: &str) {
+        for _ in 0..600 {
+            if let Err(e) = r.tick(16, InputFrame::default()) {
+                panic!("{e:#}\n{}", r.inspect());
+            }
+            let n = native(r);
+            if n["kag"]["click_waiting"] == true && n["kag"]["last_tag"] == tag {
+                return;
+            }
+            std::thread::yield_now();
         }
-        let state = runtime.inspect();
-        if state["sessions"][0]["native"]["log_tail"]
+        panic!("KAG did not wait at {tag}: {}", r.inspect());
+    }
+    wait(&mut runtime, "l");
+    let before = native(&runtime);
+    assert!(
+        before["log_tail"]
             .to_string()
             .contains("CRYSIRROR_KAG3_SCENARIO_STARTED")
-        {
+    );
+    assert!(
+        !before["log_tail"]
+            .to_string()
+            .contains("CRYSIRROR_KAG3_AFTER_LINE")
+    );
+    let canvases = runtime.inspect()["engine"]["canvases"].to_string();
+    assert!(
+        canvases.contains("glyph_run"),
+        "no retained text: {canvases}"
+    );
+    assert!(canvases.contains("character"));
+    for _ in 0..5 {
+        runtime.tick(16, InputFrame::default()).unwrap();
+        assert_eq!(native(&runtime)["kag"]["last_tag"], "l");
+    }
+    runtime
+        .tick(
+            16,
+            InputFrame {
+                buttons_pressed: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    wait(&mut runtime, "p");
+    assert!(
+        native(&runtime)["log_tail"]
+            .to_string()
+            .contains("CRYSIRROR_KAG3_AFTER_LINE")
+    );
+    assert!(
+        !native(&runtime)["log_tail"]
+            .to_string()
+            .contains("CRYSIRROR_KAG3_AFTER_PAGE")
+    );
+    runtime
+        .tick(
+            16,
+            InputFrame {
+                buttons_pressed: crysirror_core::service::buttons::MOUSE_LEFT,
+                pointer_x: 320,
+                pointer_y: 240,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    for _ in 0..300 {
+        runtime.tick(16, InputFrame::default()).unwrap();
+        if native(&runtime)["kag"]["sleeping"] == true {
             assert!(
-                runtime
-                    .host
-                    .engine
-                    .layers
-                    .get(crysirror_core::state::ClientId(1), 2)
-                    .is_some()
+                native(&runtime)["log_tail"]
+                    .to_string()
+                    .contains("CRYSIRROR_KAG3_AFTER_PAGE")
             );
             return;
         }
-        std::thread::yield_now();
     }
-    panic!(
-        "original KAG3 scenario did not start: {}",
-        runtime.inspect()
-    );
+    panic!("KAG did not reach stop: {}", runtime.inspect());
 }

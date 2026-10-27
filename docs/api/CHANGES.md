@@ -4,6 +4,20 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `be619476a3bcddb4` (2026-10-27): shared KAG3 prerequisites
+
+- Text.positionSimple and the device-free TextMeasurement::position_simple return
+  scalar baselines from the engine's simple font layout, reusable by retained
+  GlyphRun text including synthetic bold and unblurred offset shadows.
+- Ui.setWindowPolicy and Ui.setFullscreen publish client-owned logical desktop
+  requests, saved with UiSystem and consumed by the winit host.
+- Core additionally exposes bounded DeferredDispatch/RegionMap kernels,
+  ImageMetadata::opaque and ClientStorage::begin_write_atomic with retained poll
+  completion. These Rust contracts contain no device handles. Default trait
+  implementations reject unsupported providers instead of claiming success.
+- KAG3 is an optional native semantic adapter; these APIs work without that VM.
+  See ADR 0088 for admitted native semantics and unsupported profiles.
+
 ## `4b42007e15453574` (2026-10-27): shared logical input journals
 
 - Input adds opt-in enableEvents/disableEvents, events/ackEvents, eventStats and

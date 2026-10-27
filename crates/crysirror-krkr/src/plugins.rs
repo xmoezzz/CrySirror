@@ -20,7 +20,7 @@ pub fn canonical(name: &str) -> Result<String> {
 }
 
 fn kind(rt: &Rt, name: &str) -> Option<&'static str> {
-    if name == "menu.dll" {
+    if matches!(name,"menu.dll"|"kagparser.dll") {
         Some("engine_facade")
     } else if rt.host().plugin_shells.contains(name) {
         Some("registration_only")
@@ -43,6 +43,7 @@ pub fn install(rt: &mut Rt, plugins: krkr_tjs2::runtime::ObjectHandle) {
                         "an engine facade or explicitly configured registration-only shell; native DLLs are never loaded",
                     ));
                 }
+                if name=="kagparser.dll" && !rt.host().loaded_plugins.contains(&name){crate::kag::install(rt);}
                 // MenuItem is built in for the KRKR2 native profile. KRKRZ's menu.dll
                 // names the same semantic adapter onto the engine MenuSpec service.
                 rt.host_mut().loaded_plugins.insert(name);
@@ -53,7 +54,7 @@ pub fn install(rt: &mut Rt, plugins: krkr_tjs2::runtime::ObjectHandle) {
                 // A live engine facade owns native objects. Unloading their class
                 // while those objects exist is unsupported, as opposed to a false
                 // success that leaves an apparently unlinked working implementation.
-                if name == "menu.dll" && rt.host().loaded_plugins.contains(&name) {
+                if matches!(name.as_str(),"menu.dll"|"kagparser.dll") && rt.host().loaded_plugins.contains(&name) {
                     return Ok(Variant::Integer(0));
                 }
                 Ok(Variant::Integer(
@@ -90,6 +91,8 @@ pub fn install(rt: &mut Rt, plugins: krkr_tjs2::runtime::ObjectHandle) {
                     Variant::String(
                         if name == "menu.dll" {
                             "UI.MenuSpec"
+                        } else if name=="kagparser.dll" {
+                            "native KAG scenario VM"
                         } else {
                             ""
                         }

@@ -211,11 +211,11 @@ fn nominal_font_height_uses_absolute_height_and_rejects_unmapped_styles() {
     let (_t, mut r) = fixture(
         r#"
         var w = new Window(); var l = new Layer(w, null);
-        l.font.bold = true; l.drawText(0, 0, "A", 0xffffff);
+        l.font.italic = true; l.drawText(0, 0, "A", 0xffffff);
     "#,
         &[],
     );
-    assert!(failure(&mut r).contains("Font.bold"));
+    assert!(failure(&mut r).contains("Font.italic"));
 }
 
 #[test]
@@ -321,4 +321,346 @@ fn configured_plugin_shell_only_registers_and_never_exports_a_fake_capability() 
     assert!(log.contains("shell registration_only"), "{log}");
     assert!(log.contains("unlink 1 0"), "{log}");
     assert!(log.contains("export undefined"), "{log}");
+}
+
+#[test]
+fn kag_parser_preserves_native_tags_callbacks_control_flow_and_shared_draws() {
+    let (_t, mut r) = fixture(
+        r#"
+Plugins.link('KAGParser.dll');
+global.score=7;
+class P extends KAGParser {
+ function P(){super.KAGParser();ignoreCR=true;}
+ function onLabel(name,page){Debug.message('label',name);}
+ function onScript(script,name,line){Scripts.exec(script,name,line);return true;}
+}
+var p=new P();p.loadScenario('first.ks');
+var w=new Window();var l=new Layer(w,null);
+var item=p.getNextTag();if(item.tagname!='item'||item.x!='9')throw new Exception('macro attribute');
+item=p.getNextTag();if(item.x!='7')throw new Exception('expression attribute');
+item=p.getNextTag();if(item.x!='sub')throw new Exception('call');
+item=p.getNextTag();if(item.x!='after')throw new Exception('return');
+if(p.getNextTag()!==void||score!=42)throw new Exception('script/EOF');
+l.fillRect(0,0,l.imageWidth,l.imageHeight,0xff123456);
+if(Plugins.getStatus('KAGParser.dll').kind!='engine_facade')throw new Exception('plugin status');
+Debug.message('kag-native-ok');
+"#,
+        &[(
+            "first.ks",
+            "*start\n[macro name=m][item x=%value][endmacro]\n[m value=9]\n[if exp=\"score==7\"][item x=&score][else][item x=bad][endif]\n[call target=*sub]\n[item x=after]\n[jump target=*end]\n*sub\n[item x=sub][return]\n*end\n[iscript]\nscore=42;\n[endscript]\n",
+        )],
+    );
+    r.tick(0, InputFrame::default()).unwrap();
+    assert!(
+        r.inspect()["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("kag-native-ok")
+    );
+    assert!(r.host.engine.layers.get(ClientId(1), 2).is_some());
+}
+
+#[test]
+fn kag_nested_load_callback_keeps_its_label_change_and_unknown_saves_fail_visibly() {
+    let (_t, mut r) = fixture(
+        r#"
+ Plugins.link('KAGParser.dll');
+ class P extends KAGParser {function P(){super.KAGParser();ignoreCR=true;} function onScenarioLoaded(name){goToLabel('*chosen');}}
+ var p=new P();p.loadScenario('first.ks');
+ if(p.getNextTag().value!='chosen')throw new Exception('nested label lost');
+ var bad=false;try{p.store();}catch(e){bad=true;}if(!bad)throw new Exception('unmapped save succeeded');
+ Debug.message('kag-reentry-ok');
+ "#,
+        &[(
+            "first.ks",
+            "[item value=wrong]\n*chosen\n[item value=chosen]\n",
+        )],
+    );
+    r.tick(0, InputFrame::default()).unwrap();
+    assert!(
+        r.inspect()["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("kag-reentry-ok")
+    );
+}
+
+#[test]
+fn async_trigger_uses_shared_turn_fences_cached_posts_cancel_and_zero_interval_timer() {
+    let (_t, mut r) = fixture(
+        r#"
+ global.n=0;
+ var a=new AsyncTrigger(function(){n++;Debug.message('fire',n);if(n<3)a.trigger();},'');
+ a.cached=true;a.trigger();a.trigger();
+ var canceled=new AsyncTrigger(function(){throw new Exception('canceled delivered');},'');canceled.trigger();canceled.cancel();
+ var t=new Timer(function(){throw new Exception('zero timer delivered');},'');t.interval=0;t.enabled=true;
+ "#,
+        &[],
+    );
+    for n in 1..=3 {
+        r.tick(0, InputFrame::default()).unwrap();
+        let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+        assert!(log.contains(&format!("fire {n}")));
+        assert!(!log.contains(&format!("fire {}", n + 1)));
+    }
+}
+
+fn authored_wave() -> Vec<u8> {
+    let mut b = b"RIFF".to_vec();
+    b.extend(164u32.to_le_bytes());
+    b.extend(b"WAVEfmt ");
+    b.extend(16u32.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(8000u32.to_le_bytes());
+    b.extend(16000u32.to_le_bytes());
+    b.extend(2u16.to_le_bytes());
+    b.extend(16u16.to_le_bytes());
+    b.extend(b"data");
+    b.extend(128u32.to_le_bytes());
+    for _ in 0..64 {
+        b.extend(8192i16.to_le_bytes());
+    }
+    b
+}
+#[test]
+fn native_sound_parks_the_original_caller_until_shared_resources_and_voice_are_ready() {
+    let (d, mut r) = fixture(
+        r#"
+ var w=new Window();
+ class Sound extends WaveSoundBuffer {function Sound(w){super.WaveSoundBuffer(w);}function onStatusChanged(){Debug.message('status',status);}}
+ var sound=new Sound(w);sound.open('tone.wav');
+ if(sound.totalSamples!=64||sound.frequency!=8000||sound.status!='stop')throw new Exception('open metadata');
+ Debug.message('opened');sound.looping=true;sound.volume=50000;sound.play();
+ if(sound.status!='play')throw new Exception('voice published early');
+ Debug.message('native-audio-ready');
+ "#,
+        &[],
+    );
+    std::fs::write(d.path().join("assets/game/tone.wav"), authored_wave()).unwrap();
+    r.set_audio_nonblocking(true);
+    let pool = r.assets.io_tasks();
+    let permits = (0..pool.stats().capacity)
+        .map(|_| pool.reserve().unwrap())
+        .collect::<Vec<_>>();
+    r.tick(0, InputFrame::default()).unwrap();
+    let before = r.inspect();
+    assert_eq!(before["sessions"][0]["native"]["suspended"], true);
+    assert!(
+        !before["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("opened")
+    );
+    for _ in 0..2 {
+        r.tick(
+            1,
+            InputFrame {
+                buttons_pressed: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(r.inspect()["sessions"][0]["native"]["queued_input"], 3);
+    drop(permits);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut audible = false;
+    loop {
+        r.tick(1, InputFrame::default()).unwrap();
+        audible |= r
+            .host
+            .channel_audio
+            .take_output()
+            .iter()
+            .any(|s| s[0].abs() > 0.01);
+        if r.inspect()["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("native-audio-ready")
+            && audible
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < end, "{}", r.inspect());
+        std::thread::yield_now();
+    }
+    let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert_eq!(log.matches("native-audio-ready").count(), 1);
+    assert_eq!(log.matches("status play").count(), 1);
+    assert!(r.host.audio_info(ClientId(1), 0).unwrap().unwrap().looping);
+}
+
+#[test]
+fn original_dictionary_save_struct_uses_atomic_save_capability_and_original_utf16_format() {
+    let (_d, mut r) = fixture(
+        r#"
+ var data=%[number:42,text:'保存'];
+ (Dictionary.saveStruct incontextof data)(System.dataPath+'state.ksd');
+ if(!Storages.isExistentStorage(System.dataPath+'state.ksd'))throw new Exception('commit missing');
+ var read=Scripts.evalStorage(System.dataPath+'state.ksd');
+ if(read.number!=42||read.text!='保存')throw new Exception('original text save roundtrip');
+ var denied=false;try{(Dictionary.saveStruct incontextof data)('startup.tjs');}catch(e){denied=true;}if(!denied)throw new Exception('asset write admitted');
+ Debug.message('native-file-ready');
+ "#,
+        &[],
+    );
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        r.tick(0, InputFrame::default()).unwrap();
+        if r.inspect()["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("native-file-ready")
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < end);
+        std::thread::yield_now();
+    }
+    let storage = r.host.storage(ClientId(1)).unwrap();
+    let b = storage
+        .read(
+            &crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Save, "state.ksd")
+                .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(&b[..2], &[0xff, 0xfe]);
+    assert!(
+        storage
+            .read(
+                &crysirror_core::path::VfsPath::new(
+                    crysirror_core::path::Mount::Asset,
+                    "game/startup.tjs"
+                )
+                .unwrap()
+            )
+            .unwrap()
+            .starts_with(b"\n var data")
+    );
+}
+
+#[test]
+fn parser_save_uses_original_dictionary_fields_and_reloads_a_label_instead_of_exact_runtime_cursor()
+{
+    let (_d, mut r) = fixture(
+        r#"
+ Plugins.link('KAGParser.dll');var p=new KAGParser();p.ignoreCR=true;p.loadScenario('first.ks');
+ var save=p.store();if(save.snapshot!==void||save.storageName!='first.ks'||save.macroArgs.count!=0||save.callStack.count!=0)throw new Exception('native layout');
+ if(p.getNextTag().value!='first')throw new Exception('first');if(p.getNextTag().value!='second')throw new Exception('second');
+ p.restore(save);if(p.getNextTag().value!='first')throw new Exception('native rewind');
+ var m=p.macros;(Dictionary.assign incontextof m)(%[hello:'[item value=macro][macropop]']);
+ if(p.getNextTag().value!='second')throw new Exception('second replay');
+ if(p.getNextTag().value!='macro')throw new Exception('live macro dictionary');
+ Debug.message('native-parser-save-ready');
+ "#,
+        &[(
+            "first.ks",
+            "*start\n[item value=first][item value=second][hello]\n",
+        )],
+    );
+    r.tick(0, InputFrame::default()).unwrap();
+    assert!(
+        r.inspect()["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("native-parser-save-ready")
+    );
+}
+
+#[test]
+fn native_regions_reparent_visibility_and_identity_gamma_use_shared_state() {
+    let (_d, mut r) = fixture(
+        r#"
+    var w=new Window();var root=new Layer(w,null);
+    var a=new Layer(w,root);var b=new Layer(w,root);var child=new Layer(w,a);
+    root.visible=true;a.visible=true;b.visible=true;child.visible=true;
+    b.left=100;child.setImageSize(40,40);child.setSizeToImageSize();
+    child.face=dfProvince;child.fillRect(0,0,40,40,0);child.fillRect(2,3,8,9,7);
+    if(child.getProvincePixel(3,4)!=7||child.getProvincePixel(0,0)!=0)throw new Exception('region mismatch');
+    child.face=dfAuto;child.fillRect(0,0,40,40,0xff123456);
+    child.parent=b;
+    if(child.parent!==b||a.children.count!=0||b.children.count!=1)throw new Exception('reparent mismatch');
+    if(!child.nodeVisible)throw new Exception('visible ancestry');
+    b.visible=false;if(child.nodeVisible)throw new Exception('hidden ancestry');b.visible=true;
+    b.enabled=false;if(child.nodeEnabled)throw new Exception('disabled ancestry');b.enabled=true;
+    var bad=false;try{b.parent=child;}catch(e){bad=true;}if(!bad)throw new Exception('cycle admitted');
+    child.adjustGamma();child.adjustGamma(1,0,255,1,0,255,1,0,255);
+    bad=false;try{child.adjustGamma(2);}catch(e){bad=true;}if(!bad)throw new Exception('nonidentity gamma silently accepted');
+    Debug.message('native-region-tree-ok');
+    "#,
+        &[],
+    );
+    r.tick(0, InputFrame::default()).unwrap();
+    assert!(
+        r.inspect()["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("native-region-tree-ok")
+    );
+    let child = r.host.engine.layers.get(ClientId(1), 8).unwrap();
+    assert_eq!(child.parent, Some(6));
+    assert!(child.visible);
+}
+
+#[test]
+fn native_hit_filter_uses_super_work_flag_and_disabled_hit_blocks_fallthrough() {
+    let (_d, mut r) = fixture(
+        r#"
+    global.block=false;global.presses=0;
+    class W extends Window { function W(){super.Window();} function onKeyDown(k,s){block=true;top.enabled=false;} }
+    class Button extends Layer {function Button(w,p){super.Layer(w,p);}function onMouseDown(x,y,b,s){presses++;Debug.message('background-press',presses);} }
+    class Filter extends Layer {function Filter(w,p){super.Layer(w,p);}function onHitTest(x,y,b){super.onHitTest(x,y,block);return !block;} }
+    var w=new W();var root=new Layer(w,null);root.visible=true;
+    var back=new Button(w,root);back.setImageSize(40,40);back.setSizeToImageSize();back.fillRect(0,0,40,40,0xff000000);back.visible=true;
+    var top=new Filter(w,root);top.setImageSize(40,40);top.setSizeToImageSize();top.fillRect(0,0,40,40,0xff000000);top.visible=true;
+    w.visible=true;
+    "#,
+        &[],
+    );
+    r.tick(0, InputFrame::default()).unwrap();
+    let click = InputFrame {
+        buttons_pressed: buttons::MOUSE_LEFT,
+        pointer_x: 5,
+        pointer_y: 5,
+        ..Default::default()
+    };
+    r.tick(1, click).unwrap();
+    let log = || r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log().contains("background-press 1"));
+    r.tick(
+        1,
+        InputFrame {
+            buttons_pressed: buttons::ENTER,
+            pointer_x: 5,
+            pointer_y: 5,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    r.tick(1, click).unwrap();
+    let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(!log.contains("background-press 2"));
+}
+
+#[test]
+fn invalidation_releases_shared_native_voice_even_without_super_finalize() {
+    let (d, mut r) = fixture(
+        r#"
+    class Sound extends WaveSoundBuffer {
+      function Sound(){super.WaveSoundBuffer();}
+      function finalize(){Debug.message('custom-finalize');}
+    }
+    var s=new Sound();s.open('tone.wav');s.looping=true;s.play();
+    invalidate s;
+    Debug.message('sound-invalidated');
+    "#,
+        &[],
+    );
+    std::fs::write(d.path().join("assets/game/tone.wav"), authored_wave()).unwrap();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        r.tick(1, InputFrame::default()).unwrap();
+        let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+        if log.contains("sound-invalidated") {
+            assert!(log.contains("custom-finalize"));
+            assert!(r.host.audio_info(ClientId(1), 0).unwrap().is_none());
+            break;
+        }
+        assert!(std::time::Instant::now() < end);
+        std::thread::yield_now();
+    }
 }

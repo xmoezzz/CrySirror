@@ -12,10 +12,17 @@
 #![allow(clippy::result_large_err)]
 pub mod adapter;
 mod constants;
+mod async_trigger;
+mod kag;
+mod kag_save;
 pub mod host;
 mod menus;
 pub mod natives;
 mod plugins;
+mod sound;
+mod save_struct;
+mod video;
+mod pointer;
 pub mod storage;
 
 pub use adapter::{Config, KrkrFactory, KrkrVm, register};

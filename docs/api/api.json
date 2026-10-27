@@ -4185,6 +4185,25 @@
           "returns": "void"
         },
         {
+          "doc": "Unwrapped simple-horizontal glyph placements {character,baseline:[x,y]} for retained GlyphRun paint. Integer size 1..512; no surface or native VM. Live calls are bounded to 4096 UTF-8 bytes; complex shaping uses the rich text API.",
+          "name": "positionSimple",
+          "params": [
+            {
+              "name": "font",
+              "type": "string"
+            },
+            {
+              "name": "size",
+              "type": "number"
+            },
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ],
+          "returns": "Record<string, any>[]"
+        },
+        {
           "doc": "Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface.",
           "name": "measureSimple",
           "params": [
@@ -4454,6 +4473,32 @@
           "params": [
             {
               "name": "visible",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Request borderless desktop fullscreen. Headless hosts retain client-owned state; the desktop applies it at frame publication.",
+          "name": "setFullscreen",
+          "params": [
+            {
+              "name": "enabled",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Request desktop decorations and resizing through engine-owned client state. Headless hosts retain the request; the desktop applies it at frame publication.",
+          "name": "setWindowPolicy",
+          "params": [
+            {
+              "name": "decorated",
+              "type": "boolean"
+            },
+            {
+              "name": "resizable",
               "type": "boolean"
             }
           ],
@@ -5349,6 +5394,16 @@
       "system": "ui"
     },
     {
+      "api": "Ui.setWindowPolicy",
+      "op": "set_window_policy",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.setFullscreen",
+      "op": "set_fullscreen",
+      "system": "ui"
+    },
+    {
       "api": "Ui.setCursorVisible",
       "op": "set_cursor_visible",
       "system": "ui"
@@ -5405,6 +5460,44 @@
     }
   ],
   "data": [
+    {
+      "doc": "One Unicode scalar at an unwrapped floating-point baseline. Synthetic bold does not change this simple layout's advance; shaping has a separate API.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "character",
+          "rust_type": "char"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "baseline",
+          "rust_type": "[f32; 2]"
+        }
+      ],
+      "name": "SimpleTextPlacement",
+      "used_by": "Text.positionSimple / TextMeasurement::position_simple"
+    },
+    {
+      "doc": "Requested desktop decorations and resizing, owned by the submitting client.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "decorated",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "resizable",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "WindowPolicy",
+      "used_by": "Ui.setWindowPolicy / UiSystem.window_policy"
+    },
     {
       "doc": "",
       "fields": [
@@ -13867,6 +13960,18 @@
         {
           "default": null,
           "doc": "",
+          "name": "set_window_policy",
+          "rust_type": "decorated: bool, resizable: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_fullscreen",
+          "rust_type": "enabled: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
           "name": "put",
           "rust_type": "widget: WidgetSpec"
         },
@@ -14144,7 +14249,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "4b42007e15453574",
+  "fingerprint": "be619476a3bcddb4",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

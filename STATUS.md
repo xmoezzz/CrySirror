@@ -3595,3 +3595,75 @@ Remaining boundaries:
   fails visibly on overflow. Other native adapters have not been migrated.
 - Original frame-action versus audio-event ordering remains open. No complete
   game, hardware or whole-engine result is claimed. The broader goal remains.
+
+## 2026-10-27 — KAG3 semantic adapter and shared prerequisites (ADR 0088)
+
+Implementation:
+- Original pinned TJS2/KAG parser crates remain byte-identical. New native
+  KAGParser, AsyncTrigger, sound and saveStruct facades call shared CrySirror
+  services; no upstream general engine/renderer/mixer/font/media implementation
+  was copied or hosted. Stock KAG3 scripts are external runtime inputs only.
+- Added reusable Core DeferredDispatch/RegionMap, shared simple scalar glyph
+  placement (public Text.positionSimple), client-owned window policy/fullscreen,
+  decoder opacity metadata and bounded worker-backed atomic capability writes.
+  Native bold/unblurred shadow text uses retained GlyphRun. Whole-destination
+  atlas cells use existing Canvas snapshots. Native region hits use Core's map.
+- Native owner phases retain a fence/cursor across shared audio/write readiness;
+  input ingress uses the Core journal before dependency checks. Native positive
+  onHitTest callbacks preserve the super-call work flag, and disabled hits block
+  fallthrough. Native reparenting rejects cycles/foreign windows. Audio source/
+  voice ownership stays in HostServices, including cleanup after custom finalize.
+- Source review pins, actual blob hashes and review scopes are recorded in
+  docs/kag3-source-audit.json. Newly authored native code remains in the optional
+  AGPL boundary; no game data, stock scripts, fonts or screenshots are committed.
+
+Compilation and reference validation:
+- Release workspace/all-target check passed with krkr, arc-formats,
+  acoustics-obvhs and rodio-output. Minimal desktop reallive+avg32 check passed.
+  Release desktop build with krkr, arc-formats and acoustics-obvhs passed.
+  Existing warnings remain; no GitHub CI/workflow was added or run.
+- Regenerated API reference/JSON/TypeScript and logged actual fingerprint
+  4b42007e15453574 -> be619476a3bcddb4. Final docs and command coverage passed.
+
+Behavior validation:
+- **34 distinct release Rust tests passed**: Core dispatch/regions 4, VFS writes
+  2, engine prerequisites/docs/coverage 10, native unit 1, native bridge 16 and
+  pinned stock KAG3 scenario 1. External KAG3/font tests were explicitly executed, not counted
+  as passes merely because they were ignored. No ignored cases in these runs.
+  Python 3.11 tooling: **189 passed**. Repeated probes are excluded from totals.
+- Unmodified KAG3 system scripts rendered authored text, held [l] without input,
+  accepted one Enter, held [p], accepted one mouse pulse and reached [s]. Both
+  scenario continuation markers were checked. Generated wait-glyph sheets match
+  the original 384x24 atlas layout. Self-authored tests additionally cover native
+  macros/conditions/script/call-return, live macro tables, label save dictionaries,
+  deferred cancellation/fences, hit filters, atomic UTF-16 saveStruct, queued input
+  during audio admission, nonzero offline mixed PCM and custom-finalizer cleanup.
+- Actual offscreen wgpu raster capture on **Apple M5 / Metal**, 640x480, after
+  300 owner ticks displayed stock menus, Latin/Japanese text and an animated wait
+  glyph through CrySirror's renderer. Diagnostics: 151 engine API calls,
+  owns_framebuffer=false, no native error, waiting at [l]. PNG inspected visually.
+  This is one local raster frame, not a frame-rate, hardware RT or other-platform
+  result. No live native audio-device or OS window-policy behavior is claimed.
+- Earlier stock probes exposed missing gamma identity, ancestor visibility,
+  atlas-copy admission, temporary cursor hiding and onHitTest routing. Those
+  failures led to the mapped behavior above; they were not reported as boot
+  success. Initial Rust borrow/Result issues and expected API generation guards
+  were corrected before final checks. Default Python lacked tomllib and failed;
+  the explicit Python 3.11 full run passed.
+- Evidence (ignored local files): target/verification/kag3-{core-final,vfs-final,
+  engine-final,native-regression,workspace-final,minimal-final,desktop-build,
+  python-311-final,gpu-render}.log, kag3-summary.json, kag3-gpu-summary.json and
+  kag3-demo/kag3.png. The external-source captures and system font stay local.
+
+Remaining boundaries:
+- Bounded KAG3 integration, not arbitrary commercial-game compatibility. Full
+  native save/call/macro stacks, TJS runtime snapshots, XP3 auto-path mounting,
+  mutable macro-parameter identity, native registered-object window shutdown,
+  font-face selection, nonuniform pixel masks, focus/modal input, video,
+  transitions and nonidentity gamma/gray/blur/
+  flip or unsupported blend/partial-replace operations remain open and fail
+  visibly. VideoOverlay currently admits only unloaded class construction.
+- Native audio currently uses the shared Sfx bus; music/voice bus inference,
+  live seek and delayed fades remain open. Nested Rust parser/input callbacks
+  cannot suspend; async admission there fails. Source/metadata reads still have
+  synchronous boundaries. ADR 0050 and the wider engine work remain unfinished.

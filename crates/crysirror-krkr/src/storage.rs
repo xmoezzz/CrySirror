@@ -84,6 +84,12 @@ impl Storage {
 
     /// Resolve a storage name to an asset-relative path, or `None`.
     pub fn resolve(&self, name: &str) -> Option<String> {
+        if let Ok(Some(path)) = save_path(name) {
+            return self
+                .files
+                .exists(&path)
+                .then(|| format!("savedata/{}", path.relative()));
+        }
         let key = normalize(name).to_lowercase();
         if key.is_empty() {
             return None;
@@ -92,7 +98,7 @@ impl Storage {
             return Some(found.clone());
         }
         let base = key.rsplit('/').next().unwrap_or(&key);
-        for dir in &self.auto {
+        for dir in self.auto.iter().rev() {
             let candidate = if dir.is_empty() {
                 base.to_owned()
             } else {
@@ -115,7 +121,19 @@ impl Storage {
             .find_map(|ext| self.resolve(&format!("{name}{ext}")))
     }
 
+    pub fn begin_write(
+        &self,
+        name: &str,
+        data: std::sync::Arc<[u8]>,
+    ) -> Result<Box<dyn crysirror_core::service::StorageWrite>> {
+        let path =
+            save_path(name)?.context("writes require the virtual savedata/ capability root")?;
+        self.files.begin_write_atomic(&path, data).map_err(err)
+    }
     pub fn read(&self, path: &str) -> Result<Vec<u8>> {
+        if let Some(path) = save_path(path)? {
+            return self.files.read(&path).map_err(err);
+        }
         self.files
             .read(&VfsPath::new(Mount::Asset, path).map_err(err)?)
             .map_err(err)
@@ -123,11 +141,28 @@ impl Storage {
     }
 
     pub fn read_named(&self, name: &str) -> Result<Vec<u8>> {
+        if let Some(path) = save_path(name)? {
+            return self.files.read(&path).map_err(err);
+        }
         let path = self
             .resolve(name)
             .with_context(|| format!("storage `{name}` not found"))?;
         self.read(&path)
     }
+}
+
+/// Only this virtual prefix grants native writes; it never denotes an OS path.
+pub fn save_path(name: &str) -> Result<Option<VfsPath>> {
+    let normalized = normalize(name);
+    let Some(relative) = normalized.strip_prefix("savedata/") else {
+        return Ok(None);
+    };
+    let relative = relative
+        .split('/')
+        .filter(|s| !s.is_empty() && *s != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    Ok(Some(VfsPath::new(Mount::Save, &relative).map_err(err)?))
 }
 
 /// Strip KiriKiri's `file://./` and archive prefixes into a slash path.

@@ -26,6 +26,7 @@ const MAX_LOG: usize = 4096;
 
 #[derive(Clone, Debug)]
 pub struct LayerState {
+    pub regions: crysirror_core::region_map::RegionMap,
     pub slot: u32,
     pub window: usize,
     pub parent: Option<usize>,
@@ -43,6 +44,9 @@ pub struct LayerState {
     pub absolute: i64,
     /// Nothing has been drawn since the surface was cleared to transparency,
     /// so source-over and replace are the same operation.
+    pub full_alpha: Option<u8>,
+    pub image_modified: bool,
+    pub has_image: bool,
     pub blank: bool,
     /// Engine nodes exist (false after invalidation of the layer or an ancestor).
     pub attached: bool,
@@ -70,6 +74,7 @@ pub struct WindowState {
 
 #[derive(Clone, Debug)]
 pub struct TimerState {
+    pub mode: u8,
     pub interval: u64,
     pub enabled: bool,
     pub capacity: u64,
@@ -84,9 +89,15 @@ pub enum Batch {
 }
 
 pub struct KrkrHost {
+    pub io_barrier: bool,
+    pub writes: std::collections::VecDeque<Box<dyn crysirror_core::service::StorageWrite>>,
+    pub can_suspend: bool,
+    pub sounds: crate::sound::Sounds,
+    pub client: u32,
     pub storage: Option<Storage>,
     pub images: Option<Arc<dyn ImageMetadata>>,
     pub text_measurement: Option<Arc<dyn TextMeasurement>>,
+    pub input: crysirror_core::service::InputFrame,
     pub now: u64,
     pub canvas: [u32; 2],
     pub font: String,
@@ -95,6 +106,8 @@ pub struct KrkrHost {
     pub layers: BTreeMap<usize, LayerState>,
     pub windows: BTreeMap<usize, WindowState>,
     pub timers: BTreeMap<usize, TimerState>,
+    pub deferred: crysirror_core::deferred_dispatch::DeferredDispatch,
+    pub parsers: BTreeMap<usize, crate::kag::ParserState>,
     pub menus: BTreeMap<usize, crate::menus::MenuState>,
     pub menus_last: Option<Value>,
     pub menu_popups: Vec<(usize, [f32; 2])>,
@@ -109,9 +122,15 @@ pub struct KrkrHost {
 impl KrkrHost {
     pub fn new(canvas: [u32; 2], font: String) -> Self {
         Self {
+            io_barrier: false,
+            writes: Default::default(),
+            can_suspend: true,
+            sounds: Default::default(),
+            client: 1,
             storage: None,
             images: None,
             text_measurement: None,
+            input: Default::default(),
             now: 0,
             canvas,
             font,
@@ -120,6 +139,9 @@ impl KrkrHost {
             layers: BTreeMap::new(),
             windows: BTreeMap::new(),
             timers: BTreeMap::new(),
+            parsers: BTreeMap::new(),
+            deferred: crysirror_core::deferred_dispatch::DeferredDispatch::new(4096)
+                .expect("fixed capacity"),
             menus: BTreeMap::new(),
             menus_last: None,
             menu_popups: vec![],
@@ -132,6 +154,22 @@ impl KrkrHost {
         }
     }
 
+    fn begin_native_write(&mut self, name: &str, data: Vec<u8>) -> TjsResult<()> {
+        if !self.io_barrier || !self.can_suspend {
+            return Err(TjsError::runtime(
+                "native write requires a resumable saveStruct boundary",
+            ));
+        }
+        if data.len() > 4 * 1024 * 1024 || self.writes.len() >= 64 {
+            return Err(TjsError::runtime("native write budget"));
+        }
+        let write = self
+            .storage()?
+            .begin_write(name, data.into())
+            .map_err(|e| TjsError::runtime(format!("{e:#}")))?;
+        self.writes.push_back(write);
+        Ok(())
+    }
     pub fn push_log(&mut self, line: String) {
         if self.log.len() >= MAX_LOG {
             self.log.remove(0);
@@ -140,6 +178,28 @@ impl KrkrHost {
     }
 
     pub fn canvas_op(&mut self, op: Value) {
+        if matches!(
+            op["op"].as_str(),
+            Some("clear" | "set" | "draw" | "copy" | "create")
+        ) {
+            if let Some(id) = op
+                .get("destination")
+                .or_else(|| op.get("id"))
+                .and_then(Value::as_u64)
+            {
+                if let Some(l) = self.layers.values_mut().find(|l| l.slot as u64 == id) {
+                    l.image_modified = true;
+                    match op["op"].as_str() {
+                        Some("clear") => {
+                            l.full_alpha =
+                                op["color"][3].as_u64().and_then(|v| u8::try_from(v).ok())
+                        }
+                        Some("draw") if l.full_alpha == Some(255) => (),
+                        _ => l.full_alpha = None,
+                    }
+                }
+            }
+        }
         match self.batches.last_mut() {
             Some(Batch::Canvases(ops)) => ops.push(op),
             _ => self.batches.push(Batch::Canvases(vec![op])),
@@ -207,6 +267,11 @@ impl KrkrHost {
         let primary = parent.is_none();
         let size = DEFAULT_LAYER_SIZE as i64;
         let state = LayerState {
+            regions: crysirror_core::region_map::RegionMap::new(
+                self.client,
+                [size as u32, size as u32],
+            )
+            .map_err(|e| TjsError::runtime(e.to_string()))?,
             slot,
             window,
             parent,
@@ -222,6 +287,9 @@ impl KrkrHost {
             visible: primary,
             opacity: 255,
             absolute: 0,
+            full_alpha: Some(0),
+            image_modified: true,
+            has_image: true,
             blank: true,
             attached: true,
             major: 0,
@@ -270,8 +338,15 @@ impl KrkrHost {
                 "invalid layer image size {w}x{height}"
             )));
         }
+        let regions =
+            crysirror_core::region_map::RegionMap::new(self.client, [w as u32, height as u32])
+                .map_err(|e| TjsError::runtime(e.to_string()))?;
         let slot = {
             let l = self.layer_mut(h)?;
+            l.regions = regions;
+            l.full_alpha = Some(fill[3]);
+            l.has_image = true;
+            l.image_modified = true;
             l.image_width = w;
             l.image_height = height;
             l.blank = fill[3] == 0;
@@ -394,38 +469,41 @@ impl KrkrHost {
     /// Front-most visible layer containing the canvas point, with local
     /// coordinates. Hit testing uses layer bounds; per-pixel alpha
     /// thresholds are not evaluated by this adapter.
-    pub fn hit(&self, x: i64, y: i64) -> Option<(usize, i64, i64)> {
-        let roots: Vec<usize> = self.windows.values().filter_map(|w| w.primary).collect();
-        let mut best = None;
-        for root in roots {
-            self.hit_walk(root, 0, 0, x, y, &mut best);
+    pub fn hits(&self, x: i64, y: i64) -> Vec<(usize, i64, i64)> {
+        fn visit(
+            host: &KrkrHost,
+            h: usize,
+            offset: [i64; 2],
+            point: [i64; 2],
+            out: &mut Vec<(i32, usize, i64, i64)>,
+        ) {
+            let Some(l) = host.layers.get(&h) else { return };
+            if !l.visible || !l.attached {
+                return;
+            }
+            let local = [point[0] - offset[0] - l.left, point[1] - offset[1] - l.top];
+            if local[0] < 0 || local[1] < 0 || local[0] >= l.width || local[1] >= l.height {
+                return;
+            }
+            out.push((l.major, h, local[0], local[1]));
+            for child in host.sorted_children(h) {
+                visit(
+                    host,
+                    child,
+                    [offset[0] + l.left, offset[1] + l.top],
+                    point,
+                    out,
+                );
+            }
         }
-        best.map(|(_, h, lx, ly)| (h, lx, ly))
-    }
-
-    fn hit_walk(
-        &self,
-        h: usize,
-        ox: i64,
-        oy: i64,
-        x: i64,
-        y: i64,
-        best: &mut Option<(i32, usize, i64, i64)>,
-    ) {
-        let Some(l) = self.layers.get(&h) else { return };
-        if !l.visible || !l.attached {
-            return;
+        let mut out = vec![];
+        for w in self.windows.values().filter(|w| w.visible) {
+            if let Some(root) = w.primary {
+                visit(self, root, [0, 0], [x, y], &mut out)
+            }
         }
-        let (lx, ly) = (x - ox - l.left, y - oy - l.top);
-        if lx < 0 || ly < 0 || lx >= l.width || ly >= l.height {
-            return;
-        }
-        if best.is_none_or(|b| l.major >= b.0) {
-            *best = Some((l.major, h, lx, ly));
-        }
-        for c in self.sorted_children(h) {
-            self.hit_walk(c, ox + l.left, oy + l.top, x, y, best);
-        }
+        out.sort_by_key(|v| std::cmp::Reverse(v.0));
+        out.into_iter().map(|(_, h, x, y)| (h, x, y)).collect()
     }
 }
 
@@ -444,7 +522,13 @@ pub fn container_spec(l: &LayerState, major: i32, parent: Option<u32>, shown: bo
 
 impl TjsHost for KrkrHost {
     fn invalidate_object(&mut self, handle: ObjectHandle) {
+        self.sounds.invalidate(handle.0);
         self.timers.remove(&handle.0);
+        self.parsers.remove(&handle.0);
+        for kind in 0..4 {
+            self.deferred
+                .cancel(self.client, crate::async_trigger::target(handle.0, kind));
+        }
         self.invalidate_layer(handle.0);
         let menus = self
             .menus
@@ -490,6 +574,26 @@ impl TjsHost for KrkrHost {
             .map_err(|e| TjsError::runtime(format!("{e:#}")))
     }
 
+    fn write_text(&mut self, name: &str, mode: &str, text: &str) -> TjsResult<()> {
+        if !mode.is_empty() {
+            return Err(TjsError::runtime(
+                "native text stream mode requires a shared codec mapping",
+            ));
+        }
+        let mut data = vec![0xff, 0xfe];
+        for unit in text.encode_utf16() {
+            data.extend_from_slice(&unit.to_le_bytes());
+        }
+        self.begin_native_write(name, data)
+    }
+    fn write_binary(&mut self, name: &str, mode: &str, bytes: &[u8]) -> TjsResult<()> {
+        if mode != "b" {
+            return Err(TjsError::runtime(
+                "native binary stream mode is unsupported",
+            ));
+        }
+        self.begin_native_write(name, bytes.to_vec())
+    }
     fn now_millis(&mut self) -> i64 {
         self.now as i64
     }

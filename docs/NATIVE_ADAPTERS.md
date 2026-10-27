@@ -88,9 +88,11 @@ TJS exception naming the missing capability. Font width queries use a
 client-authorized engine text measurement handle, sharing the configured font
 alias and simple-layout metrics with Canvas drawing. Nominal height preserves
 the native absolute-height rule; unsupported font styles fail visibly
-([ADR 0063](adr/0063-native-font-measurement.md)). KAG3 boot, XP3 mounts,
-native font-face selection, audio, video, transitions and saves are pending;
-see [ADR 0053](adr/0053-krkr-tjs2-adapter.md).
+([ADR 0063](adr/0063-native-font-measurement.md)). The initial ADR 0053
+limits are extended by [ADR 0088](adr/0088-kag3-semantic-adapter-and-shared-prerequisites.md):
+bounded stock KAG3 execution, shared audio, bold/unblurred shadow text and native
+atomic saveStruct are now mapped. XP3 auto-mounts, font-face selection, video,
+transitions and complete native saves remain open.
 
 ## Siglus plain message profile (2026-10-26)
 
@@ -379,3 +381,29 @@ pass; resource completion first resumes the interrupted script. Runtime payload
 discards old backlog. Existing original file layouts stay unchanged. This adds
 no raw OS/IME/analog input, extra native key mapping or frame-action ordering
 acceptance. Other adapters' input admission remains further work.
+
+## KAG3 over shared engine services (ADR 0088)
+
+The optional `krkr` adapter now admits the bounded stock KAG3 profile described in
+[ADR 0088](adr/0088-kag3-semantic-adapter-and-shared-prerequisites.md). The pinned
+original TJS2 VM and KAG parser are unchanged. KAGParser.dll is an engine facade
+with native callbacks/macros/control flow, not an empty plugin registration or a
+hosted legacy engine. Stock system scripts are external inputs, never vendored.
+
+Reusable additions are Core DeferredDispatch and RegionMap, shared simple glyph
+placement, requested window policy/fullscreen, decoder opacity metadata and
+worker-backed atomic capability writes. Native text uses ordinary retained
+GlyphRun/Canvas operations; wait-glyph atlas cells use existing engine snapshots.
+WaveSoundBuffer uses shared prepared sources/channels/mix groups. Input ingress
+uses Core's journal and a resumable owner phase prevents replay during I/O waits.
+Native positive hit tests call the original TJS onHitTest work-flag protocol;
+disabled hits block fallthrough. These kernels/services have independent tests
+without any VM.
+
+The profile does not claim arbitrary KAG games, full native save stacks or VM
+snapshots, XP3 auto-path mounting, nonuniform pixel-mask queries, focus/modal
+input, video playback, nonidentity gamma, grayscale/blur/flips or every blend/
+copy operation. Unloaded VideoOverlay declarations and identity gamma admission
+are explicitly not completed media/effect integrations. See the source review
+pins/hashes in [kag3-source-audit.json](kag3-source-audit.json) and separate actual
+compilation/behavior records in STATUS.md.

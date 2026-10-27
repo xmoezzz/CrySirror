@@ -118,3 +118,7 @@ moves to `done` only with recorded behavior evidence.
 | [0082](0082-acoustic-instance-snapshots.md) | Shared local acoustic BVHs, worker instance commits, World bindings and nonstarving geometry snapshots | implemented affine/enabled profile; deformation, prototypes and TLAS refit remain open |
 | [0083](0083-shared-transport-and-siglus-pcmch.md) | Shared running transport clock, preserved delayed resume, retained stop completion and original PCMCH semantics | implemented bounded profile; full native routing/events/discovery remain open |
 | [0084](0084-kinematic-doppler-and-motion-capture.md) | Shared radial Doppler, owner world velocity capture and observable worker pitch | implemented direct model; propagation delay and per-path Doppler remain open |
+| [0085](0085-owner-clock-cue-programs.md) | Engine-owned deterministic cue banks and owner-clock scheduling | implemented bounded sequences; native mapping in 0086 |
+| [0086](0086-native-pcmevent-and-portable-cue-cursors.md) | Native Siglus PCMEVENT and portable scheduling intent | implemented bounded profile; original frame-action timing remains open |
+| [0087](0087-logical-input-journals-and-native-continuations.md) | Shared logical input receipts and native script/audio continuation | implemented framed input profile; raw OS/IME/analog events remain open |
+| [0088](0088-kag3-semantic-adapter-and-shared-prerequisites.md) | Original KAG3 facade over shared text, dispatch, regions, audio and atomic writes | bounded native profile; full games/saves/media/effects remain open |

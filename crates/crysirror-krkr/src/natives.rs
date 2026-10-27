@@ -18,14 +18,19 @@ pub type Rt = Runtime<KrkrHost>;
 pub fn install(rt: &mut Rt) {
     crate::constants::install_tvp_constants(rt);
     install_system(rt);
+    crate::save_struct::install(rt);
     install_debug(rt);
     install_storages(rt);
     install_scripts(rt);
     install_plugins(rt);
     install_timer(rt);
+    crate::async_trigger::install(rt);
     crate::menus::install(rt);
     install_window(rt);
     install_layer(rt);
+    crate::sound::install(rt);
+    crate::video::install(rt);
+    crate::pointer::install(rt);
 }
 
 // ---------------------------------------------------------------- helpers
@@ -302,7 +307,22 @@ fn install_system(rt: &mut Rt) {
             ),
         ],
     );
-    rt.set_object_member(h, "title", Variant::String(String::new()));
+    rt.set_object_member(h, "__title", Variant::String(String::new()));
+    rt.register_object_native_property(
+        h,
+        "title",
+        |rt, _| {
+            let h = rt.global_member("System").object_handle().unwrap();
+            Ok(rt.object_member(h, "__title"))
+        },
+        |rt, _, v| {
+            let text = v.to_tjs_string()?;
+            let h = rt.global_member("System").object_handle().unwrap();
+            rt.host_mut().ui_op(json!({"op":"set_title","text":text}));
+            rt.set_object_member(h, "__title", Variant::String(text));
+            Ok(())
+        },
+    );
     rt.set_object_member(h, "exceptionHandler", Variant::Void);
 }
 
@@ -522,6 +542,7 @@ fn install_timer(rt: &mut Rt) {
         rt.host_mut().timers.insert(
             h.0,
             TimerState {
+                mode: 0,
                 interval: 1000,
                 enabled: false,
                 capacity: 6,
@@ -556,14 +577,33 @@ fn install_timer(rt: &mut Rt) {
         class,
         &[
             (
+                "mode",
+                |rt, t| Ok(Variant::Integer(timer(rt, t)?.mode as i64)),
+                |rt, t, v| {
+                    let n = v.to_integer()?;
+                    if !(0..=2).contains(&n) {
+                        return Err(TjsError::runtime("invalid Timer.mode"));
+                    }
+                    timer_mut(rt, t)?.mode = n as u8;
+                    Ok(())
+                },
+            ),
+            (
                 "interval",
                 |rt, t| Ok(Variant::Integer(timer(rt, t)?.interval as i64)),
                 |rt, t, v| {
                     let now = rt.host().now;
-                    let i = v.to_integer()?.max(1) as u64;
+                    let i = v.to_integer()?.max(0) as u64;
                     let s = timer_mut(rt, t)?;
                     s.interval = i;
-                    s.next = now + i;
+                    s.next = now
+                        .checked_add(i)
+                        .ok_or_else(|| TjsError::runtime("timer deadline overflow"))?;
+                    let h = this_of(rt, t, "Timer.interval")?;
+                    let client = rt.host().client;
+                    rt.host_mut()
+                        .deferred
+                        .cancel(client, crate::async_trigger::target(h.0, 1));
                     Ok(())
                 },
             ),
@@ -578,6 +618,13 @@ fn install_timer(rt: &mut Rt) {
                         s.next = now + s.interval;
                     }
                     s.enabled = on;
+                    if !on {
+                        let h = this_of(rt, t, "Timer.enabled")?;
+                        let client = rt.host().client;
+                        rt.host_mut()
+                            .deferred
+                            .cancel(client, crate::async_trigger::target(h.0, 1));
+                    }
                     Ok(())
                 },
             ),
@@ -636,13 +683,70 @@ fn install_window(rt: &mut Rt) {
         );
         let root = crate::menus::root(rt, h)?;
         rt.host_mut().windows.get_mut(&h.0).unwrap().menu = Some(root.0);
-        rt.set_object_member(h, "caption", Variant::String(String::new()));
+        rt.set_object_member(h, "__caption", Variant::String(String::new()));
         if let Variant::Object(class) = rt.global_member("Window") {
             rt.set_object_member(class, "mainWindow", Variant::self_bound(h));
         }
         Ok(Variant::Void)
     });
+    rt.register_object_native_property(class, "focusedLayer", |_, _| Ok(Variant::Null), read_only);
+    rt.register_object_native_property(
+        class,
+        "caption",
+        |rt, t| {
+            let h = this_of(rt, t, "Window.caption")?;
+            Ok(rt.object_member(h, "__caption"))
+        },
+        |rt, t, v| {
+            let h = this_of(rt, t, "Window.caption")?;
+            let text = v.to_tjs_string()?;
+            rt.host_mut().ui_op(json!({"op":"set_title","text":text}));
+            rt.set_object_member(h, "__caption", Variant::String(text));
+            Ok(())
+        },
+    );
+    rt.register_object_native_property(
+        class,
+        "fullScreen",
+        |rt, t| {
+            let h = this_of(rt, t, "Window.fullScreen")?;
+            Ok(Variant::Integer(
+                rt.object_member(h, "__fullscreen").is_truthy() as i64,
+            ))
+        },
+        |rt, t, v| {
+            let h = this_of(rt, t, "Window.fullScreen")?;
+            let enabled = v.is_truthy();
+            rt.host_mut()
+                .ui_op(json!({"op":"set_fullscreen","enabled":enabled}));
+            rt.set_object_member(h, "__fullscreen", Variant::Integer(enabled as i64));
+            Ok(())
+        },
+    );
     rt.set_object_member(class, "mainWindow", Variant::Null);
+    rt.register_object_native_property(
+        class,
+        "borderStyle",
+        |rt, t| {
+            let h = this_of(rt, t, "Window.borderStyle")?;
+            Ok(rt.object_member(h, "__borderStyle"))
+        },
+        |rt, t, v| {
+            let h = this_of(rt, t, "Window.borderStyle")?;
+            let n = v.to_integer()?;
+            let (decorated, resizable) = match n {
+                0 => (false, false),
+                1 | 3 => (true, false),
+                2 | 4 | 5 => (true, true),
+                _ => return Err(TjsError::runtime("unknown Window.borderStyle")),
+            };
+            rt.set_object_member(h, "__borderStyle", Variant::Integer(n));
+            rt.host_mut().ui_op(
+                json!({"op":"set_window_policy","decorated":decorated,"resizable":resizable}),
+            );
+            Ok(())
+        },
+    );
     let set_inner: Native = |rt, this, a| {
         let h = this_of(rt, this, "Window.setInnerSize")?;
         let (w, height) = (
@@ -657,6 +761,19 @@ fn install_window(rt: &mut Rt) {
         rt,
         class,
         &[
+            ("onMouseDown", |_, _, _| Ok(Variant::Void)),
+            ("onMouseUp", |_, _, _| Ok(Variant::Void)),
+            ("onMouseMove", |_, _, _| Ok(Variant::Void)),
+            ("onClick", |_, _, _| Ok(Variant::Void)),
+            ("onKeyDown", |_, _, _| Ok(Variant::Void)),
+            ("onKeyUp", |_, _, _| Ok(Variant::Void)),
+            ("hideMouseCursor", |rt, t, _| {
+                let h = this_of(rt, t, "Window.hideMouseCursor")?;
+                rt.set_object_member(h, "__temporary_cursor_hide", Variant::Integer(1));
+                rt.host_mut()
+                    .ui_op(json!({"op":"set_cursor_visible","visible":false}));
+                Ok(Variant::Void)
+            }),
             ("setInnerSize", set_inner),
             ("setSize", set_inner),
             // The desktop frontend owns the OS window; its position and
@@ -770,7 +887,7 @@ fn window_mut(rt: &mut Rt, h: ObjectHandle) -> Result<&mut WindowState> {
 pub const DEFAULT_FONT_HEIGHT: i64 = 24;
 
 fn font_size(rt: &Rt, font: ObjectHandle) -> Result<u64> {
-    for property in ["bold", "italic", "angle"] {
+    for property in ["italic", "angle"] {
         if rt.object_member(font, property).to_integer()? != 0 {
             return Err(unsupported(
                 &format!("Font.{property}"),
@@ -868,6 +985,8 @@ fn install_layer(rt: &mut Rt) {
         rt.set_object_member(h, "name", Variant::String(String::new()));
         for (k, v) in [
             ("hitThreshold", 16),
+            ("hitType", 0),
+            ("showParentHint", 1),
             ("focusable", 0),
             ("enabled", 1),
             ("face", 0),
@@ -882,6 +1001,19 @@ fn install_layer(rt: &mut Rt) {
         rt,
         class,
         &[
+            ("onHitTest", |rt, t, a| {
+                let h = this_of(rt, t, "Layer.onHitTest")?;
+                let hit = a
+                    .get(2)
+                    .ok_or_else(|| TjsError::runtime("onHitTest needs a hit flag"))?
+                    .is_truthy();
+                rt.set_object_member(h, "__hit_test_work", Variant::Integer(hit as i64));
+                Ok(Variant::Void)
+            }),
+            ("onMouseDown", |_, _, _| Ok(Variant::Void)),
+            ("onMouseUp", |_, _, _| Ok(Variant::Void)),
+            ("onMouseMove", |_, _, _| Ok(Variant::Void)),
+            ("onClick", |_, _, _| Ok(Variant::Void)),
             ("setPos", |rt, t, a| {
                 let h = this_of(rt, t, "Layer.setPos")?;
                 let (x, y) = (
@@ -934,7 +1066,77 @@ fn install_layer(rt: &mut Rt) {
                 l.dirty = true;
                 Ok(Variant::Void)
             }),
+            ("getProvincePixel", |rt, t, a| {
+                let h = this_of(rt, t, "Layer.getProvincePixel")?;
+                let v = rt
+                    .host()
+                    .layer(h)?
+                    .regions
+                    .get(
+                        rt.host().client,
+                        [
+                            need_int(&a, 0, "province x")?,
+                            need_int(&a, 1, "province y")?,
+                        ],
+                    )
+                    .map_err(|e| TjsError::runtime(e.to_string()))?;
+                Ok(Variant::Integer(v as i64))
+            }),
+            // No modal mode is admitted by this profile. Removing the absent
+            // mode is valid; entering one remains an explicit capability error.
+            ("removeMode", |rt, t, _| {
+                let h = this_of(rt, t, "Layer.removeMode")?;
+                rt.host().layer(h)?;
+                Ok(Variant::Void)
+            }),
+            ("setMode", |_, _, _| {
+                Err(unsupported(
+                    "Layer.setMode",
+                    "shared native-layer modal input mapping",
+                ))
+            }),
+            ("focus", |rt, t, _| {
+                let h = this_of(rt, t, "Layer.focus")?;
+                if rt.object_member(h, "focusable").is_truthy() {
+                    return Err(unsupported(
+                        "Layer.focus",
+                        "native layer keyboard focus mapping",
+                    ));
+                }
+                Ok(Variant::Integer(0))
+            }),
+            ("freeImage", |rt, t, _| {
+                let h = this_of(rt, t, "Layer.freeImage")?;
+                let slot = rt.host().layer(h)?.slot;
+                rt.host_mut()
+                    .canvas_op(json!({"op":"clear","id":slot,"color":[0,0,0,0]}));
+                rt.host_mut().layer_mut(h)?.blank = true;
+                rt.host_mut().layer_mut(h)?.has_image = false;
+                Ok(Variant::Void)
+            }),
             ("loadImages", layer_load_images),
+            // The stock KAG3 loader always calls this, even with nine void
+            // arguments. An identity transform needs no retained operation.
+            // Nonidentity correction must acquire a shared Canvas capability.
+            ("adjustGamma", |rt, t, a| {
+                let h = this_of(rt, t, "Layer.adjustGamma")?;
+                rt.host().layer(h)?;
+                if a.len() > 9 {
+                    return Err(unsupported("Layer.adjustGamma", "nine channel parameters"));
+                }
+                for i in 0..9 {
+                    if let Some(v) = a.get(i).filter(|v| !matches!(v, Variant::Void)) {
+                        let expected = [1.0, 0.0, 255.0][i % 3];
+                        if v.to_real()? != expected {
+                            return Err(unsupported(
+                                "Layer.adjustGamma",
+                                "nonidentity Canvas gamma correction",
+                            ));
+                        }
+                    }
+                }
+                Ok(Variant::Void)
+            }),
             ("fillRect", layer_fill_rect),
             ("colorRect", layer_color_rect),
             ("copyRect", |rt, t, a| layer_copy(rt, t, a, true)),
@@ -1008,6 +1210,47 @@ fn install_layer(rt: &mut Rt) {
         class,
         &[
             (
+                "nodeVisible",
+                |rt, t| {
+                    let h = this_of(rt, t, "Layer.nodeVisible")?;
+                    let mut node = Some(h.0);
+                    let mut depth = 0;
+                    while let Some(id) = node {
+                        let l = rt.host().layer(ObjectHandle(id))?;
+                        if !l.visible {
+                            return Ok(Variant::Integer(0));
+                        }
+                        node = l.parent;
+                        depth += 1;
+                        if depth > 64 {
+                            return Err(TjsError::runtime("layer visibility ancestry limit"));
+                        }
+                    }
+                    Ok(Variant::Integer(1))
+                },
+                read_only,
+            ),
+            (
+                "nodeEnabled",
+                |rt, t| {
+                    let h = this_of(rt, t, "Layer.nodeEnabled")?;
+                    let mut node = Some(h.0);
+                    let mut depth = 0;
+                    while let Some(id) = node {
+                        if !rt.object_member(ObjectHandle(id), "enabled").is_truthy() {
+                            return Ok(Variant::Integer(0));
+                        }
+                        node = rt.host().layer(ObjectHandle(id))?.parent;
+                        depth += 1;
+                        if depth > 64 {
+                            return Err(TjsError::runtime("layer enable ancestry limit"));
+                        }
+                    }
+                    Ok(Variant::Integer(1))
+                },
+                read_only,
+            ),
+            (
                 "left",
                 |rt, t| layer_get(rt, t, |l| l.left),
                 |rt, t, v| layer_set(rt, t, v, |l, x| l.left = x),
@@ -1036,6 +1279,48 @@ fn install_layer(rt: &mut Rt) {
                 "imageTop",
                 |rt, t| layer_get(rt, t, |l| l.image_top),
                 |rt, t, v| layer_set(rt, t, v, |l, x| l.image_top = x),
+            ),
+            (
+                "hint",
+                |_, _| Ok(Variant::String(String::new())),
+                |_, _, v| {
+                    if !v.to_tjs_string()?.is_empty() {
+                        return Err(unsupported("Layer.hint", "shared tooltip mapping"));
+                    }
+                    Ok(())
+                },
+            ),
+            (
+                "imageModified",
+                |rt, t| layer_get(rt, t, |l| l.image_modified as i64),
+                |rt, t, v| {
+                    let h = this_of(rt, t, "imageModified")?;
+                    rt.host_mut().layer_mut(h)?.image_modified = v.is_truthy();
+                    Ok(())
+                },
+            ),
+            (
+                "hasImage",
+                |rt, t| layer_get(rt, t, |l| l.has_image as i64),
+                |rt, t, v| {
+                    let h = this_of(rt, t, "hasImage")?;
+                    let l = rt.host().layer(h)?.clone();
+                    if v.is_truthy() {
+                        if !l.has_image {
+                            rt.host_mut().reset_surface(
+                                h,
+                                l.image_width,
+                                l.image_height,
+                                [0; 4],
+                            )?;
+                        }
+                    } else {
+                        rt.host_mut()
+                            .canvas_op(json!({"op":"clear","id":l.slot,"color":[0,0,0,0]}));
+                        rt.host_mut().layer_mut(h)?.has_image = false;
+                    }
+                    Ok(())
+                },
             ),
             (
                 "imageWidth",
@@ -1100,11 +1385,57 @@ fn install_layer(rt: &mut Rt) {
                         .map(|p| Variant::self_bound(ObjectHandle(p)))
                         .unwrap_or(Variant::Null))
                 },
-                |_, _, _| {
-                    Err(unsupported(
-                        "Layer.parent assignment",
-                        "re-parenting retained layers (not implemented yet)",
-                    ))
+                |rt, t, v| {
+                    let h = this_of(rt, t, "Layer.parent")?;
+                    let parent = object_arg(&v)
+                        .map(|p| rt.bound_this(p).unwrap_or(p))
+                        .ok_or_else(|| {
+                            unsupported(
+                                "Layer.parent = null",
+                                "detached native tree lifetime mapping",
+                            )
+                        })?;
+                    let l = rt.host().layer(h)?.clone();
+                    let p = rt.host().layer(parent)?;
+                    if l.window != p.window {
+                        return Err(TjsError::runtime(
+                            "native parent belongs to a different window",
+                        ));
+                    }
+                    if rt.host().windows.get(&l.window).and_then(|w| w.primary) == Some(h.0) {
+                        return Err(unsupported(
+                            "primary layer reparent",
+                            "native primary-tree replacement mapping",
+                        ));
+                    }
+                    if l.parent == Some(parent.0) {
+                        return Ok(());
+                    }
+                    let mut cursor = Some(parent.0);
+                    let mut depth = 0;
+                    while let Some(id) = cursor {
+                        if id == h.0 {
+                            return Err(TjsError::runtime("native parent cycle"));
+                        }
+                        depth += 1;
+                        if depth > 64 {
+                            return Err(TjsError::runtime("native parent depth"));
+                        }
+                        cursor = rt.host().layers.get(&id).and_then(|l| l.parent);
+                    }
+                    if let Some(old) = l.parent.and_then(|id| rt.host_mut().layers.get_mut(&id)) {
+                        old.children.retain(|id| *id != h.0);
+                    }
+                    rt.host_mut()
+                        .layers
+                        .get_mut(&parent.0)
+                        .unwrap()
+                        .children
+                        .push(h.0);
+                    let l = rt.host_mut().layer_mut(h)?;
+                    l.parent = Some(parent.0);
+                    l.dirty = true;
+                    Ok(())
                 },
             ),
             (
@@ -1175,7 +1506,7 @@ fn restack(rt: &mut Rt, t: Option<ObjectHandle>, f: fn(&mut Vec<usize>, usize)) 
 
 fn set_image_size(rt: &mut Rt, h: ObjectHandle, w: i64, ht: i64) -> Result<()> {
     let l = rt.host().layer(h)?;
-    if l.image_width == w && l.image_height == ht {
+    if l.has_image && l.image_width == w && l.image_height == ht {
         return Ok(());
     }
     if !l.blank {
@@ -1209,6 +1540,15 @@ fn check_face(rt: &Rt, h: ObjectHandle, member: &str) -> Result<()> {
 fn layer_load_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
     let h = this_of(rt, t, "Layer.loadImages")?;
     let name = string(&a, 0, "Layer.loadImages")?;
+    if crate::storage::save_path(&name)
+        .map_err(|e| TjsError::runtime(e.to_string()))?
+        .is_some()
+    {
+        return Err(unsupported(
+            "Layer.loadImages",
+            "image preparation from the Save mount",
+        ));
+    }
     if int(&a, 1, 0x1fffffff)? != 0x1fffffff {
         return Err(unsupported(
             "Layer.loadImages colour key",
@@ -1239,11 +1579,35 @@ fn layer_load_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> R
     };
     host.canvas_op(json!({"op":"set","id":slot,"layer":{"id":0,"rect":[0,0,w,ht],"paint":{"kind":"image","asset":path}}}));
     host.api_calls += 1;
+    let opaque = rt
+        .host()
+        .images
+        .as_ref()
+        .ok_or_else(|| TjsError::runtime("image metadata absent"))?
+        .opaque(&path)
+        .map_err(|e| TjsError::runtime(e.to_string()))?;
+    rt.host_mut().layer_mut(h)?.full_alpha = opaque.then_some(255);
     Ok(Variant::Void)
 }
 
 fn layer_fill_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
     let h = this_of(rt, t, "Layer.fillRect")?;
+    if rt.object_member(h, "face").to_integer()? == 3 {
+        let owner = rt.host().client;
+        let rect = [
+            need_int(&a, 0, "province x")?,
+            need_int(&a, 1, "province y")?,
+            need_int(&a, 2, "province width")?,
+            need_int(&a, 3, "province height")?,
+        ];
+        let region = need_int(&a, 4, "province region")? as u32 & 255;
+        rt.host_mut()
+            .layer_mut(h)?
+            .regions
+            .fill(owner, rect, region)
+            .map_err(|e| TjsError::runtime(e.to_string()))?;
+        return Ok(Variant::Void);
+    }
     check_face(rt, h, "Layer.fillRect")?;
     let [x, y, w, ht] = [
         need_int(&a, 0, "Layer.fillRect")?,
@@ -1261,6 +1625,7 @@ fn layer_fill_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     if covers {
         host.canvas_op(json!({"op":"clear","id":l.slot,"color":color}));
         host.layer_mut(h)?.blank = color[3] == 0;
+        host.layer_mut(h)?.full_alpha = Some(color[3]);
     } else if color[3] == 255 {
         host.canvas_op(json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x,y,w,ht],"paint":{"kind":"solid","color":color}}}));
         host.layer_mut(h)?.blank = false;
@@ -1278,6 +1643,22 @@ fn layer_fill_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
 
 fn layer_color_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
     let h = this_of(rt, t, "Layer.colorRect")?;
+    if rt.object_member(h, "face").to_integer()? == 3 {
+        let rect = [
+            need_int(&a, 0, "province x")?,
+            need_int(&a, 1, "province y")?,
+            need_int(&a, 2, "province width")?,
+            need_int(&a, 3, "province height")?,
+        ];
+        let region = need_int(&a, 4, "province region")? as u32 & 255;
+        let owner = rt.host().client;
+        rt.host_mut()
+            .layer_mut(h)?
+            .regions
+            .fill(owner, rect, region)
+            .map_err(|e| TjsError::runtime(e.to_string()))?;
+        return Ok(Variant::Void);
+    }
     check_face(rt, h, "Layer.colorRect")?;
     let [x, y, w, ht] = [
         need_int(&a, 0, "Layer.colorRect")?,
@@ -1354,9 +1735,14 @@ fn layer_copy(
     }
     let source = rt.host().layer(src)?.clone();
     let dest = rt.host().layer(h)?.clone();
-    let whole = [dx, dy, sx, sy] == [0, 0, 0, 0]
-        && [sw, sh] == [source.image_width, source.image_height]
-        && [sw, sh] == [dest.image_width, dest.image_height];
+    // A complete destination replacement can select one cell from a larger
+    // source atlas. The shared Canvas copy clips/snapshots that cell itself.
+    let whole = [dx, dy] == [0, 0]
+        && [sw, sh] == [dest.image_width, dest.image_height]
+        && sx >= 0
+        && sy >= 0
+        && sx.checked_add(sw).is_some_and(|r| r <= source.image_width)
+        && sy.checked_add(sh).is_some_and(|b| b <= source.image_height);
     if replace && !whole && !dest.blank {
         return Err(unsupported(
             "partial Layer.copyRect onto drawn pixels",
@@ -1370,6 +1756,13 @@ fn layer_copy(
     );
     let blank = (replace && whole && source.blank) || (dest.blank && source.blank);
     host.layer_mut(h)?.blank = blank;
+    host.layer_mut(h)?.full_alpha = if replace && whole {
+        source.full_alpha
+    } else if !replace && dest.full_alpha == Some(255) {
+        Some(255)
+    } else {
+        None
+    };
     host.api_calls += 1;
     Ok(Variant::Void)
 }
@@ -1393,6 +1786,7 @@ fn layer_assign_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) ->
     host.canvas_op(json!({"op":"copy","source":source.slot,"destination":slot,
         "rect":[0,0,source.image_width,source.image_height],"position":[0,0],"opacity":255,"replace":true}));
     host.layer_mut(h)?.blank = source.blank;
+    host.layer_mut(h)?.full_alpha = source.full_alpha;
     host.api_calls += 1;
     Ok(Variant::Void)
 }
@@ -1414,10 +1808,12 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     }
     let opa = int(&a, 4, 255)?;
     let color = argb(need_int(&a, 3, "Layer.drawText")?, Some(opa));
-    if int(&a, 6, 0)? != 0 {
+    let shadow_level = int(&a, 6, 0)?;
+    let blur = int(&a, 8, 0)?;
+    if shadow_level != 0 && blur != 0 {
         return Err(unsupported(
-            "Layer.drawText shadows",
-            "engine glyph shadow styles on canvases",
+            "Layer.drawText blurred shadow/outline",
+            "shared retained glyph coverage effects",
         ));
     }
     if text.is_empty() || opa <= 0 {
@@ -1427,15 +1823,46 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
         .ok_or_else(|| TjsError::runtime("Layer.font missing"))?;
     let size = font_size(rt, font)?;
     let l = rt.host().layer(h)?.clone();
+    let bold = rt.object_member(font, "bold").is_truthy();
+    if !bold && shadow_level == 0 {
+        let alias = rt.host().font.clone();
+        let host = rt.host_mut();
+        if host.layer(h)?.full_alpha != Some(255) {
+            host.layer_mut(h)?.full_alpha = None;
+        }
+        host.canvas_op(json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x,y,(l.image_width-x).max(1),size as i64*2],"paint":{"kind":"text","text":text,"font":alias,"size":size,"color":color,"layout":crysirror_core::service::UNWRAPPED_TEXT_LAYOUT}}}));
+        host.layer_mut(h)?.blank = false;
+        host.api_calls += 1;
+        return Ok(Variant::Void);
+    }
+    if text.len() > 4096 {
+        return Err(TjsError::runtime(
+            "native positioned text exceeds 4096 bytes",
+        ));
+    }
+    let host = rt.host();
+    let placements = host
+        .text_measurement
+        .as_ref()
+        .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?
+        .position_simple(&host.font, size as u16, &text)
+        .map_err(|e| TjsError::runtime(e.to_string()))?;
+    let glyphs = placements
+        .into_iter()
+        .map(|g| json!({"character":g.character.to_string(),"baseline":g.baseline}))
+        .collect::<Vec<_>>();
+    let bold = rt.object_member(font, "bold").is_truthy();
+    let alias = rt.host().font.clone();
     let host = rt.host_mut();
-    // Every KiriKiri face maps to the configured project font alias.
-    let alias = host.font.clone();
-    let width = (l.image_width - x).max(1);
-    host.canvas_op(
-        json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x,y,width,size as i64 * 2],
-        "paint":{"kind":"text","text":text,"font":alias,"size":size,"color":color,
-        "layout":crysirror_core::service::UNWRAPPED_TEXT_LAYOUT}}}),
-    );
+    if host.layer(h)?.full_alpha != Some(255) {
+        host.layer_mut(h)?.full_alpha = None;
+    }
+    if shadow_level != 0 {
+        let offset = [int(&a, 9, 0)?, int(&a, 10, 0)?];
+        let shadow = argb(int(&a, 7, 0)?, Some(opa * shadow_level.clamp(0, 255) / 255));
+        host.canvas_op(json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x+offset[0],y+offset[1],l.image_width.max(1),l.image_height.max(1)],"paint":{"kind":"glyph_run","font":alias,"size":size,"color":shadow,"bold":bold,"glyphs":glyphs}}}));
+    }
+    host.canvas_op(json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x,y,l.image_width.max(1),l.image_height.max(1)],"paint":{"kind":"glyph_run","font":alias,"size":size,"color":color,"bold":bold,"glyphs":glyphs}}}));
     host.layer_mut(h)?.blank = false;
     host.api_calls += 1;
     Ok(Variant::Void)

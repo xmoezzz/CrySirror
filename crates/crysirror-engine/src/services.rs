@@ -84,6 +84,8 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("ui", "set_value", "Ui.setValue"),
     ("ui", "set_text", "Ui.setText"),
     ("ui", "set_title", "Ui.setTitle"),
+    ("ui", "set_window_policy", "Ui.setWindowPolicy"),
+    ("ui", "set_fullscreen", "Ui.setFullscreen"),
     ("ui", "set_cursor_visible", "Ui.setCursorVisible"),
     ("ui", "insert_text", "Ui.insertText"),
     ("ui", "backspace", "Ui.backspace"),
@@ -289,6 +291,8 @@ fn ui_info() -> &'static ClassInfo {
             m("setEnabled", vec![("id", T::Int), ("enabled", T::Bool)], T::Void, "Enable/disable input."),
             m("setValue", vec![("id", T::Int), ("value", T::Number)], T::Void, "Toggle/slider value."),
             m("setCursorVisible",vec![("visible",T::Bool)],T::Void,"Set engine cursor presentation visibility."),
+            m("setFullscreen",vec![("enabled",T::Bool)],T::Void,"Request borderless desktop fullscreen. Headless hosts retain client-owned state; the desktop applies it at frame publication."),
+            m("setWindowPolicy",vec![("decorated",T::Bool),("resizable",T::Bool)],T::Void,"Request desktop decorations and resizing through engine-owned client state. Headless hosts retain the request; the desktop applies it at frame publication."),
             m("setTitle",vec![("text",T::String)],T::Void,"Set engine presentation title."),
             m("focusTextField", vec![("id", T::Int)], T::Void, "Focus an enabled, visible text field owned by this client."),
             m("insertText", vec![("text", T::String)], T::Void, "Append committed single-line Unicode to the focused text field, up to max_length Unicode scalars."),
@@ -377,6 +381,8 @@ impl Class for UiClass {
             "setCursorVisible" => UiCommand::SetCursorVisible {
                 visible: arg(args, 0, "visible")?.as_bool()?,
             },
+            "setFullscreen" => UiCommand::SetFullscreen{enabled:arg(args,0,"enabled")?.as_bool()?},
+            "setWindowPolicy" => UiCommand::SetWindowPolicy{decorated:arg(args,0,"decorated")?.as_bool()?,resizable:arg(args,1,"resizable")?.as_bool()?},
             "setTitle" => UiCommand::SetTitle {
                 text: arg(args, 0, "text")?.as_str()?.into(),
             },

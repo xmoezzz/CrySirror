@@ -662,6 +662,8 @@ declare class Text {
   status(ticket: number): Record<string, any>;
   /** Release a ticket and cancel pending preparation. Already published blocks remain owned by Text until remove. */
   cancel(ticket: number): void;
+  /** Unwrapped simple-horizontal glyph placements {character,baseline:[x,y]} for retained GlyphRun paint. Integer size 1..512; no surface or native VM. Live calls are bounded to 4096 UTF-8 bytes; complex shaping uses the rich text API. */
+  positionSimple(font: string, size: number, text: string): Record<string, any>[];
   /** Measure an unwrapped single line using simple-horizontal-v1 kerning and advances. Returns advance, line_height, ascent and descent; does not create a surface. */
   measureSimple(font: string, size: number, text: string): Record<string, any>;
   /** Offline rich-text preparation; live hosts use beginDraw/drawAsync. Returns a shared surface path for a layer. */
@@ -709,6 +711,10 @@ declare class Ui {
   setValue(id: number, value: number): void;
   /** Set engine cursor presentation visibility. */
   setCursorVisible(visible: boolean): void;
+  /** Request borderless desktop fullscreen. Headless hosts retain client-owned state; the desktop applies it at frame publication. */
+  setFullscreen(enabled: boolean): void;
+  /** Request desktop decorations and resizing through engine-owned client state. Headless hosts retain the request; the desktop applies it at frame publication. */
+  setWindowPolicy(decorated: boolean, resizable: boolean): void;
   /** Set engine presentation title. */
   setTitle(text: string): void;
   /** Focus an enabled, visible text field owned by this client. */

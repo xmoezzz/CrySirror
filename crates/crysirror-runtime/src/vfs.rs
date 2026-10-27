@@ -6,19 +6,19 @@ use cap_std::{
     fs::{Dir, OpenOptions},
 };
 use crysirror_core::{
+    Error, Result,
     path::{Mount, VfsPath},
     service::{AssetReader, ClientStorage, FileSystem, StorageLease},
     state::ClientId,
-    vfs::{strip_mount, VfsProvider},
-    Error, Result,
+    vfs::{VfsProvider, strip_mount},
 };
 use std::{
     collections::BTreeMap,
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Mutex, RwLock,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
@@ -101,6 +101,7 @@ fn provider_snapshot(mounts: &ProviderMounts) -> Vec<ProviderMount> {
 }
 
 pub struct DiskVfs {
+    writes: crysirror_tasks::TaskPool,
     pub assets: Dir,
     writable_root: Dir,
     mounts: BTreeMap<ClientId, Mounts>,
@@ -111,6 +112,8 @@ impl DiskVfs {
     pub fn new(assets: &Path, writable: &Path) -> Result<Self> {
         std::fs::create_dir_all(writable).map_err(io)?;
         Ok(Self {
+            writes: crysirror_tasks::TaskPool::new("vfs-write", 1, 64)
+                .map_err(|e| Error::Io(e.to_string()))?,
             assets: Dir::open_ambient_dir(assets, ambient_authority()).map_err(io)?,
             writable_root: Dir::open_ambient_dir(writable, ambient_authority()).map_err(io)?,
             mounts: BTreeMap::new(),
@@ -182,6 +185,7 @@ impl DiskVfs {
     pub fn storage(&self, client: ClientId) -> Result<Arc<dyn ClientStorage>> {
         let m = self.mounts.get(&client).ok_or(Error::NotFound)?;
         Ok(Arc::new(CapStorage {
+            writes: self.writes.clone(),
             asset: m.asset.try_clone().map_err(io)?,
             save: m.save.try_clone().map_err(io)?,
             cache: m.cache.try_clone().map_err(io)?,
@@ -238,6 +242,7 @@ impl DiskVfs {
     }
 }
 struct CapStorage {
+    writes: crysirror_tasks::TaskPool,
     asset: Dir,
     save: Dir,
     cache: Dir,
@@ -279,7 +284,57 @@ impl CapStorage {
         }
     }
 }
+struct PendingWrite {
+    task: Option<crysirror_tasks::Task<()>>,
+    state: crysirror_core::service::StorageWriteState,
+}
+impl crysirror_core::service::StorageWrite for PendingWrite {
+    fn poll(&mut self) -> Result<crysirror_core::service::StorageWriteState> {
+        if let Some(task) = &mut self.task {
+            match task.try_take() {
+                Ok(None) => (),
+                Ok(Some(())) => {
+                    self.task = None;
+                    self.state = crysirror_core::service::StorageWriteState::Ready;
+                }
+                Err(e) => {
+                    self.task = None;
+                    self.state = crysirror_core::service::StorageWriteState::Failed(e.to_string());
+                }
+            }
+        }
+        Ok(self.state.clone())
+    }
+}
 impl ClientStorage for CapStorage {
+    fn begin_write_atomic(
+        &self,
+        path: &VfsPath,
+        data: Arc<[u8]>,
+    ) -> Result<Box<dyn crysirror_core::service::StorageWrite>> {
+        if path.mount() == Mount::Asset {
+            return Err(Error::ReadOnly);
+        }
+        if data.len() > 4 * 1024 * 1024 {
+            return Err(Error::Limit("async atomic write bytes"));
+        }
+        let permit = self
+            .writes
+            .reserve()
+            .map_err(|e| Error::Io(e.to_string()))?;
+        let dir = self.dir(path.mount()).try_clone().map_err(io)?;
+        let relative = path.relative().to_owned();
+        let task = permit
+            .spawn(move |cancel| {
+                cancel.check()?;
+                write_atomic(&dir, &relative, &data).map_err(|e| anyhow::anyhow!("{e}"))
+            })
+            .map_err(|e| Error::Io(e.to_string()))?;
+        Ok(Box::new(PendingWrite {
+            task: Some(task),
+            state: crysirror_core::service::StorageWriteState::Pending,
+        }))
+    }
     fn acquire_lease(&self, name: &str) -> Result<Box<dyn StorageLease>> {
         if name.is_empty()
             || name.len() > 128
@@ -487,9 +542,10 @@ mod tests {
             assert_eq!(data, expected);
         }
         assert!(fs.open_asset_file(ClientId(9), &path).is_err());
-        assert!(fs
-            .open_asset_file(ClientId(1), &VfsPath::new(Mount::Save, "song.wav").unwrap())
-            .is_err());
+        assert!(
+            fs.open_asset_file(ClientId(1), &VfsPath::new(Mount::Save, "song.wav").unwrap())
+                .is_err()
+        );
         let mut provider = MemoryProvider::new();
         provider.insert("song.wav", b"overlay".to_vec()).unwrap();
         fs.mount_provider(ClientId(1), "", Arc::new(provider))
@@ -522,9 +578,10 @@ mod tests {
             fs.provider_mounts(ClientId(1)),
             vec![("pack".into(), "memory")]
         );
-        assert!(fs
-            .mount_provider(ClientId(9), "", Arc::new(MemoryProvider::new()))
-            .is_err());
+        assert!(
+            fs.mount_provider(ClientId(9), "", Arc::new(MemoryProvider::new()))
+                .is_err()
+        );
     }
     #[test]
     fn storage_handle_is_client_scoped_thread_safe_and_lists() {
@@ -554,9 +611,11 @@ mod tests {
         });
         t.join().unwrap();
         let other = fs.storage(ClientId(2)).unwrap();
-        assert!(other
-            .read(&VfsPath::new(Mount::Asset, "graph/a").unwrap())
-            .is_err());
+        assert!(
+            other
+                .read(&VfsPath::new(Mount::Asset, "graph/a").unwrap())
+                .is_err()
+        );
     }
     #[test]
     fn held_storage_observes_later_mounts_without_crossing_clients() {
@@ -610,10 +669,11 @@ mod tests {
         assert!(fs.open_asset_file(ClientId(2), &shadow).unwrap().is_some());
         // A matching mount disables the raw-disk shortcut even for a missing
         // provider entry; provider-aware storage still falls through to disk.
-        assert!(fs
-            .open_asset_file(ClientId(1), &fallback)
-            .unwrap()
-            .is_none());
+        assert!(
+            fs.open_asset_file(ClientId(1), &fallback)
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(held_a.read(&fallback).unwrap(), b"fallback");
         let mut bytes = [0; 8];
         assert_eq!(
@@ -720,17 +780,87 @@ mod tests {
         std::os::unix::fs::symlink(outside.path(), a.path().join("escape")).unwrap();
         let mut fs = DiskVfs::new(a.path(), w.path()).unwrap();
         fs.register(ClientId(1), "test", "game").unwrap();
-        assert!(fs
-            .open_asset_file(
+        assert!(
+            fs.open_asset_file(
                 ClientId(1),
                 &VfsPath::new(Mount::Asset, "escape/secret").unwrap()
             )
-            .is_err());
-        assert!(fs
-            .read(
+            .is_err()
+        );
+        assert!(
+            fs.read(
                 ClientId(1),
                 &VfsPath::new(Mount::Asset, "escape/secret").unwrap()
             )
-            .is_err());
+            .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod atomic_write_tests {
+    use super::*;
+    use crysirror_core::service::{StorageWrite, StorageWriteState};
+    fn poll(op: &mut dyn StorageWrite) -> StorageWriteState {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let s = op.poll().unwrap();
+            if s != StorageWriteState::Pending {
+                return s;
+            }
+            assert!(std::time::Instant::now() < end);
+            std::thread::yield_now();
+        }
+    }
+    #[test]
+    fn worker_commits_are_atomic_owner_scoped_and_retain_success_or_failure() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("assets")).unwrap();
+        let mut fs = DiskVfs::new(&d.path().join("assets"), &d.path().join("state")).unwrap();
+        fs.register(ClientId(1), "test", "a").unwrap();
+        fs.register(ClientId(2), "test", "b").unwrap();
+        let a = fs.storage(ClientId(1)).unwrap();
+        let b = fs.storage(ClientId(2)).unwrap();
+        let path = VfsPath::new(Mount::Save, "data/state.ksd").unwrap();
+        a.write_atomic(&path, b"old").unwrap();
+        let mut op = a
+            .begin_write_atomic(&path, Arc::from(&b"replacement"[..]))
+            .unwrap();
+        assert_eq!(poll(&mut *op), StorageWriteState::Ready);
+        assert_eq!(op.poll().unwrap(), StorageWriteState::Ready);
+        assert_eq!(a.read(&path).unwrap(), b"replacement");
+        assert!(b.read(&path).is_err());
+        assert!(
+            a.begin_write_atomic(
+                &VfsPath::new(Mount::Asset, "forbidden").unwrap(),
+                Arc::from(&b"x"[..])
+            )
+            .is_err()
+        );
+        let bad = VfsPath::new(Mount::Save, "data/state.ksd/child").unwrap();
+        let mut failed = a.begin_write_atomic(&bad, Arc::from(&b"bad"[..])).unwrap();
+        let result = poll(&mut *failed);
+        assert!(matches!(result, StorageWriteState::Failed(_)));
+        assert_eq!(failed.poll().unwrap(), result);
+        assert_eq!(a.read(&path).unwrap(), b"replacement");
+    }
+    #[test]
+    fn rejected_worker_admission_does_not_change_existing_file() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("assets")).unwrap();
+        let mut fs = DiskVfs::new(&d.path().join("assets"), &d.path().join("state")).unwrap();
+        fs.register(ClientId(1), "test", "a").unwrap();
+        let a = fs.storage(ClientId(1)).unwrap();
+        let path = VfsPath::new(Mount::Save, "value").unwrap();
+        a.write_atomic(&path, b"old").unwrap();
+        let permits = (0..fs.writes.stats().capacity)
+            .map(|_| fs.writes.reserve().unwrap())
+            .collect::<Vec<_>>();
+        assert!(a.begin_write_atomic(&path, Arc::from(&b"new"[..])).is_err());
+        assert_eq!(a.read(&path).unwrap(), b"old");
+        drop(permits);
+        let mut op = a.begin_write_atomic(&path, Arc::from(&b"new"[..])).unwrap();
+        assert_eq!(poll(&mut *op), StorageWriteState::Ready);
+        assert_eq!(a.read(&path).unwrap(), b"new");
     }
 }

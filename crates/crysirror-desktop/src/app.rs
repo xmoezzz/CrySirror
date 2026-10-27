@@ -584,6 +584,13 @@ impl App {
         if let Some((_, visible)) = self.core.rt().host.engine.ui.cursor {
             w.window.set_cursor_visible(visible);
         }
+        if let Some((_, enabled)) = self.core.rt().host.engine.ui.fullscreen {
+            if w.window.fullscreen().is_some()!=enabled{w.window.set_fullscreen(enabled.then_some(winit::window::Fullscreen::Borderless(None)));}
+        }
+        if let Some((_, policy)) = self.core.rt().host.engine.ui.window_policy {
+            w.window.set_decorations(policy.decorated);
+            w.window.set_resizable(policy.resizable);
+        }
         if let Some((_, title)) = &self.core.rt().host.engine.ui.title {
             w.window.set_title(title);
         }

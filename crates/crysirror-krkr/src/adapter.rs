@@ -69,7 +69,7 @@ impl Config {
         for name in &self.plugin_shells {
             let name = crate::plugins::canonical(name).map_err(|e| anyhow::anyhow!("{e}"))?;
             ensure!(
-                name != "menu.dll",
+                !matches!(name.as_str(), "menu.dll" | "kagparser.dll"),
                 "engine facade cannot be replaced by a plugin shell"
             );
         }
@@ -77,10 +77,20 @@ impl Config {
     }
 }
 
+struct FramePass {
+    fence: u64,
+    phase: u8,
+    handlers: Vec<Variant>,
+    handler: usize,
+    now: u64,
+}
+
 pub struct KrkrVm {
     client: ClientId,
     config: Config,
     rt: Option<Rt>,
+    inbox: crysirror_core::input_buffer::InputBuffer,
+    pass: Option<FramePass>,
     last_down: u64,
     last_pointer: [i32; 2],
     pressed: Option<usize>,
@@ -97,6 +107,8 @@ impl KrkrVm {
             client,
             config,
             rt: None,
+            inbox: crysirror_core::input_buffer::InputBuffer::new(client.0, 1, 256)?,
+            pass: None,
             last_down: 0,
             last_pointer: [-1, -1],
             pressed: None,
@@ -107,7 +119,7 @@ impl KrkrVm {
         })
     }
 
-    fn boot(&mut self, h: &mut dyn HostServices) -> Result<()> {
+    fn boot(&mut self, h: &mut dyn HostServices, input: InputFrame) -> Result<()> {
         let files = h.storage(self.client).map_err(err)?;
         let storage = Storage::new(files, &self.config.root)?;
         ensure!(
@@ -116,6 +128,8 @@ impl KrkrVm {
             self.config.startup
         );
         let mut host = KrkrHost::new(self.config.canvas, self.config.font_alias.clone());
+        host.client = self.client.0;
+        host.input = input;
         host.plugin_shells = self
             .config
             .plugin_shells
@@ -173,14 +187,126 @@ impl KrkrVm {
     }
 
     fn input(&mut self, input: InputFrame) -> Result<()> {
-        let rt = self.rt.as_ref().context("KiriKiri runtime absent")?;
-        let window = rt.host().windows.keys().next().copied().map(ObjectHandle);
+        self.rt.as_mut().unwrap().host_mut().input = input;
+        self.rt.as_mut().unwrap().host_mut().input.buttons_down |= input.buttons_pressed;
+        let rt = self.rt.as_mut().context("KiriKiri runtime absent")?;
+        let window = rt
+            .host()
+            .windows
+            .iter()
+            .find(|(_, w)| w.visible)
+            .map(|(h, _)| ObjectHandle(*h));
         let Some(window) = window else {
+            self.rt.as_mut().unwrap().host_mut().input = input;
             self.last_down = input.buttons_down;
             return Ok(());
         };
         let (x, y) = (i64::from(input.pointer_x), i64::from(input.pointer_y));
-        let hit = rt.host().hit(x, y);
+        let shift = |bits: u64| -> i64 {
+            i64::from(bits & buttons::SHIFT != 0)
+                | (i64::from(bits & buttons::CTRL != 0) << 2)
+                | (i64::from(bits & buttons::MOUSE_LEFT != 0) << 3)
+                | (i64::from(bits & buttons::MOUSE_RIGHT != 0) << 4)
+        };
+        let flags = shift(input.buttons_down | input.buttons_pressed);
+        let mouse_mask = buttons::MOUSE_LEFT | buttons::MOUSE_RIGHT;
+        let pointer_active = [input.pointer_x, input.pointer_y] != self.last_pointer
+            || ((input.buttons_down ^ self.last_down) | input.buttons_pressed) & mouse_mask != 0;
+        let candidates = if pointer_active {
+            rt.host().hits(x, y)
+        } else {
+            vec![]
+        };
+        let mut hit = None;
+        for (id, lx, ly) in candidates {
+            let target = ObjectHandle(id);
+            let mut enabled = true;
+            let mut node = Some(id);
+            let mut depth = 0;
+            while let Some(id) = node {
+                if !rt.object_member(ObjectHandle(id), "enabled").is_truthy() {
+                    enabled = false;
+                    break;
+                }
+                node = rt.host().layer(ObjectHandle(id))?.parent;
+                depth += 1;
+                ensure!(depth <= 64, "native enabled ancestry limit");
+            }
+            let layer = rt.host().layer(target)?;
+            let kind = rt
+                .object_member(target, "hitType")
+                .to_integer()
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let threshold = rt
+                .object_member(target, "hitThreshold")
+                .to_integer()
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let yes = if kind == 1 {
+                layer
+                    .regions
+                    .get(self.client.0, [lx - layer.image_left, ly - layer.image_top])?
+                    != 0
+            } else if kind == 0 {
+                let px = lx - layer.image_left;
+                let py = ly - layer.image_top;
+                if layer.has_image
+                    && (px < 0 || py < 0 || px >= layer.image_width || py >= layer.image_height)
+                {
+                    false
+                } else if threshold <= 0 {
+                    true
+                } else if threshold >= 256 || !layer.has_image {
+                    false
+                } else if rt
+                    .object_member(target, "type")
+                    .to_integer()
+                    .map_err(|e| anyhow::anyhow!("{e}"))?
+                    == 1
+                {
+                    true
+                } else {
+                    layer.full_alpha.context("alpha-mask hit testing requires a shared per-pixel canvas query for this nonuniform image")? as i64>=threshold
+                }
+            } else {
+                bail!("unknown native hitType")
+            };
+            if yes {
+                // Native onHitTest changes a work flag through super.onHitTest;
+                // its TJS return value is not the native hit result.
+                rt.set_object_member(target, "__hit_test_work", Variant::Integer(1));
+                *self.events.entry("onHitTest").or_default() += 1;
+                rt.call_object_method(
+                    target,
+                    "onHitTest",
+                    vec![
+                        Variant::Integer(lx),
+                        Variant::Integer(ly),
+                        Variant::Integer(1),
+                    ],
+                )
+                .map_err(|e| anyhow::anyhow!("TJS onHitTest: {e}"))?;
+                if rt.object_member(target, "__hit_test_work").is_truthy() {
+                    // A hit disabled layer blocks layers behind it; it does
+                    // not make the pointer fall through the disabled subtree.
+                    if !enabled {
+                        break;
+                    }
+                    hit = Some((id, lx, ly));
+                    break;
+                }
+            }
+        }
+        if [input.pointer_x, input.pointer_y] != self.last_pointer {
+            self.rt.as_mut().unwrap().set_object_member(
+                window,
+                "__temporary_cursor_hide",
+                Variant::Integer(0),
+            );
+        }
+        crate::pointer::apply(
+            self.rt.as_mut().unwrap(),
+            hit.map_or(window, |h| ObjectHandle(h.0)),
+        );
         if [input.pointer_x, input.pointer_y] != self.last_pointer {
             self.last_pointer = [input.pointer_x, input.pointer_y];
             self.call(
@@ -189,7 +315,7 @@ impl KrkrVm {
                 vec![
                     Variant::Integer(x),
                     Variant::Integer(y),
-                    Variant::Integer(0),
+                    Variant::Integer(flags),
                 ],
             )?;
             if let Some((layer, lx, ly)) = hit {
@@ -199,7 +325,7 @@ impl KrkrVm {
                     vec![
                         Variant::Integer(lx),
                         Variant::Integer(ly),
-                        Variant::Integer(0),
+                        Variant::Integer(flags),
                     ],
                 )?;
             }
@@ -214,7 +340,7 @@ impl KrkrVm {
                     Variant::Integer(px),
                     Variant::Integer(py),
                     Variant::Integer(button),
-                    Variant::Integer(0),
+                    Variant::Integer(flags),
                 ]
             };
             if pressed {
@@ -227,6 +353,7 @@ impl KrkrVm {
                 }
             }
             if released {
+                self.rt.as_mut().unwrap().host_mut().input.buttons_down &= !bit;
                 self.call(window, "onMouseUp", args(x, y))?;
                 if let Some((layer, lx, ly)) = hit {
                     self.call(ObjectHandle(layer), "onMouseUp", args(lx, ly))?;
@@ -249,93 +376,218 @@ impl KrkrVm {
                 }
             }
         }
-        for (bit, key) in [
-            (buttons::ENTER, 13),
-            (buttons::SPACE, 32),
-            (buttons::ESCAPE, 27),
-            (buttons::UP, 38),
-            (buttons::DOWN, 40),
-            (buttons::LEFT, 37),
-            (buttons::RIGHT, 39),
-        ] {
+        for &(bit, key) in crate::pointer::KEYS {
             if input.buttons_pressed & bit != 0 {
                 self.call(
                     window,
                     "onKeyDown",
-                    vec![Variant::Integer(key), Variant::Integer(0)],
+                    vec![Variant::Integer(key), Variant::Integer(flags)],
+                )?;
+            }
+            if input.buttons_down & bit == 0 && (self.last_down | input.buttons_pressed) & bit != 0
+            {
+                self.rt.as_mut().unwrap().host_mut().input.buttons_down &= !bit;
+                self.call(
+                    window,
+                    "onKeyUp",
+                    vec![Variant::Integer(key), Variant::Integer(flags)],
                 )?;
             }
         }
+        self.rt.as_mut().unwrap().host_mut().input = input;
         self.last_down = input.buttons_down;
         Ok(())
     }
 
-    fn timers(&mut self, now: u64) -> Result<()> {
-        let rt = self.rt.as_mut().context("KiriKiri runtime absent")?;
-        let mut due = Vec::new();
-        for (h, t) in rt.host_mut().timers.iter_mut() {
-            if !t.enabled || now < t.next {
+    fn enqueue_timers(&mut self, now: u64) -> Result<()> {
+        use crysirror_core::deferred_dispatch::DispatchPhase;
+        let rt = self.rt.as_mut().unwrap();
+        let mut due = vec![];
+        for (id, t) in &mut rt.host_mut().timers {
+            if !t.enabled || t.interval == 0 || now < t.next {
                 continue;
             }
             let missed = (now - t.next) / t.interval + 1;
-            t.next += missed * t.interval;
-            due.push((*h, missed.min(t.capacity.max(1))));
-        }
-        for (h, count) in due {
-            for _ in 0..count {
-                // A handler may disable or invalidate its own timer.
-                let live = self
-                    .rt
-                    .as_ref()
-                    .unwrap()
-                    .host()
-                    .timers
-                    .get(&h)
-                    .is_some_and(|t| t.enabled);
-                if !live {
-                    break;
-                }
-                self.call(ObjectHandle(h), "onTimer", vec![])?;
+            t.next = t
+                .next
+                .checked_add(
+                    missed
+                        .checked_mul(t.interval)
+                        .context("timer deadline overflow")?,
+                )
+                .context("timer deadline overflow")?;
+            for _ in 0..missed.min(t.capacity.max(1)) {
+                ensure!(due.len() < 4096, "native timer callback budget");
+                due.push((*id, t.mode));
             }
         }
-        let handlers = natives::continuous_handlers(self.rt.as_mut().unwrap());
-        for f in handlers {
-            let rt = self.rt.as_mut().unwrap();
-            rt.call_function(f, vec![Variant::Integer(now as i64)])
-                .map_err(|e| anyhow::anyhow!("{e}"))
-                .context("continuous handler")?;
+        for (id, mode) in due {
+            rt.host_mut().deferred.post(
+                self.client.0,
+                crate::async_trigger::target(id, 1),
+                match mode {
+                    1 => DispatchPhase::Exclusive,
+                    2 => DispatchPhase::Idle,
+                    _ => DispatchPhase::Normal,
+                },
+                false,
+            )?;
         }
         Ok(())
     }
-
+    fn drive_sound(&mut self, h: &mut dyn HostServices) -> Result<bool> {
+        for _ in 0..128 {
+            self.flush(h)?;
+            if !crate::save_struct::poll(self.rt.as_mut().unwrap())? {
+                return Ok(false);
+            }
+            if !crate::sound::drive(self.rt.as_mut().unwrap(), h, self.client)? {
+                return Ok(false);
+            }
+            let rt = self.rt.as_mut().unwrap();
+            if rt.is_suspended() {
+                rt.resume_suspended().map_err(|e| anyhow::anyhow!("{e}"))?;
+            } else {
+                self.flush(h)?;
+                return Ok(true);
+            }
+        }
+        bail!("native audio continuation budget")
+    }
     fn execute(&mut self, h: &mut dyn HostServices, input: InputFrame) -> Result<VmYield> {
+        use crysirror_core::deferred_dispatch::DispatchPhase;
         if let Some(e) = &self.last_error {
-            bail!("KiriKiri cannot resume after a failed step: {e}");
+            bail!("KiriKiri cannot resume after a failed step: {e}")
         }
         if self.halted {
             return Ok(VmYield::Halted);
         }
-        if self.rt.is_none() {
-            self.boot(h)?;
-        }
         let now = h.now_ms();
-        self.rt.as_mut().unwrap().host_mut().now = now;
-        let menus = h
-            .query_engine(
-                self.client,
-                crysirror_core::service::EngineQuery::MenuEvents,
-            )
-            .map_err(err)?;
-        crate::menus::dispatch(self.rt.as_mut().unwrap(), &menus)?;
-        self.input(input)?;
-        self.timers(now)?;
-        self.flush(h)?;
-        self.frames += 1;
-        if self.rt.as_ref().unwrap().host().exit_requested {
-            self.halted = true;
-            return Ok(VmYield::Halted);
+        self.inbox.push(self.client.0, now, input)?;
+        if self.rt.is_none() {
+            self.boot(h, input)?;
         }
-        Ok(VmYield::BudgetExhausted)
+        self.rt.as_mut().unwrap().host_mut().now = now;
+        if !self.drive_sound(h)? {
+            return Ok(VmYield::BudgetExhausted);
+        }
+        if self.pass.is_none() {
+            let callbacks = crate::sound::observations(self.rt.as_mut().unwrap(), h, self.client)?;
+            for (id, event) in callbacks {
+                let kind = if event == "onStatusChanged" { 2 } else { 3 };
+                self.rt.as_mut().unwrap().host_mut().deferred.post(
+                    self.client.0,
+                    crate::async_trigger::target(id, kind),
+                    DispatchPhase::Exclusive,
+                    false,
+                )?;
+            }
+            let menus = h
+                .query_engine(
+                    self.client,
+                    crysirror_core::service::EngineQuery::MenuEvents,
+                )
+                .map_err(err)?;
+            let rt = self.rt.as_mut().unwrap();
+            rt.host_mut().can_suspend = false;
+            let menu = crate::menus::dispatch(rt, &menus);
+            rt.host_mut().can_suspend = true;
+            menu?;
+            self.enqueue_timers(now)?;
+            let rt = self.rt.as_mut().unwrap();
+            let handlers = natives::continuous_handlers(rt);
+            self.pass = Some(FramePass {
+                fence: rt.host().deferred.fence(),
+                phase: 0,
+                handlers,
+                handler: 0,
+                now,
+            });
+        }
+        for _ in 0..16384 {
+            if !self.drive_sound(h)? {
+                return Ok(VmYield::BudgetExhausted);
+            }
+            let p = self.pass.as_mut().unwrap();
+            let phase = p.phase;
+            let fence = p.fence;
+            if matches!(phase, 0 | 2 | 4) {
+                let tier = match phase {
+                    0 => DispatchPhase::Exclusive,
+                    2 => DispatchPhase::Normal,
+                    _ => DispatchPhase::Idle,
+                };
+                if let Some(event) =
+                    self.rt
+                        .as_mut()
+                        .unwrap()
+                        .host_mut()
+                        .deferred
+                        .pop(self.client.0, fence, tier)
+                {
+                    let id = (event >> 2) as usize;
+                    let kind = event & 3;
+                    if kind == 1
+                        && !self
+                            .rt
+                            .as_ref()
+                            .unwrap()
+                            .host()
+                            .timers
+                            .get(&id)
+                            .is_some_and(|t| t.enabled && t.interval != 0)
+                    {
+                        continue;
+                    }
+                    let method = match kind {
+                        0 => "onFire",
+                        1 => "onTimer",
+                        2 => "__crysirror_notify_status",
+                        _ => "__crysirror_notify_fade",
+                    };
+                    self.call(ObjectHandle(id), method, vec![])?;
+                    continue;
+                }
+                self.pass.as_mut().unwrap().phase += 1;
+                continue;
+            }
+            if phase == 1 {
+                self.pass.as_mut().unwrap().phase = 2;
+                let batch = self.inbox.read(self.client.0, 1)?;
+                let frame = batch.samples.first().map_or(input, |s| s.frame);
+                self.rt.as_mut().unwrap().host_mut().can_suspend = false;
+                let result = self.input(frame);
+                self.rt.as_mut().unwrap().host_mut().can_suspend = true;
+                result?;
+                if let Some(receipt) = batch.receipt {
+                    self.inbox.acknowledge(self.client.0, receipt)?;
+                }
+                continue;
+            }
+            if phase == 3 {
+                let p = self.pass.as_mut().unwrap();
+                if let Some(f) = p.handlers.get(p.handler).cloned() {
+                    p.handler += 1;
+                    let time = p.now;
+                    self.rt
+                        .as_mut()
+                        .unwrap()
+                        .call_function(f, vec![Variant::Integer(time as i64)])
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
+                    continue;
+                }
+                p.phase = 4;
+                continue;
+            }
+            self.pass = None;
+            self.frames += 1;
+            if self.rt.as_ref().unwrap().host().exit_requested {
+                self.halted = true;
+                return Ok(VmYield::Halted);
+            }
+            return Ok(VmYield::BudgetExhausted);
+        }
+        bail!("native owner callback budget")
     }
 
     /// Script log lines (Debug.message, System.inform); for tests and tools.
@@ -388,9 +640,17 @@ impl VmAdapter for KrkrVm {
     }
     fn diagnostics(&self) -> Vec<u8> {
         let host = self.rt.as_ref().map(|rt| rt.host());
+        let kag=self.rt.as_ref().and_then(|r|r.global_member("kag").object_handle()).map(|k|{
+            let r=self.rt.as_ref().unwrap();let conductor=r.object_member(k,"conductor").object_handle();
+            json!({"click_waiting":r.object_member(k,"clickWaiting").is_truthy(),"sleeping":r.object_member(k,"inSleep").is_truthy(),"last_tag":conductor.map(|c|r.object_member(c,"lastTagName").to_tjs_string().unwrap_or_default())})
+        });
         serde_json::to_vec(&json!({
             "vm": "kirakira-tjs2",
+            "kag":kag,
             "frames": self.frames,
+            "queued_input":self.inbox.len(),
+            "frame_pass":self.pass.as_ref().map(|p|p.phase),
+            "suspended":self.rt.as_ref().is_some_and(|r|r.is_suspended()),
             "layers": host.map(|h| h.layers.len()),
             "timers": host.map(|h| h.timers.len()),
             "plugins": host.map(|h| &h.loaded_plugins),
