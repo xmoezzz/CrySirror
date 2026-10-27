@@ -39,6 +39,7 @@ pub(crate) struct Attachment {
     pub(crate) reflections: Option<crysirror_acoustics::reflections::ReflectionTrackingSpec>,
 }
 pub struct AudioRuntime {
+    pub(crate) frame_pending: bool,
     pub mixer: Mixer,
     pub scene_audio: crysirror_audio::scene::SceneAudio,
     pub(crate) clips: BTreeMap<(u32, String), Clip>,
@@ -58,6 +59,7 @@ pub struct AudioRuntime {
 impl Default for AudioRuntime {
     fn default() -> Self {
         Self {
+            frame_pending: false,
             mixer: Default::default(),
             scene_audio: Default::default(),
             clips: BTreeMap::new(),
@@ -82,6 +84,7 @@ impl AudioRuntime {
         std::mem::take(&mut self.output)
     }
     pub fn reset_playback(&mut self) {
+        self.frame_pending = false;
         self.jobs.reset();
         self.mixer.clear();
         self.scene_audio.reset(&mut self.mixer);
@@ -152,7 +155,7 @@ fn clip(cx: &mut EngineContext, client: u32, path: &str) -> Result<Clip> {
     Ok(clip)
 }
 /// Called after world/native VM updates and late update, once per App frame.
-pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
+pub(crate) fn prepare(cx: &mut EngineContext, dt_ms: u64) -> Result<usize> {
     ensure!(dt_ms <= 60000, "audio frame exceeds 60 seconds");
     sync_generation(cx.state()?);
     crate::audio_async::poll(cx.state()?)?;
@@ -324,9 +327,18 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
         .context("audio clock overflow")?;
     let count = (numerator / 1000) as usize;
     a.remainder = numerator % 1000;
+    a.output.clear();
+    Ok(count)
+}
+/// Explicit synchronous/offline completion. Live hosts use App.begin_frame /
+/// poll_frame, which move final DSP to a worker after this owner control phase.
+pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
+    let count = prepare(cx, dt_ms)?;
+    let s = cx.state()?;
+    let a = &mut s.mixer_audio;
     a.output.resize(count, [0.; 2]);
     for block in a.output.chunks_mut(4096) {
-        a.mixer.render(block)?
+        a.mixer.render(block)?;
     }
     let native = s.runtime.host.take_pcm_output();
     if native.len() > a.output.len() {
@@ -336,6 +348,15 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
         out[0] += pcm[0];
         out[1] += pcm[1];
     }
+    Ok(())
+}
+pub(crate) fn publish(cx: &mut EngineContext, pcm: Vec<StereoFrame>) -> Result<()> {
+    let s = cx.state()?;
+    ensure!(
+        !s.mixer_audio.mixer.is_rendering(),
+        "audio publication still pending"
+    );
+    s.mixer_audio.output = pcm;
     Ok(())
 }
 
@@ -360,7 +381,7 @@ fn playback_json(info: crysirror_core::service::AudioPlaybackInfo) -> Value {
 }
 fn info() -> &'static ClassInfo {
     static INFO: OnceLock<ClassInfo> = OnceLock::new();
-    INFO.get_or_init(||ClassInfo{name:"Audio",doc:"Scoped voice pool, streaming music and deterministic CPU mixing; classic channels share this output.",properties:vec![PropertyInfo{name:"sampleRate",ty:T::Int,writable:false,doc:"Mixer output frames per second."}],methods:vec![
+    INFO.get_or_init(||ClassInfo{name:"Audio",doc:"Scoped voice pool, streaming music and deterministic CPU mixing; classic channels share this output.",properties:vec![PropertyInfo{name:"sampleRate",ty:T::Int,writable:false,doc:"Mixer output frames per second."},PropertyInfo{name:"rendering",ty:T::Bool,writable:false,doc:"A prepared or running audio frame awaits owner publication; playback queries retain the previous published state and controls require completion."}],methods:vec![
         method("nativeChannelInfo",vec![("channel",T::Int)],T::Any,"Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails."),
         method("playbackInfo",vec![("handle",T::Map)],T::Map,"Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, paused/loop state and output-clock fade-out/resume-delay counters."),
         method("scheduleVoiceResume",vec![("handle",T::Map),("delay_ms",T::Number),("fade_ms",T::Number)],T::Void,"Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness."),
@@ -607,6 +628,14 @@ impl Class for AudioClass {
     fn get(&self, cx: &mut EngineContext, _: ObjectId, p: &str) -> Result<Value> {
         sync_generation(cx.state()?);
         match p {
+            "rendering" => {
+                let s = cx.state()?;
+                Ok(Value::Bool(
+                    s.mixer_audio.frame_pending
+                        || s.mixer_audio.mixer.is_rendering()
+                        || s.runtime.host.channel_audio.mixer.is_rendering(),
+                ))
+            }
             "sampleRate" => Ok(Value::Int(
                 cx.state()?.mixer_audio.mixer.sample_rate().into(),
             )),
@@ -621,6 +650,32 @@ impl Class for AudioClass {
         args: &[Value],
     ) -> Result<Value> {
         sync_generation(cx.state()?);
+        if cx.state()?.mixer_audio.frame_pending
+            || cx.state()?.mixer_audio.mixer.is_rendering()
+            || cx.state()?.runtime.host.channel_audio.mixer.is_rendering()
+        {
+            ensure!(
+                matches!(
+                    name,
+                    "playbackInfo"
+                        | "nativeChannelInfo"
+                        | "voice"
+                        | "stats"
+                        | "bus"
+                        | "mixGroup"
+                        | "nativeMixGroup"
+                        | "channelStatus"
+                        | "sourceStatus"
+                        | "playbackStatus"
+                        | "sourceInfo"
+                        | "sourcePreparation"
+                        | "cancelSourcePreparation"
+                        | "beginPrepareSource"
+                        | "clearSfxCache"
+                ),
+                "audio frame pending; poll frame completion before this control"
+            );
+        }
         if let Some(result) = crate::audio_groups_api::call(cx, name, args)? {
             return Ok(result);
         }

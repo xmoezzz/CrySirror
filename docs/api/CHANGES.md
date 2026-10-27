@@ -4,6 +4,19 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `bec05c019d833cb0` (2026-10-27): worker final audio frame completion
+
+- Add readonly Audio.rendering for prepared capacity waits and running DSP.
+  Playback/source/group queries retain the last owner-published state; DSP
+  controls fail explicitly until the frame completes.
+- Rust App.begin_frame/poll_frame/frame_pending and Runtime.begin_tick/
+  poll_audio_frame/audio_frame_pending expose worker completion. Live desktop
+  uses these dependencies; synchronous frame/tick remain offline paths.
+- Prepared playback receipts require owner publication, even when the worker
+  product is ready during an outstanding DSP frame. No project/native save or
+  resource schema changes. See ADR 0079.
+
+
 ## `f2af02453b2f74f8` (2026-10-27): named mix groups, output age and native PCM/SE
 
 - Add Audio.setMixGroup, mixGroup, nativeMixGroup, removeMixGroup and

@@ -22,7 +22,7 @@ pub enum Bus {
     Ambient,
     Ui,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VoiceHandle {
     pub client: u32,
@@ -487,7 +487,22 @@ impl Client {
         self.buses.get(&bus).copied().unwrap_or_default().level()
     }
 }
+struct VoiceObservation {
+    spec: VoiceSpec,
+    info: crysirror_core::service::AudioPlaybackInfo,
+    source: Option<SourceBufferStatus>,
+    position: f64,
+}
+struct PublishedMix {
+    voices: BTreeMap<VoiceHandle, VoiceObservation>,
+    reverbs: BTreeMap<u32, crate::reverb::ReverbSettings>,
+    stats: MixStats,
+}
 pub struct Mixer {
+    lease: Option<u64>,
+    published: Option<PublishedMix>,
+    deferred_stop: std::collections::BTreeSet<u32>,
+    deferred_pause: BTreeMap<u32, bool>,
     groups: MixGroups,
     config: MixerConfig,
     voices: Vec<Option<Voice>>,
@@ -511,6 +526,10 @@ impl Mixer {
         );
         let count = config.max_voices;
         Ok(Self {
+            lease: None,
+            published: None,
+            deferred_stop: Default::default(),
+            deferred_pause: Default::default(),
             groups: MixGroups::default(),
             config,
             voices: (0..count).map(|_| None).collect(),
@@ -521,16 +540,101 @@ impl Mixer {
             stats: Default::default(),
         })
     }
+    /// DSP state has one worker owner until its frame is collected. Read-only
+    /// observations remain at the last owner-published boundary.
+    pub fn is_rendering(&self) -> bool {
+        self.lease.is_some()
+    }
+    pub(crate) fn idle(&self) -> Result<()> {
+        ensure!(
+            !self.is_rendering(),
+            "audio render pending; collect its frame before control mutation"
+        );
+        Ok(())
+    }
+    pub(crate) fn lease_id(&self) -> Option<u64> {
+        self.lease
+    }
+    pub(crate) fn lease_render(&mut self, id: u64) -> Result<Mixer> {
+        self.idle()?;
+        let mut observations = BTreeMap::new();
+        for v in self.voices.iter().flatten() {
+            let h = v.handle;
+            observations.insert(
+                h,
+                VoiceObservation {
+                    spec: v.spec.clone(),
+                    info: self.playback_info(h.client, h)?,
+                    source: v.cursor.source.buffer_status(),
+                    position: self.position(h.client, h)?,
+                },
+            );
+        }
+        let mut placeholder = Mixer::new(self.config.clone())?;
+        placeholder.generations = self.generations.clone();
+        placeholder.sequence = self.sequence;
+        placeholder.groups = self.groups.clone();
+        placeholder.listeners = self.listeners.clone();
+        let mut reverbs = BTreeMap::new();
+        for (&owner, c) in &self.clients {
+            let mut clone = Client::new(c.random);
+            clone.voice_limit = c.voice_limit;
+            clone.buses = c.buses.clone();
+            clone.ducking = c.ducking;
+            clone.duck = c.duck;
+            clone.duck_output = c.duck_output;
+            clone.previous = c.previous.clone();
+            if let Some(r) = &c.reverb {
+                reverbs.insert(owner, r.settings.clone());
+            }
+            placeholder.clients.insert(owner, clone);
+        }
+        placeholder.stats = self.stats;
+        placeholder.lease = Some(id);
+        placeholder.published = Some(PublishedMix {
+            voices: observations,
+            reverbs,
+            stats: self.stats(),
+        });
+        Ok(std::mem::replace(self, placeholder))
+    }
+    pub(crate) fn finish_render(&mut self, id: u64, mut mixer: Mixer) -> bool {
+        if self.lease != Some(id) {
+            return false;
+        }
+        for &client in &self.deferred_stop {
+            mixer.stop_client(client);
+        }
+        for (&client, &paused) in &self.deferred_pause {
+            mixer.pause_client(client, paused);
+        }
+        *self = mixer;
+        true
+    }
+    pub(crate) fn abort_render(&mut self, id: u64) {
+        if self.lease == Some(id) {
+            self.clear();
+        }
+    }
+    pub(crate) fn requires_render(&self) -> bool {
+        self.voices.iter().any(Option::is_some)
+            || self.groups.is_fading()
+            || self.clients.values().any(|c| c.reverb.is_some())
+    }
     pub fn sample_rate(&self) -> u32 {
         self.config.sample_rate
     }
     pub fn stats(&self) -> MixStats {
+        if let Some(p) = &self.published {
+            return p.stats;
+        }
         MixStats {
             active: self.voices.iter().filter(|v| v.is_some()).count(),
             ..self.stats
         }
     }
     fn client(&mut self, id: u32) -> Result<&mut Client> {
+        self.idle()?;
         ensure!(id > 0, "audio client must be nonzero");
         ensure!(
             self.clients.contains_key(&id) || self.clients.len() < 64,
@@ -559,6 +663,9 @@ impl Mixer {
         Ok(std::mem::replace(&mut self.client(client)?.reverb, effect))
     }
     pub fn reverb(&self, client: u32) -> Option<&crate::reverb::ReverbSettings> {
+        if let Some(p) = &self.published {
+            return p.reverbs.get(&client);
+        }
         self.clients
             .get(&client)?
             .reverb
@@ -597,6 +704,7 @@ impl Mixer {
         settings: &AudioMixGroupSettings,
         fade_ms: f32,
     ) -> Result<()> {
+        self.idle()?;
         duration(fade_ms)?;
         self.groups.validate(client, name, settings).map(|_| ())
     }
@@ -607,6 +715,7 @@ impl Mixer {
         settings: AudioMixGroupSettings,
         fade_ms: f32,
     ) -> Result<()> {
+        self.idle()?;
         duration(fade_ms)?;
         self.groups.set(
             client,
@@ -633,6 +742,7 @@ impl Mixer {
         self.groups.info(client, name, self.config.sample_rate)
     }
     pub fn validate_remove_mix_group(&self, client: u32, name: &str) -> Result<()> {
+        self.idle()?;
         let id = self.groups.resolve(client, Some(name))?.unwrap();
         ensure!(
             !self
@@ -645,6 +755,7 @@ impl Mixer {
         self.groups.validate_remove(client, name)
     }
     pub fn remove_mix_group(&mut self, client: u32, name: &str) -> Result<()> {
+        self.idle()?;
         self.validate_remove_mix_group(client, name)?;
         self.groups.remove(client, name)
     }
@@ -721,6 +832,7 @@ impl Mixer {
         source: Box<dyn AudioSource>,
         spec: VoiceSpec,
     ) -> Result<VoiceHandle> {
+        self.idle()?;
         spec.validate()?;
         let mix_group = self.groups.resolve(client, spec.mix_group.as_deref())?;
         ensure!(
@@ -817,6 +929,7 @@ impl Mixer {
         source: Box<dyn AudioSource>,
         spec: VoiceSpec,
     ) -> Result<VoiceHandle> {
+        self.idle()?;
         self.spec(client, previous)?;
         let old = self.voices[previous.slot as usize].take();
         match self.play(client, source, spec) {
@@ -828,6 +941,9 @@ impl Mixer {
         }
     }
     pub(crate) fn has_spare_voice(&self, client: u32) -> bool {
+        if self.is_rendering() {
+            return false;
+        }
         self.voices.iter().any(Option::is_none)
             && self.clients.get(&client).is_none_or(|c| {
                 c.voice_limit.is_none_or(|limit| {
@@ -855,6 +971,7 @@ impl Mixer {
         Ok(())
     }
     fn voice(&mut self, client: u32, h: VoiceHandle) -> Result<&mut Voice> {
+        self.idle()?;
         ensure!(client == h.client, "audio handle belongs to another client");
         let v = self
             .voices
@@ -865,6 +982,9 @@ impl Mixer {
         Ok(v)
     }
     pub fn is_playing(&self, client: u32, h: VoiceHandle) -> bool {
+        if let Some(p) = &self.published {
+            return h.client == client && p.voices.contains_key(&h);
+        }
         h.client == client
             && self
                 .voices
@@ -875,6 +995,9 @@ impl Mixer {
     /// Source completion excludes derived HRTF/echo tails. Native waits consume
     /// this state while modern is_playing retains an effect's natural tail.
     pub fn source_is_playing(&self, client: u32, h: VoiceHandle) -> bool {
+        if let Some(p) = &self.published {
+            return h.client == client && p.voices.get(&h).is_some_and(|v| v.info.source_playing);
+        }
         h.client == client
             && self
                 .voices
@@ -904,6 +1027,12 @@ impl Mixer {
         Ok(())
     }
     pub fn stop_client(&mut self, client: u32) {
+        if self.is_rendering() {
+            if self.clients.contains_key(&client) {
+                self.deferred_stop.insert(client);
+            }
+            return;
+        }
         for v in &mut self.voices {
             if v.as_ref().is_some_and(|v| v.handle.client == client) {
                 *v = None
@@ -911,6 +1040,10 @@ impl Mixer {
         }
     }
     pub fn clear(&mut self) {
+        self.lease = None;
+        self.published = None;
+        self.deferred_pause.clear();
+        self.deferred_stop.clear();
         for c in self.clients.values_mut() {
             c.reverb = None;
         }
@@ -1049,6 +1182,7 @@ impl Mixer {
         Ok(())
     }
     pub fn direct_latency_frames(&self, client: u32, h: VoiceHandle) -> Result<usize> {
+        self.idle()?;
         self.spec(client, h)?;
         let v = self.voices[h.slot as usize].as_ref().unwrap();
         ensure!(
@@ -1105,6 +1239,7 @@ impl Mixer {
         Ok(())
     }
     pub fn reflection_plan_ready(&self, client: u32, h: VoiceHandle) -> Result<bool> {
+        self.idle()?;
         self.spec(client, h)?;
         Ok(self.voices[h.slot as usize]
             .as_ref()
@@ -1153,6 +1288,7 @@ impl Mixer {
         client: u32,
         h: VoiceHandle,
     ) -> Result<Option<&crysirror_acoustics::reflections::ReflectionPaths>> {
+        self.idle()?;
         self.spec(client, h)?;
         Ok(self.voices[h.slot as usize]
             .as_ref()
@@ -1291,6 +1427,14 @@ impl Mixer {
         client: u32,
         h: VoiceHandle,
     ) -> Result<crysirror_core::service::AudioPlaybackInfo> {
+        if let Some(p) = &self.published {
+            ensure!(client == h.client, "foreign audio handle");
+            return p
+                .voices
+                .get(&h)
+                .map(|v| v.info)
+                .context("audio voice ended or stale");
+        }
         self.spec(client, h)?;
         let voice = self.voices[h.slot as usize].as_ref().unwrap();
         Ok(crysirror_core::service::AudioPlaybackInfo {
@@ -1311,6 +1455,12 @@ impl Mixer {
         })
     }
     pub fn pause_client(&mut self, client: u32, paused: bool) {
+        if self.is_rendering() {
+            if self.clients.contains_key(&client) {
+                self.deferred_pause.insert(client, paused);
+            }
+            return;
+        }
         for v in self.voices.iter_mut().flatten() {
             if v.handle.client == client {
                 v.spec.paused = paused
@@ -1386,6 +1536,14 @@ impl Mixer {
         Ok(())
     }
     pub fn position(&self, client: u32, h: VoiceHandle) -> Result<f64> {
+        if let Some(p) = &self.published {
+            ensure!(client == h.client, "foreign audio handle");
+            return p
+                .voices
+                .get(&h)
+                .map(|v| v.position)
+                .context("audio voice ended or stale");
+        }
         ensure!(client == h.client, "audio handle belongs to another client");
         let v = self
             .voices
@@ -1396,6 +1554,14 @@ impl Mixer {
         Ok(v.position / v.cursor.source.sample_rate() as f64)
     }
     pub fn spec(&self, client: u32, h: VoiceHandle) -> Result<VoiceSpec> {
+        if let Some(p) = &self.published {
+            ensure!(client == h.client, "foreign audio handle");
+            return p
+                .voices
+                .get(&h)
+                .map(|v| v.spec.clone())
+                .context("audio voice ended or stale");
+        }
         ensure!(client == h.client, "audio handle belongs to another client");
         let v = self
             .voices
@@ -1465,6 +1631,7 @@ impl Mixer {
     /// Owner/control phase. It polls completion and submits prefetch without
     /// waiting. Synchronous source backends preserve their existing behavior.
     pub fn service_sources(&mut self) -> Result<()> {
+        self.idle()?;
         for v in self.voices.iter_mut().flatten() {
             v.cursor.source.service()?;
             if let Some(seek) = v.seek.as_mut().filter(|s| s.pending) {
@@ -1488,6 +1655,14 @@ impl Mixer {
         Ok(())
     }
     pub fn source_status(&self, client: u32, h: VoiceHandle) -> Result<Option<SourceBufferStatus>> {
+        if let Some(p) = &self.published {
+            ensure!(client == h.client, "foreign audio handle");
+            return p
+                .voices
+                .get(&h)
+                .map(|v| v.source.clone())
+                .context("audio voice ended or stale");
+        }
         ensure!(client == h.client, "foreign audio handle");
         let v = self
             .voices
@@ -1500,6 +1675,7 @@ impl Mixer {
     /// Overwrites the destination with unclipped linear stereo PCM. One output
     /// limiter/clamp belongs at the hardware/export boundary, not per voice.
     pub fn render(&mut self, out: &mut [StereoFrame]) -> Result<()> {
+        self.idle()?;
         self.service_sources()?;
         ensure!(
             out.len() <= self.config.sample_rate as usize * 10,

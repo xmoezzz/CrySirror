@@ -363,6 +363,7 @@ impl ChannelAudio {
         Ok(())
     }
     pub fn submit(&mut self, client: u32, request: AudioRequest) -> Result<()> {
+        self.mixer.idle()?;
         if self.clients.insert(client) {
             // Native VMs retain their own ducking policy. Users can explicitly
             // configure the shared mixer; playback does not invent a new fade.
@@ -554,16 +555,21 @@ impl ChannelAudio {
         self.voices.insert((client, channel), h);
         Ok(())
     }
-    pub fn render(&mut self, delta_ms: u64) -> Result<()> {
+    /// Owner control phase, shared by synchronous and worker frame paths.
+    pub fn prepare_render(&mut self, delta_ms: u64) -> Result<usize> {
+        self.mixer.idle()?;
         self.poll_preparations()?;
         for (&(client, _), &h) in &self.voices {
             if self.mixer.is_playing(client, h) {
                 self.mixer.retire_reflection_plan(client, h)?;
             }
         }
-        if self.clients.is_empty() {
+        // An idle synchronous/offline runtime may advance a long simulation
+        // interval without producing PCM. Preserve that contract; active audio
+        // and worker frame admission still enforce their two-second bounds.
+        if self.clients.is_empty() && !self.mixer.requires_render() {
             self.output.clear();
-            return Ok(());
+            return Ok(0);
         }
         let numerator = delta_ms
             .checked_mul(48_000)
@@ -572,10 +578,22 @@ impl ChannelAudio {
         let count = numerator / 1000;
         ensure!(count <= 96_000, "channel audio frame exceeds two seconds");
         self.remainder = numerator % 1000;
-        self.output.resize(count as usize, [0.; 2]);
+        self.output.clear();
+        Ok(count as usize)
+    }
+    pub fn render(&mut self, delta_ms: u64) -> Result<()> {
+        let count = self.prepare_render(delta_ms)?;
+        self.output.resize(count, [0.; 2]);
         for block in self.output.chunks_mut(4096) {
             self.mixer.render(block)?;
         }
+        Ok(())
+    }
+    /// Publish only after a matching worker job restored this mixer.
+    pub fn publish_output(&mut self, pcm: Vec<StereoFrame>) -> Result<()> {
+        self.mixer.idle()?;
+        ensure!(pcm.len() <= 96_000, "channel output extent");
+        self.output = pcm;
         Ok(())
     }
     pub fn take_output(&mut self) -> Vec<StereoFrame> {

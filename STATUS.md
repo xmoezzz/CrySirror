@@ -2809,3 +2809,92 @@ Remaining boundaries:
   not an exact wall-clock/device timing match under starvation. Halted snapshots
   can retain the last observed native declaration. Final async DSP/mixing/output,
   dynamic geometry/Doppler and higher/diffuse acoustics remain active goals.
+
+## 2026-10-27 — worker final DSP frames and desktop dependencies (ADR 0079)
+
+Implementation:
+- Added shared CPU MixJob/MixFrame over the bounded TaskPool. A worker owns the
+  actual mixer/decoder/effect histories for a frame; owner slots retain scoped
+  readonly observations. Completion validates all leases, restores DSP state and
+  publishes combined unclipped PCM once. This works without a VM/device/window.
+- Jobs admit 1–8 same-rate mixers and at most two seconds per frame, with per-mixer
+  counts and 4096-frame cancellation blocks. Prepared frames retain PCM/counts
+  while capacity is full. Ordinary controls fail during a lease; infallible
+  client pause/stop applies at publication. Reset/restore invalidates old tokens;
+  failures/panics release playback slots and publish no failed PCM.
+- Runtime.begin_tick/poll_audio_frame and App.begin_frame/poll_frame expose the
+  dependency. Callbacks, VM/world time and accepted input execute once. App joins
+  pooled/canonical and native/media audio in one worker product; engine frame
+  completion/input commit follows publication. Pause defers, shutdown cancels,
+  and validated restore discards obsolete PCM. Synchronous frame/tick remain
+  explicit offline/reference paths; tick_control requires an external coordinator.
+- Plain and scripted desktop now use worker final DSP. The pending-frame gate
+  precedes elapsed-time/gamepad/input-edge acquisition. CPU mixing remains
+  available with the optional output device disabled; muted checks open no device.
+- Audio.rendering includes prepared capacity waits and running work. Playback
+  and group observations remain at the last publication. Prepared playback
+  receipts cannot report ready before owner publication during a DSP lease.
+- Extended the authored gain-group demo with --worker for sample and exported WAV
+  comparison. Added independent worker/sample/transport/failure/reverb-history
+  oracles, App lifecycle/backpressure/restore tests, desktop driver tests and an
+  original SceneVm WAIT/restore test. No new VM hooks or legacy DSP were imported.
+
+Compilation:
+- Release workspace/all-target check passed with desktop krkr, arc-formats and
+  acoustics-obvhs. Minimal no-default desktop reallive+avg32 check also passed.
+  Existing CBG/RealLive/minimal-CLI warnings remain. API reference regenerated;
+  signature fingerprint f2af02453b2f74f8 -> bec05c019d833cb0 is logged in CHANGES.
+- No GitHub CI/workflow or remote build was added/run. No live window, GPU,
+  output device, Windows/Linux or console behavior was tested by this phase.
+
+Behavior validation:
+- Final local release scopes: shared audio + full Runtime **192 passed**;
+  engine App/audio/frame/API reference **42 passed**; JS async services **10
+  passed**; desktop CPU driver/input/mix tests **6 passed**. **250 distinct Rust
+  passed**, three ignored excluded. Earlier/focused reruns are not counted again.
+  Python 3.11 tooling: **189 passed**.
+- Eight shared worker cases assert actual source reads on a worker thread,
+  synchronous-reference PCM, frozen queries/transport, rejected concurrent DSP
+  mutations, capacity retries retaining PCM, independent producer frame counts,
+  deferred client controls, stale generation/reset cancellation, source failures,
+  task panic, queued cancellation and bounded validation. Multi-frame reverb
+  history produces identical samples to a continuous synchronous render.
+- Five App/frame cases cover callbacks/time/input once under backpressure,
+  readonly Audio.rendering and native observations, paired PCM equivalence,
+  deferred pause, restore/shutdown discarding old output, standalone Runtime
+  completion and completion errors faulting the App. Both default desktop core
+  variants enforce the gate before another tick and explicitly cancel at exit.
+- All **21 authored original SceneVm audio cases** pass. The new case blocks CPU
+  workers after native BGM preparation, verifies unchanged original VM diagnostic
+  state and published age while DSP is pending, then observes publication and
+  WAIT completion. Restore cancels the obsolete audio and rebinds resources via
+  the same engine API; no native audio runtime or renderer is hosted.
+- Full regression caught the new two-second admission check incorrectly rejecting
+  a long idle synchronous tick. Fixed the no-audio path to retain its original
+  contract. Runtime save rewind and the four-second VFX history test now pass;
+  active audio/worker admission keeps its bounded profile.
+- Ran the standalone mix_groups demo in synchronous and --worker release modes.
+  Both authored assertions pass and exported WAV files are byte-identical:
+  stereo 48 kHz, 16-bit, 144000 frames/three seconds, 576044 bytes; SHA-256
+  a6cb3e72588260026d4b6a5789f47dcda27969d0f1694d01a236aa551849e0eb.
+  Clear/muted/restored RMS 0.158114 / 0.070711 / 0.158114; peak 0.286419.
+- Evidence: target/verification/mix-worker-{shared-runtime-final,engine-final,
+  js-final,desktop-tests,workspace-check,minimal-check,api-bless,demo-reference,
+  demo,python-final,diff-check}.log; mix-worker-validation.json,
+  mix-worker-demo.json and mix-worker{,-reference}.wav. The earlier broad
+  regression logs include the idle-tick failure; final scopes above pass.
+
+Remaining boundaries:
+- Final DSP is worker-owned but frame-dependent. Shared-pool contention can
+  postpone simulation/render publication and starve device output. There is no
+  dedicated device-clock renderer, sample-timestamped future command queue,
+  allocation-free owner handoff or realtime throughput/latency guarantee.
+- The existing two mixer instances retain independent duck/effect histories;
+  final PCM addition does not create cross-mixer sidechains or a submix graph.
+  PcmOutput still opens devices on submission and uses a mutex for its bounded
+  queue/refill callback. Device lifecycle/loss, lock-free transfer and pool
+  teardown/join remain work. No hardware performance claim follows from CPU tests.
+- General native startup/I/O and VM scheduling, PCMCH/KOE, exact legacy timing,
+  dynamic acoustic geometry, Doppler and diffuse/higher-order propagation remain
+  open. This phase adds reusable scheduling and completion capabilities, not
+  whole-game compatibility or completion of the engine-wide async requirement.

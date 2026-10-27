@@ -1513,6 +1513,12 @@
           "name": "sampleRate",
           "type": "number",
           "writable": false
+        },
+        {
+          "doc": "A prepared or running audio frame awaits owner publication; playback queries retain the previous published state and controls require completion.",
+          "name": "rendering",
+          "type": "boolean",
+          "writable": false
         }
       ]
     },
@@ -12775,7 +12781,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "f2af02453b2f74f8",
+  "fingerprint": "bec05c019d833cb0",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

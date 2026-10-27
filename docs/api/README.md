@@ -343,3 +343,22 @@ cargo run --release -p crysirror-audio --example mix_groups -- /tmp/mix-groups.w
 
 It asserts the independent UI stem during the parent music fade and compares
 clear/muted/restored RMS. No fonts or game assets are bundled.
+
+### Worker audio frame completion
+
+Live Rust hosts use App.begin_frame(dt_ms, input), then poll_frame until it
+returns true before beginning another frame. frame_pending reports the dependency;
+Audio.rendering includes prepared frames awaiting task capacity. Playback, source
+and group observations retain the last published boundary. DSP controls fail
+while a frame is pending. Completion publishes the pooled/canonical and native/
+media mix together; take_output drains it once. Pause defers to completion, and
+restore/shutdown discards obsolete audio. Runtime.begin_tick/poll_audio_frame is
+the standalone native/media equivalent; tick_control is for an external
+coordinator that owns the dependency. Synchronous frame/tick remain available for
+offline execution. Device callbacks and device-clock independence remain open:
+see [ADR 0079](../adr/0079-worker-final-audio-frames.md).
+
+The independent gain-group demo also supports final DSP workers:
+`cargo run --release -p crysirror-audio --example mix_groups -- /tmp/mix-worker.wav --worker`.
+It uses the same authored sample assertions as its synchronous mode, without a
+VM or output device.

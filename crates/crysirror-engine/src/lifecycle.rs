@@ -90,6 +90,8 @@ pub struct App {
     accumulator_ms: u64,
     dropped_ms: u64,
     fault: Option<String>,
+    audio_frame: Option<(u64, crysirror_audio::render_job::MixFrame, InputFrame)>,
+    pause_after_frame: bool,
 }
 impl App {
     /// `client` names the project client that engine code acts as; it must
@@ -126,6 +128,8 @@ impl App {
             accumulator_ms: 0,
             dropped_ms: 0,
             fault: None,
+            audio_frame: None,
+            pause_after_frame: false,
         })
     }
     pub fn state(&self) -> AppState {
@@ -275,14 +279,102 @@ impl App {
     }
     /// Advance one host frame. Paused apps do not advance engine time.
     pub fn frame(&mut self, dt_ms: u64, input: InputFrame) -> Result<()> {
+        ensure!(
+            self.audio_frame.is_none(),
+            "collect the pending worker frame before synchronous frame execution"
+        );
         self.expect(&[AppState::Running, AppState::Paused], "frame")?;
         if self.state == AppState::Paused {
             return Ok(());
         }
-        let r = self.run_frame(dt_ms, input);
+        let r = self.run_frame(dt_ms, input, false);
         self.guard(r)
     }
-    fn run_frame(&mut self, dt_ms: u64, input: InputFrame) -> Result<()> {
+    pub fn frame_pending(&self) -> bool {
+        self.audio_frame.is_some()
+    }
+    /// Accept simulation/input once. Final pooled/native DSP and PCM addition
+    /// finish on workers; call poll_frame before accepting another frame.
+    pub fn begin_frame(&mut self, dt_ms: u64, input: InputFrame) -> Result<()> {
+        self.expect(&[AppState::Running, AppState::Paused], "begin_frame")?;
+        ensure!(
+            self.audio_frame.is_none(),
+            "previous worker frame is pending"
+        );
+        ensure!(dt_ms <= 2000, "worker audio frame exceeds two seconds");
+        if self.state == AppState::Paused {
+            return Ok(());
+        }
+        let r = self.run_frame(dt_ms, input, true);
+        self.guard(r)
+    }
+    /// Nonblocking completion/publication. No callbacks or time advancement are
+    /// repeated while a queued/running frame owns the DSP dependency.
+    pub fn poll_frame(&mut self) -> Result<bool> {
+        let Some((epoch, mut frame, input)) = self.audio_frame.take() else {
+            return Ok(true);
+        };
+        let s = self.cx.state()?;
+        if epoch != s.runtime.restored {
+            frame.cancel(&mut [
+                &mut s.mixer_audio.mixer,
+                &mut s.runtime.host.channel_audio.mixer,
+            ]);
+            crate::audio_api::sync_generation(s);
+            if std::mem::take(&mut self.pause_after_frame) {
+                self.pause()?;
+            }
+            return Ok(true);
+        }
+        let result = frame.poll(&mut [
+            &mut s.mixer_audio.mixer,
+            &mut s.runtime.host.channel_audio.mixer,
+        ]);
+        match result {
+            Ok(None) => {
+                self.audio_frame = Some((epoch, frame, input));
+                Ok(false)
+            }
+            Ok(Some(pcm)) => {
+                self.cx.state()?.mixer_audio.frame_pending = false;
+                let result = crate::audio_api::publish(&mut self.cx, pcm)
+                    .and_then(|()| self.finish_frame(input));
+                self.guard(result)?;
+                if std::mem::take(&mut self.pause_after_frame) {
+                    self.pause()?;
+                }
+                Ok(true)
+            }
+            Err(e) => {
+                let s = self.cx.state()?;
+                frame.cancel(&mut [
+                    &mut s.mixer_audio.mixer,
+                    &mut s.runtime.host.channel_audio.mixer,
+                ]);
+                s.mixer_audio.frame_pending = false;
+                self.guard(Err(e)).map(|()| true)
+            }
+        }
+    }
+    fn finish_frame(&mut self, input: InputFrame) -> Result<()> {
+        let s = self.cx.state()?;
+        s.frame = s.frame.checked_add(1).context("frame counter overflow")?;
+        s.actions.end_frame(input);
+        Ok(())
+    }
+    fn cancel_frame(&mut self) -> Result<()> {
+        self.pause_after_frame = false;
+        if let Some((_, mut frame, _)) = self.audio_frame.take() {
+            let s = self.cx.state()?;
+            frame.cancel(&mut [
+                &mut s.mixer_audio.mixer,
+                &mut s.runtime.host.channel_audio.mixer,
+            ]);
+            s.mixer_audio.frame_pending = false;
+        }
+        Ok(())
+    }
+    fn run_frame(&mut self, dt_ms: u64, input: InputFrame, worker_audio: bool) -> Result<()> {
         ensure!(dt_ms <= 60_000, "frame delta exceeds 60 s");
         let profiler = self.runtime()?.profiler();
         let _span = profiler.span(profiler.frame() + 1, "engine.frame");
@@ -313,17 +405,40 @@ impl App {
         crate::systems::spatial_audio(&mut self.cx).context("spatial audio")?;
         {
             let s = self.cx.state()?;
-            s.runtime.tick(dt_ms, input).context("runtime tick")?;
+            if worker_audio {
+                s.runtime.tick_control(dt_ms, input)
+            } else {
+                s.runtime.tick(dt_ms, input)
+            }
+            .context("runtime tick")?;
         }
         self.each("on_late_update", false, |b, cx| b.on_late_update(cx, dt_ms))?;
         crate::text_api::update(&mut self.cx, dt_ms).context("rich text reveal")?;
-        crate::audio_api::update(&mut self.cx, dt_ms).context("audio mixer")?;
-        let s = self.cx.state()?;
-        s.frame = s.frame.checked_add(1).context("frame counter overflow")?;
-        s.actions.end_frame(input);
+        if worker_audio {
+            let pooled =
+                crate::audio_api::prepare(&mut self.cx, dt_ms).context("audio controls")?;
+            let s = self.cx.state()?;
+            let native = s.runtime.host.channel_audio.prepare_render(dt_ms)?;
+            let extra = s.runtime.host.take_pcm_output();
+            let frame = crysirror_audio::render_job::MixFrame::new(
+                s.runtime.assets.cpu_tasks(),
+                vec![pooled, native],
+                extra,
+            )?;
+            s.mixer_audio.frame_pending = true;
+            self.audio_frame = Some((s.runtime.restored, frame, input));
+            self.poll_frame()?;
+        } else {
+            crate::audio_api::update(&mut self.cx, dt_ms).context("audio mixer")?;
+            self.finish_frame(input)?;
+        }
         Ok(())
     }
     pub fn pause(&mut self) -> Result<()> {
+        if self.audio_frame.is_some() {
+            self.pause_after_frame = true;
+            return Ok(());
+        }
         self.expect(&[AppState::Running], "pause")?;
         let r = self.each("on_pause", false, |b, cx| b.on_pause(cx));
         self.guard(r)?;
@@ -331,6 +446,10 @@ impl App {
         Ok(())
     }
     pub fn resume(&mut self) -> Result<()> {
+        if self.pause_after_frame {
+            self.pause_after_frame = false;
+            return Ok(());
+        }
         self.expect(&[AppState::Paused], "resume")?;
         let r = self.each("on_resume", false, |b, cx| b.on_resume(cx));
         self.guard(r)?;
@@ -340,6 +459,7 @@ impl App {
     /// Run shutdown hooks in reverse order. Every hook runs even if an earlier
     /// one fails; the first error is returned and the app is still Stopped.
     pub fn shutdown(&mut self) -> Result<()> {
+        self.cancel_frame()?;
         if matches!(self.state, AppState::Stopped) {
             return Ok(());
         }

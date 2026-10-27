@@ -268,6 +268,9 @@ impl ChannelAudio {
         Ok(ticket)
     }
     pub fn poll_preparations(&mut self) -> Result<()> {
+        if self.mixer.is_rendering() {
+            return Ok(());
+        }
         let mut jobs = std::mem::take(&mut self.jobs);
         let result = (|| {
             for (owner, _, ticket) in jobs.jobs.tickets() {
@@ -309,7 +312,16 @@ impl ChannelAudio {
             channel: self.jobs.channels[&ticket],
             phase: match status.state {
                 OperationState::Pending => AudioPreparePhase::Pending,
-                OperationState::Ready => AudioPreparePhase::Ready,
+                OperationState::Ready => {
+                    if matches!(
+                        self.jobs.jobs.poll(client, 0, ticket)?,
+                        Some(Product::Published)
+                    ) {
+                        AudioPreparePhase::Ready
+                    } else {
+                        AudioPreparePhase::Pending
+                    }
+                }
                 OperationState::Failed => AudioPreparePhase::Failed,
             },
             error: status.error,

@@ -658,6 +658,7 @@ pub struct Runtime {
     pub assets: Assets,
     pub restored: u64,
     audio_nonblocking: Option<bool>,
+    audio_frame: Option<(u64, crysirror_audio::render_job::MixFrame)>,
     sessions: Vec<Session>,
     registry: AdapterRegistry,
     fingerprint: String,
@@ -907,6 +908,7 @@ impl Runtime {
             assets,
             restored: 0,
             audio_nonblocking: None,
+            audio_frame: None,
             sessions,
             registry,
             fingerprint,
@@ -990,7 +992,71 @@ impl Runtime {
             .channel_audio
             .configure_preparation(self.assets.io_tasks(), enabled);
     }
+    /// True while a standalone native/media audio frame awaits worker completion.
+    pub fn audio_frame_pending(&self) -> bool {
+        self.audio_frame.is_some()
+    }
+    /// Poll without advancing VM/world/input clocks or waiting for a worker.
+    pub fn poll_audio_frame(&mut self) -> Result<bool> {
+        let Some((epoch, mut frame)) = self.audio_frame.take() else {
+            return Ok(true);
+        };
+        if epoch != self.restored {
+            frame.cancel(&mut [&mut self.host.channel_audio.mixer]);
+            return Ok(true);
+        }
+        match frame.poll(&mut [&mut self.host.channel_audio.mixer]) {
+            Ok(Some(pcm)) => {
+                self.host.channel_audio.publish_output(pcm)?;
+                Ok(true)
+            }
+            Ok(None) => {
+                self.audio_frame = Some((epoch, frame));
+                Ok(false)
+            }
+            Err(e) => {
+                frame.cancel(&mut [&mut self.host.channel_audio.mixer]);
+                Err(e)
+            }
+        }
+    }
+    pub fn begin_tick(&mut self, delta_ms: u64, input: InputFrame) -> Result<()> {
+        ensure!(
+            self.audio_frame.is_none(),
+            "collect the previous audio frame before beginning another tick"
+        );
+        ensure!(
+            delta_ms <= 2000,
+            "asynchronous audio tick exceeds two seconds"
+        );
+        self.tick_control(delta_ms, input)?;
+        let count = self.host.channel_audio.prepare_render(delta_ms)?;
+        let extra = self.host.take_pcm_output();
+        self.audio_frame = Some((
+            self.restored,
+            crysirror_audio::render_job::MixFrame::new(
+                self.assets.cpu_tasks(),
+                vec![count],
+                extra,
+            )?,
+        ));
+        self.poll_audio_frame()?;
+        Ok(())
+    }
+    /// Advance owner-controlled simulation once, leaving final audio DSP for an
+    /// external worker coordinator. Caller must collect that audio dependency.
+    pub fn tick_control(&mut self, delta_ms: u64, input: InputFrame) -> Result<()> {
+        self.tick_inner(delta_ms, input, false)
+    }
     pub fn tick(&mut self, delta_ms: u64, input: InputFrame) -> Result<()> {
+        self.tick_inner(delta_ms, input, true)
+    }
+    fn tick_inner(&mut self, delta_ms: u64, input: InputFrame, render_audio: bool) -> Result<()> {
+        ensure!(
+            self.audio_frame.is_none() && !self.host.channel_audio.mixer.is_rendering(),
+            "audio frame pending before runtime tick"
+        );
+
         let profile_frame = self.profiler.begin_frame();
         let _tick_span = self.profiler.span(profile_frame, "runtime.tick");
         {
@@ -1068,7 +1134,9 @@ impl Runtime {
         }
         self.sync_videos()?;
         self.tick_puppets(delta_ms)?;
-        self.host.channel_audio.render(delta_ms)?;
+        if render_audio {
+            self.host.channel_audio.render(delta_ms)?;
+        }
         {
             let _span = self.profiler.span(profile_frame, "vfx.poll_schedule");
             self.vfx.update(
@@ -1353,7 +1421,11 @@ impl Runtime {
         self.physics.invalidate();
         self.vfx.reset(self.host.clock_ms);
         self.host.trace.clear();
+        if let Some((_, mut frame)) = self.audio_frame.take() {
+            frame.cancel(&mut [&mut self.host.channel_audio.mixer]);
+        }
         self.host.channel_audio.reset();
+        self.host.pcm.clear();
         self.restored = next_restored;
         Ok(())
     }

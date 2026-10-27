@@ -17,19 +17,23 @@ pub(crate) fn name(s: &str) -> Result<()> {
     );
     Ok(())
 }
+#[derive(Clone)]
 struct Group {
     settings: AudioMixGroupSettings,
     parent: Option<usize>,
     gain: Ramp,
     output: f32,
 }
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct MixGroups {
     ids: BTreeMap<(u32, String), usize>,
     slots: Vec<Option<Group>>,
     order: Vec<usize>,
 }
 impl MixGroups {
+    pub(crate) fn is_fading(&self) -> bool {
+        self.slots.iter().flatten().any(|g| g.gain.left > 0)
+    }
     pub(crate) fn resolve(&self, client: u32, group: Option<&str>) -> Result<Option<usize>> {
         group
             .map(|n| {

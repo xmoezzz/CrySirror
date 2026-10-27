@@ -250,3 +250,14 @@ layouts remain unchanged; import stops nonpersistent PCM/SE and restores their
 category volume while preserving host group parents/mute. PCMCH, PCM events,
 general KOE/JITAN/mouth tables, native UI sound slots and full game/save coverage
 remain open. Source audit: [siglus-sfx-source-audit.json](siglus-sfx-source-audit.json).
+
+## Final audio worker dependency (ADR 0079)
+
+Native semantic adapters continue using the same shared resources, transport and
+channel completion contracts. Live App/desktop final DSP now uses shared CPU
+workers; observations remain frozen at the previous owner publication while that
+frame is pending. The host collects it before another VM/world tick. Backpressure
+must not rerun the native instruction or consume another input edge. Restore
+invalidates the obsolete frame and drops its PCM. This adds no legacy mixer or
+new VM hooks, and does not establish exact native wall-clock timing or an
+independent device clock. See [ADR 0079](adr/0079-worker-final-audio-frames.md).

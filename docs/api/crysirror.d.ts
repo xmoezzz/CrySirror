@@ -17,6 +17,8 @@ declare class Assets {
 declare class Audio {
   /** Mixer output frames per second. */
   readonly sampleRate: number;
+  /** A prepared or running audio frame awaits owner publication; playback queries retain the previous published state and controls require completion. */
+  readonly rendering: boolean;
   /** Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails. */
   nativeChannelInfo(channel: number): any;
   /** Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, paused/loop state and output-clock fade-out/resume-delay counters. */

@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `f2af02453b2f74f8`
+API fingerprint: `bec05c019d833cb0`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -66,6 +66,7 @@ Script global: `audio`.
 | Property | Type | Access | Description |
 |---|---|---|---|
 | `sampleRate` | `number` | read | Mixer output frames per second. |
+| `rendering` | `boolean` | read | A prepared or running audio frame awaits owner publication; playback queries retain the previous published state and controls require completion. |
 
 | Method | Returns | Description |
 |---|---|---|

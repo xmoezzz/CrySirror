@@ -36,17 +36,57 @@ impl Core {
                 .expect("engine context present between frames"),
         }
     }
-    fn tick(&mut self, ms: u64, input: InputFrame) -> Result<bool> {
+    fn frame_pending(&self, audio: &Audio) -> bool {
+        match self {
+            Core::Plain(_) => audio.frame_pending(),
+            #[cfg(feature = "scripting")]
+            Core::Scripted(app) => app.frame_pending(),
+        }
+    }
+    fn begin_tick(&mut self, audio: &mut Audio, ms: u64, input: InputFrame) -> Result<()> {
+        ensure!(
+            !self.frame_pending(audio),
+            "desktop frame dependency pending before simulation"
+        );
         match self {
             Core::Plain(rt) => {
-                rt.tick(ms, input)?;
-                Ok(false)
+                rt.tick_control(ms, input)?;
+                audio.begin_frame(rt, ms)
             }
             #[cfg(feature = "scripting")]
+            Core::Scripted(app) => app.begin_frame(ms, input),
+        }
+    }
+    fn poll_tick(&mut self, audio: &mut Audio) -> Result<bool> {
+        match self {
+            Core::Plain(rt) => audio.poll_frame(rt),
+            #[cfg(feature = "scripting")]
             Core::Scripted(app) => {
-                app.frame(ms, input)?;
-                Ok(app.quit_requested())
+                if !app.poll_frame()? {
+                    return Ok(false);
+                }
+                let frames = app.context().state()?.mixer_audio.take_output();
+                let rt = app.runtime()?;
+                audio.sync_mixed(&frames, !rt.host.scene.voices().is_empty(), rt.restored)?;
+                Ok(true)
             }
+        }
+    }
+    fn shutdown(&mut self, audio: &mut Audio) -> Result<()> {
+        match self {
+            Core::Plain(rt) => {
+                audio.cancel_frame(rt);
+                Ok(())
+            }
+            #[cfg(feature = "scripting")]
+            Core::Scripted(app) => app.shutdown(),
+        }
+    }
+    fn quit_requested(&self) -> bool {
+        match self {
+            Core::Plain(_) => false,
+            #[cfg(feature = "scripting")]
+            Core::Scripted(app) => app.quit_requested(),
         }
     }
 }
@@ -308,7 +348,10 @@ impl App {
             presented: 0,
             error: None,
         };
-        event_loop.run_app(&mut app)?;
+        let event_result = event_loop.run_app(&mut app);
+        let shutdown_result = app.core.shutdown(&mut app.audio);
+        event_result?;
+        shutdown_result?;
         if let Some(path) = &app.options.profile_path {
             let mut report = match &mut app.window {
                 Some(w) => {
@@ -470,53 +513,62 @@ impl App {
         if w.minimized {
             return Ok(());
         }
-        let now = Instant::now();
-        let delta = now
-            .duration_since(self.last_tick)
-            .min(Duration::from_millis(250))
-            + self.remainder;
-        self.last_tick = now;
-        let ms = if self.options.frames.is_some() {
-            16
-        } else {
-            delta.as_millis() as u64
-        };
-        self.remainder = if self.options.frames.is_some() {
-            Duration::ZERO
-        } else {
-            delta - Duration::from_millis(ms)
-        };
-        #[allow(unused_mut)]
-        let mut frame_input = self.input;
-        #[cfg(feature = "gamepad")]
-        if let Some(gamepad) = &mut self.gamepad {
-            let events = gamepad.poll()?;
-            if let Core::Scripted(app) = &mut self.core {
-                for event in events {
-                    if self.focused
-                        || matches!(
-                            event,
-                            crysirror_engine::input_api::GamepadEvent::Connected { .. }
-                                | crysirror_engine::input_api::GamepadEvent::Disconnected { .. }
-                        )
-                    {
-                        app.context().state()?.actions.inject_gamepad(event)?;
+        if !self.core.frame_pending(&self.audio) {
+            let now = Instant::now();
+            let delta = now
+                .duration_since(self.last_tick)
+                .min(Duration::from_millis(250))
+                + self.remainder;
+            self.last_tick = now;
+            let ms = if self.options.frames.is_some() {
+                16
+            } else {
+                delta.as_millis() as u64
+            };
+            self.remainder = if self.options.frames.is_some() {
+                Duration::ZERO
+            } else {
+                delta - Duration::from_millis(ms)
+            };
+            #[allow(unused_mut)]
+            let mut frame_input = self.input;
+            #[cfg(feature = "gamepad")]
+            if let Some(gamepad) = &mut self.gamepad {
+                let events = gamepad.poll()?;
+                if let Core::Scripted(app) = &mut self.core {
+                    for event in events {
+                        if self.focused
+                            || matches!(
+                                event,
+                                crysirror_engine::input_api::GamepadEvent::Connected { .. }
+                                    | crysirror_engine::input_api::GamepadEvent::Disconnected { .. }
+                            )
+                        {
+                            app.context().state()?.actions.inject_gamepad(event)?;
+                        }
                     }
                 }
+                if self.focused {
+                    frame_input = gamepad.navigation_frame(frame_input);
+                } else {
+                    gamepad.reset_navigation();
+                }
             }
-            if self.focused {
-                frame_input = gamepad.navigation_frame(frame_input);
-            } else {
-                gamepad.reset_navigation();
+            if !self.focused {
+                frame_input = InputFrame::default();
             }
+            self.core.begin_tick(
+                &mut self.audio,
+                if self.presented == 0 { 0 } else { ms },
+                frame_input,
+            )?;
+            self.input.buttons_pressed = 0;
         }
-        if !self.focused {
-            frame_input = InputFrame::default();
+        if !self.core.poll_tick(&mut self.audio)? {
+            w.window.request_redraw();
+            return Ok(());
         }
-        if self
-            .core
-            .tick(if self.presented == 0 { 0 } else { ms }, frame_input)?
-        {
+        if self.core.quit_requested() {
             el.exit();
         }
         if let Some((_, visible)) = self.core.rt().host.engine.ui.cursor {
@@ -524,17 +576,6 @@ impl App {
         }
         if let Some((_, title)) = &self.core.rt().host.engine.ui.title {
             w.window.set_title(title);
-        }
-        self.input.buttons_pressed = 0;
-        match &mut self.core {
-            #[cfg(feature = "scripting")]
-            Core::Scripted(app) => {
-                let frames = app.context().state()?.mixer_audio.take_output();
-                let voices = !app.runtime()?.host.scene.voices().is_empty();
-                let restored = app.runtime()?.restored;
-                self.audio.sync_mixed(&frames, voices, restored)?;
-            }
-            Core::Plain(runtime) => self.audio.sync(runtime)?,
         }
         let rt = self.core.rt();
         if w.snapshot_store != rt.assets.store_id() || w.snapshot_restored != rt.restored {
@@ -845,5 +886,92 @@ impl ApplicationHandler for App {
                 w.window.request_redraw();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod audio_frame_tests {
+    use super::*;
+    use crysirror_core::{
+        service::{AudioParameters, AudioRequest, HostServices, PcmAudio},
+        state::ClientId,
+    };
+    fn runtime() -> (tempfile::TempDir, Runtime) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("assets")).unwrap();
+        let path = dir.path().join("project.json");
+        std::fs::write(&path,serde_json::to_vec(&serde_json::json!({"schema":2,"name":"desktop-mix","content_revision":"1","canvas":[64,64],"assets":"assets","clients":[{"name":"game","adapter":"crysirror-script-v1","game":"test"}]})).unwrap()).unwrap();
+        let rt = Runtime::load(&path, &dir.path().join("state")).unwrap();
+        (dir, rt)
+    }
+    fn verify(mut core: Core) {
+        core.rt()
+            .host
+            .submit_audio(
+                ClientId(1),
+                AudioRequest::PlayPcm {
+                    channel: 2,
+                    source: PcmAudio::new(48000, vec![[0.125; 2]; 48000]).unwrap(),
+                    parameters: AudioParameters::default(),
+                },
+            )
+            .unwrap();
+        let mut audio = Audio::new(true); // no window, output device or GPU
+        let pool = core.rt().assets.cpu_tasks();
+        let permits = (0..pool.stats().capacity)
+            .map(|_| pool.reserve().unwrap())
+            .collect::<Vec<_>>();
+        core.begin_tick(&mut audio, 10, InputFrame::default())
+            .unwrap();
+        assert!(core.frame_pending(&audio));
+        assert!(!core.poll_tick(&mut audio).unwrap());
+        assert!(
+            core.begin_tick(&mut audio, 10, InputFrame::default())
+                .is_err()
+        );
+        assert_eq!(core.rt().now_ms(), 10);
+        drop(permits);
+        let limit = Instant::now() + Duration::from_secs(5);
+        while !core.poll_tick(&mut audio).unwrap() {
+            assert!(Instant::now() < limit);
+            std::thread::yield_now();
+        }
+        assert!(!core.frame_pending(&audio));
+        assert_eq!(
+            core.rt()
+                .host
+                .audio_info(ClientId(1), 2)
+                .unwrap()
+                .unwrap()
+                .age_frames,
+            480
+        );
+        assert!(core.rt().host.take_pcm_output().is_empty());
+        assert!(core.poll_tick(&mut audio).unwrap());
+        assert_eq!(core.rt().now_ms(), 10);
+        let permits = (0..pool.stats().capacity)
+            .map(|_| pool.reserve().unwrap())
+            .collect::<Vec<_>>();
+        core.begin_tick(&mut audio, 10, InputFrame::default())
+            .unwrap();
+        assert!(core.frame_pending(&audio));
+        core.shutdown(&mut audio).unwrap();
+        assert!(!core.frame_pending(&audio));
+        assert!(!core.rt().host.channel_audio.mixer.is_rendering());
+        drop(permits);
+    }
+    #[test]
+    fn plain_desktop_uses_worker_frame_completion_and_preserves_clock_under_backpressure() {
+        let (_dir, rt) = runtime();
+        verify(Core::Plain(rt));
+    }
+    #[cfg(feature = "scripting")]
+    #[test]
+    fn scripted_desktop_uses_worker_frame_completion_and_preserves_clock_under_backpressure() {
+        let (_dir, rt) = runtime();
+        let mut app = crysirror_engine::App::new(rt, "game").unwrap();
+        app.init().unwrap();
+        app.start().unwrap();
+        verify(Core::Scripted(Box::new(app)));
     }
 }

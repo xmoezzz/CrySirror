@@ -364,3 +364,15 @@ same resource, channel and group APIs. Cross-category semantic queues retain
 original call order; workers never own a borrowed VM/host. Siglus runtime payload
 schema is 3; original file layouts are unchanged. PCMCH/KOE, exact legacy timing
 and full async final mixing/output remain open. Details: ADR 0078.
+
+## Worker final audio frames (ADR 0079)
+
+Live App and plain/scripted desktop coordinate final pooled/canonical and
+native/media DSP through shared bounded MixFrame jobs. Workers exclusively own
+mixer histories; owner slots retain readonly published observations. Completion
+restores matching leases and publishes combined PCM once. Admission backpressure
+does not repeat simulation/input; restore/clear cancels obsolete audio. Public
+Audio.rendering includes prepared frames awaiting capacity. Runtime.begin_tick
+and App.begin_frame expose nonblocking completion; their synchronous counterparts
+remain explicit offline paths. See [ADR 0079](adr/0079-worker-final-audio-frames.md)
+for ownership, cancellation and the still-synchronous device queue/lifecycle.

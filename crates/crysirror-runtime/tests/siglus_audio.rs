@@ -859,3 +859,77 @@ fn original_import_preserves_cross_category_stop_order_before_blocked_bgm_reprep
     assert!(!r.host.channel_audio.is_playing(1, 1));
     assert!(!r.host.channel_audio.is_playing(1, 2));
 }
+
+#[test]
+fn original_wait_and_restore_use_worker_mix_publication_without_repeating_native_tick() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY_WAIT);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 1000);
+    r.set_audio_nonblocking(true);
+    until(&mut r, |r| {
+        r.host.audio_info(ClientId(1), 0).unwrap().is_some()
+    });
+    let save = r.snapshot().unwrap();
+    let before = r.host.audio_info(ClientId(1), 0).unwrap().unwrap();
+    let gate = Gate::block(r.assets.cpu_tasks());
+    r.begin_tick(5, InputFrame::default()).unwrap();
+    assert!(r.audio_frame_pending());
+    assert!(r.host.channel_audio.mixer.is_rendering());
+    let diagnostic = native(&r);
+    for _ in 0..3 {
+        assert!(!r.poll_audio_frame().unwrap());
+        assert_eq!(native(&r), diagnostic);
+        assert_eq!(
+            r.host
+                .audio_info(ClientId(1), 0)
+                .unwrap()
+                .unwrap()
+                .age_frames,
+            before.age_frames
+        );
+        assert!(r.tick(5, InputFrame::default()).is_err());
+        assert_eq!(r.now_ms(), 5);
+    }
+    gate.release();
+    let end = Instant::now() + Duration::from_secs(5);
+    while !r.poll_audio_frame().unwrap() {
+        assert!(Instant::now() < end);
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        r.host
+            .audio_info(ClientId(1), 0)
+            .unwrap()
+            .unwrap()
+            .age_frames,
+        before.age_frames + 240
+    );
+    assert_eq!(r.host.take_pcm_output().len(), 240);
+    assert!(!r.all_halted());
+    let gate = Gate::block(r.assets.cpu_tasks());
+    r.begin_tick(5, InputFrame::default()).unwrap();
+    assert!(r.audio_frame_pending());
+    r.restore(&save).unwrap();
+    assert!(r.poll_audio_frame().unwrap());
+    assert!(r.host.audio_info(ClientId(1), 0).unwrap().is_none());
+    assert!(r.host.take_pcm_output().is_empty());
+    gate.release();
+    until(&mut r, |r| {
+        r.host.audio_info(ClientId(1), 0).unwrap().is_some()
+    });
+    for _ in 0..100 {
+        r.begin_tick(1, InputFrame::default()).unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        while !r.poll_audio_frame().unwrap() {
+            assert!(Instant::now() < end);
+            std::thread::yield_now();
+        }
+        if r.all_halted() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(r.all_halted(), "{}", native(&r));
+    assert_eq!(native(&r)["int_stack"], json!([42]));
+}

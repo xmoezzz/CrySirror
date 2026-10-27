@@ -20,6 +20,10 @@ fn main() -> Result<()> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
+    let worker = std::env::args().any(|arg| arg == "--worker");
+    let pool = worker
+        .then(|| crysirror_tasks::TaskPool::new("demo-mix", 2, 4))
+        .transpose()?;
     let rate = 48000u32;
     let mut mixer = Mixer::default();
     mixer.set_mix_group(1, "world", Settings::default(), 0.)?;
@@ -69,7 +73,28 @@ fn main() -> Result<()> {
             mixer.set_mix_group_gain(1, "world", if second == 1 { 0. } else { 1. }, 250.)?;
         }
         for block in out[second * rate as usize..(second + 1) * rate as usize].chunks_mut(512) {
-            mixer.render(block)?;
+            if let Some(pool) = &pool {
+                let mut job = crysirror_audio::render_job::MixJob::begin(
+                    pool,
+                    &mut [&mut mixer],
+                    block.len(),
+                    vec![],
+                )?;
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    if let Some(pcm) = job.poll(&mut [&mut mixer])? {
+                        block.copy_from_slice(&pcm);
+                        break;
+                    }
+                    ensure!(
+                        std::time::Instant::now() < deadline,
+                        "demo audio worker timeout"
+                    );
+                    std::thread::yield_now();
+                }
+            } else {
+                mixer.render(block)?;
+            }
         }
     }
     let n = rate as usize;
@@ -107,7 +132,7 @@ fn main() -> Result<()> {
     }
     std::fs::write(&path, wave)?;
     println!(
-        "{}: stereo48k, three seconds; parent fades music 1–1.25s and restores 2–2.25s; UI unaffected; RMS={clear:.6}/{quiet:.6}/{restored:.6}; peak={peak:.6}",
+        "{}: stereo48k, three seconds; parent fades music 1–1.25s and restores 2–2.25s; UI unaffected; worker={worker}; RMS={clear:.6}/{quiet:.6}/{restored:.6}; peak={peak:.6}",
         path.display()
     );
     Ok(())

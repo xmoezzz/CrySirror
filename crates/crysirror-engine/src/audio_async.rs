@@ -114,6 +114,9 @@ fn handle(owner: u32, value: &Value) -> Result<VoiceHandle> {
 /// Owner-only publication; all VFS reads and decoding have already completed.
 pub(crate) fn poll(state: &mut EngineState) -> Result<()> {
     crate::audio_api::sync_generation(state);
+    if state.mixer_audio.frame_pending || state.mixer_audio.mixer.is_rendering() {
+        return Ok(());
+    }
     let epoch = state.runtime.restored;
     let mut runtime = std::mem::take(&mut state.mixer_audio.jobs);
     let outcome = (|| {
@@ -312,6 +315,8 @@ pub(crate) fn call(cx: &mut EngineContext, method: &str, args: &[Value]) -> Resu
         if status.state == OperationState::Ready {
             if let Some(Product::Published(result)) = a.jobs.jobs.poll(owner, epoch, ticket)? {
                 value["result"] = result.clone();
+            } else {
+                value["state"] = json!("pending");
             }
         }
         return Ok(Some(Value::from_json(value)));
