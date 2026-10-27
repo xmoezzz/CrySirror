@@ -25,9 +25,11 @@ declare class Audio {
   stop(channel: number): void;
   /** Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion. */
   playAt(channel: number, voice: Record<string, any>, where: Record<string, any>): void;
+  /** Automatically refresh a spatial voice's reflection paths on bounded workers using ReflectionTrackingSpec. Movement coalesces; fixed delay history is preserved and tap plans crossfade. Initial work holds the source clock, including HRTF dependency. clearVoiceReflections disables tracking. Playback options may include reflections to register before a short source runs. */
+  trackVoiceReflections(handle: Record<string, any>, settings: Record<string, any>): void;
   /** Trace bounded single-bounce specular ReflectionQuery paths on workers against this client's prepared acoustic scene. Includes material pressure gains, arrival directions and physical/excess delays. Exceeding budgets fails visibly. */
   beginReflectionProbe(query: Record<string, any>): number;
-  /** Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate snapshots; explicitly prepare again, no automatic tracking yet. */
+  /** Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate these static snapshots; prepare again or opt into trackVoiceReflections. */
   beginVoiceReflections(handle: Record<string, any>, options: Record<string, any>): number;
   /** Client/restore-scoped pending/ready/failed query/preparation receipt. Ready follows publication. Release using cancelReflectionJob. */
   reflectionStatus(ticket: number): Record<string, any>;
@@ -35,7 +37,7 @@ declare class Audio {
   cancelReflectionJob(ticket: number): void;
   /** Cancel pending reflection work and clear this voice's early echo history, preserving independent direct/HRTF/late-reverb processing. */
   clearVoiceReflections(handle: Record<string, any>): void;
-  /** Current captured paths, acoustic scene revision, pending flag and invalidation/failure reason. Spatial/listener/scene changes require explicit re-preparation. */
+  /** Current captured paths, scene revision, pending/error state and optional automatic tracking snapshots. Static effects require re-preparation after pose changes; tracked effects coalesce updates and expose waiting/draining state. */
   reflectionsVoice(handle: Record<string, any>): Record<string, any>;
   /** Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections. */
   beginReverb(settings: Record<string, any>): number;
@@ -91,7 +93,7 @@ declare class Audio {
   sourceStatus(handle: Record<string, any>): any;
   /** Drop this client's cached clips. Playing voices retain their own PCM and residency receipts. */
   clearSfxCache(): void;
-  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle. */
+  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle. */
   playSfx(voice: Record<string, any>): Record<string, any>;
   /** Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants. */
   playRandom(name: string, container: Record<string, any>, voice: Record<string, any>): Record<string, any>;

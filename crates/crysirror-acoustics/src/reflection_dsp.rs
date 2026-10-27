@@ -1,6 +1,6 @@
 // Copyright (c) 2026 CrySirror contributors.
 // Licensed under the Apache License, Version 2.0; see LICENSE.
-//! Sparse fractional-delay early echoes with shared complementary-band history.
+//! Sparse reflection plans with single-owner history and bounded tap crossfades.
 use crate::{reflections::ReflectionPaths, spectrum::BandSplitter};
 use anyhow::{Result, ensure};
 use glam::Vec3;
@@ -11,31 +11,27 @@ struct Tap {
     gains: [f32; 3],
     pan: [f32; 2],
 }
-/// Worker-prepared immutable tap metadata plus single-owner DSP history.
-/// Reads/process/reset perform no geometry, I/O or delay-buffer allocation.
-pub struct EarlyReflections {
+/// Immutable, worker-prepared tap plan. Publication does not reset sample history.
+pub struct ReflectionPlan {
     paths: Arc<ReflectionPaths>,
-    splitter: BandSplitter,
-    ring: Vec<[f32; 3]>,
     taps: Vec<Tap>,
-    at: usize,
-    filled: usize,
     rate: u32,
-    tail: usize,
     latency: usize,
+    longest: usize,
     storage: Option<Arc<dyn Send + Sync>>,
 }
-impl EarlyReflections {
+impl ReflectionPlan {
     pub fn prepare(
         rate: u32,
         paths: ReflectionPaths,
         direct_latency_frames: usize,
     ) -> Result<Self> {
-        ensure!(direct_latency_frames <= 256, "reflection reference latency");
         paths.query.validate()?;
         ensure!(
-            (8000..=192000).contains(&rate) && paths.paths.len() <= paths.query.options.max_paths,
-            "reflection PCM format/path count"
+            (8000..=192000).contains(&rate)
+                && direct_latency_frames <= 256
+                && paths.paths.len() <= paths.query.options.max_paths,
+            "reflection PCM format/path count/reference latency"
         );
         let right = Vec3::from(paths.query.listener_forward)
             .cross(Vec3::from(paths.query.listener_up))
@@ -84,26 +80,14 @@ impl EarlyReflections {
                 pan: [(0.5 * (1. - pan)).sqrt(), (0.5 * (1. + pan)).sqrt()],
             });
         }
-        let tail = if taps.is_empty() {
-            0
-        } else {
-            longest + (rate as usize).div_ceil(100)
-        };
         Ok(Self {
             paths: Arc::new(paths),
-            splitter: BandSplitter::new(rate)?,
-            ring: vec![[0.; 3]; longest + 2],
             taps,
-            at: 0,
-            filled: 0,
             rate,
-            tail,
             latency: direct_latency_frames,
+            longest,
             storage: None,
         })
-    }
-    pub fn sample_rate(&self) -> u32 {
-        self.rate
     }
     pub fn paths(&self) -> &ReflectionPaths {
         &self.paths
@@ -111,17 +95,167 @@ impl EarlyReflections {
     pub fn direct_latency_frames(&self) -> usize {
         self.latency
     }
+    pub fn resident_bytes(&self) -> usize {
+        self.taps.capacity() * core::mem::size_of::<Tap>()
+            + self.paths.paths.capacity()
+                * core::mem::size_of::<crate::reflections::ReflectionPath>()
+            + core::mem::size_of::<ReflectionPaths>()
+    }
+    pub fn retain_storage(&mut self, receipt: Arc<dyn Send + Sync>) {
+        self.storage = Some(receipt);
+    }
+    fn tail_frames(&self) -> usize {
+        if self.taps.is_empty() {
+            0
+        } else {
+            self.longest + (self.rate as usize).div_ceil(100)
+        }
+    }
+    fn output(&self, ring: &[[f32; 3]], at: usize, filled: usize) -> [f32; 2] {
+        let read = |delay: usize| {
+            if delay > filled {
+                [0.; 3]
+            } else {
+                ring[(at + ring.len() - delay) % ring.len()]
+            }
+        };
+        let mut out = [0.; 2];
+        for tap in &self.taps {
+            let a = read(tap.delay);
+            let b = read(tap.delay + 1);
+            let v = (0..3)
+                .map(|i| (a[i] + (b[i] - a[i]) * tap.fraction) * tap.gains[i])
+                .sum::<f32>();
+            out[0] += v * tap.pan[0];
+            out[1] += v * tap.pan[1];
+        }
+        let gain = self.paths.query.options.wet_gain;
+        [out[0] * gain, out[1] * gain]
+    }
+}
+/// Mutable single-owner delay history. Tracked mode reserves the configured
+/// maximum delay once and keeps history even when the current plan has no paths.
+pub struct EarlyReflections {
+    current: ReflectionPlan,
+    previous: Option<ReflectionPlan>,
+    splitter: BandSplitter,
+    ring: Vec<[f32; 3]>,
+    at: usize,
+    filled: usize,
+    transition_total: usize,
+    transition_left: usize,
+    tracked: bool,
+    audible: bool,
+    fade_from_silence: bool,
+    storage: Option<Arc<dyn Send + Sync>>,
+}
+impl EarlyReflections {
+    pub fn prepare(rate: u32, paths: ReflectionPaths, latency: usize) -> Result<Self> {
+        Self::from_plan(ReflectionPlan::prepare(rate, paths, latency)?, false)
+    }
+    pub fn prepare_tracked(rate: u32, paths: ReflectionPaths, latency: usize) -> Result<Self> {
+        Self::from_plan(ReflectionPlan::prepare(rate, paths, latency)?, true)
+    }
+    fn from_plan(plan: ReflectionPlan, tracked: bool) -> Result<Self> {
+        let capacity = if tracked {
+            (plan.paths.query.options.max_delay_seconds as f64 * plan.rate as f64).ceil() as usize
+                + 256
+                + 2
+        } else {
+            plan.longest + 2
+        };
+        Ok(Self {
+            splitter: BandSplitter::new(plan.rate)?,
+            ring: vec![[0.; 3]; capacity],
+            current: plan,
+            previous: None,
+            at: 0,
+            filled: 0,
+            transition_total: 0,
+            transition_left: 0,
+            tracked,
+            audible: true,
+            fade_from_silence: false,
+            storage: None,
+        })
+    }
+    pub fn sample_rate(&self) -> u32 {
+        self.current.rate
+    }
+    pub fn paths(&self) -> &ReflectionPaths {
+        self.current.paths()
+    }
+    pub fn direct_latency_frames(&self) -> usize {
+        self.current.latency
+    }
     pub fn tail_frames(&self) -> usize {
-        self.tail
+        self.current.tail_frames().max(
+            self.previous
+                .as_ref()
+                .filter(|_| self.transition_left > 0)
+                .map_or(0, ReflectionPlan::tail_frames),
+        )
     }
     pub fn resident_bytes(&self) -> usize {
-        self.ring.len() * core::mem::size_of::<[f32; 3]>()
-            + self.taps.len() * core::mem::size_of::<Tap>()
+        self.ring.capacity() * core::mem::size_of::<[f32; 3]>()
+            + self.current.resident_bytes()
+            + self
+                .previous
+                .as_ref()
+                .map_or(0, ReflectionPlan::resident_bytes)
     }
-    pub fn retain_storage(&mut self, storage: Arc<dyn Send + Sync>) {
-        self.storage = Some(storage);
+    pub fn history_capacity_frames(&self) -> usize {
+        self.ring.len()
     }
-    /// Old cells are inaccessible until overwritten; no large buffer clear.
+    pub fn is_tracked(&self) -> bool {
+        self.tracked
+    }
+    pub fn set_audible(&mut self, audible: bool) {
+        self.audible = audible;
+    }
+    pub fn can_publish_plan(&self) -> bool {
+        self.transition_left == 0
+    }
+    /// Returns retired metadata for owner-side disposal. At most two plans render.
+    pub fn publish_plan(
+        &mut self,
+        plan: ReflectionPlan,
+        crossfade_ms: u32,
+    ) -> Result<Option<ReflectionPlan>> {
+        ensure!(
+            self.tracked && self.can_publish_plan(),
+            "reflection transition is pending"
+        );
+        ensure!(
+            plan.rate == self.sample_rate() && plan.longest + 2 <= self.ring.len(),
+            "reflection plan exceeds history format/capacity"
+        );
+        ensure!(
+            (1..=200).contains(&crossfade_ms),
+            "reflection crossfade duration"
+        );
+        let retired = self.previous.take();
+        let old = std::mem::replace(&mut self.current, plan);
+        self.previous = Some(old);
+        self.transition_total = (self.sample_rate() as usize * crossfade_ms as usize)
+            .div_ceil(1000)
+            .max(1);
+        self.transition_left = self.transition_total;
+        self.fade_from_silence = !self.audible;
+        self.audible = true;
+        Ok(retired)
+    }
+    /// The sample loop never frees previous plans. Collect after a completed fade.
+    pub fn retire_plan(&mut self) -> Option<ReflectionPlan> {
+        if self.transition_left == 0 {
+            self.previous.take()
+        } else {
+            None
+        }
+    }
+    pub fn retain_storage(&mut self, receipt: Arc<dyn Send + Sync>) {
+        self.storage = Some(receipt);
+    }
     pub fn reset(&mut self) {
         self.at = 0;
         self.filled = 0;
@@ -129,37 +263,32 @@ impl EarlyReflections {
     }
     pub fn process_frame(&mut self, input: f32) -> Result<[f32; 2]> {
         ensure!(input.is_finite(), "nonfinite reflection input");
-        if self.taps.is_empty() {
+        if !self.tracked && self.current.taps.is_empty() {
             return Ok([0.; 2]);
         }
         self.ring[self.at] = self.splitter.process(input);
-        let mut out = [0.; 2];
-        let len = self.ring.len();
-        let read = |delay: usize| -> [f32; 3] {
-            if delay > self.filled {
-                [0.; 3]
-            } else {
-                self.ring[(self.at + len - delay) % len]
-            }
-        };
-        for tap in &self.taps {
-            let a = read(tap.delay);
-            let b = read(tap.delay + 1);
-            let value = (0..3)
-                .map(|i| (a[i] + (b[i] - a[i]) * tap.fraction) * tap.gains[i])
-                .sum::<f32>();
-            out[0] += value * tap.pan[0];
-            out[1] += value * tap.pan[1];
+        let mut out = self.current.output(&self.ring, self.at, self.filled);
+        if self.transition_left > 0 {
+            let old = self
+                .previous
+                .as_ref()
+                .unwrap()
+                .output(&self.ring, self.at, self.filled);
+            let old = if self.fade_from_silence { [0.; 2] } else { old };
+            let t = (self.transition_total - self.transition_left) as f32
+                / self.transition_total as f32;
+            out = [
+                old[0] + (out[0] - old[0]) * t,
+                old[1] + (out[1] - old[1]) * t,
+            ];
+            self.transition_left -= 1;
         }
-        self.at = (self.at + 1) % len;
-        self.filled = (self.filled + 1).min(len - 1);
-        let wet = self.paths.query.options.wet_gain;
-        out[0] *= wet;
-        out[1] *= wet;
+        self.at = (self.at + 1) % self.ring.len();
+        self.filled = (self.filled + 1).min(self.ring.len() - 1);
         ensure!(
             out.iter().all(|x| x.is_finite()),
             "nonfinite reflection output"
         );
-        Ok(out)
+        Ok(if self.audible { out } else { [0.; 2] })
     }
 }

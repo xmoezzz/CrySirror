@@ -297,6 +297,28 @@ impl ChannelAudio {
         self.mixer.set_reflections(client, handle, effect)?;
         Ok(())
     }
+    pub fn reflection_plan_ready(&self, client: u32, channel: u32) -> Result<bool> {
+        let h = *self
+            .voices
+            .get(&(client, channel))
+            .context("audio channel not found")?;
+        self.mixer.reflection_plan_ready(client, h)
+    }
+    /// Publish a worker-prepared moving-path plan while keeping channel history.
+    pub fn publish_reflection_plan(
+        &mut self,
+        client: u32,
+        channel: u32,
+        plan: crysirror_acoustics::reflection_dsp::ReflectionPlan,
+        crossfade_ms: u32,
+    ) -> Result<Option<crysirror_acoustics::reflection_dsp::ReflectionPlan>> {
+        let h = *self
+            .voices
+            .get(&(client, channel))
+            .context("audio channel not found")?;
+        self.mixer
+            .publish_reflection_plan(client, h, plan, crossfade_ms)
+    }
     pub fn set_ducking(&mut self, client: u32, config: Ducking) -> Result<()> {
         self.mixer.set_ducking(client, config)?;
         self.clients.insert(client);
@@ -442,6 +464,11 @@ impl ChannelAudio {
     }
     pub fn render(&mut self, delta_ms: u64) -> Result<()> {
         self.poll_preparations()?;
+        for (&(client, _), &h) in &self.voices {
+            if self.mixer.is_playing(client, h) {
+                self.mixer.retire_reflection_plan(client, h)?;
+            }
+        }
         if self.clients.is_empty() {
             self.output.clear();
             return Ok(());

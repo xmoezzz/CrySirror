@@ -2397,3 +2397,100 @@ Remaining boundaries:
   pool teardown retain owner/synchronous boundaries. No full engine-wide async
   completion, new GPU/hardware RT or Windows/Linux behavior is claimed. The
   broader modern engine/VN capability objective remains active.
+
+## Automatic reflection tracking (ADR 0075, 2026-10-27)
+
+Implementation:
+- Added engine-owned ReflectionTrackingSpec and Audio.trackVoiceReflections,
+  plus playback `reflections` registration before source consumption. Updates
+  run after listener/camera and entity-follow poses. Initial short sounds wait
+  for enabled HRTF then reflection preparation. Static captured APIs retain
+  explicit invalidation/re-preparation semantics; mode/settings replacement
+  clears history, while ordinary pose updates preserve it.
+- Split immutable worker-prepared ReflectionPlan from mixer-owned EarlyReflections
+  history. Tracked effects reserve configured maximum delay once and record even
+  empty plans. At most two plans render with sample-bounded linear crossfades.
+  Completed previous plans/leases are reclaimed by the control owner, not in the
+  sample loop. Seek resets filled history without stale samples. Shared Rust
+  Mixer/ChannelAudio publication works without App, VM, script or device.
+- Coalesced immutable source/listener/revision/latency snapshots use round-robin
+  admission: 64 configured voices, 32 tracked flights globally, eight/client,
+  four launches/frame and one flight or ready result/voice. The cap is checked
+  before advancing the queue, covering the five-voice starvation boundary.
+  Full pools defer; residency exhaustion records waiting with interval retry.
+  Initial effects reserve 8 MiB, updates 64 KiB, shrinking to prepared capacities
+  plus 8 KiB against the existing 512 MiB estimated host reflection budget.
+  Actual workers, results and installed/retired objects retain their leases.
+- Publication accepts a completed captured pose behind continuous movement,
+  then schedules the coalesced desired pose; scene revision and direct HRTF
+  latency remain strict. Incompatible old taps mute immediately and compatible
+  replacements fade from silence using retained input history. Worker failure
+  releases initial holds and retains a still-valid old effect. Clear, stop and
+  restore prevent stale publication. Source EOF stops new geometry jobs and
+  drains the installed target; native waits still use source completion.
+- reflectionsVoice exposes tracking settings, desired/submitted/published
+  snapshots, capture time/published age, pending/waiting/error, muted/draining
+  and successful update count. Targets may lag under contention; publication
+  is separate from audible fade completion. API docs regenerated and logged
+  079531ae354ff224 -> 1ff0b7ce813fb81e. No legacy engine or VM-private algorithm
+  was imported; original native adapter implementations/opcodes are unchanged.
+
+Compilation:
+- Local release workspace/all-target check passed with desktop krkr, arc-formats
+  and acoustics-obvhs. Minimal desktop no-default reallive+avg32 check passed.
+  Existing CBG/RealLive/minimal-CLI warnings remain; no new warning was observed.
+  No GitHub CI or remote build ran.
+
+Behavior validation:
+- Acoustics/audio/tasks with obvhs: **95 passed**, two ignored. Engine audio,
+  acoustics/HRTF/reverb/static/tracked reflections: **41 passed**. JS async
+  services: **8 passed**, one font case ignored. Original RealLive/AVG32 bridges:
+  **12 passed**, one font case ignored. API reference: **6 passed**. Total:
+  **162 distinct Rust tests passed**, four ignored excluded; the final five
+  tracked-engine reruns are not counted twice. Python 3.11: **189 passed**.
+- Four new device-free DSP/channel cases verify past samples survive changed
+  delays, initially empty plans retain history, exact fade samples, busy-plan
+  rejection, owner-side retirement/receipt lifetime, obsolete-geometry silence,
+  seek isolation/capacity rejection, scoped channel publication and source EOF
+  independent of retained echoes.
+- Five engine cases verify continuous moving-source publication, listener
+  orientation, blocked workers retaining audible old history, client scopes,
+  clear/restore cancellation, scene replacement mute/recovery, both five-voice
+  and twelve-voice fair admission, and a **one-frame sound** with HRTF-before-
+  reflections dependency. Its real isolated echo reaches the output after
+  source EOF. The same playback case verifies entity following, camera listener
+  movement and entity destruction. Latest tracked-engine rerun passed after
+  capture-age/draining-status additions.
+- JS now exercises playSfxAsync with reflection settings, the explicit tracking
+  method, listener movement, observed worker publication and resource clear.
+  The initial JS failure was a fixture missing existing required listener
+  forward/up fields; the corrected fixture passed. API blessing initially
+  required logging the new fingerprint; the logged final reference test passed.
+- Authored moving_reflections example exports 48 kHz stereo, three-second
+  stationary/moving wet-only WAVs. Moving output uses **40 plan updates**, peak
+  **0.121842**, versus stationary **0.127668**; squared PCM difference
+  **71.441991051**. Worker wall time (including offline fences) 0.000328 s for
+  moving plans; three-second mixing 0.005390 s on this Apple M5 run. These tiny
+  authored-scene timings do not rank backends or establish live-scene throughput.
+  An independent exported-PCM check verifies left-dominant early moving energy
+  (4.388710 / 3.508156), right-dominant late energy (2.249148 / 2.863898), and
+  a silent final half-second. Stationary output stays left-dominant. No game
+  data, measured HRIR, font, GPU or audio output device was used.
+- Evidence under target/verification: tracking-library-tests.log,
+  tracking-engine-final-tests.log, tracking-native-tests.log,
+  tracking-js-tests.log, tracking-api-final-tests.log,
+  tracking-workspace-check.log, tracking-minimal-check.log,
+  tracking-python-tests.log, tracking-demo.log, tracking-demo-oracle.log and
+  moving-reflection-demo/*.wav. Generated WAVs/evidence remain ignored.
+
+Remaining boundaries:
+- Geometry remains baked/static; no mesh refit, higher/diffuse bounce,
+  diffraction, reflection HRIR/Ambisonics, continuous Doppler or physical waves
+  already in flight. Discrete captured delays crossfade; they are not continuous
+  physical resampling. Source directivity stays authored in world space rather
+  than implicitly following entity rotation. Explicit reconfiguration cuts tails.
+- Final DSP/mixing, control/scratch allocation, last-reference disposal and device/
+  pool teardown retain synchronous owner boundaries. No complete engine-wide
+  async migration, new GPU/hardware RT, other-platform/audio-device behavior or
+  additional commercial VN opcode/save compatibility is claimed. The broader
+  modern engine/VN capability objective remains active.

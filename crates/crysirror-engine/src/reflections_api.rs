@@ -22,30 +22,30 @@ type Key = (u32, u32, u64);
 fn key(h: VoiceHandle) -> Key {
     (h.client, h.slot, h.generation)
 }
-const VOICE_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const VOICE_BYTES: usize = 8 * 1024 * 1024;
 const HOST_BYTES: usize = 512 * 1024 * 1024;
-struct Charge {
+pub(crate) struct Charge {
     budget: Arc<AtomicUsize>,
     bytes: usize,
 }
 impl Charge {
     fn new(budget: Arc<AtomicUsize>) -> Result<Self> {
+        Self::reserve(budget, VOICE_BYTES)
+    }
+    pub(crate) fn reserve(budget: Arc<AtomicUsize>, bytes: usize) -> Result<Self> {
         ensure!(
             budget
                 .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n
-                    .checked_add(VOICE_BYTES)
+                    .checked_add(bytes)
                     .filter(|n| *n <= HOST_BYTES))
                 .is_ok(),
             "reflection residency budget exceeded"
         );
-        Ok(Self {
-            budget,
-            bytes: VOICE_BYTES,
-        })
+        Ok(Self { budget, bytes })
     }
 }
 impl Charge {
-    fn shrink(&mut self, bytes: usize) -> Result<()> {
+    pub(crate) fn shrink(&mut self, bytes: usize) -> Result<()> {
         ensure!(
             bytes <= self.bytes,
             "reflection prepared storage exceeds reservation"
@@ -86,7 +86,8 @@ pub struct ReflectionsRuntime {
     pending: BTreeMap<Key, u64>,
     installed: BTreeMap<Key, (VoiceHandle, u64)>,
     errors: BTreeMap<Key, String>,
-    budget: Arc<AtomicUsize>,
+    pub(crate) budget: Arc<AtomicUsize>,
+    pub(crate) tracking: crate::reflection_tracking::TrackingRuntime,
 }
 impl Default for ReflectionsRuntime {
     fn default() -> Self {
@@ -97,17 +98,30 @@ impl Default for ReflectionsRuntime {
             installed: BTreeMap::new(),
             errors: BTreeMap::new(),
             budget: Arc::new(AtomicUsize::new(0)),
+            tracking: Default::default(),
         }
     }
 }
 impl ReflectionsRuntime {
     pub fn reset(&mut self) {
+        self.tracking.reset();
         self.jobs.clear();
         self.requests.clear();
         self.pending.clear();
         self.installed.clear();
         self.errors.clear();
     }
+}
+pub(crate) fn clear_static(state: &mut EngineState, h: VoiceHandle) -> Result<()> {
+    let runtime = &mut state.mixer_audio.reflections;
+    if let Some(ticket) = runtime.pending.remove(&key(h)) {
+        runtime.jobs.cancel(h.client, ticket)?;
+        runtime.requests.remove(&ticket);
+    }
+    runtime.installed.remove(&key(h));
+    runtime.errors.remove(&key(h));
+    state.mixer_audio.mixer.set_reflections(h.client, h, None)?;
+    Ok(())
 }
 fn stale(state: &EngineState, request: &Request) -> Option<&'static str> {
     if state.mixer_audio.acoustics.revision(request.owner) != Some(request.revision) {
@@ -136,6 +150,7 @@ fn stale(state: &EngineState, request: &Request) -> Option<&'static str> {
 }
 pub(crate) fn poll(state: &mut EngineState) -> Result<()> {
     crate::audio_api::sync_generation(state);
+    crate::reflection_tracking::collect(state)?;
     let epoch = state.runtime.restored;
     let mut runtime = std::mem::take(&mut state.mixer_audio.reflections);
     let outcome = (|| {
@@ -245,12 +260,19 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
             | "cancelReflectionJob"
             | "clearVoiceReflections"
             | "reflectionsVoice"
+            | "trackVoiceReflections"
     ) {
         return Ok(None);
     }
     poll(state)?;
     let owner = state.client.0;
     let epoch = state.runtime.restored;
+    if method == "trackVoiceReflections" {
+        let h = handle(owner, arg(args, 0)?)?;
+        let spec = serde_json::from_value(arg(args, 1)?.to_json())?;
+        crate::reflection_tracking::track(state, h, spec)?;
+        return Ok(Some(Value::Null));
+    }
     if matches!(method, "beginReflectionProbe" | "beginVoiceReflections") {
         let voice = if method == "beginVoiceReflections" {
             Some(handle(owner, arg(args, 0)?)?)
@@ -336,6 +358,9 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
                     }
                 })?;
         if let Some(h) = voice {
+            if runtime.tracking.remove(h) {
+                state.mixer_audio.mixer.set_reflections(owner, h, None)?;
+            }
             if let Err(error) = state.mixer_audio.mixer.pending_reflections(owner, h) {
                 runtime.jobs.cancel(owner, ticket)?;
                 return Err(error);
@@ -354,6 +379,7 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
         state.mixer_audio.mixer.spec(owner, h)?;
         let runtime = &mut state.mixer_audio.reflections;
         if method == "clearVoiceReflections" {
+            runtime.tracking.remove(h);
             if let Some(ticket) = runtime.pending.remove(&key(h)) {
                 runtime.jobs.cancel(owner, ticket)?;
                 runtime.requests.remove(&ticket);
@@ -364,7 +390,7 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
             return Ok(Some(Value::Null));
         }
         return Ok(Some(Value::from_json(
-            json!({"pending":runtime.pending.contains_key(&key(h)),"scene_revision":runtime.installed.get(&key(h)).map(|p|p.1),"paths":state.mixer_audio.mixer.reflection_paths(owner,h)?,"error":runtime.errors.get(&key(h))}),
+            json!({"pending":runtime.pending.contains_key(&key(h))||runtime.tracking.status(h).is_some_and(|s|s["pending"]==true),"scene_revision":runtime.tracking.revision(h).or_else(||runtime.installed.get(&key(h)).map(|p|p.1)),"paths":state.mixer_audio.mixer.reflection_paths(owner,h)?,"error":runtime.errors.get(&key(h)),"tracking":runtime.tracking.status(h)}),
         )));
     }
     let ticket = u64::try_from(arg(args, 0)?.as_i64()?)?;

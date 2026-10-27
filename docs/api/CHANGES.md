@@ -4,6 +4,28 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `1ff0b7ce813fb81e` (2026-10-27): automatic reflection tracking
+
+- Add Audio.trackVoiceReflections and ReflectionTrackingSpec. SFX/random/music
+  voice options also accept `reflections` through the shared playback parser.
+  playSfxAsync registers tracking before consuming short sources; enabled HRTF
+  prepares first. Existing captured-pose APIs keep their static contract.
+- Automatic updates capture entity/listener poses after control updates,
+  coalesce movement, use bounded round-robin workers and preserve fixed-capacity
+  history. Immutable tap plans crossfade at most two targets. Pose snapshots may
+  lag motion; scene revision and HRTF latency remain strict. Invalid old taps
+  mute and new compatible plans fade from silence.
+- reflectionsVoice adds optional tracking settings/snapshots, capture/published
+  age, pending/waiting/error, muted/draining and successful update count.
+  Publication acknowledges the target, not crossfade completion. Natural source
+  EOF stops refresh and drains the installed plan; native waits remain source-
+  based. clearVoiceReflections cancels either mode. Settings/mode changes cut
+  history; restore invalidates derived work/resources. No Doppler, dynamic
+  geometry or higher/diffuse reflections are implied. See ADR 0075 for limits.
+- Shared Rust ReflectionPlan/EarlyReflections and Mixer/ChannelAudio plan
+  publication are usable without App/VM/device. Sample processing retains old
+  plans until control-side collection. Final mix/output is still synchronous.
+
 ## `079531ae354ff224` (2026-10-27): captured geometric early reflections
 
 - Add Audio.beginReflectionProbe/beginVoiceReflections/reflectionStatus/

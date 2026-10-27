@@ -36,6 +36,7 @@ pub(crate) struct Attachment {
     pub(crate) raycast: bool,
     pub(crate) acoustics: Option<crysirror_acoustics::AcousticSource>,
     pub(crate) binaural: bool,
+    pub(crate) reflections: Option<crysirror_acoustics::reflections::ReflectionTrackingSpec>,
 }
 pub struct AudioRuntime {
     pub mixer: Mixer,
@@ -310,6 +311,7 @@ pub fn update(cx: &mut EngineContext, dt_ms: u64) -> Result<()> {
     }
     crate::acoustics_api::dispatch(cx.state()?)?;
     crate::binaural_api::dispatch(cx.state()?)?;
+    crate::reflection_tracking::update(cx.state()?, dt_ms)?;
     let s = cx.state()?;
     let a = &mut s.mixer_audio;
     a.attachments
@@ -358,12 +360,13 @@ fn info() -> &'static ClassInfo {
         method("play",vec![("channel",T::Int),("voice",T::Map)],T::Void,"Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics."),
         method("stop",vec![("channel",T::Int)],T::Void,"Stop a classic channel."),
         method("playAt",vec![("channel",T::Int),("voice",T::Map),("where",T::Map)],T::Void,"Legacy distance-gain API. Use playSfx with spatial/follow for stereo 3D and occlusion."),
+        method("trackVoiceReflections",vec![("handle",T::Map),("settings",T::Map)],T::Void,"Automatically refresh a spatial voice's reflection paths on bounded workers using ReflectionTrackingSpec. Movement coalesces; fixed delay history is preserved and tap plans crossfade. Initial work holds the source clock, including HRTF dependency. clearVoiceReflections disables tracking. Playback options may include reflections to register before a short source runs."),
         method("beginReflectionProbe",vec![("query",T::Map)],T::Int,"Trace bounded single-bounce specular ReflectionQuery paths on workers against this client's prepared acoustic scene. Includes material pressure gains, arrival directions and physical/excess delays. Exceeding budgets fails visibly."),
-        method("beginVoiceReflections",vec![("handle",T::Map),("options",T::Map)],T::Int,"Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate snapshots; explicitly prepare again, no automatic tracking yet."),
+        method("beginVoiceReflections",vec![("handle",T::Map),("options",T::Map)],T::Int,"Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate these static snapshots; prepare again or opt into trackVoiceReflections."),
         method("reflectionStatus",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed query/preparation receipt. Ready follows publication. Release using cancelReflectionJob."),
         method("cancelReflectionJob",vec![("ticket",T::Int)],T::Void,"Cancel/release reflection work and release an initial clock hold. Releasing a published receipt keeps its effect."),
         method("clearVoiceReflections",vec![("handle",T::Map)],T::Void,"Cancel pending reflection work and clear this voice's early echo history, preserving independent direct/HRTF/late-reverb processing."),
-        method("reflectionsVoice",vec![("handle",T::Map)],T::Map,"Current captured paths, acoustic scene revision, pending flag and invalidation/failure reason. Spatial/listener/scene changes require explicit re-preparation."),
+        method("reflectionsVoice",vec![("handle",T::Map)],T::Map,"Current captured paths, scene revision, pending/error state and optional automatic tracking snapshots. Static effects require re-preparation after pose changes; tracked effects coalesce updates and expose waiting/draining state."),
         method("beginReverb",vec![("settings",T::Map)],T::Int,"Prepare a client ReverbSettings parametric late-reverb bus on bounded CPU workers. Publishes matched resources in pooled/canonical and native/media mixers. Old effects remain until success. Replacing a room cuts its old tail; this does not simulate geometry reflections."),
         method("reverbStatus",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed preparation. Ready includes published revision, settings and both mixer rates. Release with cancelReverbJob."),
         method("cancelReverbJob",vec![("ticket",T::Int)],T::Void,"Cancel/release a scoped reverb preparation ticket. Releasing a published ticket keeps its installed effect."),
@@ -391,7 +394,7 @@ fn info() -> &'static ClassInfo {
         method("beginSeekVoice",vec![("handle",T::Map),("source_frame",T::Int)],T::Int,"Exact nonblocking seek for resident or worker-buffered sources. A newer seek supersedes an older one; pending seeks freeze the voice clock."),
         method("sourceStatus",vec![("handle",T::Map)],T::Any,"Worker stream queue, decoded frame count, seek generation and errors, or null for a resident source."),
         method("clearSfxCache",vec![],T::Void,"Drop this client's cached clips. Playing voices retain their own PCM and residency receipts."),
-        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle."),
+        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle."),
         method("playRandom",vec![("name",T::String),("container",T::Map),("voice",T::Map)],T::Map,"Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants."),
         method("playMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Map,"Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync."),
         method("stopVoice",vec![("handle",T::Map),("fade_ms",T::Number)],T::Void,"Stop immediately or sample-accurate fade out."),
@@ -457,6 +460,14 @@ pub(crate) fn voice_options(
         .map(|v| v.as_bool())
         .transpose()?
         .unwrap_or(false);
+    let reflections = map
+        .remove("reflections")
+        .filter(|v| !matches!(v, Value::Null))
+        .map(|v| parse::<crysirror_acoustics::reflections::ReflectionTrackingSpec>(&v))
+        .transpose()?;
+    if let Some(spec) = &reflections {
+        spec.validate()?;
+    }
     let acoustics = map
         .remove("acoustics")
         .filter(|v| !matches!(v, Value::Null))
@@ -486,8 +497,8 @@ pub(crate) fn voice_options(
     }
     spec.validate()?;
     ensure!(
-        acoustics.is_none() || spec.spatial.is_some(),
-        "acoustics requires a spatial voice or follow entity"
+        (acoustics.is_none() && reflections.is_none()) || spec.spatial.is_some(),
+        "acoustics/reflections require a spatial voice or follow entity"
     );
     ensure!(
         acoustics.is_none() || !raycast,
@@ -503,7 +514,8 @@ pub(crate) fn voice_options(
         state.mixer_audio.binaural.admit_voice(state.client.0)?;
     }
     ensure!(
-        acoustics.is_none() || state.mixer_audio.acoustics.has_scene(state.client.0),
+        (acoustics.is_none() && reflections.is_none())
+            || state.mixer_audio.acoustics.has_scene(state.client.0),
         "prepare an acoustic scene before playing an acoustic source"
     );
     ensure!(
@@ -521,6 +533,7 @@ pub(crate) fn voice_options(
         raycast,
         acoustics,
         binaural,
+        reflections,
     });
     Ok((asset, spec, attachment))
 }
@@ -543,6 +556,7 @@ pub(crate) fn attach_state(
             .attachments
             .retain(|_, a| runtime.mixer.is_playing(a.handle.client, a.handle));
         let binaural = a.binaural;
+        let reflections = a.reflections.clone();
         runtime.attachments.insert(key(handle), a);
         if runtime.attachments[&key(handle)].acoustics.is_some() {
             runtime
@@ -554,6 +568,13 @@ pub(crate) fn attach_state(
                 let a = &mut state.mixer_audio;
                 a.attachments.remove(&key(handle));
                 a.mixer.stop(handle.client, handle, 0.)?;
+                return Err(error);
+            }
+        }
+        if let Some(spec) = reflections {
+            if let Err(error) = crate::reflection_tracking::track(state, handle, spec) {
+                state.mixer_audio.attachments.remove(&key(handle));
+                state.mixer_audio.mixer.stop(handle.client, handle, 0.)?;
                 return Err(error);
             }
         }

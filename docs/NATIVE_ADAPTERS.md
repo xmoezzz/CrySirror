@@ -184,3 +184,15 @@ completion is distinct from retained echo/HRTF tails: original RealLive/AVG32
 sound waits still advance at source EOF while engine echo state drains. Native
 adapter implementations/opcodes/save layouts are unchanged. This is a static
 pose profile; dynamic tracking and higher-order/diffuse propagation remain open.
+
+
+## Shared moving reflection plans (2026-10-27)
+
+ADR 0075 adds reusable ReflectionPlan and persistent EarlyReflections history,
+with Mixer/ChannelAudio publication and source-completion semantics independent
+of App/VM/device. Modern engine Audio can automatically coalesce entity/listener
+updates; native adapters can translate a spatial operation onto those shared
+resources without private echo algorithms. This phase adds no native opcode or
+save mapping. Original RealLive/AVG32 bridge fixtures still verify source waits
+while engine-owned effects drain; that bounded evidence does not establish full
+game support or native automatic spatialization.

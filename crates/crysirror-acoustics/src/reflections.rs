@@ -66,6 +66,50 @@ impl ReflectionOptions {
         Ok(())
     }
 }
+/// Automatic pose-refresh policy over the same single-bounce simulator.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReflectionTrackingSpec {
+    /// Geometry, materials, propagation and maximum delay capacity.
+    pub options: ReflectionOptions,
+    /// Minimum interval between background snapshots, 16..1000 milliseconds.
+    pub refresh_interval_ms: u64,
+    /// Linear old/new tap crossfade, 1..200 milliseconds.
+    pub crossfade_ms: u32,
+    /// Accumulated source/listener displacement needed to refresh, 0..10 metres.
+    pub position_threshold_metres: f32,
+    /// Forward/up angular change needed to refresh, 0..180 degrees.
+    pub angle_threshold_degrees: f32,
+}
+impl Default for ReflectionTrackingSpec {
+    fn default() -> Self {
+        Self {
+            options: Default::default(),
+            refresh_interval_ms: 50,
+            crossfade_ms: 20,
+            position_threshold_metres: 0.01,
+            angle_threshold_degrees: 1.,
+        }
+    }
+}
+impl ReflectionTrackingSpec {
+    pub fn validate(&self) -> Result<()> {
+        self.options.validate()?;
+        ensure!(
+            (16..=1000).contains(&self.refresh_interval_ms)
+                && (1..=200).contains(&self.crossfade_ms),
+            "reflection tracking interval/crossfade"
+        );
+        ensure!(
+            self.position_threshold_metres.is_finite()
+                && (0. ..=10.).contains(&self.position_threshold_metres)
+                && self.angle_threshold_degrees.is_finite()
+                && (0. ..=180.).contains(&self.angle_threshold_degrees),
+            "reflection tracking movement thresholds"
+        );
+        Ok(())
+    }
+}
 /// Immutable emission/listener snapshot captured by a worker.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

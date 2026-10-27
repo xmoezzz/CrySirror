@@ -630,9 +630,10 @@ impl Mixer {
         {
             if v.reflections.as_ref().is_some_and(|r| {
                 let q = &r.paths().query;
-                q.listener != listener.position
-                    || q.listener_forward != listener.forward
-                    || q.listener_up != listener.up
+                !r.is_tracked()
+                    && (q.listener != listener.position
+                        || q.listener_forward != listener.forward
+                        || q.listener_up != listener.up)
             }) {
                 v.reflections = None;
                 constrain_tail(v);
@@ -898,7 +899,9 @@ impl Mixer {
             s.validate()?
         }
         let v = self.voice(client, h)?;
-        if v.spec.spatial.as_ref().map(|s| s.position) != spatial.as_ref().map(|s| s.position) {
+        if v.spec.spatial.as_ref().map(|s| s.position) != spatial.as_ref().map(|s| s.position)
+            && v.reflections.as_ref().is_none_or(|r| !r.is_tracked())
+        {
             v.reflections = None;
             constrain_tail(v);
         }
@@ -952,18 +955,75 @@ impl Mixer {
                 "reflection sample rate/reference latency mismatch"
             );
             ensure!(
-                v.spec
-                    .spatial
-                    .as_ref()
-                    .is_none_or(|s| s.position == q.source)
-                    && listener.position == q.listener
-                    && listener.forward == q.listener_forward
-                    && listener.up == q.listener_up,
+                effect.is_tracked()
+                    || (v
+                        .spec
+                        .spatial
+                        .as_ref()
+                        .is_none_or(|s| s.position == q.source)
+                        && listener.position == q.listener
+                        && listener.forward == q.listener_forward
+                        && listener.up == q.listener_up),
                 "reflection captured pose changed"
             );
         }
         v.reflection_pending = false;
         let old = std::mem::replace(&mut v.reflections, effect);
+        constrain_tail(v);
+        Ok(old)
+    }
+    /// Initial tracked preparation can wait behind HRTF preparation without
+    /// consuming a one-shot's source. Both preparations remain independent jobs.
+    pub fn pending_tracked_reflections(&mut self, client: u32, h: VoiceHandle) -> Result<()> {
+        ensure!(
+            self.source_is_playing(client, h),
+            "reflection source has ended"
+        );
+        let v = self.voice(client, h)?;
+        v.reflection_pending = v.reflections.is_none();
+        Ok(())
+    }
+    pub fn reflection_plan_ready(&self, client: u32, h: VoiceHandle) -> Result<bool> {
+        self.spec(client, h)?;
+        Ok(self.voices[h.slot as usize]
+            .as_ref()
+            .unwrap()
+            .reflections
+            .as_ref()
+            .is_some_and(|r| r.is_tracked() && r.can_publish_plan()))
+    }
+    pub fn publish_reflection_plan(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        plan: crysirror_acoustics::reflection_dsp::ReflectionPlan,
+        crossfade_ms: u32,
+    ) -> Result<Option<crysirror_acoustics::reflection_dsp::ReflectionPlan>> {
+        ensure!(
+            self.direct_latency_frames(client, h)? == plan.direct_latency_frames(),
+            "reflection reference latency changed"
+        );
+        self.voice(client, h)?
+            .reflections
+            .as_mut()
+            .context("tracked reflection history is missing")?
+            .publish_plan(plan, crossfade_ms)
+    }
+    pub fn suppress_tracked_reflections(&mut self, client: u32, h: VoiceHandle) -> Result<()> {
+        if let Some(effect) = &mut self.voice(client, h)?.reflections {
+            if effect.is_tracked() {
+                effect.set_audible(false);
+            }
+        }
+        Ok(())
+    }
+    pub fn retire_reflection_plan(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+    ) -> Result<Option<crysirror_acoustics::reflection_dsp::ReflectionPlan>> {
+        let v = self.voice(client, h)?;
+        let old = v.reflections.as_mut().and_then(|r| r.retire_plan());
         constrain_tail(v);
         Ok(old)
     }
@@ -1039,7 +1099,11 @@ impl Mixer {
             .as_ref()
             .is_some_and(|r| r.direct_latency_frames() != latency)
         {
-            v.reflections = None;
+            if v.reflections.as_ref().is_some_and(|r| r.is_tracked()) {
+                v.reflections.as_mut().unwrap().set_audible(false);
+            } else {
+                v.reflections = None;
+            }
         }
         v.binaural = voice;
         v.binaural_pending = false;

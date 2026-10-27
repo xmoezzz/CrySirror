@@ -96,8 +96,9 @@ and require preparation again after restore.
 Default queries use Parry; the optional host feature `acoustics-obvhs` permits
 `backend: "obvhs"` in scene JSON. Unsupported backends fail visibly. The direct-path profile
 does not enable HRTF by itself; prepare an HRTF resource separately for that.
-Reflected sound, diffraction and reverb remain unsupported. Absorption/scattering are
-reserved metadata and reported travel time is not a playback delay.
+The direct-path query does not simulate reflections/reverb; the optional shared
+resources below provide those. Absorption/scattering affect specular reflections;
+reported direct travel time is not a playback delay.
 See [ADR 0067](../adr/0067-shared-acoustics-and-cpu-bvh.md) for scheduling,
 limits and source attribution. The device-free synthesized demo runs with
 `cargo run --release -p crysirror-audio --example acoustic_room -- /tmp/room.wav`.
@@ -224,7 +225,7 @@ per-band material pressure, air/range/directivity and crossing transmission.
 traceReflectionsAsync accepts ReflectionQuery for inspection without a voice.
 Voice preparation captures the current source/listener/scene and requires a
 prepared HRTF voice if HRTF is enabled. Moving a pose or replacing geometry
-invalidates paths; prepare again explicitly. There is no automatic tracking yet.
+invalidates static paths; prepare again explicitly, or opt into tracking below.
 Starting short async sounds paused prevents source EOF before preparation starts.
 Published receipts are separate from current effect state; use reflectionsVoice
 to inspect pending work, current paths and invalidation errors. Promise.ticket
@@ -237,3 +238,29 @@ Audio.voice.source_playing excludes derived tails; playing includes them. Native
 channel waits retain source completion while the engine drains echoes. Scene/path/
 crossing budget overflow fails visibly. See [ADR 0074](../adr/0074-captured-geometric-early-reflections.md)
 for energy convention, ownership, bounds and remaining propagation work.
+
+
+## Automatic reflection tracking
+
+```typescript
+await audio.prepareAcousticsAsync('room.json');
+const voice = await audio.playSfxAsync({
+  asset: 'step.wav', spatial: { position: [0, 0, 2] },
+  reflections: { refresh_interval_ms: 50, crossfade_ms: 20 }
+});
+// Or: audio.trackVoiceReflections(existingSpatialVoice, settings).
+// follow: entity tracks the entity; the listener follows the camera by default.
+```
+
+ReflectionTrackingSpec adds motion thresholds and scheduling/fade controls.
+Playback registers before consuming short sources; enabled HRTF prepares first.
+Workers coalesce moving source/listener snapshots and publish completed paths
+without resetting delay history. reflectionsVoice.tracking reports snapshots,
+capture/published age, pending/waiting/error, muted/draining and update count.
+Published targets can lag current motion; publication is separate from the
+sample-level fade finishing. Scene/latency changes mute incompatible old paths.
+Natural source EOF stops refresh and drains the installed echo. Clearing the
+scene disables tracking; clearVoiceReflections cancels tracking/effects. Changing
+settings or switching static/tracked mode cuts history. See [ADR 0075](../adr/0075-tracked-reflection-plans.md)
+for bounds and remaining physical/async limits. An authored wet-only moving demo:
+`cargo run --release -p crysirror-audio --example moving_reflections -- /tmp/echoes`.

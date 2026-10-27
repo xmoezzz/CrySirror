@@ -467,6 +467,7 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
                         raycast: false,
                         acoustics: None,
                         binaural: false,
+                        reflections: None,
                     })
                     .binaural = true;
             } else {

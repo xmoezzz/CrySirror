@@ -155,10 +155,26 @@ deferred CPU jobs. Image-source scans, segment transmission and delay-buffer
 allocation run on workers. Initial voice work holds only that source's clock;
 replacement keeps old valid playback. Changes to captured pose, scene or HRTF
 bridge latency fail pending work and invalidate installed paths. Explicit
-preparation is required again; automatic tracking is pending.
+preparation is required again in static mode; opt-in tracking is described below.
 OperationTable::fail preserves scoped failed receipts without launching queued
 work. Cancellation releases live reservations only when the actual worker/DSP
 drops. Each voice stages at 8 MiB, then shrinks to prepared storage plus an 8 KiB
 allowance against the 512 MiB host estimate. Source completion stays distinct from derived echo/HRTF tails, including
 native waits. Geometry/DSP pointers never enter VM saves.
 Mixing, control allocations and last-reference disposal retain owner boundaries.
+
+
+## Tracked reflection updates (ADR 0075)
+
+Audio.trackVoiceReflections or playback `reflections` opts into coalesced pose
+refresh after camera/entity updates. Initial source playback waits for HRTF and
+reflection resources. Workers prepare paths/taps, while the mixer retains its
+maximum-delay history and crossfades at most two plans. At most four jobs launch
+per frame with round-robin admission, 32 flights globally and eight/client.
+Full pools defer; residency waiting/errors and captured/published age are visible
+in reflectionsVoice.tracking. Scene revision/HRTF latency remain strict even when
+poses advance during worker execution. Invalid old geometry/latency is muted.
+Natural source EOF cancels new updates and drains the installed plan; native
+waits still use source completion. Clear/restore invalidate tasks and resources.
+The sample loop does not reclaim retired plans; control-side disposal and final
+mix/output remain synchronous. See ADR 0075 for exact limits and lifetime policy.

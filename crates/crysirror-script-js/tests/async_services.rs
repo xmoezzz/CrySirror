@@ -379,6 +379,7 @@ fn reverb_promise_publishes_engine_bus_resources_and_releases_its_ticket() {
 #[test]
 fn reflection_promises_publish_captured_paths_and_a_prepared_shared_voice() {
     let (dir,mut app)=app(r#"
+      let movingVoice=null, moved=false;
       async function onInit() {
         await audio.prepareAcousticsAsync('wall.json');
         const result=await audio.traceReflectionsAsync({source:[0,0,2],listener:[0,0,0]});
@@ -394,6 +395,19 @@ fn reflection_promises_publish_captured_paths_and_a_prepared_shared_voice() {
         audio.clearVoiceReflections(voice);if(audio.reflectionsVoice(voice).paths!==null)throw Error('echo survived clear');
         await audio.prepareVoiceReflectionsAsync(voice,{});
         audio.pauseVoice(voice,false);engine.log('reflections-ready');
+        movingVoice=await audio.playSfxAsync({asset:'pulse.wav',looping:true,spatial:{position:[0,0,2]},reflections:{}});
+        audio.trackVoiceReflections(movingVoice,{refresh_interval_ms:16,crossfade_ms:1});
+      }
+      function onUpdate(dt) {
+        if(movingVoice===null)return;
+        const state=audio.reflectionsVoice(movingVoice).tracking;
+        if(state.error!==null)throw Error(state.error);
+        if(state.completed_updates===0)return;
+        if(!moved){audio.setListener({position:[1,0,0],forward:[0,0,-1],up:[0,1,0]});moved=true;return;}
+        if(state.published.query.listener[0]!==1)return;
+        audio.clearVoiceReflections(movingVoice);
+        if(audio.reflectionsVoice(movingVoice).tracking!==null)throw Error('tracking survived clear');
+        audio.stopVoice(movingVoice,0);movingVoice=null;engine.log('tracking-ready');
       }
     "#);
     std::fs::write(dir.path().join("assets/a/wall.json"),serde_json::to_vec(&serde_json::json!({"materials":[{"absorption":[0,0,0],"transmission":[0,0,0],"scattering":0}],"meshes":[{"id":7,"vertices":[[-10,-10,-2],[10,-10,-2],[10,10,-2],[-10,10,-2]],"triangles":[[0,1,2],[0,2,3]]}]})).unwrap()).unwrap();
@@ -401,5 +415,5 @@ fn reflection_promises_publish_captured_paths_and_a_prepared_shared_voice() {
     wave.extend(b"RIFF");wave.extend((size+36).to_le_bytes());wave.extend(b"WAVEfmt ");wave.extend(16u32.to_le_bytes());wave.extend(1u16.to_le_bytes());wave.extend(1u16.to_le_bytes());wave.extend(48000u32.to_le_bytes());wave.extend(96000u32.to_le_bytes());wave.extend(2u16.to_le_bytes());wave.extend(16u16.to_le_bytes());wave.extend(b"data");wave.extend(size.to_le_bytes());
     for _ in 0..16 {wave.extend(8192i16.to_le_bytes());}
     std::fs::write(dir.path().join("assets/a/pulse.wav"),wave).unwrap();
-    app.init().unwrap();app.start().unwrap();until(&mut app,"reflections-ready");
+    app.init().unwrap();app.start().unwrap();until(&mut app,"tracking-ready");
 }

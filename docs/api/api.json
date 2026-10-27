@@ -717,6 +717,21 @@
           "returns": "void"
         },
         {
+          "doc": "Automatically refresh a spatial voice's reflection paths on bounded workers using ReflectionTrackingSpec. Movement coalesces; fixed delay history is preserved and tap plans crossfade. Initial work holds the source clock, including HRTF dependency. clearVoiceReflections disables tracking. Playback options may include reflections to register before a short source runs.",
+          "name": "trackVoiceReflections",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "settings",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Trace bounded single-bounce specular ReflectionQuery paths on workers against this client's prepared acoustic scene. Includes material pressure gains, arrival directions and physical/excess delays. Exceeding budgets fails visibly.",
           "name": "beginReflectionProbe",
           "params": [
@@ -728,7 +743,7 @@
           "returns": "number"
         },
         {
-          "doc": "Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate snapshots; explicitly prepare again, no automatic tracking yet.",
+          "doc": "Prepare captured-pose early echoes for a spatial voice on workers. Initial preparation holds its source clock; replacement keeps the old effect. Uses existing HRTF bridge latency after HRTF is ready. Pose/scene/latency changes invalidate these static snapshots; prepare again or opt into trackVoiceReflections.",
           "name": "beginVoiceReflections",
           "params": [
             {
@@ -776,7 +791,7 @@
           "returns": "void"
         },
         {
-          "doc": "Current captured paths, acoustic scene revision, pending flag and invalidation/failure reason. Spatial/listener/scene changes require explicit re-preparation.",
+          "doc": "Current captured paths, scene revision, pending/error state and optional automatic tracking snapshots. Static effects require re-preparation after pose changes; tracked effects coalesce updates and expose waiting/draining state.",
           "name": "reflectionsVoice",
           "params": [
             {
@@ -1069,7 +1084,7 @@
           "returns": "void"
         },
         {
-          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean}; acoustics requires a ready scene; binaural requires a ready HRTF profile. Both use background preparation. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle.",
+          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle.",
           "name": "playSfx",
           "params": [
             {
@@ -4873,6 +4888,69 @@
     }
   ],
   "data": [
+    {
+      "doc": "Automatic pose-refresh policy over the same single-bounce simulator.",
+      "fields": [
+        {
+          "default": {
+            "max_delay_seconds": 0.5,
+            "max_paths": 64,
+            "propagation": {
+              "air_absorption": [
+                0.0002,
+                0.0017,
+                0.182
+              ],
+              "dipole_power": 1.0,
+              "dipole_weight": 0.0,
+              "forward": [
+                0.0,
+                0.0,
+                -1.0
+              ],
+              "ignore_mesh": null,
+              "metres_per_unit": 1.0,
+              "radius": 0.0,
+              "samples": 16,
+              "sound_speed": 343.0,
+              "transmission_hits": 32
+            },
+            "reference_distance_metres": 1.0,
+            "triangle_budget": 262144,
+            "wet_gain": 1.0
+          },
+          "doc": "Geometry, materials, propagation and maximum delay capacity.",
+          "name": "options",
+          "rust_type": "ReflectionOptions"
+        },
+        {
+          "default": 50,
+          "doc": "Minimum interval between background snapshots, 16..1000 milliseconds.",
+          "name": "refresh_interval_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": 20,
+          "doc": "Linear old/new tap crossfade, 1..200 milliseconds.",
+          "name": "crossfade_ms",
+          "rust_type": "u32"
+        },
+        {
+          "default": 0.01,
+          "doc": "Accumulated source/listener displacement needed to refresh, 0..10 metres.",
+          "name": "position_threshold_metres",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Forward/up angular change needed to refresh, 0..180 degrees.",
+          "name": "angle_threshold_degrees",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "ReflectionTrackingSpec",
+      "used_by": "Audio.trackVoiceReflections / playSfx.reflections"
+    },
     {
       "doc": "Bounded point-source, single-specular-bounce profile. Diffuse/multiple reflections and diffraction require separate simulation.",
       "fields": [
@@ -12133,7 +12211,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "079531ae354ff224",
+  "fingerprint": "1ff0b7ce813fb81e",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

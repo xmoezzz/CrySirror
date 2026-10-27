@@ -153,7 +153,8 @@ pub(crate) fn poll(state: &mut EngineState) -> Result<()> {
                         state.runtime.host.engine.world.entity(entity)?;
                     }
                     ensure!(
-                        a.acoustics.is_none() || state.mixer_audio.acoustics.has_scene(owner),
+                        (a.acoustics.is_none() && a.reflections.is_none())
+                            || state.mixer_audio.acoustics.has_scene(owner),
                         "acoustic scene removed while audio prepared"
                     );
                     if a.binaural {
