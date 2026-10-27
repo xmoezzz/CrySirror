@@ -349,3 +349,18 @@ enter VM saves. Siglus stopped/EOF replay now submits the same PlayResource API;
 stopped snapshot reconstruction prepares a resource without starting a voice.
 See [ADR 0077](adr/0077-prepared-audio-resources-and-native-replay.md) for budgets,
 read races, metadata limits and remaining native/async boundaries.
+
+## Audio control hierarchy and native SFX (ADR 0078)
+
+Mixer owns bounded client-scoped named gain groups, compiled parent ordering and
+output-clock interpolation. VoiceSpec/AudioParameters only carry logical group
+names; publication resolves dense indices. Voice, group, fixed bus and Master
+remain separate gain stages. Shared late-reverb history belongs to its return
+bus after source/group sends, not to a native player. Source positions and
+publication age in output frames are distinct reusable observations.
+
+Native PCM/global SE translates opcode/value/resource/wait/save policy onto the
+same resource, channel and group APIs. Cross-category semantic queues retain
+original call order; workers never own a borrowed VM/host. Siglus runtime payload
+schema is 3; original file layouts are unchanged. PCMCH/KOE, exact legacy timing
+and full async final mixing/output remain open. Details: ADR 0078.

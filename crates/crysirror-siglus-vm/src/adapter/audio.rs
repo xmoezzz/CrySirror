@@ -15,6 +15,14 @@ pub(super) struct Pending {
     ticket: Option<Stage>,
 }
 enum Stage {
+    NativeResource {
+        ticket: u64,
+        channel: u32,
+        parameters: AudioParameters,
+    },
+    Native {
+        ticket: u64,
+    },
     Resource {
         ticket: u64,
         play: Play,
@@ -54,8 +62,28 @@ fn number(value: Option<&str>, default: i64) -> Result<i64> {
     }
 }
 impl SiglusVm {
+    fn sync_sfx(
+        vm: &mut SceneVm<'static>,
+        host: &dyn HostServices,
+        client: ClientId,
+    ) -> Result<()> {
+        if vm.ctx.pcm.has_source() {
+            vm.ctx.pcm.sync(
+                host.audio_info(client, crate::sfx_bridge::PCM_CHANNEL)
+                    .map_err(err)?,
+            )?;
+        }
+        if vm.ctx.se.has_source() {
+            vm.ctx.se.sync(
+                host.audio_info(client, crate::sfx_bridge::SE_CHANNEL)
+                    .map_err(err)?,
+            )?;
+        }
+        Ok(())
+    }
     pub(super) fn sync_audio(&mut self, host: &dyn HostServices) -> Result<()> {
         if let Some(vm) = self.state.vm.as_mut() {
+            Self::sync_sfx(vm, host, ClientId(self.state.client))?;
             if vm.ctx.bgm.current.is_some() || vm.ctx.bgm.check_state() != 0 {
                 let info = host
                     .audio_info(ClientId(self.state.client), CHANNEL)
@@ -71,14 +99,19 @@ impl SiglusVm {
         host: &mut dyn HostServices,
         before: SceneVm<'static>,
     ) -> Result<bool> {
-        let operations = std::mem::take(&mut self.state.vm.as_mut().unwrap().ctx.bgm.pending);
+        let vm = self.state.vm.as_mut().unwrap();
+        let mut ordered = std::mem::take(&mut vm.ctx.bgm.pending).entries();
+        ordered.extend(vm.ctx.pcm.take().entries());
+        ordered.extend(vm.ctx.se.take().entries());
+        ordered.sort_unstable_by_key(|(serial, _)| *serial);
+        let operations: VecDeque<_> = ordered.into_iter().map(|(_, op)| op).collect();
         if operations.is_empty() {
             return Ok(true);
         }
         let after = self.state.vm.replace(before).unwrap();
         self.pending_audio = Some(Pending {
             after,
-            operations: operations.into(),
+            operations,
             ticket: None,
         });
         self.poll_audio(host)
@@ -91,10 +124,10 @@ impl SiglusVm {
         loop {
             if let Some(stage) = pending.ticket.take() {
                 let result = match &stage {
-                    Stage::Resource { ticket, .. } => host
+                    Stage::Resource { ticket, .. } | Stage::NativeResource { ticket, .. } => host
                         .audio_resource_preparation(client, *ticket)
                         .map(|s| (s.phase, s.error, s.resource)),
-                    Stage::Voice { ticket, .. } => host
+                    Stage::Voice { ticket, .. } | Stage::Native { ticket } => host
                         .audio_preparation(client, *ticket)
                         .map(|s| (s.phase, s.error, None)),
                 };
@@ -112,6 +145,45 @@ impl SiglusVm {
                     return Ok(false);
                 }
                 match stage {
+                    Stage::NativeResource {
+                        ticket,
+                        channel,
+                        parameters,
+                    } => {
+                        host.release_audio_resource_preparation(client, ticket)
+                            .map_err(err)?;
+                        ensure!(
+                            phase == AudioPreparePhase::Ready,
+                            "{}",
+                            error.unwrap_or_else(
+                                || "Siglus sound resource preparation failed".into()
+                            )
+                        );
+                        let resource = resource.context("ready native sound resource missing")?;
+                        let result = host.begin_audio(
+                            client,
+                            AudioRequest::PlayResource {
+                                channel,
+                                resource,
+                                parameters,
+                            },
+                        );
+                        // Playback admission captured its lease, or failed. Either
+                        // way, this one-shot adapter owns no retained source bank.
+                        host.release_audio_resource(client, resource).map_err(err)?;
+                        pending.ticket = Some(Stage::Native {
+                            ticket: result.map_err(err)?,
+                        });
+                        continue;
+                    }
+                    Stage::Native { ticket } => {
+                        host.release_audio(client, ticket).map_err(err)?;
+                        ensure!(
+                            phase == AudioPreparePhase::Ready,
+                            "{}",
+                            error.unwrap_or_else(|| "Siglus sound preparation failed".into())
+                        );
+                    }
                     Stage::Resource {
                         ticket,
                         play,
@@ -200,18 +272,48 @@ impl SiglusVm {
                 }
             }
             let Some(operation) = pending.operations.pop_front() else {
+                Self::sync_sfx(&mut pending.after, host, client)?;
                 self.state.vm = Some(pending.after);
                 return Ok(true);
             };
             let retain = matches!(&operation, Operation::Retain(_));
             match operation {
+                Operation::Start {
+                    channel,
+                    key,
+                    group,
+                } => {
+                    let asset = self.state.config.resources.get(&key).with_context(|| {
+                        format!("Siglus sound requires config.resources alias for {key:?}")
+                    })?;
+                    let source = AudioAsset {
+                        path: VfsPath::new(Mount::Asset, asset).map_err(err)?,
+                        frame_limit: None,
+                    };
+                    let ticket = host
+                        .begin_audio_resource(client, source, true)
+                        .map_err(err)?;
+                    pending.ticket = Some(Stage::NativeResource {
+                        ticket,
+                        channel,
+                        parameters: AudioParameters {
+                            mix_group: Some(group),
+                            ..Default::default()
+                        },
+                    });
+                }
+
                 Operation::Control(request) => {
                     host.submit_audio(client, request).map_err(err)?;
-                    pending
-                        .after
-                        .ctx
-                        .bgm
-                        .sync(host.audio_info(client, CHANNEL).map_err(err)?);
+                    if pending.after.ctx.bgm.current.is_some()
+                        || pending.after.ctx.bgm.check_state() != 0
+                    {
+                        pending
+                            .after
+                            .ctx
+                            .bgm
+                            .sync(host.audio_info(client, CHANNEL).map_err(err)?);
+                    }
                 }
                 Operation::Play(play) | Operation::Retain(play) => {
                     // Retain is only queued while reconstructing a stopped slot.

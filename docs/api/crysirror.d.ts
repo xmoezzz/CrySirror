@@ -111,7 +111,7 @@ declare class Audio {
   sourceStatus(handle: Record<string, any>): any;
   /** Drop this client's cached clips. Playing voices retain their own PCM and residency receipts. */
   clearSfxCache(): void;
-  /** {asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle. */
+  /** {asset,bus?,mix_group?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle. */
   playSfx(voice: Record<string, any>): Record<string, any>;
   /** Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants. */
   playRandom(name: string, container: Record<string, any>, voice: Record<string, any>): Record<string, any>;
@@ -127,6 +127,16 @@ declare class Audio {
   setVoice(handle: Record<string, any>, options: Record<string, any>): void;
   /** {playing,source_playing,position_seconds?}; playing includes effect tails, source_playing excludes them. Stale/stolen/ended handles are inactive. */
   voice(handle: Record<string, any>): Record<string, any>;
+  /** Create/update a client logical gain group in pooled and native/media mixers after validating both. Partial settings: parent?:string|null, gain?:0..4, muted?:boolean; new defaults parent=null,gain=1,muted=false. Parent must exist in both namespaces; cycles/depth>8/budgets fail atomically. Fade uses each output clock, including silence/paused sources. This is gain control, not an effect submix. */
+  setMixGroup(name: string, settings: Record<string, any>, fade_ms: number | null): void;
+  /** Pooled AudioMixGroupInfo for the next output frame, or null. Controls multiply voice gain and ancestors before bus/master and reverb sends. Host controls persist through playback clear/restore; DSP history is not saved. */
+  mixGroup(name: string): any;
+  /** Native/media mixer AudioMixGroupInfo or null. Native adapters may define scoped groups independently of pooled voices. */
+  nativeMixGroup(name: string): any;
+  /** Remove from both namespaces after validating neither has child groups or live voice/effect instances. Unobserved playback resolves its logical group name again at publication. */
+  removeMixGroup(name: string): void;
+  /** Route a live pooled voice to an existing client group, or null to bypass groups; preserves source position and independent voice fades. */
+  setVoiceMixGroup(handle: Record<string, any>, group: string | null): void;
   /** master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}. */
   setBus(bus: string, settings: Record<string, any>): void;
   /** Read this client's bus settings. */

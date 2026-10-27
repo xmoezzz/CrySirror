@@ -138,6 +138,40 @@ pub enum PcmBus {
     Ambient,
     Ui,
 }
+/// A client-owned logical gain group. Parents must exist in the same mixer
+/// namespace. This is a control graph, not a second decoder/effect engine.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AudioMixGroupSettings {
+    /// Optional group parent; None routes directly to the voice's fixed bus.
+    pub parent: Option<String>,
+    /// Independent linear gain, 0..4. Multiplies the voice and ancestor gains.
+    pub gain: f32,
+    /// Fade toward silence while retaining the authored gain value.
+    pub muted: bool,
+}
+impl Default for AudioMixGroupSettings {
+    fn default() -> Self {
+        Self {
+            parent: None,
+            gain: 1.,
+            muted: false,
+        }
+    }
+}
+/// Owner-observed group controls; frame counters use this mixer's output clock.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AudioMixGroupInfo {
+    /// Authored target settings, independent of the currently interpolated gain.
+    pub settings: AudioMixGroupSettings,
+    /// Own interpolated gain for the next output frame, including mute.
+    pub gain: f32,
+    /// Product of current own and ancestor gains for the next output frame.
+    pub effective_gain: f32,
+    /// Remaining gain fade frames, independent of voice pause/starvation.
+    pub fade_frames: u64,
+    /// Frames per second used by this group's fade counter.
+    pub output_rate: u32,
+}
 #[derive(Clone, Debug)]
 pub struct AudioParameters {
     /// Mixer voice gain, default 1.
@@ -166,12 +200,15 @@ pub struct AudioParameters {
     pub fade_ms: f32,
     /// False keeps a currently active channel instead of reopening it.
     pub restart: bool,
+    /// Optional existing client-scoped mix group, default None.
+    pub mix_group: Option<String>,
     /// Shared output bus, default Sfx.
     pub bus: PcmBus,
 }
 impl Default for AudioParameters {
     fn default() -> Self {
         Self {
+            mix_group: None,
             gain: 1.,
             decode_gain: 1.,
             rate: 1.,
@@ -200,6 +237,9 @@ pub struct AudioPlaybackInfo {
     pub paused: bool,
     /// Actual prepared source loop mode.
     pub looping: bool,
+    /// Output frames since voice publication, including pauses, dependency
+    /// holds, starvation and effect tails. Seeking does not reset this age.
+    pub age_frames: u64,
     /// Current decoded-source frame, without worker read-ahead.
     pub position_frames: u64,
     /// Decoded-source frames per second.
@@ -274,6 +314,20 @@ pub struct AudioPreparation {
 /// and decoder resources are not part of logical VM snapshots.
 #[derive(Clone, Debug)]
 pub enum AudioRequest {
+    /// Set only a group's gain, creating a root with default settings if absent.
+    /// Existing parent and mute controls remain host-owned.
+    SetMixGroupGain {
+        name: String,
+        gain: f32,
+        fade_ms: f32,
+    },
+    /// Configure an owner-scoped gain group, with atomic parent/cycle/budget
+    /// validation and an output-clock fade. Does not open an audio source.
+    SetMixGroup {
+        name: String,
+        settings: AudioMixGroupSettings,
+        fade_ms: f32,
+    },
     /// Open an independent decoder over an existing immutable encoded resource
     /// on workers. Releasing its handle does not invalidate admitted/live work.
     PlayResource {
@@ -441,6 +495,11 @@ pub trait TextMeasurement: Send + Sync {
 }
 
 pub trait HostServices: FileSystem {
+    /// Inspect a native/media mixer's client-owned logical group, if present.
+    fn audio_mix_group(&self, _client: ClientId, _name: &str) -> Result<Option<AudioMixGroupInfo>> {
+        Err(crate::Error::Unsupported("audio mix group inspection"))
+    }
+
     /// Snapshot/probe a client asset on workers. Optional length measurement
     /// streams/discards decoded chunks when the container has no frame count.
     fn begin_audio_resource(

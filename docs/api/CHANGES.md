@@ -4,6 +4,30 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `f2af02453b2f74f8` (2026-10-27): named mix groups, output age and native PCM/SE
+
+- Add Audio.setMixGroup, mixGroup, nativeMixGroup, removeMixGroup and
+  setVoiceMixGroup, with shared AudioMixGroupSettings/Info. Logical groups form
+  bounded client-scoped gain hierarchies, with output-clock ramps and atomic
+  validation before publication to both pooled/native mixers. They control gain,
+  not arbitrary effect graphs. Parent null detaches; omitted settings are retained.
+- VoiceSpec and AudioParameters add optional mix_group; new source admission
+  resolves the current owner's logical name at publication. Source positions and
+  independent voice envelopes remain distinct from group/bus/master gain.
+- AudioPlaybackInfo adds age_frames: rendered output frames since publication,
+  including pause, dependency holds, starvation and effects; seeking does not
+  reset it. Native global PCM/SE use engine-measured source lengths and output
+  age for original integer-millisecond wait predicates, while physical PCM may
+  still be playing. API queries retain decoded position/rate as separate values.
+- Rust AudioRequest gains SetMixGroup/SetMixGroupGain. **Rust source compatibility:**
+  exhaustive matches and full struct literals require their new fields/variants.
+  Core remains dependency free; HostServices defaults fail when unsupported.
+- Siglus runtime payload schema **2 -> 3** for PCM/SE logical state; schema-2
+  snapshots require migration and are rejected. Worker tickets, engine resources,
+  native operation-order stamps and sample/DSP histories remain unsaved. Original
+  file codecs/layouts are unchanged. Native group gain updates preserve host
+  parents/mute; global PCM/SE calls use shared resource/channel APIs. ADR 0078.
+
 ## `5b75e19d7feee9bf` (2026-10-27): immutable prepared audio resources
 
 - Add Audio.beginPrepareSource/sourcePreparation/cancelSourcePreparation,

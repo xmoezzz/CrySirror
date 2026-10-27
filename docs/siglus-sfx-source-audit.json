@@ -1,0 +1,61 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "upstream_license": "MPL-2.0",
+  "scope": "PCM global and SE global form/state/resource/wait policy; not PCMCH/KOE/JITAN or whole-game coverage",
+  "implementation": "New semantic adapters use CrySirror resource snapshots, independent decoder leases, mix groups and channel transport; no original SFX/Kira playback/decoder/envelope/timer implementation copied or linked. Original VM and original save codecs remain.",
+  "resource_profile": "Explicit canonical Config.resources aliases; optional decoded UTF-8 Gameexe SE entries, native count default16/min8/max256; SE voice-number aliases use explicit CrySirror keys koe/{number}, without native pack/path inference.",
+  "wait_policy": "Original SfxEngine WAV duration truncates to integer milliseconds. Shared output publication age drives the native comparison, independently of decoded cursor, preparation starvation and physical/effect EOF.",
+  "reference_note": "kira_hub has previously documented optional-device changes in the reference tree; its immutable original Git blob is audited here. Prior BGM audit covers original audio wait/argument/save paths.",
+  "prior_audit": "siglus-bgm-source-audit.json",
+  "files": [
+    {
+      "path": "crates/siglus_scene_vm/src/audio/sfx_engine.rs",
+      "sha256": "48d732ae36d1e5876cd71d4e52b9dd578d4a311adff18fe05dcef9b8e376deea",
+      "bytes": 45457,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/pcm.rs",
+      "sha256": "25f3804400c630f87cb1349d4b8ff23f02c6b8d3a45fdafa7f1de8241619074c",
+      "bytes": 2549,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/se.rs",
+      "sha256": "05c190975cf0babdc7f0cbc71f561a5625f9cd6ef778655c009bf6a3c45ed8b7",
+      "bytes": 6387,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/audio/kira_hub.rs",
+      "sha256": "d32a67162700a73192e98378900d50cb22fd3bc68817acce914703dfbaef6a4b",
+      "bytes": 8664,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/tables.rs",
+      "sha256": "e90ff2cbece28d9d749e7f5d274471185ce833204509a72bb130e720948191be",
+      "bytes": 63913,
+      "review": "complete selected function load_se_file_names and SE count constants",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/vm.rs",
+      "sha256": "e0bbd6546ef6e1375c36ceadbd321ce8f7af8d180c61f011ef28da60e2db8d62",
+      "bytes": 610381,
+      "review": "complete selected functions write_cpp_sound/read_current_sound/read_cpp_sound, including cross-category stop and restore ordering",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    }
+  ]
+}

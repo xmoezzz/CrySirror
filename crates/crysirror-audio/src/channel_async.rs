@@ -126,6 +126,7 @@ impl ChannelAudio {
             "channel replacement fade"
         );
         crate::mixer::VoiceSpec {
+            mix_group: p.mix_group.clone(),
             gain: p.gain,
             rate: p.rate,
             fade_in_ms: p.fade_ms,
@@ -327,6 +328,9 @@ impl ChannelAudio {
         request: &AudioRequest,
     ) -> Result<()> {
         let (channel, stop) = match request {
+            AudioRequest::SetMixGroup { .. } | AudioRequest::SetMixGroupGain { .. } => {
+                return Ok(());
+            }
             AudioRequest::Play { channel, .. }
             | AudioRequest::PlayAsset { channel, .. }
             | AudioRequest::PlayPcm { channel, .. }

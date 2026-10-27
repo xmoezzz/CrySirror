@@ -2704,3 +2704,108 @@ Remaining boundaries:
   snapshots can retain the last active declaration. Same-size writes during
   snapshot reads can race; probing known-length sources is not full-file packet
   validation. Broader engine/VN and ADR 0050 goals remain active.
+
+## 2026-10-27 — shared mix groups, playback age and original PCM/global SE (ADR 0078)
+
+Implementation:
+- Added engine-owned client-scoped named gain groups, independent of any VM.
+  Core supplies plain AudioMixGroupSettings/Info and SetMixGroup/SetMixGroupGain
+  requests, without dependencies. VoiceSpec/AudioParameters gains optional
+  mix_group; publication resolves a dense index in the owning mixer's namespace.
+- Candidate graph validation checks parent authority, cycles, descendant depth,
+  gains/fades/names and limits (64 groups/client, 256/mixer, depth eight) before
+  mutation. Parent-before-child evaluation performs no name search/allocation
+  per output frame. Removal rejects children and live source/effect references;
+  pending playback revalidates its logical name at publication. Leaf slots reuse
+  safely without moving indices referenced by another client/voice.
+- Extracted the existing shared output-frame Ramp into one internal module.
+  Group fades progress during silence, pauses, dependency holds and starvation;
+  independent source positions/envelopes remain separate. Group/ancestor gains
+  apply once before existing reverb sends/Master. Previously committed late wet
+  history stays on the return bus. Dialogue duck admission evaluates group level
+  per sample and remains invariant across block partitions.
+- Public Audio setMixGroup/mixGroup/nativeMixGroup/removeMixGroup/
+  setVoiceMixGroup reaches pooled and native/media control graphs. Both validate
+  before either changes. Partial fields retain values; parent:null detaches,
+  while null/nonfinite gain, null mute and unknown fields fail. Gain-only native
+  updates preserve host parent/mute. Host group controls persist through playback
+  clear/restore; they are not automatically serialized VM/project DSP graphs.
+- AudioPlaybackInfo.age_frames is a shared output-frame publication age, distinct
+  from decoded position/read-ahead. Pause, holds, starvation and effects count;
+  seek does not reset age. Native PCM/SE resource preparation measures unknown
+  lengths, then independent voice preparation captures a lease. Temporary lookup
+  handles release at admission; workers/live instances retain actual encoded bytes.
+- Original global PCM PLAY/STOP and global SE filename/number/explicit voice-alias
+  play, volume/extremes/getter, stop/fade, CHECK and WAIT/WAIT_KEY use CrySirror
+  resources, channels and siglus.pcm/siglus.se gain groups. The adapter retains
+  native identity/volume/observed playing state and ordered semantic requests;
+  no native decoder, sample cache, timer, envelope, Kira hub/mixer or renderer is
+  copied/linked. Integer-ms SFX end predicates compare shared publication age;
+  they can end before the final fractional-ms PCM samples. SE key wait keeps its
+  native zero return, with playback continuing after skip.
+- Canonical resources aliases are mandatory. Decoded Gameexe numbered SE uses
+  native count default16/min8/max256; SE voice numbers use explicit CrySirror
+  aliases koe/{number}, without guessing native packs/filenames. Unknown forms,
+  missing entries/aliases and property fallbacks fail visibly. BGM/PCM/SE pending
+  operations carry ephemeral ordering stamps so original import stops PCM/SE
+  before a later BGM preparation can block; no stamp/ticket enters saved data.
+- Siglus runtime payload schema is **3** for new PCM/SE logical declarations;
+  schema-2 snapshots require migration and are rejected by the version gate.
+  Active declarations rebuild only after candidate commit, with no exact PCM/
+  decoder/age/effect checkpoint. Original file codec/layouts are unchanged:
+  nonpersistent global PCM/SE stops on import and category volumes restore via
+  shared controls. The isolated codec test host uses real ChannelAudio through
+  a dev dependency; normal VM dependency inspection excludes crysirror-audio,
+  Kira, rodio, cpal, wgpu, winit and ash.
+- Verified existing immutable siglus_rs pin 5f358ef1360b0439e92aed2b749e8f25d8721954
+  and six scoped immutable source/hash audit records, including full SFX/forms/
+  hub and selected SE-table/save functions. Reference hub opt-in-device changes
+  remain explicit. API reference regenerated/logged:
+  5b75e19d7feee9bf -> f2af02453b2f74f8.
+
+Compilation:
+- Final release workspace/all-target check passed with desktop krkr, arc-formats
+  and acoustics-obvhs; minimal no-default desktop reallive+avg32 check passed.
+  Existing CBG/RealLive/minimal-CLI warnings remain; new fixture warning was fixed.
+  No GitHub CI/workflow, remote build, output device, GPU, Windows/Linux or
+  console validation ran. Normal VM dependency audit is in the local evidence.
+
+Behavior validation:
+- Final local release scopes: shared audio/core/compat/tasks **115 passed**;
+  Runtime/Siglus **114 passed**; engine audio/acoustics/HRTF/reflection/reverb and
+  API reference **54 passed**; RealLive/AVG32 bridges **12 passed**; JS async
+  services **10 passed**. **305 distinct Rust passed**, four ignored excluded.
+  Focused/earlier runs are not counted twice. Python 3.11 tooling: **189 passed**.
+- Six independent group tests assert hierarchy/client routing, live re-routing
+  without seek, bus/Master scaling, atomic graph/cycle/depth/capacity failure,
+  silence/pause fade clocks, sample-boundary duck release and block partition
+  invariance. Native gain requests preserve host parent/mute. A grouped impulse
+  matches independent voice-gain dry/late-reverb PCM; committed tail survives
+  group mute/removal. Transport assertions separate starved/paused source position
+  from output publication age. Public API tests cover both mixers, invalid/null
+  changes, parent detach/partial retention and second-mixer admission rollback.
+- **20 authored original SceneVm audio cases** pass. New cases exercise native
+  PCM/SE independent fade samples, file/SE-number/explicit voice-number playback,
+  true worker gates and pending snapshots, failure preserving the old source and
+  original PC followed by repair/retry, active rebind, native zero-return key wait,
+  original file volume/stop behavior and cross-category stop ordering while BGM
+  workers are blocked. A whole-ms wait releases while physical PCM is still live.
+  Existing BGM/source/effect/save/unknown-op coverage remains passing.
+- Ran standalone mix_groups example in release, producing a three-second stereo
+  48 kHz WAV from authored tones. Parent music fades leave the UI stem unchanged;
+  Rust asserts its samples and restored level. Clear/muted/restored RMS:
+  **0.158114 / 0.070711 / 0.158114**, peak **0.286419**. No game data/fonts/device.
+- Evidence: target/verification/groups-{shared-tests,runtime-final,engine-final,
+  js-final,vn-tests,transport-final,python,workspace-final,minimal-final,demo,
+  native-normal-dependencies}.log and mix-groups.wav. Source review:
+  docs/siglus-sfx-source-audit.json; contracts/limits: ADR 0078.
+
+Remaining boundaries:
+- These are gain/control hierarchies, not full Sound Class/submix effect graphs,
+  group concurrency or virtualization. PCMCH/PCM events, general KOE speech/
+  JITAN/mouth tables, native UI sound slots, automatic resource/append discovery,
+  encrypted Gameexe, all save variants and whole-game compatibility remain open.
+  Native polling follows the engine's current VM-before-mix frame phase and is
+  not an exact wall-clock/device timing match under starvation. Halted snapshots
+  can retain the last observed native declaration. Final async DSP/mixing/output,
+  dynamic geometry/Doppler and higher/diffuse acoustics remain active goals.

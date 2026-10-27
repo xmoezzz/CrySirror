@@ -239,6 +239,8 @@ fn generate() -> api_doc::ApiDocs {
         d("AudioResourceHandle","Audio.prepareSourceAsync / beginPlaySource / HostServices",None),
         d("AudioResourceInfo","Audio.sourceInfo / sourcePreparation / HostServices",None),
         d("AudioResourcePreparation","Rust HostServices.audio_resource_preparation",None),
+        d("AudioMixGroupSettings","Audio.setMixGroup / Mixer / HostServices audio requests",None),
+        d("AudioMixGroupInfo","Audio.mixGroup / nativeMixGroup / HostServices.audio_mix_group",None),
         d("AudioParameters","Rust HostServices/ChannelAudio playback parameters",None),
         d("PcmBus","AudioParameters.bus",None),
         d("AudioPlaybackInfo","Audio.playbackInfo / nativeChannelInfo / HostServices.audio_info",None),

@@ -4,7 +4,10 @@
 //! Deterministic, device-free stereo mixer. All controls are client scoped;
 //! decoded PCM and decoder handles are derived playback resources, never saves.
 use crate::decoder::{AudioSource, Clip, SourceBufferStatus, SourceRead, StereoFrame};
+use crate::envelope::Ramp;
+use crate::mix_groups::MixGroups;
 use anyhow::{Context, Result, bail, ensure};
+use crysirror_core::service::{AudioMixGroupInfo, AudioMixGroupSettings};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -183,6 +186,8 @@ pub struct LoopPoints {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct VoiceSpec {
+    /// An existing client-scoped logical gain group; None bypasses groups.
+    pub mix_group: Option<String>,
     pub bus: Bus,
     pub gain: f32,
     pub rate: f32,
@@ -197,6 +202,7 @@ pub struct VoiceSpec {
 impl Default for VoiceSpec {
     fn default() -> Self {
         Self {
+            mix_group: None,
             bus: Bus::Sfx,
             gain: 1.,
             rate: 1.,
@@ -212,6 +218,9 @@ impl Default for VoiceSpec {
 }
 impl VoiceSpec {
     pub fn validate(&self) -> Result<()> {
+        if let Some(name) = &self.mix_group {
+            crate::mix_groups::name(name)?;
+        }
         ensure!(
             self.bus != Bus::Master,
             "master is a control bus, not a voice bus"
@@ -358,37 +367,10 @@ impl Cursor {
         }
     }
 }
-#[derive(Clone, Copy)]
-struct Ramp {
-    value: f32,
-    target: f32,
-    left: u64,
-}
-impl Ramp {
-    fn new(value: f32) -> Self {
-        Self {
-            value,
-            target: value,
-            left: 0,
-        }
-    }
-    fn to(&mut self, target: f32, frames: u64) {
-        self.target = target;
-        self.left = frames;
-        if frames == 0 {
-            self.value = target
-        }
-    }
-    fn step(&mut self) -> f32 {
-        let out = self.value;
-        if self.left > 0 {
-            self.value += (self.target - self.value) / self.left as f32;
-            self.left -= 1;
-        }
-        out
-    }
-}
+
 struct Voice {
+    age_frames: u64,
+    mix_group: Option<usize>,
     handle: VoiceHandle,
     spec: VoiceSpec,
     cursor: Cursor,
@@ -506,6 +488,7 @@ impl Client {
     }
 }
 pub struct Mixer {
+    groups: MixGroups,
     config: MixerConfig,
     voices: Vec<Option<Voice>>,
     generations: Vec<u64>,
@@ -528,6 +511,7 @@ impl Mixer {
         );
         let count = config.max_voices;
         Ok(Self {
+            groups: MixGroups::default(),
             config,
             voices: (0..count).map(|_| None).collect(),
             generations: vec![0; count],
@@ -604,6 +588,78 @@ impl Mixer {
         c.previous.clear();
         Ok(())
     }
+    /// Validate without changing state; hosts use this before publishing to
+    /// multiple mixers whose output rates may differ.
+    pub fn validate_mix_group(
+        &self,
+        client: u32,
+        name: &str,
+        settings: &AudioMixGroupSettings,
+        fade_ms: f32,
+    ) -> Result<()> {
+        duration(fade_ms)?;
+        self.groups.validate(client, name, settings).map(|_| ())
+    }
+    pub fn set_mix_group(
+        &mut self,
+        client: u32,
+        name: &str,
+        settings: AudioMixGroupSettings,
+        fade_ms: f32,
+    ) -> Result<()> {
+        duration(fade_ms)?;
+        self.groups.set(
+            client,
+            name,
+            settings,
+            frames(fade_ms, self.config.sample_rate),
+        )
+    }
+    pub fn set_mix_group_gain(
+        &mut self,
+        client: u32,
+        name: &str,
+        gain: f32,
+        fade_ms: f32,
+    ) -> Result<()> {
+        let mut settings = self
+            .mix_group(client, name)?
+            .map(|i| i.settings)
+            .unwrap_or_default();
+        settings.gain = gain;
+        self.set_mix_group(client, name, settings, fade_ms)
+    }
+    pub fn mix_group(&self, client: u32, name: &str) -> Result<Option<AudioMixGroupInfo>> {
+        self.groups.info(client, name, self.config.sample_rate)
+    }
+    pub fn validate_remove_mix_group(&self, client: u32, name: &str) -> Result<()> {
+        let id = self.groups.resolve(client, Some(name))?.unwrap();
+        ensure!(
+            !self
+                .voices
+                .iter()
+                .flatten()
+                .any(|v| v.mix_group == Some(id)),
+            "mix group still has live voice/effect instances"
+        );
+        self.groups.validate_remove(client, name)
+    }
+    pub fn remove_mix_group(&mut self, client: u32, name: &str) -> Result<()> {
+        self.validate_remove_mix_group(client, name)?;
+        self.groups.remove(client, name)
+    }
+    pub fn set_voice_mix_group(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        name: Option<String>,
+    ) -> Result<()> {
+        let group = self.groups.resolve(client, name.as_deref())?;
+        let v = self.voice(client, h)?;
+        v.mix_group = group;
+        v.spec.mix_group = name;
+        Ok(())
+    }
     pub fn set_bus(&mut self, client: u32, bus: Bus, settings: BusSettings) -> Result<()> {
         ensure!(
             settings.gain.is_finite() && (0.0..=4.).contains(&settings.gain),
@@ -666,6 +722,7 @@ impl Mixer {
         spec: VoiceSpec,
     ) -> Result<VoiceHandle> {
         spec.validate()?;
+        let mix_group = self.groups.resolve(client, spec.mix_group.as_deref())?;
         ensure!(
             (8000..=192000).contains(&source.sample_rate()),
             "audio source sample rate"
@@ -722,6 +779,8 @@ impl Mixer {
         let mut envelope = Ramp::new(if spec.fade_in_ms > 0. { 0. } else { 1. });
         envelope.to(1., frames(spec.fade_in_ms, self.config.sample_rate));
         self.voices[slot] = Some(Voice {
+            age_frames: 0,
+            mix_group,
             handle,
             gain: Ramp::new(spec.gain),
             pan: Ramp::new(0.5),
@@ -1235,6 +1294,7 @@ impl Mixer {
         self.spec(client, h)?;
         let voice = self.voices[h.slot as usize].as_ref().unwrap();
         Ok(crysirror_core::service::AudioPlaybackInfo {
+            age_frames: voice.age_frames,
             source_playing: self.source_is_playing(client, h),
             paused: voice.spec.paused,
             looping: voice.spec.looping,
@@ -1447,23 +1507,6 @@ impl Mixer {
         );
         out.fill([0.; 2]);
         let rate = self.config.sample_rate;
-        for c in self.clients.values_mut() {
-            c.dialogue_voices = 0;
-        }
-        for v in self.voices.iter().flatten() {
-            let c = &mut self
-                .clients
-                .get_mut(&v.handle.client)
-                .expect("registered voice client");
-            if v.spec.bus == Bus::Voice
-                && !v.spec.paused
-                && !v.binaural_pending
-                && v.spec.gain > 0.
-                && c.level(Bus::Voice) > 0.
-            {
-                c.dialogue_voices += 1;
-            }
-        }
         let spatial: Vec<_> = self
             .voices
             .iter()
@@ -1494,6 +1537,28 @@ impl Mixer {
             })
             .collect();
         for sample in out.iter_mut() {
+            self.groups.step();
+            for c in self.clients.values_mut() {
+                c.dialogue_voices = 0;
+            }
+            for v in self.voices.iter().flatten() {
+                let c = self
+                    .clients
+                    .get_mut(&v.handle.client)
+                    .expect("registered voice client");
+                if v.spec.bus == Bus::Voice
+                    && !v.spec.paused
+                    && !v.binaural_pending
+                    && !v.reflection_pending
+                    && !v.source_ended
+                    && v.resume_after.is_none()
+                    && v.spec.gain > 0.
+                    && c.level(Bus::Voice) > 0.
+                    && self.groups.output(v.mix_group) > 0.
+                {
+                    c.dialogue_voices += 1;
+                }
+            }
             for c in self.clients.values_mut() {
                 let dialogue = c.dialogue_voices > 0;
                 let target = if dialogue { c.ducking.gain } else { 1. };
@@ -1514,6 +1579,7 @@ impl Mixer {
             }
             for (slot, (effect, step)) in self.voices.iter_mut().zip(spatial.iter().zip(&rates)) {
                 let Some(v) = slot else { continue };
+                v.age_frames = v.age_frames.saturating_add(1);
                 if let Some((left, fade)) = &mut v.resume_after {
                     let waiting = *left > 0;
                     *left = left.saturating_sub(1);
@@ -1535,13 +1601,11 @@ impl Mixer {
                         .is_some_and(|s| s.pending || s.error.is_some())
                 {
                     if silent_transport_tick(v) {
-                        retire_dialogue(v, &mut self.clients);
                         *slot = None;
                     }
                     continue;
                 }
                 if v.source_ended && v.tail_left == 0 {
-                    retire_dialogue(v, &mut self.clients);
                     *slot = None;
                     continue;
                 }
@@ -1572,7 +1636,6 @@ impl Mixer {
                             self.stats.underrun_frames =
                                 self.stats.underrun_frames.saturating_add(1);
                             if silent_transport_tick(v) {
-                                retire_dialogue(v, &mut self.clients);
                                 *slot = None;
                             }
                             continue;
@@ -1586,13 +1649,11 @@ impl Mixer {
                                     self.stats.underrun_frames =
                                         self.stats.underrun_frames.saturating_add(1);
                                     if silent_transport_tick(v) {
-                                        retire_dialogue(v, &mut self.clients);
                                         *slot = None;
                                     }
                                     continue;
                                 }
                                 SampleRead::End => {
-                                    retire_dialogue(v, &mut self.clients);
                                     *slot = None;
                                     continue;
                                 }
@@ -1609,7 +1670,6 @@ impl Mixer {
                                 v.tail_left = tail;
                                 [0.; 2]
                             } else {
-                                retire_dialogue(v, &mut self.clients);
                                 *slot = None;
                                 continue;
                             }
@@ -1636,7 +1696,6 @@ impl Mixer {
                             self.stats.underrun_frames =
                                 self.stats.underrun_frames.saturating_add(1);
                             if silent_transport_tick(v) {
-                                retire_dialogue(v, &mut self.clients);
                                 *slot = None;
                             }
                             continue;
@@ -1651,7 +1710,10 @@ impl Mixer {
                 };
                 let c = &self.clients[&v.handle.client];
                 let master_gain = c.level(Bus::Master);
-                let mut gain = v.gain.step() * v.envelope.step() * c.level(v.spec.bus);
+                let mut gain = v.gain.step()
+                    * v.envelope.step()
+                    * c.level(v.spec.bus)
+                    * self.groups.output(v.mix_group);
                 let pan = v.pan.step();
                 if pan != 0.5 && v.binaural.is_none() {
                     s[0] *= (1. - pan).sqrt() * std::f32::consts::SQRT_2;
@@ -1719,7 +1781,6 @@ impl Mixer {
                             .frame_count()
                             .is_some_and(|n| v.position >= n as f64))
                 {
-                    retire_dialogue(v, &mut self.clients);
                     *slot = None
                 }
             }
@@ -1775,14 +1836,6 @@ fn spatial_mix(spatial: &Spatial, listener: Listener, rate: u32) -> SpatialMix {
         gain: spatial.gain_at(distance) * (1. - 0.7 * spatial.occlusion),
         pan: [((1. - pan) * 0.5).sqrt(), ((1. + pan) * 0.5).sqrt()],
         alpha,
-    }
-}
-fn retire_dialogue(v: &Voice, clients: &mut BTreeMap<u32, Client>) {
-    let c = clients
-        .get_mut(&v.handle.client)
-        .expect("registered voice client");
-    if v.spec.bus == Bus::Voice && !v.spec.paused && v.spec.gain > 0. && c.level(Bus::Voice) > 0. {
-        c.dialogue_voices = c.dialogue_voices.saturating_sub(1);
     }
 }
 

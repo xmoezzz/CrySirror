@@ -259,7 +259,11 @@ impl SiglusVm {
             if !self.poll_audio(host)? {
                 return Ok(VmYield::BudgetExhausted);
             }
-            if !self.state.vm.as_ref().unwrap().ctx.bgm.pending.is_empty() {
+            let has_audio = {
+                let vm=self.state.vm.as_ref().unwrap();
+                !vm.ctx.bgm.pending.is_empty() || vm.ctx.pcm.pending() || vm.ctx.se.pending()
+            };
+            if has_audio {
                 let before = self.state.vm.as_ref().unwrap().clone();
                 if !self.begin_audio_batch(host, before)? {
                     return Ok(VmYield::BudgetExhausted);
@@ -380,7 +384,7 @@ impl SiglusVm {
                         host.write_atomic(ClientId(self.state.client), &Self::path(&key)?, &bytes)
                             .map_err(err)?;
                     }
-                    if !vm.ctx.bgm.pending.is_empty() {
+                    if !vm.ctx.bgm.pending.is_empty() || vm.ctx.pcm.pending() || vm.ctx.se.pending() {
                         if !self.begin_audio_batch(host, before.clone())? {
                             self.publish(host)?;
                             return Ok(VmYield::BudgetExhausted);
@@ -493,7 +497,7 @@ impl VmAdapter for SiglusVm {
         "siglus"
     }
     fn snapshot_schema(&self) -> u32 {
-        2
+        3
     }
     fn step(
         &mut self,
@@ -521,7 +525,9 @@ impl VmAdapter for SiglusVm {
             }
         }
         if let Some(vm) = state.vm.as_mut() {
-            vm.ctx.bgm.rebind();
+            vm.ctx.bgm.rebind().map_err(err)?;
+            vm.ctx.pcm.rebind().map_err(err)?;
+            vm.ctx.se.rebind().map_err(err)?;
         }
         self.state = state;
         self.pending_audio = None;

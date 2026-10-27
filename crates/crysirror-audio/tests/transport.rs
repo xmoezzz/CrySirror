@@ -266,6 +266,7 @@ fn stop_and_pause_deadlines_advance_on_starvation_while_source_and_initial_fade_
             continue;
         }
         let info = m.playback_info(1, h).unwrap();
+        assert_eq!(info.age_frames, 8);
         assert_eq!(info.position_frames, 0);
         if mode == 2 {
             assert!(info.paused);

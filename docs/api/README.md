@@ -309,3 +309,37 @@ source_frames include an optional frame limit; unknown physical length stays
 null unless measured. Preparing may scan/discard decoded chunks when requested;
 it does not retain a full PCM track. Header probing is not full-file validation.
 See [ADR 0077](../adr/0077-prepared-audio-resources-and-native-replay.md) for limits.
+
+### Hierarchical audio gain controls
+
+```ts
+audio.setMixGroup("game", {gain: 0.8});
+audio.setMixGroup("dialogue", {parent: "game", gain: 0.7});
+const voice = await audio.playSfxAsync({asset: "line.ogg", mix_group: "dialogue"});
+audio.setMixGroup("game", {gain: 0.2}, 250); // output-clock fade of the parent
+audio.setVoiceMixGroup(voice, null); // retain source position, bypass groups
+```
+
+Groups are client-scoped logical controls in both pooled and native/media mixers.
+Updates retain omitted fields; parent:null detaches, and null gain/mute is invalid.
+A group has its own gain/mute ramp; ancestor, voice, bus and Master gains remain
+separate. The limit is 64 groups/client, 256/mixer and depth eight. Parents must
+exist, cycles fail atomically, and groups with child/live voice/effect references
+cannot be removed. mixGroup/nativeMixGroup exposes target settings, next-frame
+own/effective gain, fade frames and output rate. Host settings survive playback
+clear/restore; this is not an arbitrary effect submix or serialized DSP graph.
+
+AudioPlaybackInfo.age_frames is output publication age, including pause/holds/
+starvation/tails, independent of decoded position. New sources reset age; seeks
+preserve it. Native global SFX uses it for its integer-ms end predicate, with
+explicit frame-phase/timing limits in ADR 0078.
+
+An independent offline demo exports an authored music/UI fade without a VM or
+output device:
+
+```sh
+cargo run --release -p crysirror-audio --example mix_groups -- /tmp/mix-groups.wav
+```
+
+It asserts the independent UI stem during the parent music fade and compares
+clear/muted/restored RMS. No fonts or game assets are bundled.

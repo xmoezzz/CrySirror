@@ -148,6 +148,19 @@ impl FileSystem for SharedHost {
     }
 }
 impl HostServices for SharedHost {
+    fn audio_mix_group(
+        &self,
+        client: ClientId,
+        name: &str,
+    ) -> crysirror_core::Result<Option<crysirror_core::service::AudioMixGroupInfo>> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .mixer
+            .mix_group(client.0, name)
+            .map_err(|e| Error::Io(format!("audio mix group: {e:#}")))
+    }
     fn begin_audio_resource(
         &mut self,
         client: ClientId,

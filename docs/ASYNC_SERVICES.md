@@ -219,3 +219,28 @@ AudioRequest::PlayResource. Siglus resource and voice completion stages keep the
 original command uncommitted until Ready. Stopped/EOF RESUME uses the retained
 resource instead of path lookup. Stopped snapshot reconstruction starts no voice.
 Budgets and remaining synchronous boundaries are in ADR 0077.
+
+## Named audio gain groups and output age (ADR 0078)
+
+Audio.setMixGroup performs bounded owner validation/publication in both mixers;
+no decoder I/O or worker wait occurs in its control DAG update. Active group
+fades advance per output frame even with no voices or paused/starved inputs.
+Publication revalidates the logical VoiceSpec.mix_group dependency; removed
+names fail rather than starting an ungrouped voice. Cycles, depth>8 and capacity
+fail before mutation; both mixers validate before either changes. Group removal
+requires no live voice/effect references or children. Parent/mute host controls
+persist through playback reset; their current graph is not a VM save payload.
+
+VoiceSpec/AudioParameters accepts mix_group for pooled/native/resource playback.
+Audio.playbackInfo/nativeChannelInfo adds age_frames since owner publication,
+including pause/dependency/starvation/tail output frames; seek leaves age alone.
+This remains distinct from decoded source position/rate and pending readiness.
+
+Native PCM/SE preparation uses engine resource measurement then independent
+voice preparation. Its temporary resource handle releases after admission,
+while worker/live leases retain bytes. Before/after VM states and ordered
+semantic operations preserve original instruction and cross-category ordering;
+only completion acknowledges following native instructions. Original SFX
+integer-ms end policy observes shared output age, with current frame-phase
+limits described in ADR 0078. Final DSP/mixing/output ownership is still a
+synchronous ADR 0050 boundary.

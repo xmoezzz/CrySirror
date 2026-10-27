@@ -468,3 +468,22 @@ fn prepared_audio_promises_publish_resources_independent_of_receipts_and_voices(
         0
     );
 }
+
+#[test]
+fn js_gain_groups_route_prepared_sources_and_preserve_partial_parent_settings(){
+    let (dir,mut app)=app(r#"
+        async function onInit(){
+            audio.setMixGroup('game',{gain:0.5});audio.setMixGroup('voice',{parent:'game',gain:0.5});
+            if(audio.nativeMixGroup('voice').effective_gain!==0.25)throw Error('native graph missing');
+            const resource=await audio.prepareSourceAsync('group.wav');
+            const voice=await audio.playSourceAsync(resource.resource,{paused:true,mix_group:'voice'});
+            audio.releaseSource(resource.resource);audio.setMixGroup('voice',{gain:0.25});
+            if(audio.mixGroup('voice').settings.parent!=='game')throw Error('parent dropped');
+            let rejected=false;try{audio.setMixGroup('game',{parent:'voice'});}catch(e){rejected=true;}
+            if(!rejected)throw Error('cycle accepted');audio.setVoiceMixGroup(voice,null);
+            audio.removeMixGroup('voice');audio.removeMixGroup('game');audio.stopVoice(voice,0);
+            engine.log('mix-groups-ready');
+        }
+    "#);
+    let mut b=b"RIFF".to_vec();b.extend(164u32.to_le_bytes());b.extend(b"WAVEfmt ");b.extend(16u32.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(8000u32.to_le_bytes());b.extend(16000u32.to_le_bytes());b.extend(2u16.to_le_bytes());b.extend(16u16.to_le_bytes());b.extend(b"data");b.extend(128u32.to_le_bytes());for _ in 0..64{b.extend(8192i16.to_le_bytes());}std::fs::write(dir.path().join("assets/a/group.wav"),b).unwrap();app.init().unwrap();app.start().unwrap();until(&mut app,"mix-groups-ready");
+}

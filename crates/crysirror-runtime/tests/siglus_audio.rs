@@ -566,3 +566,296 @@ fn failed_voice_stage_releases_new_resource_and_preserves_the_previous_prepared_
     assert!(info.looping);
     assert_eq!(info.position_frames, 7);
 }
+
+fn se(s: &mut SceneBuilder, operation: i32, args: &[i32], ret: i32) {
+    s.command(&[c::ELM_GLOBAL_SE, operation], 0, args, ret);
+}
+fn sound_file(s: &mut SceneBuilder, global: i32, operation: i32) {
+    s.command_string(&[global, operation], 0, "native-music", &[], fm::VOID);
+}
+#[test]
+fn native_pcm_and_se_mix_independently_and_category_fade_preserves_the_voice_envelope() {
+    let mut s = SceneBuilder::default();
+    sound_file(&mut s, c::ELM_GLOBAL_PCM, c::ELM_PCM_PLAY);
+    se(&mut s, c::ELM_SE_SET_VOLUME, &[128], fm::VOID);
+    sound_file(&mut s, c::ELM_GLOBAL_SE, c::ELM_SE_PLAY_BY_FILE_NAME);
+    se(&mut s, c::ELM_SE_GET_VOLUME, &[], fm::INT);
+    se(&mut s, c::ELM_SE_CHECK, &[], fm::INT);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[1], fm::VOID);
+    se(&mut s, c::ELM_SE_SET_VOLUME_MIN, &[1], fm::VOID);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[1], fm::VOID);
+    se(&mut s, c::ELM_SE_CHECK, &[], fm::INT);
+    s.command(&[c::ELM_GLOBAL_PCM, c::ELM_PCM_STOP], 0, &[], fm::VOID);
+    se(&mut s, c::ELM_SE_STOP, &[0], fm::VOID);
+    se(&mut s, c::ELM_SE_CHECK, &[], fm::INT);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 1000);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([128, 1]));
+    tick(&mut r, 1);
+    let pcm = r.host.channel_audio.take_output();
+    assert_eq!(pcm.len(), 48);
+    for (i, s) in pcm.iter().enumerate() {
+        let input = i as f32 * 20. / 32768.;
+        let expected = input * (1. + 128. / 255. * (1. - i as f32 / 48.));
+        assert!(
+            (s[0] - expected).abs() < 1e-6,
+            "{i}: {} != {expected}",
+            s[0]
+        );
+    }
+    let group = r
+        .host
+        .audio_mix_group(ClientId(1), "siglus.se")
+        .unwrap()
+        .unwrap();
+    assert_eq!(group.fade_frames, 0);
+    assert!(group.gain.abs() < 1e-6);
+    tick(&mut r, 1);
+    assert_eq!(native(&r)["int_stack"], json!([128, 1, 1, 0, 42]));
+    assert!(
+        r.host
+            .channel_audio
+            .take_output()
+            .iter()
+            .flatten()
+            .all(|x| *x == 0.)
+    );
+}
+#[test]
+fn native_sfx_worker_gate_preserves_original_instruction_and_pending_snapshot() {
+    let mut s = SceneBuilder::default();
+    sound_file(&mut s, c::ELM_GLOBAL_SE, c::ELM_SE_PLAY_BY_FILE_NAME);
+    se(&mut s, c::ELM_SE_WAIT, &[], fm::INT);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 1000);
+    r.set_audio_nonblocking(true);
+    let gate = Gate::block(r.assets.io_tasks());
+    tick(&mut r, 0);
+    let pc = native(&r)["pc"].clone();
+    let saved = r.snapshot().unwrap();
+    for _ in 0..3 {
+        tick(&mut r, 1);
+        assert_eq!(native(&r)["pc"], pc);
+        assert_ne!(native(&r)["int_stack"], json!([0, 42]));
+        assert!(r.host.audio_info(ClientId(1), 2).unwrap().is_none());
+    }
+    gate.release();
+    until(&mut r, |r| {
+        r.host.audio_info(ClientId(1), 2).unwrap().is_some()
+    });
+    assert_eq!(native(&r)["int_stack"], json!([0]));
+    tick(&mut r, 25);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([0, 42]));
+    r.restore(&saved).unwrap();
+    until(&mut r, |r| {
+        r.host.audio_info(ClientId(1), 2).unwrap().is_some()
+    });
+    tick(&mut r, 25);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([0, 42]));
+}
+#[test]
+fn native_numbered_se_and_active_snapshot_rebind_use_explicit_table_and_shared_groups() {
+    let mut s = SceneBuilder::default();
+    se(&mut s, c::ELM_SE_SET_VOLUME, &[64], fm::VOID);
+    se(&mut s, c::ELM_SE_PLAY_BY_SE_NO, &[0], fm::VOID);
+    se(&mut s, c::ELM_SE_WAIT, &[], fm::INT);
+    se(&mut s, c::ELM_SE_CHECK, &[], fm::INT);
+    finish(&mut s);
+    let (dir, mut r) = fixture(s, 1000);
+    std::fs::write(
+        dir.path().join("assets/a/Gameexe.ini"),
+        "#SE.CNT=16\n#SE.000=\"native-music\"\n",
+    )
+    .unwrap();
+    tick(&mut r, 0);
+    let saved = r.snapshot().unwrap();
+    assert_eq!(native(&r)["int_stack"], json!([0]));
+    r.restore(&saved).unwrap();
+    tick(&mut r, 0);
+    assert!(
+        r.host
+            .audio_info(ClientId(1), 2)
+            .unwrap()
+            .unwrap()
+            .source_playing
+    );
+    let group = r
+        .host
+        .audio_mix_group(ClientId(1), "siglus.se")
+        .unwrap()
+        .unwrap();
+    assert!((group.gain - 64. / 255.).abs() < 1e-6);
+    tick(&mut r, 25);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([0, 0, 42]));
+}
+#[test]
+fn native_original_import_stops_nonpersistent_pcm_and_se_before_restoring_group_volumes() {
+    let mut s = SceneBuilder::default();
+    se(&mut s, c::ELM_SE_SET_VOLUME, &[128], fm::VOID);
+    sound_file(&mut s, c::ELM_GLOBAL_PCM, c::ELM_PCM_PLAY);
+    sound_file(&mut s, c::ELM_GLOBAL_SE, c::ELM_SE_PLAY_BY_FILE_NAME);
+    s.command(&[c::ELM_GLOBAL_SAVEPOINT], 0, &[], fm::INT);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[10000], fm::VOID);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 1000);
+    tick(&mut r, 0);
+    let saved = r.export_original_save(ClientId(1)).unwrap();
+    assert!(r.host.audio_info(ClientId(1), 1).unwrap().is_some());
+    assert!(r.host.audio_info(ClientId(1), 2).unwrap().is_some());
+    r.import_original_save(ClientId(1), &saved).unwrap();
+    tick(&mut r, 0);
+    assert!(!r.host.channel_audio.is_playing(1, 1));
+    assert!(!r.host.channel_audio.is_playing(1, 2));
+    assert!(
+        (r.host
+            .audio_mix_group(ClientId(1), "siglus.se")
+            .unwrap()
+            .unwrap()
+            .gain
+            - 128. / 255.)
+            .abs()
+            < 1e-6
+    );
+}
+#[test]
+fn unsupported_sfx_and_missing_table_or_alias_fail_visibly_without_following_arithmetic() {
+    for (op, args) in [
+        (9876, vec![]),
+        (c::ELM_SE_PLAY, vec![0]),
+        (c::ELM_SE_PLAY_BY_KOE_NO, vec![7]),
+    ] {
+        let mut s = SceneBuilder::default();
+        se(&mut s, op, &args, fm::VOID);
+        finish(&mut s);
+        let (_dir, mut r) = fixture(s, 1000);
+        assert!(r.tick(0, InputFrame::default()).is_err());
+        assert_ne!(native(&r)["int_stack"], json!([42]));
+        assert!(r.host.audio_info(ClientId(1), 2).unwrap().is_none());
+    }
+}
+
+#[test]
+fn native_sound_wait_uses_integer_millisecond_age_while_last_pcm_frames_still_play() {
+    let mut s = SceneBuilder::default();
+    sound_file(&mut s, c::ELM_GLOBAL_SE, c::ELM_SE_PLAY_BY_FILE_NAME);
+    se(&mut s, c::ELM_SE_WAIT, &[], fm::INT);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 1000);
+    tick(&mut r, 0);
+    tick(&mut r, 20);
+    let info = r.host.audio_info(ClientId(1), 2).unwrap().unwrap();
+    assert!(info.source_playing);
+    assert_eq!(info.age_frames, 960);
+    assert_eq!(info.position_frames, 960);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([0, 42]));
+    assert!(
+        r.host
+            .audio_info(ClientId(1), 2)
+            .unwrap()
+            .unwrap()
+            .source_playing
+    );
+    assert_eq!(r.host.channel_audio.resources.resource_count(), 0);
+}
+#[test]
+fn failed_sfx_resource_keeps_old_source_and_original_command_then_retries_after_repair() {
+    let mut s = SceneBuilder::default();
+    sound_file(&mut s, c::ELM_GLOBAL_SE, c::ELM_SE_PLAY_BY_FILE_NAME);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[2], fm::VOID);
+    sound_file(&mut s, c::ELM_GLOBAL_SE, c::ELM_SE_PLAY_BY_FILE_NAME);
+    finish(&mut s);
+    let (dir, mut r) = fixture(s, 1000);
+    tick(&mut r, 0);
+    std::fs::write(dir.path().join("assets/a/tone.wav"), b"broken").unwrap();
+    r.set_audio_nonblocking(true);
+    tick(&mut r, 2);
+    let pc = native(&r)["pc"].clone();
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        if r.tick(0, InputFrame::default()).is_err() {
+            break;
+        }
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(native(&r)["pc"], pc);
+    assert_ne!(native(&r)["int_stack"], json!([42]));
+    assert!(
+        r.host
+            .audio_info(ClientId(1), 2)
+            .unwrap()
+            .unwrap()
+            .source_playing
+    );
+    assert_eq!(r.host.channel_audio.resources.resource_count(), 0);
+    std::fs::write(dir.path().join("assets/a/tone.wav"), wave()).unwrap();
+    until(&mut r, |r| native(r)["halted"] == true);
+    assert_eq!(native(&r)["int_stack"], json!([42]));
+}
+#[test]
+fn se_voice_number_uses_explicit_engine_alias_and_wait_key_keeps_native_zero_return() {
+    let mut s = SceneBuilder::default();
+    se(&mut s, c::ELM_SE_PLAY_BY_KOE_NO, &[7], fm::VOID);
+    se(&mut s, c::ELM_SE_WAIT_KEY, &[], fm::INT);
+    finish(&mut s);
+    let (dir, initial) = fixture(s, 1000);
+    drop(initial);
+    let path = dir.path().join("project.json");
+    let mut project: Json = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    project["clients"][0]["config"]["resources"]["koe/7"] = json!("tone.wav");
+    std::fs::write(&path, serde_json::to_vec(&project).unwrap()).unwrap();
+    let mut r = Runtime::load(&path, &dir.path().join("state")).unwrap();
+    tick(&mut r, 0);
+    r.tick(
+        0,
+        InputFrame {
+            buttons_down: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([0, 42]));
+    assert!(
+        r.host
+            .audio_info(ClientId(1), 2)
+            .unwrap()
+            .unwrap()
+            .source_playing
+    );
+}
+
+#[test]
+fn original_import_preserves_cross_category_stop_order_before_blocked_bgm_reprepare() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY);
+    sound_file(&mut s, c::ELM_GLOBAL_PCM, c::ELM_PCM_PLAY);
+    sound_file(&mut s, c::ELM_GLOBAL_SE, c::ELM_SE_PLAY_BY_FILE_NAME);
+    s.command(&[c::ELM_GLOBAL_SAVEPOINT], 0, &[], fm::INT);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[10000], fm::VOID);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 1000);
+    tick(&mut r, 0);
+    let saved = r.export_original_save(ClientId(1)).unwrap();
+    assert!(r.host.channel_audio.is_playing(1, 1));
+    assert!(r.host.channel_audio.is_playing(1, 2));
+    r.set_audio_nonblocking(true);
+    let gate = Gate::block(r.assets.io_tasks());
+    r.import_original_save(ClientId(1), &saved).unwrap();
+    tick(&mut r, 0);
+    assert!(!r.host.channel_audio.is_playing(1, 0));
+    assert!(!r.host.channel_audio.is_playing(1, 1));
+    assert!(!r.host.channel_audio.is_playing(1, 2));
+    assert_eq!(native(&r)["audio_preparing"], true);
+    gate.release();
+    until(&mut r, |r| {
+        r.host.channel_audio.is_playing(1, 0) && native(r)["audio_preparing"] == false
+    });
+    assert!(!r.host.channel_audio.is_playing(1, 1));
+    assert!(!r.host.channel_audio.is_playing(1, 2));
+}

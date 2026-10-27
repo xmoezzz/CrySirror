@@ -1688,6 +1688,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "chrono",
+ "crysirror-audio",
  "crysirror-core",
  "crysirror-image",
  "crysirror-scene",

@@ -18,6 +18,7 @@ struct Host {
     scene: Vec<u8>,
     clock: u64,
     engine: crysirror_scene::EngineSystems,
+    audio: crysirror_audio::channels::ChannelAudio,
 }
 impl FileSystem for Host {
     fn read(&mut self, _: ClientId, _: &VfsPath) -> crysirror_core::Result<Vec<u8>> {
@@ -28,6 +29,16 @@ impl FileSystem for Host {
     }
 }
 impl HostServices for Host {
+    fn submit_audio(
+        &mut self,
+        c: ClientId,
+        request: crysirror_core::service::AudioRequest,
+    ) -> crysirror_core::Result<()> {
+        self.audio
+            .submit(c.0, request)
+            .map_err(|e| Error::Io(e.to_string()))
+    }
+
     fn now_ms(&self) -> u64 {
         self.clock
     }
@@ -90,6 +101,7 @@ fn original_savepoint_exports_native_codec_and_import_resumes_with_loaded_flag()
         scene: pack_scene(&b.finish()),
         clock: 0,
         engine: Default::default(),
+        audio: Default::default(),
     };
     let config: Config =
         serde_json::from_value(serde_json::json!({"scene":"Scene.pck","string_codec":"plain"}))
@@ -113,6 +125,26 @@ fn original_savepoint_exports_native_codec_and_import_resumes_with_loaded_flag()
         VmYield::Halted
     );
     assert_eq!(host.engine.frame([320, 180]).unwrap()[0].quad[0][0], 240.);
+    assert_eq!(
+        host.audio
+            .mixer
+            .mix_group(1, "siglus.pcm")
+            .unwrap()
+            .unwrap()
+            .settings
+            .gain,
+        1.
+    );
+    assert_eq!(
+        host.audio
+            .mixer
+            .mix_group(1, "siglus.se")
+            .unwrap()
+            .unwrap()
+            .settings
+            .gain,
+        1.
+    );
 }
 
 #[test]
@@ -126,6 +158,7 @@ fn native_timewait_key_requires_decide_release_and_does_not_reuse_edge() {
         scene: pack_scene(&b.finish()),
         clock: 0,
         engine: Default::default(),
+        audio: Default::default(),
     };
     let config: Config =
         serde_json::from_value(serde_json::json!({"scene":"Scene.pck","string_codec":"plain"}))

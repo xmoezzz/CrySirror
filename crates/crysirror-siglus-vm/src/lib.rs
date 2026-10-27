@@ -43,3 +43,6 @@ pub mod fixture;
 mod native_save_tests;
 
 mod bgm_bridge;
+
+mod audio_queue;
+mod sfx_bridge;

@@ -245,6 +245,7 @@ pub(super) fn prepare(
         PcmBus::Ui => Bus::Ui,
     };
     let spec = VoiceSpec {
+        mix_group: p.mix_group.clone(),
         bus,
         gain: p.gain,
         rate: p.rate,
@@ -377,6 +378,21 @@ impl ChannelAudio {
             .retain(|_, h| self.mixer.is_playing(h.client, *h));
         self.cancel_pending_control(client, &request)?;
         match request {
+            AudioRequest::SetMixGroupGain {
+                name,
+                gain,
+                fade_ms,
+            } => {
+                self.mixer
+                    .set_mix_group_gain(client, &name, gain, fade_ms)?;
+            }
+            AudioRequest::SetMixGroup {
+                name,
+                settings,
+                fade_ms,
+            } => {
+                self.mixer.set_mix_group(client, &name, settings, fade_ms)?;
+            }
             AudioRequest::PlayPcm {
                 channel,
                 source,

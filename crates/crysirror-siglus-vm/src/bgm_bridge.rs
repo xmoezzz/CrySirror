@@ -36,8 +36,16 @@ pub(crate) struct Binding {
 #[derive(Clone)]
 pub(crate) enum Operation {
     Play(Play),
+    Start {
+        channel: u32,
+        key: String,
+        group: String,
+    },
     Retain(Play),
-    Replay { fade: f32, delay: f32 },
+    Replay {
+        fade: f32,
+        delay: f32,
+    },
     Control(AudioRequest),
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -54,7 +62,7 @@ pub struct BgmEngine {
     #[serde(skip)]
     pub(crate) binding: Option<Binding>,
     #[serde(skip)]
-    pub(crate) pending: Vec<Operation>,
+    pub(crate) pending: crate::audio_queue::Queue,
 }
 impl Default for BgmEngine {
     fn default() -> Self {
@@ -69,7 +77,7 @@ impl Default for BgmEngine {
             delay: 0,
             current: None,
             binding: None,
-            pending: vec![],
+            pending: Default::default(),
         }
     }
 }
@@ -163,7 +171,7 @@ impl BgmEngine {
             self.pending.push(Operation::Control(AudioRequest::Stop {
                 channel: CHANNEL,
                 fade_ms,
-            }));
+            }))?;
         }
         self.name = None;
         self.looping = false;
@@ -185,11 +193,12 @@ impl BgmEngine {
         let fade_ms = milliseconds(duration)?;
         self.volume = v;
         if self.current.is_some() {
-            self.pending.push(Operation::Control(AudioRequest::SetGain {
-                channel: CHANNEL,
-                gain: f32::from(v) / 255.,
-                fade_ms,
-            }));
+            self.pending
+                .push(Operation::Control(AudioRequest::SetGain {
+                    channel: CHANNEL,
+                    gain: f32::from(v) / 255.,
+                    fade_ms,
+                }))?;
         }
         Ok(())
     }
@@ -224,7 +233,7 @@ impl BgmEngine {
             paused,
             delay,
         };
-        self.pending.push(Operation::Play(play.clone()));
+        self.pending.push(Operation::Play(play.clone()))?;
         self.current = Some(play);
         self.name = Some(name);
         self.looping = looping;
@@ -244,7 +253,7 @@ impl BgmEngine {
                 channel: CHANNEL,
                 paused: true,
                 fade_ms,
-            }));
+            }))?;
             self.state = if fade_ms > 0. { 2 } else { 3 };
         }
         Ok(())
@@ -257,13 +266,13 @@ impl BgmEngine {
                 self.pending.push(Operation::Replay {
                     fade: fade_ms,
                     delay: delay_ms,
-                });
+                })?;
             } else {
                 self.pending.push(Operation::Control(AudioRequest::Resume {
                     channel: CHANNEL,
                     delay_ms,
                     fade_ms,
-                }));
+                }))?;
             }
             self.paused = false;
             self.delay = delay.max(0);
@@ -275,7 +284,7 @@ impl BgmEngine {
         self.initial_position = position;
     }
     /// Recreate derived playback only after a candidate restore is committed.
-    pub(crate) fn rebind(&mut self) {
+    pub(crate) fn rebind(&mut self) -> Result<()> {
         self.binding = None;
         if let Some(mut play) = self.current.clone() {
             if self.state != 0 && self.name.is_some() {
@@ -283,13 +292,14 @@ impl BgmEngine {
                 play.delay = self.delay;
                 play.fade_in = 0;
                 play.fade_out = 0;
-                self.pending.push(Operation::Play(play));
+                self.pending.push(Operation::Play(play))?;
             } else {
                 // A stopped slot retains source metadata; restoring it must not
                 // create an audible voice merely to reconstruct the resource.
-                self.pending.push(Operation::Retain(play));
+                self.pending.push(Operation::Retain(play))?;
             }
         }
+        Ok(())
     }
     pub(crate) fn check_state(&self) -> i32 {
         self.state

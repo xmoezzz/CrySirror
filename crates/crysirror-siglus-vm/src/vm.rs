@@ -13806,6 +13806,8 @@ impl<'a> SceneVm<'a> {
 impl SceneVm<'static> {
     pub fn engine_validate(&self) -> Result<()> {
         self.ctx.bgm.validate()?;
+        self.ctx.pcm.validate()?;
+        self.ctx.se.validate()?;
         crate::message::validate(&self.ctx)?;
         anyhow::ensure!(
             self.int_stack.len() <= 1_000_000

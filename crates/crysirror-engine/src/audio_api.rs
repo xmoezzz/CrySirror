@@ -355,7 +355,7 @@ fn method(
 }
 fn playback_json(info: crysirror_core::service::AudioPlaybackInfo) -> Value {
     Value::from_json(
-        serde_json::json!({"source_playing":info.source_playing,"paused":info.paused,"looping":info.looping,"position_frames":info.position_frames,"source_rate":info.source_rate,"source_frames":info.source_frames,"output_rate":info.output_rate,"fade_out_frames":info.fade_out_frames,"resume_delay_frames":info.resume_delay_frames}),
+        serde_json::json!({"age_frames":info.age_frames,"source_playing":info.source_playing,"paused":info.paused,"looping":info.looping,"position_frames":info.position_frames,"source_rate":info.source_rate,"source_frames":info.source_frames,"output_rate":info.output_rate,"fade_out_frames":info.fade_out_frames,"resume_delay_frames":info.resume_delay_frames}),
     )
 }
 fn info() -> &'static ClassInfo {
@@ -408,7 +408,7 @@ fn info() -> &'static ClassInfo {
         method("beginSeekVoice",vec![("handle",T::Map),("source_frame",T::Int)],T::Int,"Exact nonblocking seek for resident or worker-buffered sources. A newer seek supersedes an older one; pending seeks freeze the voice clock."),
         method("sourceStatus",vec![("handle",T::Map)],T::Any,"Worker stream queue, decoded frame count, seek generation and errors, or null for a resident source."),
         method("clearSfxCache",vec![],T::Void,"Drop this client's cached clips. Playing voices retain their own PCM and residency receipts."),
-        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle."),
+        method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,mix_group?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle."),
         method("playRandom",vec![("name",T::String),("container",T::Map),("voice",T::Map)],T::Map,"Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants."),
         method("playMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Map,"Stream music by name; optional sample-frame loop_points; crossfade_ms fades old/new together. Looping defaults true. Offline-only; realtime hosts use playMusicAsync."),
         method("stopVoice",vec![("handle",T::Map),("fade_ms",T::Number)],T::Void,"Stop immediately or sample-accurate fade out."),
@@ -416,6 +416,11 @@ fn info() -> &'static ClassInfo {
         method("seekVoice",vec![("handle",T::Map),("frame",T::Int)],T::Void,"Synchronous exact seek. Worker-buffered streams require beginSeekVoice/seekVoiceAsync."),
         method("setVoice",vec![("handle",T::Map),("options",T::Map)],T::Void,"Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed."),
         method("voice",vec![("handle",T::Map)],T::Map,"{playing,source_playing,position_seconds?}; playing includes effect tails, source_playing excludes them. Stale/stolen/ended handles are inactive."),
+        method("setMixGroup",vec![("name",T::String),("settings",T::Map),("fade_ms",T::Optional(Box::new(T::Number)))],T::Void,"Create/update a client logical gain group in pooled and native/media mixers after validating both. Partial settings: parent?:string|null, gain?:0..4, muted?:boolean; new defaults parent=null,gain=1,muted=false. Parent must exist in both namespaces; cycles/depth>8/budgets fail atomically. Fade uses each output clock, including silence/paused sources. This is gain control, not an effect submix."),
+        method("mixGroup",vec![("name",T::String)],T::Any,"Pooled AudioMixGroupInfo for the next output frame, or null. Controls multiply voice gain and ancestors before bus/master and reverb sends. Host controls persist through playback clear/restore; DSP history is not saved."),
+        method("nativeMixGroup",vec![("name",T::String)],T::Any,"Native/media mixer AudioMixGroupInfo or null. Native adapters may define scoped groups independently of pooled voices."),
+        method("removeMixGroup",vec![("name",T::String)],T::Void,"Remove from both namespaces after validating neither has child groups or live voice/effect instances. Unobserved playback resolves its logical group name again at publication."),
+        method("setVoiceMixGroup",vec![("handle",T::Map),("group",T::Optional(Box::new(T::String)))],T::Void,"Route a live pooled voice to an existing client group, or null to bypass groups; preserves source position and independent voice fades."),
         method("setBus",vec![("bus",T::String),("settings",T::Map)],T::Void,"master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}."),
         method("bus",vec![("bus",T::String)],T::Map,"Read this client's bus settings."),
         method("setDucking",vec![("config",T::Map)],T::Void,"Dialogue-driven music ducking {gain,attack_ms,release_ms}."),
@@ -616,6 +621,9 @@ impl Class for AudioClass {
         args: &[Value],
     ) -> Result<Value> {
         sync_generation(cx.state()?);
+        if let Some(result) = crate::audio_groups_api::call(cx, name, args)? {
+            return Ok(result);
+        }
         if let Some(result) = crate::audio_resources_api::call(cx, name, args)? {
             return Ok(result);
         }

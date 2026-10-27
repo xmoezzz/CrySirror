@@ -12,6 +12,8 @@ mod channel_async;
 pub mod decoder;
 pub mod legacy_pcm;
 pub mod mixer;
+mod envelope;
+mod mix_groups;
 pub mod native;
 pub mod pcm;
 pub mod reverb;

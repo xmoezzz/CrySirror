@@ -212,14 +212,41 @@ An explicit resources alias maps each native music file to a client engine asset
 Optional decoded UTF-8 Gameexe BGM rows supply start/end/repeat frames, bounded
 at 4096 entries. Discovery/append dirs, encrypted Gameexe and native pack-entry
 selection are not inferred. Unsupported opcodes/property fallbacks fail visibly.
-PCM/PCMCH/SE/voice are not integrated by this phase. ADR 0077 adds immutable
+ADR 0078 adds global PCM and SE below; PCMCH and KOE speech remain unbound.
+ADR 0077 adds immutable
 CrySirror resource handles: native PLAY/READY commits after resource and voice
 preparation; RESUME after EOF/stop replays the retained resource without reopening
 its original path. Stopped runtime snapshots reconstruct resources without hidden
 playback. Handles are ephemeral; rebuilding a snapshot still needs the assets.
 
-Runtime Siglus payload schema is 2. Pending checkpoints replay uncommitted native
+Runtime Siglus payload schema is 3 (ADR 0078); schema-2 snapshots require migration.
+Pending checkpoints replay uncommitted native
 commands; active restores reprepare declarations at authored start. Original file
 codecs remain intact, with BGM persistence translated through shared preparation.
 No whole-game, every-save-variant, device or other-platform claim follows. See
 [siglus-bgm-source-audit.json](siglus-bgm-source-audit.json) and ADR 0076.
+
+## Original PCM/global SE and shared gain groups (ADR 0078)
+
+Global PCM PLAY/STOP and SE filename/number/explicit voice-alias play, volume,
+stop/fade, checks and waits now use shared audio resource/channel/group APIs.
+`siglus.pcm` and `siglus.se` are client-owned gain groups; the adapter holds no
+mixer, source buffer, decoder cache or private timer. Resource/voice completion
+keeps original instructions pending; one-shot handles release at admission while
+actual decoder leases retain bytes. Ordered semantic actions preserve cross-
+category stop-before-BGM-prepare behavior on original file import.
+
+Original integer-ms SFX end predicates use shared publication age, distinct from
+physical source/effect EOF. Polling follows the current engine frame phase;
+exact timer/device timing under starvation is not established. Decoded Gameexe
+SE table count follows native 16/default, 8/min and 256/max policy. Every native
+source needs a canonical resources alias; `koe/{number}` is an explicit CrySirror
+mapping for SE voice-number calls, without automatic pack/filename discovery.
+Missing/unknown operations fail visibly.
+
+Runtime payload schema is 3 for PCM/SE logical declarations. Active snapshots
+reconstruct after commit, without exact sample/age/DSP history. Original file
+layouts remain unchanged; import stops nonpersistent PCM/SE and restores their
+category volume while preserving host group parents/mute. PCMCH, PCM events,
+general KOE/JITAN/mouth tables, native UI sound slots and full game/save coverage
+remain open. Source audit: [siglus-sfx-source-audit.json](siglus-sfx-source-audit.json).

@@ -1243,7 +1243,7 @@
           "returns": "void"
         },
         {
-          "doc": "{asset,bus?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle.",
+          "doc": "{asset,bus?,mix_group?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle.",
           "name": "playSfx",
           "params": [
             {
@@ -1361,6 +1361,73 @@
             }
           ],
           "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Create/update a client logical gain group in pooled and native/media mixers after validating both. Partial settings: parent?:string|null, gain?:0..4, muted?:boolean; new defaults parent=null,gain=1,muted=false. Parent must exist in both namespaces; cycles/depth>8/budgets fail atomically. Fade uses each output clock, including silence/paused sources. This is gain control, not an effect submix.",
+          "name": "setMixGroup",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "settings",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "fade_ms",
+              "type": "number | null"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Pooled AudioMixGroupInfo for the next output frame, or null. Controls multiply voice gain and ancestors before bus/master and reverb sends. Host controls persist through playback clear/restore; DSP history is not saved.",
+          "name": "mixGroup",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "Native/media mixer AudioMixGroupInfo or null. Native adapters may define scoped groups independently of pooled voices.",
+          "name": "nativeMixGroup",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "Remove from both namespaces after validating neither has child groups or live voice/effect instances. Unobserved playback resolves its logical group name again at publication.",
+          "name": "removeMixGroup",
+          "params": [
+            {
+              "name": "name",
+              "type": "string"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Route a live pooled voice to an existing client group, or null to bypass groups; preserves source position and independent voice fades.",
+          "name": "setVoiceMixGroup",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "group",
+              "type": "string | null"
+            }
+          ],
+          "returns": "void"
         },
         {
           "doc": "master/music/sfx/voice/ambient/ui {gain:0..4,muted:boolean}.",
@@ -5123,6 +5190,68 @@
       "used_by": "Rust HostServices.audio_resource_preparation"
     },
     {
+      "doc": "A client-owned logical gain group. Parents must exist in the same mixer namespace. This is a control graph, not a second decoder/effect engine.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Optional group parent; None routes directly to the voice's fixed bus.",
+          "name": "parent",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": null,
+          "doc": "Independent linear gain, 0..4. Multiplies the voice and ancestor gains.",
+          "name": "gain",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Fade toward silence while retaining the authored gain value.",
+          "name": "muted",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "AudioMixGroupSettings",
+      "used_by": "Audio.setMixGroup / Mixer / HostServices audio requests"
+    },
+    {
+      "doc": "Owner-observed group controls; frame counters use this mixer's output clock.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Authored target settings, independent of the currently interpolated gain.",
+          "name": "settings",
+          "rust_type": "AudioMixGroupSettings"
+        },
+        {
+          "default": null,
+          "doc": "Own interpolated gain for the next output frame, including mute.",
+          "name": "gain",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Product of current own and ancestor gains for the next output frame.",
+          "name": "effective_gain",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Remaining gain fade frames, independent of voice pause/starvation.",
+          "name": "fade_frames",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Frames per second used by this group's fade counter.",
+          "name": "output_rate",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "AudioMixGroupInfo",
+      "used_by": "Audio.mixGroup / nativeMixGroup / HostServices.audio_mix_group"
+    },
+    {
       "doc": "",
       "fields": [
         {
@@ -5205,6 +5334,12 @@
         },
         {
           "default": null,
+          "doc": "Optional existing client-scoped mix group, default None.",
+          "name": "mix_group",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": null,
           "doc": "Shared output bus, default Sfx.",
           "name": "bus",
           "rust_type": "PcmBus"
@@ -5270,6 +5405,12 @@
           "doc": "Actual prepared source loop mode.",
           "name": "looping",
           "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Output frames since voice publication, including pauses, dependency holds, starvation and effect tails. Seeking does not reset this age.",
+          "name": "age_frames",
+          "rust_type": "u64"
         },
         {
           "default": null,
@@ -12634,7 +12775,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "5b75e19d7feee9bf",
+  "fingerprint": "f2af02453b2f74f8",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {
