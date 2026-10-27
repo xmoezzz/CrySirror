@@ -54,3 +54,5 @@ pub use lifecycle::{App, AppState, Lifecycle, Plugin};
 pub use object::{Class, ClassInfo, MethodInfo, ObjectId, PropertyInfo, TypeHint};
 pub use script::ScriptHost;
 pub use value::Value;
+
+pub use acoustics_api::AcousticMeshBindingSpec;

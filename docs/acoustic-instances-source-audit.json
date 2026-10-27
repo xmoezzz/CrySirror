@@ -1,0 +1,100 @@
+{
+  "date": "2026-10-27",
+  "reference": {
+    "url": "https://valvesoftware.github.io/steam-audio/doc/capi/scene.html",
+    "scope": "Reviewed public instance transform and batched commit contract; no SDK/native source copied or linked",
+    "checked": "2026-10-27"
+  },
+  "implementation": "CrySirror immutable per-mesh local BVHs, shared snapshots and Parry Qbvh instance bounds; no handwritten BVH builder/refitter. Obvhs applies to local mesh BVHs; the top-level index uses Parry in both modes.",
+  "prior_audit": "crates/crysirror-acoustics/UPSTREAM.md",
+  "scope": "Affine transforms and enabled flags over stable mesh topology; not deformation, prototype sharing across distinct IDs, TLAS refit, diffraction or Steam Audio integration",
+  "libraries": [
+    {
+      "crate": "parry3d",
+      "version": "0.17.6",
+      "registry_checksum": "6aeb9659a05b1783fb2e9bc94f48225ae5b40817eb45b62569c0e4dd767a6e51",
+      "registry_archive_checksum_verified": true,
+      "registry_vcs": null,
+      "files": [
+        {
+          "path": "src/partitioning/qbvh/build.rs",
+          "sha256": "cf35dbb01d0d429bea3357b0266511975321522c939fcfe8528209c2925c8633",
+          "bytes": 15593,
+          "review": "complete file",
+          "registry_archive_file_verified": true,
+          "copied_into_crysirror": false
+        },
+        {
+          "path": "src/partitioning/qbvh/traversal.rs",
+          "sha256": "5c6f3e0e3e811d4db0e3b23ece645e8890a6395fc6b39c16e0f0a2f62510ad1a",
+          "bytes": 25973,
+          "review": "complete used depth-first entry/node/stack methods (lines 31-105); other traversal forms unused",
+          "registry_archive_file_verified": true,
+          "copied_into_crysirror": false
+        },
+        {
+          "path": "src/query/visitors/ray_intersections_visitor.rs",
+          "sha256": "0c3e316e48c5cd73b4b594766f562c3f00d9383765b8f96c37563e473b72f546",
+          "bytes": 1882,
+          "review": "complete file",
+          "registry_archive_file_verified": true,
+          "copied_into_crysirror": false
+        },
+        {
+          "path": "src/query/ray/ray_trimesh.rs",
+          "sha256": "777f8905579be8aaf3a0fa30fa929150c474a751eeb1ace36a7416a19a23ed95",
+          "bytes": 7660,
+          "review": "complete file",
+          "registry_archive_file_verified": true,
+          "copied_into_crysirror": false
+        },
+        {
+          "path": "src/query/ray/ray_triangle.rs",
+          "sha256": "1b2d0389ff773401a418e723c7d5547d434b183ed380de85f7e7089e1a9d2ab6",
+          "bytes": 3845,
+          "review": "complete selected 3D RayCast and local_ray_intersection_with_triangle functions",
+          "registry_archive_file_verified": true,
+          "copied_into_crysirror": false
+        }
+      ]
+    },
+    {
+      "crate": "obvhs",
+      "version": "0.4.0",
+      "registry_checksum": "9e079e5dff9fc17017bfb526d5b71fe077e603de662e4b22f6deb4b6b36e5895",
+      "registry_archive_checksum_verified": true,
+      "registry_vcs": {
+        "git": {
+          "sha1": "2cf08de9d804196df1fc8b257326dfc35ea4d844"
+        },
+        "path_in_vcs": ""
+      },
+      "files": [
+        {
+          "path": "src/bvh2/builder.rs",
+          "sha256": "c2e431c5c3a9ab587962d513cf9a6fe024d608c04f18577e948b65d371ff28e3",
+          "bytes": 4606,
+          "review": "complete file; existing BLAS path retained",
+          "registry_archive_file_verified": true,
+          "copied_into_crysirror": false
+        },
+        {
+          "path": "src/bvh2/mod.rs",
+          "sha256": "d3dc0f5ec3051bf54d66b96a480d505a14cdb3a2f29f6ce8c6b5330cf2ec004e",
+          "bytes": 49043,
+          "review": "complete selected ray_traverse method; existing primitive-index indirection retained",
+          "registry_archive_file_verified": true,
+          "copied_into_crysirror": false
+        },
+        {
+          "path": "src/ray.rs",
+          "sha256": "f98ec41b33bde9bc6204f7cd187ea40c5669ed07e22568de8951ba2b374968cb",
+          "bytes": 2421,
+          "review": "complete file",
+          "registry_archive_file_verified": true,
+          "copied_into_crysirror": false
+        }
+      ]
+    }
+  ]
+}

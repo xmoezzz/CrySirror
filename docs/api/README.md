@@ -403,3 +403,36 @@ in the preparation receipt. No VM or audio device is required. See ADR 0081.
 
 An authored offline demo: `cargo run --release -p crysirror-audio --example
 voice_compression -- /tmp/crysirror-voice-compression`.
+
+
+### Moving acoustic meshes
+
+```ts
+await audio.prepareAcousticsAsync('room.json');
+const door = world.spawn({name: 'door'});
+audio.bindAcousticMesh({mesh: 7, entity: door});
+door.position = [3, 0, 0];
+// Inspect audio.acousticStats().instances for capture/publication and errors.
+// Detach before explicit editing; unbind retains the last published pose.
+audio.unbindAcousticMesh(7);
+await audio.updateAcousticsAsync([{id: 7, enabled: false}]);
+```
+
+Bindings use the entity's global matrix times local_transform (identity). Optional
+follow_visibility includes ancestors. Pose batches retain local mesh BVHs and
+immutable old query snapshots; disabled meshes retain memory and triangle IDs.
+One automatic job/client coalesces at 50 ms minimum submission intervals. Missing
+entities disable their mesh with a diagnostic; invalid poses keep prior geometry.
+Clear/restore/full scene replacement remove derived bindings.
+
+A revision changes for every pose commit; scene_generation changes for full
+scene replacement. Automatic direct/reflection results can lag a moving instance
+within the same generation. acousticVoice and reflectionsVoice.tracking report
+current_revision / geometry_stale; reflection snapshots also expose capture age.
+This avoids repeated cancellation while geometry moves. Full replacements and
+latency changes retain strict invalidation. See ADR 0082 for bounds, source
+audits and remaining deformation/prototype/refit/age-policy limitations.
+
+The device-free worker demo exports authored closed/open/closed audio and checks
+corresponding echo visibility: `cargo run --release -p crysirror-audio --example
+moving_acoustic_door -- /tmp/moving-door.wav`.

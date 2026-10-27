@@ -136,6 +136,16 @@ pub const BINDINGS: &[AsyncBinding] = &[
     },
     AsyncBinding {
         class: "Audio",
+        name: "updateAcousticsAsync",
+        start: "beginUpdateAcousticScene",
+        status: "acousticStatus",
+        cancel: "cancelAcousticJob",
+        completion: "result",
+        returns: "Record<string, any>",
+        release: true,
+    },
+    AsyncBinding {
+        class: "Audio",
         name: "traceAcousticsAsync",
         start: "beginAcousticProbe",
         status: "acousticStatus",

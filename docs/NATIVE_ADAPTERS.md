@@ -300,3 +300,14 @@ stopped. Native pack/path discovery, append-directory policy, MWND/KOE_ST,
 backlog/menu replay, mouth tables/emotes and full character/system/BGM duck
 routing remain unimplemented. This is a bounded global profile, not full-game
 compatibility. Source scope and hashes: siglus-koe-source-audit.json.
+
+
+## Shared moving acoustic geometry (ADR 0082)
+
+Rust/JS/TS clients can now commit acoustic mesh poses/enabled flags or bind meshes
+to owned World entities. Local BVHs, world surfaces, worker snapshots and sound
+query/effect completion stay in engine crates. A native spatial/scene instruction
+can translate onto these shared capabilities without private geometry tracing.
+Mapping a native opcode also requires its explicit HostServices facade. This
+phase adds no native opcode, resource-discovery or save mapping. The active
+Siglus/RealLive/AVG32 profiles retain their earlier acceptance limits.

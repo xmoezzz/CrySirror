@@ -194,7 +194,7 @@ pub struct ReflectionPaths {
     pub query: ReflectionQuery,
     /// Visible single-bounce paths ordered by excess delay then triangle identity.
     pub paths: Vec<ReflectionPath>,
-    /// All scene triangles considered, including rejected/ignored surfaces.
+    /// Stored triangles counted against the scene budget, including disabled/ignored meshes.
     pub tested_triangles: usize,
 }
 pub fn simulate(scene: &AcousticScene, query: &ReflectionQuery) -> Result<ReflectionPaths> {
@@ -220,7 +220,7 @@ pub fn simulate_cancellable(
         tested_triangles: scene.triangle_count(),
     };
     let mut planes: Vec<(Vec3, Vec3)> = vec![];
-    for (id, (vertices, mesh, material)) in scene.surfaces().enumerate() {
+    for (id, (vertices, mesh, material)) in scene.surfaces() {
         if id % 64 == 0 {
             check()?;
         }

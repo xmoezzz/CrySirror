@@ -73,6 +73,12 @@ declare class Audio {
   setVoiceHrtf(handle: Record<string, any>, enabled: boolean): void;
   /** Read a client-scoped AcousticSceneSpec JSON (up to 32 MiB) and build its CPU BVH on workers. Old geometry remains until successful owner publication. Options live in the JSON; obvhs requires its host feature. */
   beginAcousticScene(asset: string): number;
+  /** Atomically prepare AcousticMeshUpdate instance changes on workers, retaining local mesh BVHs and rebuilding only the library instance bounds. Previous scene/probe snapshots remain immutable. Wait for any pending scene preparation; explicitly unbind entity-driven meshes before manual changes. acousticStatus publishes the new revision. */
+  beginUpdateAcousticScene(updates: Record<string, any>[]): number;
+  /** Follow a client World entity using AcousticMeshBindingSpec: global entity matrix times explicit local_transform. Captured poses coalesce into bounded worker commits at 50 ms minimum intervals, sharing local BVHs. Missing entities disable their mesh and report a binding error; invalid poses retain prior geometry. Inspect acousticStats.instances; derived bindings clear with scene replacement/restore. */
+  bindAcousticMesh(binding: Record<string, any>): void;
+  /** Detach an entity binding and cancel any pending automatic commit for this client, retaining the last published mesh pose. Remaining bindings recapture on the next frame. */
+  unbindAcousticMesh(mesh: number): void;
   /** Simulate a captured source/listener/settings query on workers. Requires a prepared scene; returns a ticket for acousticStatus. Gains exclude the mixer's existing distance curve. */
   beginAcousticProbe(query: Record<string, any>): number;
   /** Nonblocking client/generation-scoped pending/ready/failed status. Ready result contains scene metadata or a direct path. Release tickets with cancelAcousticJob. */
@@ -81,9 +87,9 @@ declare class Audio {
   cancelAcousticJob(ticket: number): void;
   /** Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene. */
   clearAcousticScene(): void;
-  /** Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement. */
+  /** Client scene/revision/backend, instance work counters/bindings/desired/submitted/published ages/errors, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement. */
   acousticStats(): Record<string, any>;
-  /** Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. */
+  /** Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. current_revision/geometry_stale report instance geometry lag; full scene generations invalidate old work. */
   acousticVoice(handle: Record<string, any>): Record<string, any>;
   /** Snapshot a client asset and probe its decoder on bounded workers. Options are AudioSourcePrepareSpec: measure_frames=false (scan when the header has no count), frame_limit before processing, optional transform:{kind:siglus_jitan,percent:100..400}. Nonidentity compression decodes bounded PCM16 and bakes mono WAVE on workers; it preserves sample rate rather than changing playback rate. At most 128 MiB encoded/input and 4194304 transformed input frames; shared resident/scratch bytes and handles are bounded. sourcePreparation publishes an immutable resource handle, without playback. */
   beginPrepareSource(asset: string, options: Record<string, any> | null): number;
@@ -791,6 +797,7 @@ interface Audio { prepareVoiceReflectionsAsync(handle: Record<string, any>, opti
 interface Audio { prepareReverbAsync(settings: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareHrtfAsync(asset: string, options: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { prepareAcousticsAsync(asset: string): CancellablePromise<Record<string, any>>; }
+interface Audio { updateAcousticsAsync(updates: Record<string, any>[]): CancellablePromise<Record<string, any>>; }
 interface Audio { traceAcousticsAsync(query: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Assets { loadAsync(path: string, kind: string): CancellablePromise<number>; }
 interface Resources { decodeAsync(asset: string, kind: string, options?: Record<string, any> | null): CancellablePromise<number>; }

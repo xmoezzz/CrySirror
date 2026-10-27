@@ -28,6 +28,7 @@ fn key(h: VoiceHandle) -> Key {
 struct Snapshot {
     captured_at_ms: u64,
     revision: u64,
+    scene_generation: u64,
     query: ReflectionQuery,
     latency: usize,
 }
@@ -53,6 +54,7 @@ struct Tracked {
     completed: u64,
     draining: bool,
     muted: bool,
+    current_revision: Option<u64>,
 }
 #[derive(Default)]
 pub(crate) struct TrackingRuntime {
@@ -74,7 +76,7 @@ impl TrackingRuntime {
         let t = self.voices.get(&key(h))?;
         Some(
             json!({"settings":t.spec,"desired":t.desired,"submitted":t.submitted,"published":t.published,
-            "pending":!t.draining&&(t.flight.is_some()||t.ready.is_some()||t.waiting.is_some()||(t.published.is_none()&&t.error.is_none())||t.desired.as_ref().is_some_and(|d|t.submitted.as_ref().is_none_or(|s|changed(s,d,&t.spec)))),"published_age_ms":t.published.as_ref().map(|p|self.clock.saturating_sub(p.captured_at_ms)),"waiting_for":t.waiting,"error":t.error,"completed_updates":t.completed,"draining":t.draining,"muted":t.muted,"clock_ms":self.clock,"next_due_ms":t.next_due}),
+            "pending":!t.draining&&(t.flight.is_some()||t.ready.is_some()||t.waiting.is_some()||(t.published.is_none()&&t.error.is_none())||t.desired.as_ref().is_some_and(|d|t.submitted.as_ref().is_none_or(|s|changed(s,d,&t.spec)))),"published_age_ms":t.published.as_ref().map(|p|self.clock.saturating_sub(p.captured_at_ms)),"waiting_for":t.waiting,"error":t.error,"completed_updates":t.completed,"draining":t.draining,"muted":t.muted,"clock_ms":self.clock,"next_due_ms":t.next_due,"current_revision":t.current_revision,"geometry_stale":t.published.as_ref().is_some_and(|p|Some(p.revision)!=t.current_revision)}),
         )
     }
     pub(crate) fn revision(&self, h: VoiceHandle) -> Option<u64> {
@@ -105,6 +107,11 @@ fn snapshot(
             .acoustics
             .revision(h.client)
             .context("acoustic scene not prepared")?,
+        scene_generation: state
+            .mixer_audio
+            .acoustics
+            .generation(h.client)
+            .context("acoustic scene generation missing")?,
         latency: mixer.direct_latency_frames(h.client, h)?,
         query: ReflectionQuery {
             source,
@@ -186,6 +193,7 @@ pub(crate) fn track(
             completed: 0,
             draining: false,
             muted: true,
+            current_revision: None,
         },
     );
     runtime.order.push_back(key(h));
@@ -202,6 +210,8 @@ pub(crate) fn collect(state: &mut EngineState) -> Result<()> {
                 continue;
             }
             let scene = state.mixer_audio.acoustics.revision(h.client);
+            let generation = state.mixer_audio.acoustics.generation(h.client);
+            t.current_revision = scene;
             if scene.is_none() || state.mixer_audio.mixer.spec(h.client, h)?.spatial.is_none() {
                 state.mixer_audio.mixer.set_reflections(h.client, h, None)?;
                 remove.push(*k);
@@ -219,7 +229,7 @@ pub(crate) fn collect(state: &mut EngineState) -> Result<()> {
             }
             t.draining = false;
             if t.published.as_ref().is_some_and(|p| {
-                Some(p.revision) != scene
+                Some(p.scene_generation) != generation
                     || state
                         .mixer_audio
                         .mixer
@@ -234,7 +244,7 @@ pub(crate) fn collect(state: &mut EngineState) -> Result<()> {
             }
             if t.flight
                 .as_ref()
-                .is_some_and(|f| Some(f.snapshot.revision) != scene)
+                .is_some_and(|f| Some(f.snapshot.scene_generation) != generation)
             {
                 t.flight = None;
                 t.submitted = None;
@@ -242,7 +252,7 @@ pub(crate) fn collect(state: &mut EngineState) -> Result<()> {
             }
             if t.ready
                 .as_ref()
-                .is_some_and(|(s, _)| Some(s.revision) != scene)
+                .is_some_and(|(s, _)| Some(s.scene_generation) != generation)
             {
                 t.ready = None;
                 t.submitted = None;
@@ -267,7 +277,8 @@ pub(crate) fn collect(state: &mut EngineState) -> Result<()> {
             }
             if let Some((s, _)) = &t.ready {
                 // Poses may advance while a worker runs. Publish the latest completed
-                // snapshot, then coalesce another update; geometry/latency stay strict.
+                // snapshot, then coalesce another update. Topology generation/latency
+                // stay strict; instance-only geometry may lag and is reported stale.
                 match state.mixer_audio.mixer.direct_latency_frames(h.client, h) {
                     Ok(latency) if latency != s.latency => {
                         t.ready = None;

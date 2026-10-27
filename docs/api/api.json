@@ -398,6 +398,23 @@
       "cancel": "cancelAcousticJob",
       "class": "Audio",
       "completion": "result",
+      "name": "updateAcousticsAsync",
+      "params": [
+        {
+          "name": "updates",
+          "optional": false,
+          "type": "Record<string, any>[]"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginUpdateAcousticScene",
+      "status": "acousticStatus"
+    },
+    {
+      "cancel": "cancelAcousticJob",
+      "class": "Audio",
+      "completion": "result",
       "name": "traceAcousticsAsync",
       "params": [
         {
@@ -1018,6 +1035,39 @@
           "returns": "number"
         },
         {
+          "doc": "Atomically prepare AcousticMeshUpdate instance changes on workers, retaining local mesh BVHs and rebuilding only the library instance bounds. Previous scene/probe snapshots remain immutable. Wait for any pending scene preparation; explicitly unbind entity-driven meshes before manual changes. acousticStatus publishes the new revision.",
+          "name": "beginUpdateAcousticScene",
+          "params": [
+            {
+              "name": "updates",
+              "type": "Record<string, any>[]"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Follow a client World entity using AcousticMeshBindingSpec: global entity matrix times explicit local_transform. Captured poses coalesce into bounded worker commits at 50 ms minimum intervals, sharing local BVHs. Missing entities disable their mesh and report a binding error; invalid poses retain prior geometry. Inspect acousticStats.instances; derived bindings clear with scene replacement/restore.",
+          "name": "bindAcousticMesh",
+          "params": [
+            {
+              "name": "binding",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Detach an entity binding and cancel any pending automatic commit for this client, retaining the last published mesh pose. Remaining bindings recapture on the next frame.",
+          "name": "unbindAcousticMesh",
+          "params": [
+            {
+              "name": "mesh",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Simulate a captured source/listener/settings query on workers. Requires a prepared scene; returns a ticket for acousticStatus. Gains exclude the mixer's existing distance curve.",
           "name": "beginAcousticProbe",
           "params": [
@@ -1057,13 +1107,13 @@
           "returns": "void"
         },
         {
-          "doc": "Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement.",
+          "doc": "Client scene/revision/backend, instance work counters/bindings/desired/submitted/published ages/errors, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement.",
           "name": "acousticStats",
           "params": [],
           "returns": "Record<string, any>"
         },
         {
-          "doc": "Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy.",
+          "doc": "Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. current_revision/geometry_stale report instance geometry lag; full scene generations invalidate old work.",
           "name": "acousticVoice",
           "params": [
             {
@@ -5803,7 +5853,7 @@
         },
         {
           "default": null,
-          "doc": "All scene triangles considered, including rejected/ignored surfaces.",
+          "doc": "Stored triangles counted against the scene budget, including disabled/ignored meshes.",
           "name": "tested_triangles",
           "rust_type": "usize"
         }
@@ -6341,6 +6391,120 @@
       "used_by": "AcousticSceneSpec.backend"
     },
     {
+      "doc": "Atomic instance changes over an existing immutable acoustic scene.",
+      "fields": [
+        {
+          "default": 7,
+          "doc": "Existing client-local mesh identity; duplicate/unknown IDs fail.",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Replacement column-major local-to-world matrix; omitted retains pose.",
+          "name": "transform",
+          "rust_type": "Option<[f32; 16]>"
+        },
+        {
+          "default": false,
+          "doc": "Disabled meshes retain geometry/triangle IDs but leave ray/reflection queries.",
+          "name": "enabled",
+          "rust_type": "Option<bool>"
+        }
+      ],
+      "name": "AcousticMeshUpdate",
+      "used_by": "Audio.beginUpdateAcousticScene / updateAcousticsAsync"
+    },
+    {
+      "doc": "Snapshot work counters, not allocator or elapsed-time measurements.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Stored meshes, including disabled and empty meshes.",
+          "name": "meshes",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "Enabled nonempty mesh instances in the top-level BVH.",
+          "name": "active_meshes",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "Stored triangles; disabling geometry does not bypass scene budgets.",
+          "name": "triangles",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "Local mesh BVHs shared with the preceding immutable snapshot.",
+          "name": "reused_mesh_bvhs",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "Mesh poses/enabled flags that actually changed in this snapshot.",
+          "name": "changed_meshes",
+          "rust_type": "usize"
+        }
+      ],
+      "name": "AcousticGeometryStats",
+      "used_by": "Audio.acousticStats scene.geometry / scene commit result"
+    },
+    {
+      "doc": "Derived binding between an acoustic mesh and a client-owned World entity.",
+      "fields": [
+        {
+          "default": 7,
+          "doc": "Existing acoustic mesh ID in the calling client's prepared scene.",
+          "name": "mesh",
+          "rust_type": "u32"
+        },
+        {
+          "default": {
+            "client": 1,
+            "generation": 1,
+            "id": 20
+          },
+          "doc": "Generation-checked World entity handle, owned by the same client.",
+          "name": "entity",
+          "rust_type": "EntityHandle"
+        },
+        {
+          "default": [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "doc": "Mesh-local offset; final pose is entity global matrix times this matrix.",
+          "name": "local_transform",
+          "rust_type": "[f32; 16]"
+        },
+        {
+          "default": false,
+          "doc": "Explicitly couple acoustic participation to ancestor-aware World visibility.",
+          "name": "follow_visibility",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "AcousticMeshBindingSpec",
+      "used_by": "Audio.bindAcousticMesh (scripts also accept an Entity object)"
+    },
+    {
       "doc": "A client-owned acoustic scene, separate from physics collider selection.",
       "fields": [
         {
@@ -6376,7 +6540,7 @@
         },
         {
           "default": [],
-          "doc": "Local vertex positions, at most one million across a scene.",
+          "doc": "Local positions within +/-1e6, at most one million vertices across a scene.",
           "name": "vertices",
           "rust_type": "Vec<[f32; 3]>"
         },
@@ -6411,7 +6575,7 @@
             0.0,
             1.0
           ],
-          "doc": "Column-major local-to-world matrix; nonuniform scale is baked on workers.",
+          "doc": "Initial column-major world pose; local BVHs remain reusable across instance updates.",
           "name": "transform",
           "rust_type": "[f32; 16]"
         }
@@ -12832,7 +12996,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "24e44c371ca52eb7",
+  "fingerprint": "e73bda1334c12a7f",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

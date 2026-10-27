@@ -115,3 +115,4 @@ moves to `done` only with recorded behavior evidence.
 | [0079](0079-worker-final-audio-frames.md) | Worker-owned final DSP frames, owner completion and live frame dependency | implemented profile; independent device clock remains open |
 | [0080](0080-async-output-worker-and-bounded-pcm-transfer.md) | Device worker, bounded PCM transfer, readiness/close receipts and direct CPAL host output | implemented profile; local CoreAudio evidence, other platforms untested |
 | [0081](0081-prepared-voice-compression-and-siglus-koe.md) | Shared bounded PCM16 compression/source transform and original global KOE/EXKOE policy | implemented global profile; full speech/mouth/routing/discovery remains open |
+| [0082](0082-acoustic-instance-snapshots.md) | Shared local acoustic BVHs, worker instance commits, World bindings and nonstarving geometry snapshots | implemented affine/enabled profile; deformation, prototypes and TLAS refit remain open |

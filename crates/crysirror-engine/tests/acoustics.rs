@@ -377,3 +377,460 @@ fn explicit_probe_keeps_immutable_geometry_alive_after_scene_clear() {
         0
     );
 }
+
+fn matrix(x: f32) -> serde_json::Value {
+    json!(glam::Mat4::from_translation(glam::Vec3::X * x).to_cols_array())
+}
+fn probe(app: &mut App) -> serde_json::Value {
+    let t = call(
+        app,
+        "beginAcousticProbe",
+        &[v(
+            json!({"source":[0,0,-4],"listener":[0,0,0],"settings":{"radius":0,"air_absorption":[0,0,0]}}),
+        )],
+    );
+    let result = wait(app, &t);
+    assert_eq!(result["state"], "ready", "{result}");
+    call(app, "cancelAcousticJob", &[t]);
+    result["result"].clone()
+}
+fn world(app: &mut App, commands: serde_json::Value) {
+    let commands: Vec<crysirror_scene::world::WorldCommand> =
+        serde_json::from_value(commands).unwrap();
+    app.context()
+        .state()
+        .unwrap()
+        .runtime
+        .host
+        .engine
+        .world
+        .apply_batch(ClientId(1), &commands)
+        .unwrap();
+}
+fn door(app: &mut App) -> crysirror_scene::world::EntityHandle {
+    world(
+        app,
+        json!([{"op":"spawn","entity":{"id":20,"name":"door"}}]),
+    );
+    app.context()
+        .state()
+        .unwrap()
+        .runtime
+        .host
+        .engine
+        .world
+        .handle(ClientId(1), 20)
+        .unwrap()
+}
+fn instance_pump(
+    app: &mut App,
+    mut done: impl FnMut(&serde_json::Value) -> bool,
+) -> serde_json::Value {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        output(app, 16);
+        let s = call(app, "acousticStats", &[]).to_json();
+        if done(&s) {
+            return s;
+        }
+        assert!(Instant::now() < end, "{s}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+#[test]
+fn explicit_instance_commits_are_atomic_scoped_and_leave_captured_probe_geometry_unchanged() {
+    let (dir, mut app) = app();
+    asset(&dir, "a", "room.json", wall());
+    let initial = prepare(&mut app, "room.json");
+    call(&mut app, "cancelAcousticJob", &[initial]);
+    assert_eq!(probe(&mut app)["gains"], json!([0., 0., 0.]));
+    let gate = Gate::block(app.runtime().unwrap().assets.cpu_tasks());
+    let captured = call(
+        &mut app,
+        "beginAcousticProbe",
+        &[v(
+            json!({"source":[0,0,-4],"listener":[0,0,0],"settings":{"air_absorption":[0,0,0]}}),
+        )],
+    );
+    let change = call(
+        &mut app,
+        "beginUpdateAcousticScene",
+        &[v(json!([{"id":7,"transform":matrix(30.)}]))],
+    );
+    assert_eq!(
+        call(&mut app, "acousticStatus", &[change.clone()]).to_json()["state"],
+        "pending"
+    );
+    assert!(
+        invoke(
+            &mut app,
+            "beginUpdateAcousticScene",
+            &[v(json!([{"id":7,"enabled":false}]))]
+        )
+        .is_err()
+    );
+    app.context().state().unwrap().client = ClientId(2);
+    assert!(invoke(&mut app, "acousticStatus", &[change.clone()]).is_err());
+    app.context().state().unwrap().client = ClientId(1);
+    gate.finish();
+    assert_eq!(
+        wait(&mut app, &captured)["result"]["gains"],
+        json!([0., 0., 0.])
+    );
+    let result = wait(&mut app, &change);
+    assert_eq!(result["state"], "ready", "{result}");
+    assert_eq!(result["result"]["geometry"]["reused_mesh_bvhs"], 1);
+    call(&mut app, "cancelAcousticJob", &[captured]);
+    call(&mut app, "cancelAcousticJob", &[change]);
+    assert_eq!(probe(&mut app)["gains"], json!([1., 1., 1.]));
+    let before = call(&mut app, "acousticStats", &[]).to_json()["scene"]["revision"].clone();
+    for changes in [
+        json!([{"id":99,"enabled":false}]),
+        json!([{"id":7,"enabled":false},{"id":7,"enabled":true}]),
+        json!([{"id":7,"transform":vec![0;16]}]),
+    ] {
+        assert!(invoke(&mut app, "beginUpdateAcousticScene", &[v(changes)]).is_err());
+    }
+    assert_eq!(
+        call(&mut app, "acousticStats", &[]).to_json()["scene"]["revision"],
+        before
+    );
+}
+#[test]
+fn world_bound_mesh_coalesces_poses_follows_parent_visibility_and_disables_stale_entity() {
+    let (dir, mut app) = app();
+    asset(&dir, "a", "room.json", wall());
+    let initial = prepare(&mut app, "room.json");
+    call(&mut app, "cancelAcousticJob", &[initial]);
+    let entity = door(&mut app);
+    call(
+        &mut app,
+        "bindAcousticMesh",
+        &[v(
+            json!({"mesh":7,"entity":entity,"follow_visibility":true}),
+        )],
+    );
+    assert!(
+        invoke(
+            &mut app,
+            "beginUpdateAcousticScene",
+            &[v(json!([{"id":7,"enabled":false}]))]
+        )
+        .is_err()
+    );
+    let gate = Gate::block(app.runtime().unwrap().assets.cpu_tasks());
+    for x in [20., 25., 30.] {
+        world(
+            &mut app,
+            json!([{"op":"set_transform","id":20,"transform":{"translation":[x,0,0]}}]),
+        );
+        output(&mut app, 16);
+    }
+    let pending = call(&mut app, "acousticStats", &[]).to_json();
+    assert_eq!(pending["instances"]["completed_updates"], 0);
+    assert_eq!(pending["preparing"], true);
+    gate.finish();
+    let ready = instance_pump(&mut app, |s| {
+        s["instances"]["completed_updates"].as_u64().unwrap_or(0) >= 2
+            && !s["preparing"].as_bool().unwrap()
+    });
+    assert_eq!(
+        ready["instances"]["bindings"][0]["desired"]["transform"],
+        matrix(30.)
+    );
+    assert_eq!(probe(&mut app)["gains"], json!([1., 1., 1.]));
+    world(
+        &mut app,
+        json!([{"op":"spawn","entity":{"id":21,"name":"parent","transform":{"translation":[-30,0,0]}}},{"op":"set_parent","id":20,"parent":21}]),
+    );
+    instance_pump(&mut app, |s| {
+        s["instances"]["completed_updates"].as_u64().unwrap_or(0) >= 3
+            && !s["preparing"].as_bool().unwrap()
+    });
+    assert_eq!(probe(&mut app)["gains"], json!([0., 0., 0.]));
+    world(
+        &mut app,
+        json!([{"op":"set_visible","id":21,"visible":false}]),
+    );
+    instance_pump(&mut app, |s| s["scene"]["geometry"]["active_meshes"] == 0);
+    assert_eq!(probe(&mut app)["gains"], json!([1., 1., 1.]));
+    world(
+        &mut app,
+        json!([{"op":"set_visible","id":21,"visible":true}]),
+    );
+    instance_pump(&mut app, |s| s["scene"]["geometry"]["active_meshes"] == 1);
+    assert_eq!(probe(&mut app)["gains"], json!([0., 0., 0.]));
+    world(&mut app, json!([{"op":"despawn","id":20}]));
+    let gone = instance_pump(&mut app, |s| s["scene"]["geometry"]["active_meshes"] == 0);
+    assert!(
+        gone["instances"]["bindings"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("unavailable")
+    );
+    call(&mut app, "unbindAcousticMesh", &[Value::Int(7)]);
+    assert_eq!(
+        call(&mut app, "acousticStats", &[]).to_json()["instances"]["bindings"],
+        json!([])
+    );
+}
+#[test]
+fn canceled_updates_unbinding_and_restore_cannot_publish_obsolete_geometry() {
+    let (dir, mut app) = app();
+    asset(&dir, "a", "room.json", wall());
+    prepare(&mut app, "room.json");
+    let gate = Gate::block(app.runtime().unwrap().assets.cpu_tasks());
+    let t = call(
+        &mut app,
+        "beginUpdateAcousticScene",
+        &[v(json!([{"id":7,"enabled":false}]))],
+    );
+    call(&mut app, "cancelAcousticJob", &[t.clone()]);
+    gate.finish();
+    assert!(invoke(&mut app, "acousticStatus", &[t]).is_err());
+    assert_eq!(probe(&mut app)["gains"], json!([0., 0., 0.]));
+    let entity = door(&mut app);
+    let mut foreign = entity;
+    foreign.client = 2;
+    assert!(
+        invoke(
+            &mut app,
+            "bindAcousticMesh",
+            &[v(json!({"mesh":7,"entity":foreign}))]
+        )
+        .is_err()
+    );
+    call(
+        &mut app,
+        "bindAcousticMesh",
+        &[v(json!({"mesh":7,"entity":entity}))],
+    );
+    let gate = Gate::block(app.runtime().unwrap().assets.cpu_tasks());
+    world(
+        &mut app,
+        json!([{"op":"set_transform","id":20,"transform":{"translation":[30,0,0]}}]),
+    );
+    output(&mut app, 16);
+    call(&mut app, "unbindAcousticMesh", &[Value::Int(7)]);
+    gate.finish();
+    output(&mut app, 16);
+    assert_eq!(probe(&mut app)["gains"], json!([0., 0., 0.]));
+    call(
+        &mut app,
+        "bindAcousticMesh",
+        &[v(json!({"mesh":7,"entity":entity}))],
+    );
+    let gate = Gate::block(app.runtime().unwrap().assets.cpu_tasks());
+    output(&mut app, 16);
+    let save = app.runtime().unwrap().snapshot().unwrap();
+    app.runtime_mut().unwrap().restore(&save).unwrap();
+    gate.finish();
+    output(&mut app, 0);
+    let stats = call(&mut app, "acousticStats", &[]).to_json();
+    assert!(stats["scene"].is_null());
+    assert_eq!(stats["instances"]["bindings"], json!([]));
+}
+
+#[test]
+fn moving_geometry_updates_real_source_filter_without_restarting_its_clock() {
+    let (dir, mut app) = app();
+    asset(&dir, "a", "room.json", wall());
+    prepare(&mut app, "room.json");
+    let h = call(
+        &mut app,
+        "playSfx",
+        &[v(
+            json!({"asset":"tone.wav","looping":true,"spatial":{"position":[0,0,-4],"min_distance":10},"acoustics":{"radius":0,"air_absorption":[0,0,0]}}),
+        )],
+    );
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        output(&mut app, 0);
+        if call(&mut app, "acousticVoice", &[h.clone()]).to_json()["result"]["path"].is_object() {
+            break;
+        }
+        assert!(Instant::now() < end);
+        std::thread::yield_now();
+    }
+    assert!(output(&mut app, 16).iter().flatten().all(|s| *s == 0.));
+    let before = call(&mut app, "playbackInfo", &[h.clone()]).to_json()["age_frames"]
+        .as_u64()
+        .unwrap();
+    let t = call(
+        &mut app,
+        "beginUpdateAcousticScene",
+        &[v(json!([{"id":7,"transform":matrix(30.)}]))],
+    );
+    let ready = wait(&mut app, &t);
+    assert_eq!(ready["state"], "ready", "{ready}");
+    let revision = ready["result"]["revision"].clone();
+    call(&mut app, "cancelAcousticJob", &[t]);
+    loop {
+        output(&mut app, 0);
+        if call(&mut app, "acousticVoice", &[h.clone()]).to_json()["result"]["revision"] == revision
+        {
+            break;
+        }
+        assert!(Instant::now() < end);
+        std::thread::yield_now();
+    }
+    let pcm = output(&mut app, 50);
+    assert!(pcm.last().unwrap()[0] > 0.3);
+    assert!(
+        call(&mut app, "playbackInfo", &[h]).to_json()["age_frames"]
+            .as_u64()
+            .unwrap()
+            > before
+    );
+}
+
+#[test]
+fn instance_motion_retains_completed_direct_snapshot_and_reports_geometry_lag() {
+    let (dir, mut app) = app();
+    asset(&dir, "a", "room.json", wall());
+    prepare(&mut app, "room.json");
+    let old = call(&mut app, "acousticStats", &[]).to_json()["scene"]["revision"].clone();
+    let gate = Gate::block(app.runtime().unwrap().assets.cpu_tasks());
+    let h = call(
+        &mut app,
+        "playSfx",
+        &[v(
+            json!({"asset":"tone.wav","looping":true,"spatial":{"position":[0,0,-4]},"acoustics":{"air_absorption":[0,0,0]}}),
+        )],
+    );
+    output(&mut app, 0);
+    let t = call(
+        &mut app,
+        "beginUpdateAcousticScene",
+        &[v(json!([{"id":7,"transform":matrix(30.)}]))],
+    );
+    gate.finish();
+    let ready = wait(&mut app, &t);
+    assert_eq!(ready["state"], "ready", "{ready}");
+    call(&mut app, "cancelAcousticJob", &[t]);
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        let info = call(&mut app, "acousticVoice", &[h.clone()]).to_json();
+        if info["result"]["revision"] == old {
+            assert_eq!(info["geometry_stale"], true);
+            break;
+        }
+        assert!(Instant::now() < end, "{info}");
+        std::thread::yield_now();
+    }
+    loop {
+        output(&mut app, 0);
+        let info = call(&mut app, "acousticVoice", &[h.clone()]).to_json();
+        if info["result"]["revision"] == ready["result"]["revision"] {
+            assert_eq!(info["geometry_stale"], false);
+            break;
+        }
+        assert!(Instant::now() < end, "{info}");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn foreign_entity_objects_cannot_be_reinterpreted_as_current_client_audio_entities() {
+    let (dir, mut app) = app();
+    asset(&dir, "a", "room.json", wall());
+    prepare(&mut app, "room.json");
+    let entity = {
+        let cx = app.context();
+        let w = cx.singleton("World").unwrap();
+        cx.call(w, "spawn", &[v(json!({"name":"a"}))]).unwrap()
+    };
+    call(
+        &mut app,
+        "bindAcousticMesh",
+        &[v(json!({"mesh":7,"entity":entity.to_json()}))],
+    );
+    app.context().state().unwrap().client = ClientId(2);
+    {
+        let cx = app.context();
+        let w = cx.singleton("World").unwrap();
+        cx.call(w, "spawn", &[v(json!({"name":"b"}))]).unwrap();
+    }
+    assert!(
+        invoke(
+            &mut app,
+            "playSfx",
+            &[v(json!({"asset":"tone.wav","follow":entity.to_json()}))]
+        )
+        .is_err()
+    );
+    assert!(
+        invoke(
+            &mut app,
+            "bindAcousticMesh",
+            &[v(json!({"mesh":7,"entity":entity.to_json()}))]
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn invalid_worker_geometry_retains_scene_without_retry_spin_and_recovers_on_changed_pose() {
+    let (dir, mut app) = app();
+    asset(&dir, "a", "room.json", wall());
+    prepare(&mut app, "room.json");
+    let initial = call(&mut app, "acousticStats", &[]).to_json();
+    let entity = door(&mut app);
+    call(
+        &mut app,
+        "bindAcousticMesh",
+        &[v(json!({"mesh":7,"entity":entity}))],
+    );
+    world(
+        &mut app,
+        json!([{"op":"set_transform","id":20,"transform":{"translation":[999999,0,0]}}]),
+    );
+    let failed = instance_pump(&mut app, |s| {
+        s["instances"]["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("world vertex"))
+            && !s["preparing"].as_bool().unwrap()
+    });
+    assert_eq!(failed["scene"]["revision"], initial["scene"]["revision"]);
+    assert_eq!(
+        failed["host_geometry_reservation"],
+        initial["host_geometry_reservation"]
+    );
+    let submitted = failed["instances"]["submitted_at_ms"].clone();
+    for _ in 0..8 {
+        output(&mut app, 16);
+    }
+    let same = call(&mut app, "acousticStats", &[]).to_json();
+    assert_eq!(same["instances"]["submitted_at_ms"], submitted);
+    assert_eq!(same["preparing"], false);
+    assert_eq!(probe(&mut app)["gains"], json!([0., 0., 0.]));
+    world(
+        &mut app,
+        json!([{"op":"set_transform","id":20,"transform":{"translation":[30,0,0]}}]),
+    );
+    let good = instance_pump(&mut app, |s| s["instances"]["completed_updates"] == 1);
+    assert!(good["instances"]["error"].is_null());
+    assert_eq!(probe(&mut app)["gains"], json!([1., 1., 1.]));
+}
+
+#[cfg(feature = "acoustics-obvhs")]
+#[test]
+fn optional_obvhs_scene_keeps_selected_backend_through_public_instance_commit() {
+    let (dir, mut app) = app();
+    let mut room = wall();
+    room["backend"] = json!("obvhs");
+    asset(&dir, "a", "room.json", room);
+    prepare(&mut app, "room.json");
+    assert_eq!(probe(&mut app)["gains"], json!([0., 0., 0.]));
+    let t = call(
+        &mut app,
+        "beginUpdateAcousticScene",
+        &[v(json!([{"id":7,"transform":matrix(30.)}]))],
+    );
+    let ready = wait(&mut app, &t);
+    assert_eq!(ready["state"], "ready", "{ready}");
+    assert_eq!(ready["result"]["backend"], "obvhs");
+    assert_eq!(ready["result"]["geometry"]["reused_mesh_bvhs"], 1);
+    call(&mut app, "cancelAcousticJob", &[t]);
+    assert_eq!(probe(&mut app)["gains"], json!([1., 1., 1.]));
+}

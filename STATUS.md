@@ -3090,3 +3090,106 @@ Remaining boundaries:
   time stretching, an independent device render clock and the broader async/
   acoustics/3D backlog remain open. This is reusable engine processing plus a
   bounded native speech profile, not full Siglus/game or engine completion.
+
+
+## 2026-10-27 — moving acoustic instances and World bindings (ADR 0082)
+
+Implementation:
+- Replaced the whole-scene flattened index with immutable per-mesh local BVHs
+  and a Parry Qbvh world instance index. Local Parry/optional obvhs BVHs share
+  across pose snapshots; unchanged meshes also share world-surface pages. Only
+  changed surface pages and the top-level index rebuild on a pose commit. No
+  handwritten BVH builder/refitter or Steam Audio SDK is added. Exact registry
+  archive checksums, matching source-file hashes and inspected source scope are
+  in docs/acoustic-instances-source-audit.json.
+- Added AcousticMeshUpdate and immutable/cancellable instance commits for affine
+  transforms and enabled flags. Queries retain normalized world-distance units
+  through inverse transforms and nonuniform scale; winding normals include
+  negative scale. Instance bounds use coordinate-scaled padding. Disabled meshes
+  keep memory/stable triangle offsets and remain in complete-scene budgets.
+- Public Audio.beginUpdateAcousticScene / updateAcousticsAsync gates explicit
+  batches with scoped task receipts and owner publication. Unknown/duplicate IDs,
+  empty/invalid batches, pending conflicting commits and manual edits to bound
+  meshes fail visibly. Old probes keep immutable scenes; failed/canceled updates
+  retain prior geometry. Local/world coordinates are now both bounded at +/-1e6.
+- Audio.bindAcousticMesh / unbindAcousticMesh connects owned World entities via
+  global matrix times explicit local offset, with optional inherited visibility.
+  One automatic job/client coalesces latest poses at 50 ms minimum submissions;
+  limits are 256 bindings/client, 1024/host. Missing entities disable geometry
+  with diagnostics; invalid poses retain prior geometry. Unchanged failed poses
+  do not spin/rebuild until changed or rebound. Unbind, successful full scene
+  replacement, clear and restore cancel/remove derived binding work.
+- Scene generation identifies full replacements; revision changes on every
+  instance commit. Automatic direct and tracked reflection queries may publish
+  completed older instance snapshots, expose geometry_stale/current_revision and
+  then refresh. Full scene generations and HRTF latency retain strict invalidation.
+  This avoids cancellation starvation during continued movement and preserves
+  sample history/tap crossfades. Explicit static reflections remain revision exact.
+- New geometry and automatic-binding stats expose actual reuse/work counts,
+  desired/submitted/publication state, ages, pending/waiting/errors. Staging
+  remains bounded by 128 MiB reservations / 512 MiB host budget; snapshot estimates
+  include per-mesh and duplicated local/world storage. Shared allocations can be
+  conservatively charged more than once, not reported as allocator measurements.
+- Audio follow-Entity now uses the existing validated object resolver, preserving
+  the object's actual client instead of reinterpreting a foreign ID locally.
+  Native adapter opcodes/layouts and save schemas are unchanged; no new native
+  spatial opcode or HostServices facade is claimed.
+
+Compilation:
+- Final release workspace/all-target check passed with desktop krkr, arc-formats,
+  acoustics-obvhs and optional rodio-output; minimal no-default desktop
+  reallive+avg32 check passed. Generated API reference/JSON/TypeScript and logged
+  fingerprint change **24e44c371ca52eb7 -> e73bda1334c12a7f**. Final API and command
+  coverage checks pass. Existing CBG/RealLive/minimal CLI warnings remain.
+- Initial compile corrected the BoundingVolume trait import and the registry's
+  List type hint. Release-only validation was used; no CI/workflow/remote build
+  was added. No game, font, SOFA dataset or proprietary SDK bytes were added.
+
+Behavior validation:
+- Final release scopes: acoustic library/backend tests **23 passed** (including
+  one distinct default-feature refusal case); engine acoustic/frame/async/API/
+  reflection tests **43 passed**; JS async services **12 passed**. **78 distinct
+  Rust passed**, three ignored excluded. Earlier/focused reruns are not counted
+  again. Python 3.11 tooling: **189 passed**.
+- Both local BVH backends pass analytic affine/nonuniform/negative-scale ray
+  distance/normal cases, ignore/bounds/material behavior, immutable update errors,
+  disabled reflection identity/budgets and existing direct/reflection tests.
+  Unit tests assert shared Arc allocation identity for local BVHs and unchanged
+  world pages; counters alone are not the evidence for reuse.
+- Engine tests gate workers to verify no early commit, old captured probes,
+  coalescing without resubmission starvation, parent transforms/visibility,
+  stale-entity disable, unbind/cancel/restore and scope isolation. Invalid worker
+  geometry retains the old scene/reservation, avoids identical retry spin and
+  recovers after a valid pose change. A public obvhs scene retains that backend
+  through an instance commit. Foreign Entity objects are rejected even when
+  an entity with the same ID exists in the current client.
+- Actual PCM goes from blocked silence to audible after geometry moves while
+  the source age continues. Reflection tests remove a finite reflector, publish
+  new paths and verify the output settles to silence after the tap transition.
+  A first assertion incorrectly expected the crossfade prefix to be silent;
+  the corrected oracle checks its settled suffix. Worker-gated direct/reflection
+  tests require older instance snapshots to publish with geometry_stale=true,
+  then converge to the current revision instead of discarding every completion.
+- Real JS Promise/Entity facades prepare, update, probe and automatically follow
+  World geometry. The authored moving_acoustic_door release demo exports stereo
+  PCM16 **48 kHz / 72000 frames**, with closed/open/closed phase RMS approximately
+  **0 / 0.1000 / 0** and independent reflected-path counts **0 / 1 / 0**. The WAV
+  contains direct occlusion audio; the path counts separately verify echo
+  visibility. Python WAVE decoding confirms PCM RMS **0 / 0.09998 / 0**. Geometry
+  work runs on workers; no native VM or audio device is used.
+- Evidence: target/verification/instances-{acoustics-final,engine-final,
+  default-backend,workspace-check,minimal-check,api-final,door-demo,python-final,
+  diff-check}.log, instances-final-run.json, instances-summary.json and
+  moving-acoustic-door.wav. Initial API generation retains the expected
+  missing-fingerprint failure.
+
+Remaining boundaries:
+- This is pose/enabled updates of fixed topology. It does not implement vertex
+  deformation/skinning, cross-ID prototype sharing, TLAS refit/quality maintenance,
+  automatic model/collider acoustic extraction or material mutation. Automatic
+  geometry/result age has no deadline or extrapolation guarantee; invalid poses
+  and capacity pressure remain observable.
+- Doppler, diffraction/diffuse/higher-order sound, independent device clock,
+  native spatial mappings and wider async/3D/VN capabilities remain open. No
+  listening-quality, performance ranking, GPU/hardware-RT, cross-platform or
+  whole-game result is implied by this CPU release validation.

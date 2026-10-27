@@ -11,5 +11,5 @@ pub mod reflections;
 pub mod reflection_dsp;
 pub mod spectrum;
 pub use direct::{DirectPath, simulate};
-pub use geometry::{AcousticScene, SurfaceHit};
+pub use geometry::{AcousticScene, AcousticGeometryStats, SurfaceHit};
 pub use schema::*;

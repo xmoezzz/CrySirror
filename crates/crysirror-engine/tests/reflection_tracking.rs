@@ -218,6 +218,103 @@ fn continuously_moving_source_and_listener_publish_completed_snapshots_without_s
             .is_some()
     );
 }
+
+#[test]
+fn instance_commit_invalidates_old_reflector_and_automatically_publishes_new_paths() {
+    let (_dir, mut app) = app();
+    let h = source(&mut app);
+    track(&mut app, h);
+    let before = pump(&mut app, h, |s| {
+        s["completed_updates"].as_u64().unwrap_or(0) > 0
+    });
+    let rev = before["published"]["revision"].clone();
+    let paths = call(&mut app, "reflectionsVoice", &[v(json!(h))]).to_json();
+    assert!(
+        !paths["paths"]["paths"].as_array().unwrap().is_empty(),
+        "{paths}"
+    );
+    let t = call(
+        &mut app,
+        "beginUpdateAcousticScene",
+        &[v(
+            json!([{"id":7,"transform":glam::Mat4::from_translation(glam::Vec3::X*30.).to_cols_array()}]),
+        )],
+    );
+    let ready = wait(&mut app, "acousticStatus", &t);
+    assert_eq!(ready["state"], "ready", "{ready}");
+    call(&mut app, "cancelAcousticJob", &[t]);
+    let after = pump(&mut app, h, |s| {
+        s["published"]["revision"] != rev
+            && s["completed_updates"].as_u64().unwrap_or(0) > 1
+            && !s["pending"].as_bool().unwrap_or(true)
+    });
+    assert_eq!(after["muted"], false);
+    let paths = call(&mut app, "reflectionsVoice", &[v(json!(h))]).to_json();
+    assert!(
+        paths["paths"]["paths"].as_array().unwrap().is_empty(),
+        "{paths}"
+    );
+    let pcm = output(&mut app, 50);
+    assert!(
+        pcm[pcm.len() - 512..]
+            .iter()
+            .flatten()
+            .all(|s| s.abs() < 1e-6)
+    );
+}
+
+#[test]
+fn instance_motion_keeps_completed_reflection_snapshot_while_new_revision_refreshes() {
+    let (_dir, mut app) = app();
+    let h = source(&mut app);
+    track(&mut app, h);
+    let initial = pump(&mut app, h, |s| s["completed_updates"] == 1);
+    let old = initial["published"]["revision"].clone();
+    let gate = Gate::block(app.runtime().unwrap().assets.cpu_tasks());
+    app.context()
+        .state()
+        .unwrap()
+        .mixer_audio
+        .mixer
+        .set_spatial(
+            1,
+            h,
+            Some(Spatial {
+                position: [0.1, 0., 2.],
+                min_distance: 10.,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    output(&mut app, 16);
+    let t = call(
+        &mut app,
+        "beginUpdateAcousticScene",
+        &[v(
+            json!([{"id":7,"transform":glam::Mat4::from_translation(glam::Vec3::X*0.1).to_cols_array()}]),
+        )],
+    );
+    gate.finish();
+    let ready = wait(&mut app, "acousticStatus", &t);
+    assert_eq!(ready["state"], "ready", "{ready}");
+    call(&mut app, "cancelAcousticJob", &[t]);
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        let s = tracking(&mut app, h);
+        if s["completed_updates"] == 2 {
+            assert_eq!(s["published"]["revision"], old);
+            assert_eq!(s["geometry_stale"], true);
+            assert_eq!(s["muted"], false);
+            break;
+        }
+        assert!(Instant::now() < end, "{s}");
+        std::thread::yield_now();
+    }
+    let final_state = pump(&mut app, h, |s| {
+        s["published"]["revision"] == ready["result"]["revision"]
+    });
+    assert_eq!(final_state["geometry_stale"], false);
+}
 #[test]
 fn blocked_refresh_keeps_old_history_and_clear_or_restore_prevents_late_publication() {
     let (_dir, mut app) = app();

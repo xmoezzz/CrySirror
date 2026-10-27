@@ -39,14 +39,14 @@ fn identity() -> [f32; 16] {
 pub struct AcousticMesh {
     /// Client-local stable mesh identity.
     pub id: u32,
-    /// Local vertex positions, at most one million across a scene.
+    /// Local positions within +/-1e6, at most one million vertices across a scene.
     pub vertices: Vec<[f32; 3]>,
     /// Indexed triangles; degenerate triangles fail instead of entering the BVH.
     pub triangles: Vec<[u32; 3]>,
     /// One material index per triangle, or empty to use material zero.
     #[serde(default)]
     pub materials: Vec<u32>,
-    /// Column-major local-to-world matrix; nonuniform scale is baked on workers.
+    /// Initial column-major world pose; local BVHs remain reusable across instance updates.
     #[serde(default = "identity")]
     pub transform: [f32; 16],
 }
@@ -60,6 +60,40 @@ pub struct AcousticSceneSpec {
     pub materials: Vec<AcousticMaterial>,
     /// Meshes with unique IDs; maximum 4096 meshes and 262144 triangles.
     pub meshes: Vec<AcousticMesh>,
+}
+/// Atomic instance changes over an existing immutable acoustic scene.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcousticMeshUpdate {
+    /// Existing client-local mesh identity; duplicate/unknown IDs fail.
+    pub id: u32,
+    /// Replacement column-major local-to-world matrix; omitted retains pose.
+    #[serde(default)]
+    pub transform: Option<[f32; 16]>,
+    /// Disabled meshes retain geometry/triangle IDs but leave ray/reflection queries.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+impl AcousticMeshUpdate {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.transform.is_some() || self.enabled.is_some(),
+            "empty acoustic mesh update"
+        );
+        if let Some(m) = self.transform {
+            let m = Mat4::from_cols_array(&m);
+            let d = m.determinant();
+            ensure!(
+                m.is_finite()
+                    && d.is_finite()
+                    && d.abs() > 1e-12
+                    && m.row(3) == glam::Vec4::W
+                    && m.inverse().is_finite(),
+                "acoustic transform must be finite, affine and invertible"
+            );
+        }
+        Ok(())
+    }
 }
 /// Direct sound propagation settings, reusable by any client or native adapter.
 #[derive(Clone, Debug, Serialize, Deserialize)]

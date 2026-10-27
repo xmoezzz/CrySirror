@@ -25,9 +25,10 @@ Semantic differences are deliberate:
   Transmission is amplitude per crossed surface, multiplied at every crossing;
   a slab with two surfaces incurs two factors. We do not use the reference's
   square-root heuristic for pairing entry and exit hits.
-- Transforms are validated and baked before BVH publication, including
-  nonuniform scale. Normals derive from world triangles. Mutable nested scene
-  mutexes and untracked instance-transform mutation are not copied.
+- Transforms are validated before immutable publication, including nonuniform
+  scale. ADR 0082 retains local BVHs and bakes changed world-surface pages; normals
+  derive from world triangles. Mutable nested scene mutexes and untracked
+  instance-transform mutation are not copied.
 - Geometry/pose inputs are immutable job snapshots. Clients own independent
   scene revisions. The render/mixer thread never traverses geometry or waits
   for a propagation job. This does not make all audio decoding/mixing async.
@@ -59,3 +60,13 @@ backend does not establish a speed advantage without workload measurements.
 A full native Steam Audio binding remains an alternative for capabilities not
 covered here. Steam Audio has selectable default/Embree/Radeon Rays/custom
 scene backends; Embree is not an unconditional dependency of every backend.
+
+
+ADR 0082 now retains local mesh BVHs and builds Parry Qbvh instance bounds above
+them (including when local meshes use obvhs). Immutable pose commits share local
+BVHs and unchanged world-surface pages; changed world triangles remain available
+for first-order reflections. This replaces the earlier whole-scene flattening
+strategy. Affine ray distances/negative-scale normals have independent tests.
+The top-level index is rebuilt, not refitted. Cross-ID prototype sharing and
+vertex deformation remain open. Exact inspected files and registry archive
+checksum verification: docs/acoustic-instances-source-audit.json.

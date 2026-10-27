@@ -4,6 +4,30 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `e73bda1334c12a7f` (2026-10-27): moving acoustic instances and World bindings
+
+- Add Audio.beginUpdateAcousticScene / updateAcousticsAsync with atomic
+  AcousticMeshUpdate batches. Stable topology and local mesh BVHs are retained;
+  changed world surfaces and the library top-level instance BVH prepare on
+  workers. Unknown/duplicate IDs, invalid poses and pending conflicting commits
+  fail visibly. Old explicit probes keep their immutable snapshot.
+- Add Audio.bindAcousticMesh / unbindAcousticMesh and AcousticMeshBindingSpec.
+  Same-client World Entity poses, parent transforms and optional inherited
+  visibility coalesce into bounded worker commits; removal disables geometry
+  with a diagnostic. Binding/control state is derived and clears on scene
+  replacement/restore. Manual edits require detaching bound meshes first.
+- acousticStats includes AcousticGeometryStats and automatic capture/publication
+  state. scene_generation identifies full scene replacement; revision also
+  changes for instance movement. Automatic direct and tracked reflection results
+  may publish a completed older instance snapshot, exposing current_revision /
+  geometry_stale, then refresh. Full generations and latency remain strict.
+- Validation is stricter for local acoustic coordinates: both local and world
+  vertices must fit finite +/-1e6. Previously only transformed world vertices
+  had this range bound; oversized local geometry now fails before BVH build.
+- Existing audio follow-Entity resolution now validates the object's actual
+  client, rejecting foreign IDs that happen to exist locally. No project or
+  native save-file schema changes. See ADR 0082 for limits and remaining work.
+
 ## `24e44c371ca52eb7` (2026-10-27): prepared voice compression and native KOE
 
 - Audio.beginPrepareSource / prepareSourceAsync options now expose

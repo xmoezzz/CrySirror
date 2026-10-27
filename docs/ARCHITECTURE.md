@@ -406,3 +406,23 @@ policy and up to 24 engine resource handles. Native snapshot schema 4 rebuilds
 these derived resources; original save-file layouts are unchanged. This profile
 requires explicit koe/{number} aliases. MWND, mouth tables, full routing/ducking
 and native archive discovery remain open; see ADR 0081 and NATIVE_ADAPTERS.md.
+
+
+## Moving acoustic geometry (ADR 0082)
+
+Acoustic scenes now retain immutable local mesh BVHs and shared world-surface
+pages. Parry Qbvh indexes world instance bounds above the selected Parry/obvhs
+local backend. Pose/enabled batches rebuild only the instance index and changed
+surface pages on CPU workers; old query snapshots remain immutable. Stable
+triangle offsets survive disable/enable. Geometry stats report actual local BVH
+reuse/work counters, not measured bytes or speed.
+
+Audio.updateAcousticsAsync exposes explicit atomic commits. bindAcousticMesh
+captures a same-client World Entity and its hierarchy/optional visibility,
+coalescing poses into one bounded job/client with 50 ms minimum submissions.
+Missing entities disable their geometry with diagnostics; invalid poses retain
+the old mesh. Unbind/clear/restore cancel derived work. Full scene replacement
+changes scene_generation; pose-only commits change revision. Automatic direct/
+tracked echo work may publish a completed older pose revision and then refresh,
+with geometry_stale/age visible. Whole-scene and HRTF-latency changes retain
+strict invalidation. See ADR 0082 for limits and remaining deformation/refit work.

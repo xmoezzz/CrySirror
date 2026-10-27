@@ -514,6 +514,27 @@ fn prepared_voice_compression_options_cross_the_js_promise_boundary() {
     );
 }
 
+#[test]
+fn acoustic_instance_promises_and_entity_facade_drive_shared_world_geometry() {
+    let (dir,mut app)=app(r#"
+        let reported=false;
+        async function onInit(){
+            const initial=await audio.prepareAcousticsAsync('door.json');
+            const moved=await audio.updateAcousticsAsync([{id:7,transform:[1,0,0,0,0,1,0,0,0,0,1,0,30,0,0,1]}]);
+            if(moved.scene_generation!==initial.scene_generation || moved.revision===initial.revision || moved.geometry.reused_mesh_bvhs!==1)throw Error('instance commit');
+            const path=await audio.traceAcousticsAsync({source:[0,0,-4],listener:[0,0,0],settings:{air_absorption:[0,0,0]}});
+            if(path.gains[0]!==1)throw Error('door did not move');
+            const door=world.spawn({name:'door'});
+            audio.bindAcousticMesh({mesh:7,entity:door});
+        }
+        function onUpdate(){
+            if(!reported&&audio.acousticStats().instances.completed_updates>0){reported=true;engine.log('acoustic-entity-followed');}
+        }
+    "#);
+    std::fs::write(dir.path().join("assets/a/door.json"),serde_json::to_vec(&serde_json::json!({"materials":[{"transmission":[0,0,0]}],"meshes":[{"id":7,"vertices":[[-10,-10,-2],[10,-10,-2],[10,10,-2],[-10,10,-2]],"triangles":[[0,1,2],[0,2,3]]}]})).unwrap()).unwrap();
+    app.init().unwrap();app.start().unwrap();until(&mut app,"acoustic-entity-followed");
+}
+
 
 #[test]
 fn js_gain_groups_route_prepared_sources_and_preserve_partial_parent_settings(){

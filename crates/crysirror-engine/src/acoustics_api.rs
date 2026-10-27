@@ -2,21 +2,25 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Client-owned acoustic scenes and bounded background propagation. No device.
+mod instances;
 use crate::{EngineState, Value};
-use anyhow::{ensure, Context, Result};
-use crysirror_acoustics::{AcousticQuery, AcousticScene, AcousticSceneSpec, DirectPath};
+use anyhow::{Context, Result, ensure};
+use crysirror_acoustics::{
+    AcousticMeshUpdate, AcousticQuery, AcousticScene, AcousticSceneSpec, DirectPath,
+};
 use crysirror_audio::mixer::{Mixer, VoiceHandle};
 use crysirror_core::path::{Mount, VfsPath};
 use crysirror_tasks::{
-    table::{OperationState, OperationTable},
     Task,
+    table::{OperationState, OperationTable},
 };
-use serde_json::{json, Value as Json};
+pub use instances::AcousticMeshBindingSpec;
+use serde_json::{Value as Json, json};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 type Key = (u32, u32, u64);
@@ -60,22 +64,31 @@ pub(crate) struct PreparedScene {
     _charge: Charge,
 }
 enum Product {
-    Scene(Arc<PreparedScene>),
+    Scene {
+        scene: Arc<PreparedScene>,
+        base: Option<u64>,
+    },
     Summary(Json),
-    Probe { revision: u64, path: DirectPath },
+    Probe {
+        revision: u64,
+        path: DirectPath,
+    },
 }
 struct Flight {
     handle: VoiceHandle,
     revision: u64,
+    scene_generation: u64,
     task: Task<DirectPath>,
 }
 /// Derived, nonserializable state. Geometry and queries are namespaced by client.
 pub struct AcousticsRuntime {
+    instances: instances::InstanceRuntime,
     epoch: Option<u64>,
     jobs: OperationTable<Product>,
     budget: Arc<AtomicUsize>,
     scenes: BTreeMap<u32, (u64, Arc<PreparedScene>)>,
     scene_jobs: BTreeMap<u32, u64>,
+    generations: BTreeMap<u32, u64>,
     flight: BTreeMap<Key, Flight>,
     waiting: BTreeMap<Key, (VoiceHandle, AcousticQuery)>,
     order: VecDeque<Key>,
@@ -84,11 +97,13 @@ pub struct AcousticsRuntime {
 impl Default for AcousticsRuntime {
     fn default() -> Self {
         Self {
+            instances: Default::default(),
             epoch: None,
             jobs: OperationTable::new(16, 64).unwrap(),
             budget: Arc::new(AtomicUsize::new(0)),
             scenes: BTreeMap::new(),
             scene_jobs: BTreeMap::new(),
+            generations: BTreeMap::new(),
             flight: BTreeMap::new(),
             waiting: BTreeMap::new(),
             order: VecDeque::new(),
@@ -100,11 +115,18 @@ impl AcousticsRuntime {
     pub fn has_scene(&self, owner: u32) -> bool {
         self.scenes.contains_key(&owner)
     }
-    pub(crate) fn revision(&self,owner:u32)->Option<u64> {self.scenes.get(&owner).map(|s|s.0)}
+    pub(crate) fn revision(&self, owner: u32) -> Option<u64> {
+        self.scenes.get(&owner).map(|s| s.0)
+    }
+    pub(crate) fn generation(&self, owner: u32) -> Option<u64> {
+        self.generations.get(&owner).copied()
+    }
     pub fn reset(&mut self) {
+        self.instances = Default::default();
         self.jobs.clear();
         self.scenes.clear();
         self.scene_jobs.clear();
+        self.generations.clear();
         self.flight.clear();
         self.waiting.clear();
         self.order.clear();
@@ -117,6 +139,53 @@ impl AcousticsRuntime {
             .cloned()
             .context("client acoustic scene is not prepared")
     }
+    fn begin_update(
+        &mut self,
+        owner: u32,
+        epoch: u64,
+        pool: &crysirror_tasks::TaskPool,
+        updates: Vec<AcousticMeshUpdate>,
+    ) -> Result<u64> {
+        ensure!(
+            !self.scene_jobs.contains_key(&owner),
+            "acoustic scene preparation pending; wait before another explicit commit"
+        );
+        ensure!(
+            !updates.is_empty() && updates.len() <= 4096,
+            "acoustic instance update count"
+        );
+        let mut ids = std::collections::BTreeSet::new();
+        let (base, previous) = self.scene(owner)?;
+        for update in &updates {
+            update.validate()?;
+            ensure!(ids.insert(update.id), "duplicate acoustic mesh update");
+            ensure!(
+                previous.scene.mesh_pose(update.id).is_some(),
+                "unknown acoustic mesh update ID"
+            );
+        }
+        self.jobs.admit(owner)?;
+        let mut charge = Charge::new(self.budget.clone())?;
+        let ticket =
+            self.jobs
+                .submit_deferred(owner, epoch, "acoustic_update", pool, move |cancel| {
+                    cancel.check()?;
+                    let scene = previous
+                        .scene
+                        .updated_cancellable(&updates, || cancel.check())?;
+                    charge.shrink(previous._charge.bytes);
+                    cancel.check()?;
+                    Ok(Product::Scene {
+                        scene: Arc::new(PreparedScene {
+                            scene,
+                            _charge: charge,
+                        }),
+                        base: Some(base),
+                    })
+                })?;
+        self.scene_jobs.insert(owner, ticket);
+        Ok(ticket)
+    }
     fn poll(&mut self, mixer: &mut Mixer, epoch: u64) -> Result<()> {
         if self.epoch.is_some_and(|old| old != epoch) {
             self.reset();
@@ -124,39 +193,64 @@ impl AcousticsRuntime {
         self.epoch = Some(epoch);
         for (owner, _, ticket) in self.jobs.tickets() {
             let status = self.jobs.status(owner, epoch, ticket)?;
+            if status.state == OperationState::Pending {
+                continue;
+            }
+            let automatic = self.instances.is_automatic(owner, ticket);
             if status.state == OperationState::Failed {
                 if self.scene_jobs.get(&owner) == Some(&ticket) {
                     self.scene_jobs.remove(&owner);
                 }
+                self.instances.finished(owner, ticket, None, status.error);
+                if automatic {
+                    self.jobs.cancel(owner, ticket)?;
+                }
                 continue;
             }
-            if status.state != OperationState::Ready {
-                continue;
-            }
+            let generations = &mut self.generations;
             let scenes = &mut self.scenes;
             let pending = &mut self.scene_jobs;
-            let mut replaced = false;
-            let _=self.jobs.publish(owner,epoch,ticket,|product|{
-                let Product::Scene(scene)=product else{return Ok(product);};
+            let mut replaced = None;
+            let publication=self.jobs.publish(owner,epoch,ticket,|product|{
+                let Product::Scene{scene,base}=product else{return Ok(product)};
                 ensure!(pending.get(&owner)==Some(&ticket),"superseded acoustic scene");
-                let info=json!({"revision":ticket,"triangles":scene.scene.triangle_count(),"backend":scene.scene.backend});
-                scenes.insert(owner,(ticket,scene));pending.remove(&owner);replaced=true;Ok(Product::Summary(info))
+                ensure!(base.is_none_or(|base|scenes.get(&owner).is_some_and(|s|s.0==base)),"acoustic update base revision changed");
+                if base.is_none(){generations.insert(owner,ticket);}
+                let info=json!({"revision":ticket,"scene_generation":generations.get(&owner),"triangles":scene.scene.triangle_count(),"backend":scene.scene.backend,"geometry":scene.scene.geometry_stats()});
+                scenes.insert(owner,(ticket,scene));pending.remove(&owner);replaced=Some(base.is_none());Ok(Product::Summary(info))
             });
-            if replaced {
-                self.flight.retain(|key, _| key.0 != owner);
-                self.waiting.retain(|key, _| key.0 != owner);
-                self.order.retain(|key| key.0 != owner);
-                self.results.retain(|key, _| key.0 != owner);
+            if let Err(error) = publication {
+                if self.scene_jobs.get(&owner) == Some(&ticket) {
+                    self.scene_jobs.remove(&owner);
+                }
+                self.instances
+                    .finished(owner, ticket, None, Some(format!("{error:#}")));
+                if automatic {
+                    self.jobs.cancel(owner, ticket)?;
+                }
+                continue;
+            }
+            if let Some(full) = replaced {
+                if full {
+                    self.flight.retain(|key, _| key.0 != owner);
+                    self.waiting.retain(|key, _| key.0 != owner);
+                    self.order.retain(|key| key.0 != owner);
+                    self.results.retain(|key, _| key.0 != owner);
+                }
+                self.instances.finished(owner, ticket, Some(ticket), None);
+                if full {
+                    self.instances.clear(owner);
+                }
+            }
+            if automatic {
+                self.jobs.cancel(owner, ticket)?;
             }
         }
         let keys = self.flight.keys().copied().collect::<Vec<_>>();
         for key in keys {
             let job = self.flight.get_mut(&key).unwrap();
             if !mixer.is_playing(key.0, job.handle)
-                || self
-                    .scenes
-                    .get(&key.0)
-                    .is_none_or(|(rev, _)| *rev != job.revision)
+                || self.generations.get(&key.0) != Some(&job.scene_generation)
             {
                 self.flight.remove(&key);
                 continue;
@@ -234,6 +328,9 @@ pub(crate) fn dispatch(state: &mut EngineState) -> Result<()> {
             continue;
         };
         let (revision, scene) = runtime.scene(handle.client)?;
+        let scene_generation = runtime
+            .generation(handle.client)
+            .context("acoustic scene generation missing")?;
         match pool.spawn(move |cancel| {
             cancel.check()?;
             let result = crysirror_acoustics::simulate(&scene.scene, &query)?;
@@ -247,6 +344,7 @@ pub(crate) fn dispatch(state: &mut EngineState) -> Result<()> {
                     Flight {
                         handle,
                         revision,
+                        scene_generation,
                         task,
                     },
                 );
@@ -267,6 +365,9 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
     if !matches!(
         method,
         "beginAcousticScene"
+            | "beginUpdateAcousticScene"
+            | "bindAcousticMesh"
+            | "unbindAcousticMesh"
             | "beginAcousticProbe"
             | "acousticStatus"
             | "cancelAcousticJob"
@@ -280,6 +381,28 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
     let owner = state.client.0;
     let epoch = state.runtime.restored;
     let pool = state.runtime.assets.cpu_tasks();
+    if matches!(method, "bindAcousticMesh" | "unbindAcousticMesh") {
+        return Ok(Some(instances::call(state, method, args)?));
+    }
+    if method == "beginUpdateAcousticScene" {
+        ensure!(
+            matches!(arg(args,0)?,Value::List(v) if !v.is_empty()&&v.len()<=4096),
+            "acoustic instance update count"
+        );
+        let updates: Vec<AcousticMeshUpdate> = serde_json::from_value(arg(args, 0)?.to_json())?;
+        let runtime = &mut state.mixer_audio.acoustics;
+        ensure!(
+            updates
+                .iter()
+                .all(|u| !runtime.instances.is_bound(owner, u.id)),
+            "unbind an entity-driven acoustic mesh before explicit editing"
+        );
+        return Ok(Some(Value::Int(
+            runtime
+                .begin_update(owner, epoch, &pool, updates)?
+                .try_into()?,
+        )));
+    }
     if method == "beginAcousticScene" {
         let name = arg(args, 0)?.as_str()?;
         let path = VfsPath::new(Mount::Asset, name).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -309,10 +432,11 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
                 drop(bytes);
                 cancel.check()?;
                 let estimate = 8192
+                    + spec.meshes.len() * 512
                     + spec
                         .meshes
                         .iter()
-                        .map(|mesh| mesh.triangles.len() * 256 + mesh.vertices.len() * 16)
+                        .map(|mesh| mesh.triangles.len() * 384 + mesh.vertices.len() * 16)
                         .sum::<usize>();
                 ensure!(
                     estimate <= RESERVATION,
@@ -321,13 +445,17 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
                 let scene = AcousticScene::build(spec)?;
                 charge.shrink(estimate);
                 cancel.check()?;
-                Ok(Product::Scene(Arc::new(PreparedScene {
-                    scene,
-                    _charge: charge,
-                })))
+                Ok(Product::Scene {
+                    scene: Arc::new(PreparedScene {
+                        scene,
+                        _charge: charge,
+                    }),
+                    base: None,
+                })
             })?;
         if let Some(old) = runtime.scene_jobs.insert(owner, ticket) {
             let _ = runtime.jobs.cancel(owner, old);
+            runtime.instances.canceled(owner, old);
         }
         return Ok(Some(Value::Int(ticket.try_into()?)));
     }
@@ -352,6 +480,7 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
         if method == "cancelAcousticJob" {
             runtime.jobs.cancel(owner, ticket)?;
             runtime.scene_jobs.retain(|_, id| *id != ticket);
+            runtime.instances.canceled(owner, ticket);
             return Ok(Some(Value::Null));
         }
         // Completion may race the initial poll above. Publish scene ownership
@@ -371,7 +500,7 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
                         value["revision"] = json!(revision);
                         value
                     }
-                    Product::Scene(_) => anyhow::bail!("acoustic scene has not been published"),
+                    Product::Scene { .. } => anyhow::bail!("acoustic scene has not been published"),
                 };
             }
         }
@@ -386,13 +515,15 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
         );
         let runtime = &state.mixer_audio.acoustics;
         return Ok(Some(Value::from_json(
-            json!({"pending":runtime.flight.contains_key(&key(handle)) || runtime.waiting.contains_key(&key(handle)),"result":runtime.results.get(&key(handle))}),
+            json!({"pending":runtime.flight.contains_key(&key(handle)) || runtime.waiting.contains_key(&key(handle)),"result":runtime.results.get(&key(handle)),"current_revision":runtime.revision(owner),"geometry_stale":runtime.results.get(&key(handle)).and_then(|v|v["revision"].as_u64()).is_some_and(|r|Some(r)!=runtime.revision(owner))}),
         )));
     }
     if method == "clearAcousticScene" {
         let a = &mut state.mixer_audio;
         let runtime = &mut a.acoustics;
+        runtime.instances.clear(owner);
         runtime.scenes.remove(&owner);
+        runtime.generations.remove(&owner);
         if let Some(ticket) = runtime.scene_jobs.remove(&owner) {
             let _ = runtime.jobs.cancel(owner, ticket);
         }
@@ -414,6 +545,10 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
     }
     let runtime = &state.mixer_audio.acoustics;
     Ok(Some(Value::from_json(
-        json!({"scene":runtime.scenes.get(&owner).map(|(revision,scene)|json!({"revision":revision,"triangles":scene.scene.triangle_count(),"backend":scene.scene.backend})),"preparing":runtime.scene_jobs.contains_key(&owner),"pending_sources":runtime.flight.keys().filter(|key|key.0==owner).count(),"queued_sources":runtime.waiting.keys().filter(|key|key.0==owner).count(),"host_geometry_reservation":runtime.budget.load(Ordering::Relaxed),"host_geometry_budget":HOST_BUDGET}),
+        json!({"scene":runtime.scenes.get(&owner).map(|(revision,scene)|json!({"revision":revision,"scene_generation":runtime.generation(owner),"triangles":scene.scene.triangle_count(),"backend":scene.scene.backend,"geometry":scene.scene.geometry_stats()})),"instances":runtime.instances.status(owner),"preparing":runtime.scene_jobs.contains_key(&owner),"pending_sources":runtime.flight.keys().filter(|key|key.0==owner).count(),"queued_sources":runtime.waiting.keys().filter(|key|key.0==owner).count(),"host_geometry_reservation":runtime.budget.load(Ordering::Relaxed),"host_geometry_budget":HOST_BUDGET}),
     )))
+}
+
+pub(crate) fn update_instances(state: &mut EngineState, dt_ms: u64) -> Result<()> {
+    instances::update(state, dt_ms)
 }

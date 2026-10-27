@@ -160,6 +160,7 @@ pub(crate) fn prepare(cx: &mut EngineContext, dt_ms: u64) -> Result<usize> {
     sync_generation(cx.state()?);
     crate::audio_async::poll(cx.state()?)?;
     crate::acoustics_api::poll(cx.state()?)?;
+    crate::acoustics_api::update_instances(cx.state()?,dt_ms)?;
     crate::binaural_api::poll(cx.state()?)?;
     crate::reverb_api::poll(cx.state()?)?;
     crate::reflections_api::poll(cx.state()?)?;
@@ -409,12 +410,15 @@ fn info() -> &'static ClassInfo {
         method("hrtfVoice",vec![("handle",T::Map)],T::Map,"Live client voice HRTF state: enabled plus ready/pending preparation/revision/published_direction/error; publication does not claim the audible crossfade has completed. Initial failure stays muted; update failure retains the last ready filter. Disable/re-enable to retry."),
         method("setVoiceHrtf",vec![("handle",T::Map),("enabled",T::Bool)],T::Void,"Enable/disable binaural rendering on a spatial voice. Enabling requires a prepared profile; source/envelope clocks wait for worker preparation. Repeated enable is idempotent. Pose updates crossfade with the profile policy."),
         method("beginAcousticScene",vec![("asset",T::String)],T::Int,"Read a client-scoped AcousticSceneSpec JSON (up to 32 MiB) and build its CPU BVH on workers. Old geometry remains until successful owner publication. Options live in the JSON; obvhs requires its host feature."),
+        method("beginUpdateAcousticScene",vec![("updates",T::List(Box::new(T::Map)))],T::Int,"Atomically prepare AcousticMeshUpdate instance changes on workers, retaining local mesh BVHs and rebuilding only the library instance bounds. Previous scene/probe snapshots remain immutable. Wait for any pending scene preparation; explicitly unbind entity-driven meshes before manual changes. acousticStatus publishes the new revision."),
+        method("bindAcousticMesh",vec![("binding",T::Map)],T::Void,"Follow a client World entity using AcousticMeshBindingSpec: global entity matrix times explicit local_transform. Captured poses coalesce into bounded worker commits at 50 ms minimum intervals, sharing local BVHs. Missing entities disable their mesh and report a binding error; invalid poses retain prior geometry. Inspect acousticStats.instances; derived bindings clear with scene replacement/restore."),
+        method("unbindAcousticMesh",vec![("mesh",T::Int)],T::Void,"Detach an entity binding and cancel any pending automatic commit for this client, retaining the last published mesh pose. Remaining bindings recapture on the next frame."),
         method("beginAcousticProbe",vec![("query",T::Map)],T::Int,"Simulate a captured source/listener/settings query on workers. Requires a prepared scene; returns a ticket for acousticStatus. Gains exclude the mixer's existing distance curve."),
         method("acousticStatus",vec![("ticket",T::Int)],T::Map,"Nonblocking client/generation-scoped pending/ready/failed status. Ready result contains scene metadata or a direct path. Release tickets with cancelAcousticJob."),
         method("cancelAcousticJob",vec![("ticket",T::Int)],T::Void,"Cancel/release a retained acoustic operation; a published scene remains installed."),
         method("clearAcousticScene",vec![],T::Void,"Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene."),
-        method("acousticStats",vec![],T::Map,"Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement."),
-        method("acousticVoice",vec![("handle",T::Map)],T::Map,"Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy."),
+        method("acousticStats",vec![],T::Map,"Client scene/revision/backend, instance work counters/bindings/desired/submitted/published ages/errors, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement."),
+        method("acousticVoice",vec![("handle",T::Map)],T::Map,"Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. current_revision/geometry_stale report instance geometry lag; full scene generations invalidate old work."),
         method("beginPrepareSource",vec![("asset",T::String),("options",T::Optional(Box::new(T::Map)))],T::Int,"Snapshot a client asset and probe its decoder on bounded workers. Options are AudioSourcePrepareSpec: measure_frames=false (scan when the header has no count), frame_limit before processing, optional transform:{kind:siglus_jitan,percent:100..400}. Nonidentity compression decodes bounded PCM16 and bakes mono WAVE on workers; it preserves sample rate rather than changing playback rate. At most 128 MiB encoded/input and 4194304 transformed input frames; shared resident/scratch bytes and handles are bounded. sourcePreparation publishes an immutable resource handle, without playback."),
         method("sourcePreparation",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed preparation; ready result has resource:{client,id} and AudioResourceInfo. Release the receipt separately from its resource."),
         method("cancelSourcePreparation",vec![("ticket",T::Int)],T::Void,"Cancel/release preparation without publishing an unobserved result. Already published resources remain retained until releaseSource or restore."),
@@ -469,22 +473,7 @@ fn handle(cx: &mut EngineContext, args: &[Value]) -> Result<VoiceHandle> {
     Ok(h)
 }
 fn entity(cx: &mut EngineContext, value: &Value) -> Result<EntityHandle> {
-    let oid = value.as_object()?;
-    let s = cx.state()?;
-    let e = s.objects.get(oid)?;
-    ensure!(e.class == "Entity", "follow requires Entity");
-    let h = EntityHandle {
-        client: s.client.0,
-        id: u32::try_from(e.payload.field("id").context("entity id")?.as_i64()?)?,
-        generation: u32::try_from(
-            e.payload
-                .field("generation")
-                .context("entity generation")?
-                .as_i64()?,
-        )?,
-    };
-    s.runtime.host.engine.world.entity(h)?;
-    Ok(h)
+    crate::builtin::handle(cx,value.as_object()?)
 }
 pub(crate) fn voice_options(
     cx: &mut EngineContext,
