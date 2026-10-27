@@ -51,6 +51,7 @@ pub struct AudioRuntime {
     pub reverb: crate::reverb_api::ReverbRuntime,
     pub reflections: crate::reflections_api::ReflectionsRuntime,
     pub(crate) music: BTreeMap<(u32, String), VoiceHandle>,
+    pub(crate) motion: crate::audio_motion::MotionRuntime,
     listeners: BTreeMap<u32, Listener>,
     restored: Option<u64>,
     remainder: u64,
@@ -72,6 +73,7 @@ impl Default for AudioRuntime {
             reflections: Default::default(),
             music: BTreeMap::new(),
             listeners: BTreeMap::new(),
+            motion: Default::default(),
             restored: None,
             remainder: 0,
             output: Vec::new(),
@@ -89,6 +91,7 @@ impl AudioRuntime {
         self.mixer.clear();
         self.scene_audio.reset(&mut self.mixer);
         self.attachments.clear();
+        self.motion.clear();
         self.music.clear();
         self.output.clear();
         self.remainder = 0;
@@ -200,6 +203,7 @@ pub(crate) fn prepare(cx: &mut EngineContext, dt_ms: u64) -> Result<usize> {
     };
     let auto = camera
         .map(|c| Listener {
+            velocity: None,
             position: c.eye,
             forward: (Vec3::from_array(c.target) - Vec3::from_array(c.eye)).to_array(),
             up: c.up,
@@ -208,6 +212,7 @@ pub(crate) fn prepare(cx: &mut EngineContext, dt_ms: u64) -> Result<usize> {
     for client in 1..=clients as u32 {
         let a = &mut cx.state()?.mixer_audio;
         let listener = a.listeners.get(&client).copied().unwrap_or(auto);
+        let listener = a.motion.listener(client, listener, dt_ms)?;
         a.mixer.set_listener(client, listener)?;
     }
     let attachments = cx
@@ -251,6 +256,10 @@ pub(crate) fn prepare(cx: &mut EngineContext, dt_ms: u64) -> Result<usize> {
                 + Vec3::from_array(a.spatial.position);
             a.spatial.position = position.to_array();
         }
+        cx.state()?
+            .mixer_audio
+            .motion
+            .source(a.handle, &mut a.spatial, dt_ms)?;
         if a.raycast {
             let s = cx.state()?;
             let listener = s
@@ -318,6 +327,7 @@ pub(crate) fn prepare(cx: &mut EngineContext, dt_ms: u64) -> Result<usize> {
     crate::reflection_tracking::update(cx.state()?, dt_ms)?;
     let s = cx.state()?;
     let a = &mut s.mixer_audio;
+    a.motion.retain(|h| a.mixer.is_playing(h.client, h));
     a.attachments
         .retain(|_, v| a.mixer.is_playing(v.handle.client, v.handle));
     a.music
@@ -383,6 +393,10 @@ fn playback_json(info: crysirror_core::service::AudioPlaybackInfo) -> Value {
 fn info() -> &'static ClassInfo {
     static INFO: OnceLock<ClassInfo> = OnceLock::new();
     INFO.get_or_init(||ClassInfo{name:"Audio",doc:"Scoped voice pool, streaming music and deterministic CPU mixing; classic channels share this output.",properties:vec![PropertyInfo{name:"sampleRate",ty:T::Int,writable:false,doc:"Mixer output frames per second."},PropertyInfo{name:"rendering",ty:T::Bool,writable:false,doc:"A prepared or running audio frame awaits owner publication; playback queries retain the previous published state and controls require completion."}],methods:vec![
+        method("dopplerVoice",vec![("handle",T::Map)],T::Map,"Scoped desired Doppler target, last installed interpolation ratio/frames, effective user pitch/rate and captured world source/listener velocities with motion reset reasons. Frozen during final worker DSP. Spatial.doppler opts in; coordinates metres and velocities m/s. Direct radial model; no propagation delay or per-reflection Doppler."),
+        method("motionSettings",vec![],T::Map,"Client automatic world-velocity inference settings: max_interval_ms=250,teleport_distance=50 metres. Explicit velocities bypass inference. Retained host policy, not a VM save."),
+        method("setMotionSettings",vec![("settings",T::Map)],T::Void,"Set strict MotionSettings and reset this client's automatic source/listener histories. Pose capture happens once per App frame; DSP interpolation belongs to workers."),
+        method("resetMotion",vec![],T::Void,"Reset this client's automatic source/listener pose histories for the next frame, such as a teleport. Explicit velocities are retained. Does not reset source position, user pitch/rate or DSP history."),
         method("nativeChannelInfo",vec![("channel",T::Int)],T::Any,"Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails."),
         method("playbackInfo",vec![("handle",T::Map)],T::Map,"Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters."),
         method("scheduleVoiceResume",vec![("handle",T::Map),("delay_ms",T::Number),("fade_ms",T::Number)],T::Void,"Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness."),
@@ -452,7 +466,7 @@ fn info() -> &'static ClassInfo {
         method("setDucking",vec![("config",T::Map)],T::Void,"Dialogue-driven music ducking {gain,attack_ms,release_ms}."),
         method("setVoiceLimit",vec![("limit",T::Int)],T::Void,"Set this client's pool limit within the host's global budget; stop voices before lowering below the active count."),
         method("setSeed",vec![("seed",T::Int)],T::Void,"Reset this client's deterministic variant generator and repeat history."),
-        method("setListener",vec![("listener",T::Any)],T::Void,"{position,forward,up}; null restores automatic camera listener."),
+        method("setListener",vec![("listener",T::Any)],T::Void,"{position,forward,up,velocity?}; explicit velocity is world m/s, otherwise App infers from pose. null restores the camera and resets listener history."),
         method("stats",vec![],T::Map,"Mixer active/stolen/rejected voices, rendered frames, per-voice underrun frames and unclipped peak."),
     ]})
 }
@@ -648,6 +662,8 @@ impl Class for AudioClass {
                 matches!(
                     name,
                     "playbackInfo"
+                        | "dopplerVoice"
+                        | "motionSettings"
                         | "nativeChannelInfo"
                         | "voice"
                         | "stats"
@@ -665,6 +681,9 @@ impl Class for AudioClass {
                 ),
                 "audio frame pending; poll frame completion before this control"
             );
+        }
+        if let Some(result) = crate::audio_motion::call(cx, name, args)? {
+            return Ok(result);
         }
         if let Some(result) = crate::audio_groups_api::call(cx, name, args)? {
             return Ok(result);
@@ -1019,23 +1038,31 @@ impl Class for AudioClass {
             "setListener" => {
                 let value = arg(args, 0, "listener")?;
                 if matches!(value, Value::Null) {
-                    cx.state()?.mixer_audio.listeners.remove(&client);
+                    let a = &mut cx.state()?.mixer_audio;
+                    a.listeners.remove(&client);
+                    a.motion.reset_listener(client);
                 } else {
                     #[derive(Deserialize)]
                     #[serde(deny_unknown_fields)]
                     struct L {
+                        #[serde(default)]
+                        velocity: Option<[f32; 3]>,
                         position: [f32; 3],
                         forward: [f32; 3],
                         up: [f32; 3],
                     }
                     let v: L = parse(value)?;
                     let l = Listener {
+                        velocity: v.velocity,
                         position: v.position,
                         forward: v.forward,
                         up: v.up,
                     };
                     let a = &mut cx.state()?.mixer_audio;
                     a.mixer.set_listener(client, l)?;
+                    if !a.listeners.contains_key(&client) {
+                        a.motion.reset_listener(client);
+                    }
                     a.listeners.insert(client, l);
                 }
             }

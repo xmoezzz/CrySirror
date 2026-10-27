@@ -330,3 +330,14 @@ not migrated. Original sound file layouts stay unchanged, with true default slot
 volume 255 and native loop/READY/delay restore predicates/order. No PCMEVENT, full
 routing/discovery, sample-perfect runtime snapshots or whole-game result is claimed.
 Source scope: [siglus-pcmch-source-audit.json](siglus-pcmch-source-audit.json).
+
+
+## Shared direct Doppler (ADR 0084)
+
+Spatial voices can opt into bounded radial Doppler, explicit velocities or App
+world/camera inference, all in engine audio/motion APIs. Mixer workers own source
+resampling and pitch progression; no VM has a private Doppler/resampling engine.
+This phase adds no native spatial opcode or HostServices spatial facade. Existing
+native two-dimensional audio does not opt in automatically and retains its
+resource, wait and original-save policies. Per-path reflected Doppler and direct
+propagation delay remain unimplemented; see ADR 0084.

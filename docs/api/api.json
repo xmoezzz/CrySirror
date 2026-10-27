@@ -722,6 +722,40 @@
       "global": "audio",
       "methods": [
         {
+          "doc": "Scoped desired Doppler target, last installed interpolation ratio/frames, effective user pitch/rate and captured world source/listener velocities with motion reset reasons. Frozen during final worker DSP. Spatial.doppler opts in; coordinates metres and velocities m/s. Direct radial model; no propagation delay or per-reflection Doppler.",
+          "name": "dopplerVoice",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Client automatic world-velocity inference settings: max_interval_ms=250,teleport_distance=50 metres. Explicit velocities bypass inference. Retained host policy, not a VM save.",
+          "name": "motionSettings",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Set strict MotionSettings and reset this client's automatic source/listener histories. Pose capture happens once per App frame; DSP interpolation belongs to workers.",
+          "name": "setMotionSettings",
+          "params": [
+            {
+              "name": "settings",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Reset this client's automatic source/listener pose histories for the next frame, such as a teleport. Explicit velocities are retained. Does not reset source position, user pitch/rate or DSP history.",
+          "name": "resetMotion",
+          "params": [],
+          "returns": "void"
+        },
+        {
           "doc": "Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails.",
           "name": "nativeChannelInfo",
           "params": [
@@ -1562,7 +1596,7 @@
           "returns": "void"
         },
         {
-          "doc": "{position,forward,up}; null restores automatic camera listener.",
+          "doc": "{position,forward,up,velocity?}; explicit velocity is world m/s, otherwise App infers from pose. null restores the camera and resets listener history.",
           "name": "setListener",
           "params": [
             {
@@ -5193,6 +5227,344 @@
     }
   ],
   "data": [
+    {
+      "doc": "Direct radial Doppler controls; opt in through Spatial.doppler.",
+      "fields": [
+        {
+          "default": 1.0,
+          "doc": "Velocity exaggeration, 0 disables shifting; default 1, range 0..16.",
+          "name": "factor",
+          "rust_type": "f32"
+        },
+        {
+          "default": 343.3,
+          "doc": "Propagation speed in metres/second; default 343.3, range 1..10000.",
+          "name": "speed_of_sound",
+          "rust_type": "f32"
+        },
+        {
+          "default": 4.0,
+          "doc": "Symmetric target pitch multiplier bound [1/max_ratio,max_ratio], default 4.",
+          "name": "max_ratio",
+          "rust_type": "f32"
+        },
+        {
+          "default": 20.0,
+          "doc": "Output-clock linear transition in ms, default 20, range 0..1000.",
+          "name": "smoothing_ms",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "DopplerSettings",
+      "used_by": "Spatial.doppler"
+    },
+    {
+      "doc": "Bounded radial calculation with separate velocity and ratio diagnostics.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Bounded target multiplier, before interpolation and user pitch/rate.",
+          "name": "ratio",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Source velocity projected onto source-to-listener direction, m/s.",
+          "name": "source_radial",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Listener velocity on that same direction, m/s (opposite toward source).",
+          "name": "listener_radial",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Scaled radial velocity exceeded +/-99% of sound speed.",
+          "name": "velocity_clamped",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "The physical radial ratio exceeded the configured symmetric pitch bound.",
+          "name": "ratio_clamped",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "DopplerCalculation",
+      "used_by": "DopplerInfo.target / Rust doppler::calculate"
+    },
+    {
+      "doc": "Frozen with the mixer frame while DSP runs on a worker.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Opt-in settings exist on this spatial voice.",
+          "name": "enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Current interpolated multiplier at the next output frame.",
+          "name": "ratio",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Current pose/velocity target; does not imply audible transition completion.",
+          "name": "target",
+          "rust_type": "DopplerCalculation"
+        },
+        {
+          "default": null,
+          "doc": "Target awaits the next render block setup (counters still describe prior setup).",
+          "name": "target_pending",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "User rate times semitone pitch times interpolated Doppler multiplier.",
+          "name": "effective_rate",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Captured world source velocity; zero when absent in standalone Mixer.",
+          "name": "source_velocity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Captured world listener velocity; zero when absent in standalone Mixer.",
+          "name": "listener_velocity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Remaining interpolation output frames (including paused/starved time).",
+          "name": "smoothing_frames",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "DopplerInfo",
+      "used_by": "Audio.dopplerVoice / Rust Mixer::doppler_info"
+    },
+    {
+      "doc": "Automatic pose-inference limits in the engine world metre convention.",
+      "fields": [
+        {
+          "default": 250,
+          "doc": "Longer frame gaps reset inference, default 250 ms, allowed 1..60000.",
+          "name": "max_interval_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": 50.0,
+          "doc": "Larger world displacement resets inference, default 50 m, range 0.001..1000.",
+          "name": "teleport_distance",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "MotionSettings",
+      "used_by": "Audio.setMotionSettings / motionSettings"
+    },
+    {
+      "doc": "Last owner capture result; independent of source/decoder playback clocks.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Derived or explicit world velocity in metres/second.",
+          "name": "velocity",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Why velocity was inferred, retained or reset at this capture.",
+          "name": "status",
+          "rust_type": "MotionStatus"
+        }
+      ],
+      "name": "MotionEstimate",
+      "used_by": "Audio.dopplerVoice motion source/listener"
+    },
+    {
+      "doc": "Observable reason for a motion capture velocity or reset.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "No previous pose is available.",
+          "name": "initial",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Finite difference over a positive bounded frame interval.",
+          "name": "inferred",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "No displacement over a positive frame interval.",
+          "name": "stationary",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Unchanged zero-duration pose retains the previous velocity.",
+          "name": "zero_interval",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Teleport threshold or changed zero-duration pose reset velocity.",
+          "name": "discontinuity",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "The frame interval exceeded the configured inference limit.",
+          "name": "gap",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Caller-provided velocity bypassed inference.",
+          "name": "explicit",
+          "rust_type": ""
+        }
+      ],
+      "name": "MotionStatus",
+      "used_by": "MotionEstimate.status"
+    },
+    {
+      "doc": "Mono point-source position, distance gain and opt-in direct Doppler. App can infer missing velocities from world poses; standalone Mixer cannot.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Optional explicit world m/s. App infers absent velocities from poses; standalone Mixer uses zero.",
+          "name": "velocity",
+          "rust_type": "Option<[f32; 3]>"
+        },
+        {
+          "default": null,
+          "doc": "Opt-in direct-path Doppler; None retains existing source speed.",
+          "name": "doppler",
+          "rust_type": "Option<DopplerSettings>"
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "doc": "World position in metres; an attachment uses this as a world-axis offset.",
+          "name": "position",
+          "rust_type": "[f32; 3]"
+        },
+        {
+          "default": 1.0,
+          "doc": "Distance below which gain is one, default 1 metre.",
+          "name": "min_distance",
+          "rust_type": "f32"
+        },
+        {
+          "default": 20.0,
+          "doc": "Zero-gain distance, greater than min_distance, default 20 metres.",
+          "name": "max_distance",
+          "rust_type": "f32"
+        },
+        {
+          "default": {
+            "kind": "inverse_square"
+          },
+          "doc": "Normalized distance-to-gain curve.",
+          "name": "attenuation",
+          "rust_type": "Attenuation"
+        },
+        {
+          "default": 0.0,
+          "doc": "Manual obstruction amount 0..1, independent of geometric acoustics.",
+          "name": "occlusion",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "Spatial",
+      "used_by": "VoiceSpec.spatial / Audio.playSfx.spatial"
+    },
+    {
+      "doc": "Shared mixer playback parameters. Public Audio calls additionally accept an asset/resource and optional entity/effect declarations outside this record.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "An existing client-scoped logical gain group; None bypasses groups.",
+          "name": "mix_group",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": "sfx",
+          "doc": "Source bus; Master is a control bus and is rejected.",
+          "name": "bus",
+          "rust_type": "Bus"
+        },
+        {
+          "default": 1.0,
+          "doc": "Per-voice gain 0..4, default 1.",
+          "name": "gain",
+          "rust_type": "f32"
+        },
+        {
+          "default": 1.0,
+          "doc": "Authored playback speed 0.125..4, default 1; separate from Doppler.",
+          "name": "rate",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0.0,
+          "doc": "Authored semitone shift -24..24, default 0.",
+          "name": "pitch_semitones",
+          "rust_type": "f32"
+        },
+        {
+          "default": 0,
+          "doc": "Pool admission/stealing priority; default 0.",
+          "name": "priority",
+          "rust_type": "i32"
+        },
+        {
+          "default": false,
+          "doc": "Repeat source input; default false.",
+          "name": "looping",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Optional decoded-source frame range for looping.",
+          "name": "loop_points",
+          "rust_type": "Option<LoopPoints>"
+        },
+        {
+          "default": null,
+          "doc": "Optional point-source spatial parameters; absent retains stereo input.",
+          "name": "spatial",
+          "rust_type": "Option<Spatial>"
+        },
+        {
+          "default": 0.0,
+          "doc": "Initial transport fade in output milliseconds; default 0.",
+          "name": "fade_in_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": false,
+          "doc": "Publish with frozen source input; default false.",
+          "name": "paused",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "VoiceSpec",
+      "used_by": "Audio.playSfx / Rust Mixer::play"
+    },
     {
       "doc": "Ephemeral client-scoped immutable audio resource. IDs are not reused during a host process; handles never enter project or native/runtime save bytes.",
       "fields": [
@@ -13075,7 +13447,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "0d9cec36638123d1",
+  "fingerprint": "768ebdf0e5892411",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

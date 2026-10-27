@@ -3298,3 +3298,99 @@ Remaining boundaries:
   mappings and broader engine-wide async/3D/VN requirements remain active work.
   No listening-quality, performance ranking, GPU/hardware-RT, other-platform or
   complete-engine result is claimed by this local CPU validation.
+
+## 2026-10-27 — Direct Doppler and motion capture (ADR 0084)
+
+Implementation:
+- Added engine-owned radial Doppler calculation, opt-in Spatial.doppler and
+  optional source/listener world velocity. The bounded target composes with
+  existing authored rate/semitone pitch through an independent output-frame ramp;
+  it does not overwrite user controls, restart input or reset downstream DSP.
+  Paused/starved/held input does not consume PCM while interpolation can settle.
+- New DopplerSettings controls factor, medium speed, symmetric target ratio and
+  transition time. Finite vector/range validation, bilateral 99%-of-sound-speed
+  radial bounds and target-ratio bounds have separate diagnostic flags. Existing
+  non-opted-in playback retains unity; disabled observations skip the calculation.
+- Shared MotionTracker infers finite differences from caller dt, not wall time.
+  Explicit velocities override it. First observations, gaps, teleports and changed
+  zero-time poses reset inference; unchanged zero-time poses retain velocity.
+  App captures Entity global parent motion and camera/manual listener motion once
+  after world/late updates. Full client/slot/generation keys prevent stale reuse;
+  ended/disabled histories are pruned. Restore clears derived history while
+  retaining client motion settings as host policy.
+- Added Audio.dopplerVoice, motionSettings, setMotionSettings and resetMotion;
+  setListener accepts optional velocity. Desired target, installed ratio/remaining
+  ramp, effective rate and capture/reset reasons are inspectable. target_pending
+  distinguishes a desired change awaiting render-block setup. Mixer ownership
+  and read observations retain the existing final DSP worker publication gate;
+  motion controls cannot mutate during a pending frame. No new task pool or
+  callback lock is added; small bounded pose capture remains owner control work.
+- Reviewed oddio's complete pinned spatial/speed/public modules at registry
+  version 0.7.4 / Git 85ad0723b460bc8c641198ef02bf114ef04f04f9, including its
+  propagation/scene ownership. The standard radial formula and velocity/unit
+  conventions were checked against OpenAL 1.1 section 3.5.2 and X3DAudio docs.
+  Exact archive/source/PDF hashes and the selection rationale are recorded in
+  docs/doppler-source-audit.json. No oddio implementation, new dependency, SDK,
+  native opcode or legacy audio host is added. Native two-dimensional sound
+  does not opt into Doppler automatically; save schemas/layouts are unchanged.
+
+Compilation:
+- Release workspace/all-target check passed with desktop krkr, arc-formats,
+  acoustics-obvhs and optional rodio-output. Minimal no-default desktop
+  reallive+avg32 check passed. All cargo validation used --release; no workflow,
+  CI or remote build was added. Existing CBG/RealLive/minimal CLI warnings remain.
+- Regenerated reference/JSON/TypeScript and logged API fingerprint
+  **0d9cec36638123d1 -> 768ebdf0e5892411**. API reference/command coverage checks
+  passed. Added explicit public data descriptions/defaults for Spatial,
+  VoiceSpec, Doppler and capture state. Old JSON remains default-disabled;
+  fully specified Rust Listener/Spatial literals need their new fields/defaults.
+- Initial compilation corrected the context-client accessor. Initial API
+  generation retained its expected missing-fingerprint guard failure before the
+  actual fingerprint was logged. These attempts are not behavior passes.
+
+Behavior validation:
+- Shared audio library/integration scopes: **117 passed**; engine API/motion and
+  real JS/async service scopes: **29 passed**; existing mixer/frame/command and
+  native Siglus audio/PCMCH regression scopes: **56 passed**. **202 distinct Rust
+  tests passed**, three ignored excluded. Earlier/focused reruns are not counted
+  again. Python 3.11 tooling: **189 passed**.
+- Independent analytic cases cover approaching/receding source and listener,
+  equal/transverse motion, coincidence, factor zero, extreme/clamped velocities
+  and invalid input. Actual PCM and decoded-source positions verify resampling,
+  composition with authored pitch/rate and chunk-invariant interpolation. Paused
+  input keeps its position while Doppler settles. Listener scope and invalid
+  update atomicity are checked.
+- An actual HRIR case verifies Doppler resamples input before HRTF: input ends
+  earlier while ear delays and filter tails keep their output-frame positions.
+  Existing acoustic/reflection/reverb/resource/decoder/output tests remain green.
+- Public engine cases follow a parent's Entity transform, camera motion, shared
+  velocity, explicit overrides, teleport/zero-time/gap resets and host policy
+  across restore. Worker-capacity gates keep ratio/observations frozen and prove
+  polling does not capture movement or advance clocks twice. Unknown settings
+  and foreign/stale handles fail. Real JS/TS Promise playback observes actual
+  engine Doppler and capture reasons through the class registry.
+- The initial parent-motion oracle confused 48 kHz output frames with the
+  fixture's 8 kHz decoded-source units; it was corrected to 384 source frames
+  after 16 ms at unity plus 16 ms at 2x. The production behavior was unchanged.
+- The independent doppler_passby release demo exports stereo PCM16 **48 kHz /
+  96000 frames** from an authored 440 Hz source moving past a listener. Windowed
+  positive-crossing estimates are **500 Hz approaching / 395 Hz receding**;
+  these are coarse 0.2-second-window estimates, not instantaneous-frequency
+  claims. Worker and synchronous exports are byte-identical. Python independently
+  decodes the WAVE, checks metadata/frequencies and records its SHA-256. No VM,
+  output device, game, font or measured HRIR/SOFA dataset is used by this demo.
+- Evidence: target/verification/doppler-{audio-completion,api-engine-final,
+  regression-final,workspace-check,minimal-check,python-final,demo,demo-sync}.log,
+  doppler-summary.json, doppler-demo-inspection.json and doppler-passby*.wav.
+
+Remaining boundaries:
+- This is a direct instantaneous radial model feeding existing linear source
+  resampling. It adds no retarded-time/direct propagation delay, independent
+  reflected-path Doppler, wind/moving medium, diffraction, shock-wave simulation,
+  predictive motion, band-limited resampling or independent device clock.
+  Automatic frame-difference velocity is not an exact physics-body velocity;
+  explicit input is available. Existing interpolation may settle after reset.
+- Native spatial opcodes/HostServices facade and broader async/3D/VN capability
+  requirements remain open. No full native game, cross-platform/hardware result,
+  performance ranking, listening-quality comparison or complete-engine claim is
+  established by this CPU release validation.

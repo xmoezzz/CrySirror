@@ -19,6 +19,14 @@ declare class Audio {
   readonly sampleRate: number;
   /** A prepared or running audio frame awaits owner publication; playback queries retain the previous published state and controls require completion. */
   readonly rendering: boolean;
+  /** Scoped desired Doppler target, last installed interpolation ratio/frames, effective user pitch/rate and captured world source/listener velocities with motion reset reasons. Frozen during final worker DSP. Spatial.doppler opts in; coordinates metres and velocities m/s. Direct radial model; no propagation delay or per-reflection Doppler. */
+  dopplerVoice(handle: Record<string, any>): Record<string, any>;
+  /** Client automatic world-velocity inference settings: max_interval_ms=250,teleport_distance=50 metres. Explicit velocities bypass inference. Retained host policy, not a VM save. */
+  motionSettings(): Record<string, any>;
+  /** Set strict MotionSettings and reset this client's automatic source/listener histories. Pose capture happens once per App frame; DSP interpolation belongs to workers. */
+  setMotionSettings(settings: Record<string, any>): void;
+  /** Reset this client's automatic source/listener pose histories for the next frame, such as a teleport. Explicit velocities are retained. Does not reset source position, user pitch/rate or DSP history. */
+  resetMotion(): void;
   /** Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails. */
   nativeChannelInfo(channel: number): any;
   /** Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters. */
@@ -157,7 +165,7 @@ declare class Audio {
   setVoiceLimit(limit: number): void;
   /** Reset this client's deterministic variant generator and repeat history. */
   setSeed(seed: number): void;
-  /** {position,forward,up}; null restores automatic camera listener. */
+  /** {position,forward,up,velocity?}; explicit velocity is world m/s, otherwise App infers from pose. null restores the camera and resets listener history. */
   setListener(listener: any): void;
   /** Mixer active/stolen/rejected voices, rendered frames, per-voice underrun frames and unclipped peak. */
   stats(): Record<string, any>;

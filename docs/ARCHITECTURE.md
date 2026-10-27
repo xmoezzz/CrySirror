@@ -439,3 +439,16 @@ Original Siglus PCMCH uses scoped prepared resources and channels 4+index; nativ
 code retains only cue/volume/mode/wait/save policy. Runtime payload schema is 5;
 original file codecs/layouts retain their native contract. See ADR 0083 for
 explicit routing, timing, restore and channel-budget limits.
+
+
+## Direct Doppler and motion capture (ADR 0084)
+
+Opt-in Spatial.doppler and explicit world velocities feed a bounded shared radial
+model. Mixer applies an independent smoothed multiplier to source resampling;
+source/transport clocks, user pitch and downstream DSP histories stay distinct.
+App captures automatic Entity global/camera motion once per owner frame using
+shared MotionTracker gap/teleport policy. Full scoped voice identities own source
+history. A final DSP worker owns rate progression and immutable observations
+freeze while pending. Audio.dopplerVoice exposes desired/installed state and reset
+reasons; native spatial mappings and retarded-time/per-reflection physics remain
+open. See ADR 0084 and doppler-source-audit.json for scope and source decisions.

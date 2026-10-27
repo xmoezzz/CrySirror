@@ -4,6 +4,7 @@
 //! Deterministic, device-free stereo mixer. All controls are client scoped;
 //! decoded PCM and decoder handles are derived playback resources, never saves.
 use crate::decoder::{AudioSource, Clip, SourceBufferStatus, SourceRead, StereoFrame};
+use crate::doppler::{DopplerInfo, DopplerSettings};
 use crate::envelope::Ramp;
 use crate::mix_groups::MixGroups;
 use anyhow::{Context, Result, bail, ensure};
@@ -81,8 +82,11 @@ impl Default for MixerConfig {
         }
     }
 }
+/// World-space listener pose and optional medium-relative velocity.
 #[derive(Clone, Copy, Debug)]
 pub struct Listener {
+    /// Optional explicit world metres/second; standalone Mixer treats None as zero.
+    pub velocity: Option<[f32; 3]>,
     pub position: [f32; 3],
     pub forward: [f32; 3],
     pub up: [f32; 3],
@@ -90,6 +94,7 @@ pub struct Listener {
 impl Default for Listener {
     fn default() -> Self {
         Self {
+            velocity: None,
             position: [0.; 3],
             forward: [0., 0., -1.],
             up: [0., 1., 0.],
@@ -107,18 +112,32 @@ pub enum Attenuation {
         points: Vec<[f32; 2]>,
     },
 }
+/// Mono point-source position, distance gain and opt-in direct Doppler.
+/// App can infer missing velocities from world poses; standalone Mixer cannot.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Spatial {
+    /// Optional explicit world m/s. App infers absent velocities from poses;
+    /// standalone Mixer uses zero.
+    pub velocity: Option<[f32; 3]>,
+    /// Opt-in direct-path Doppler; None retains existing source speed.
+    pub doppler: Option<DopplerSettings>,
+    /// World position in metres; an attachment uses this as a world-axis offset.
     pub position: [f32; 3],
+    /// Distance below which gain is one, default 1 metre.
     pub min_distance: f32,
+    /// Zero-gain distance, greater than min_distance, default 20 metres.
     pub max_distance: f32,
+    /// Normalized distance-to-gain curve.
     pub attenuation: Attenuation,
+    /// Manual obstruction amount 0..1, independent of geometric acoustics.
     pub occlusion: f32,
 }
 impl Default for Spatial {
     fn default() -> Self {
         Self {
+            velocity: None,
+            doppler: None,
             position: [0.; 3],
             min_distance: 1.,
             max_distance: 20.,
@@ -129,6 +148,13 @@ impl Default for Spatial {
 }
 impl Spatial {
     pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.velocity.is_none_or(finite3),
+            "invalid spatial audio velocity"
+        );
+        if let Some(d) = self.doppler {
+            d.validate()?;
+        }
         ensure!(
             finite3(self.position)
                 && self.min_distance.is_finite()
@@ -185,20 +211,32 @@ pub struct LoopPoints {
     pub start: u64,
     pub end: u64,
 }
+/// Shared mixer playback parameters. Public Audio calls additionally accept an
+/// asset/resource and optional entity/effect declarations outside this record.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct VoiceSpec {
     /// An existing client-scoped logical gain group; None bypasses groups.
     pub mix_group: Option<String>,
+    /// Source bus; Master is a control bus and is rejected.
     pub bus: Bus,
+    /// Per-voice gain 0..4, default 1.
     pub gain: f32,
+    /// Authored playback speed 0.125..4, default 1; separate from Doppler.
     pub rate: f32,
+    /// Authored semitone shift -24..24, default 0.
     pub pitch_semitones: f32,
+    /// Pool admission/stealing priority; default 0.
     pub priority: i32,
+    /// Repeat source input; default false.
     pub looping: bool,
+    /// Optional decoded-source frame range for looping.
     pub loop_points: Option<LoopPoints>,
+    /// Optional point-source spatial parameters; absent retains stereo input.
     pub spatial: Option<Spatial>,
+    /// Initial transport fade in output milliseconds; default 0.
     pub fade_in_ms: f32,
+    /// Publish with frozen source input; default false.
     pub paused: bool,
 }
 impl Default for VoiceSpec {
@@ -371,6 +409,8 @@ impl Cursor {
 }
 
 struct Voice {
+    doppler: Ramp,
+    doppler_settings: Option<DopplerSettings>,
     age_frames: u64,
     transport_frames: u64,
     mix_group: Option<usize>,
@@ -511,6 +551,7 @@ impl Client {
     }
 }
 struct VoiceObservation {
+    doppler: DopplerInfo,
     spec: VoiceSpec,
     info: crysirror_core::service::AudioPlaybackInfo,
     source: Option<SourceBufferStatus>,
@@ -586,6 +627,7 @@ impl Mixer {
             observations.insert(
                 h,
                 VoiceObservation {
+                    doppler: self.doppler_info(h.client, h)?,
                     spec: v.spec.clone(),
                     info: self.playback_info(h.client, h)?,
                     source: v.cursor.source.buffer_status(),
@@ -818,7 +860,8 @@ impl Mixer {
     }
     pub fn set_listener(&mut self, client: u32, listener: Listener) -> Result<()> {
         ensure!(
-            finite3(listener.position)
+            listener.velocity.is_none_or(finite3)
+                && finite3(listener.position)
                 && finite3(listener.forward)
                 && finite3(listener.up)
                 && len(listener.forward) > 1e-5
@@ -914,6 +957,8 @@ impl Mixer {
         let mut envelope = Ramp::new(if spec.fade_in_ms > 0. { 0. } else { 1. });
         envelope.to(1., frames(spec.fade_in_ms, self.config.sample_rate));
         self.voices[slot] = Some(Voice {
+            doppler: Ramp::new(1.),
+            doppler_settings: None,
             age_frames: 0,
             transport_frames: 0,
             mix_group,
@@ -1499,6 +1544,51 @@ impl Mixer {
         }
         Ok(())
     }
+    /// Current kinematic target and interpolated rate, frozen during worker DSP.
+    pub fn doppler_info(&self, client: u32, h: VoiceHandle) -> Result<DopplerInfo> {
+        if let Some(p) = &self.published {
+            ensure!(client == h.client, "foreign audio handle");
+            return p
+                .voices
+                .get(&h)
+                .map(|v| v.doppler)
+                .context("audio voice ended or stale");
+        }
+        let spec = self.spec(client, h)?;
+        let v = self.voices[h.slot as usize].as_ref().unwrap();
+        let listener = self.listener(client);
+        let source = spec.spatial.as_ref();
+        let velocity = source.and_then(|s| s.velocity).unwrap_or([0.; 3]);
+        let settings = source.and_then(|s| s.doppler);
+        let enabled = settings.is_some();
+        let target = if let Some(settings) = settings {
+            crate::doppler::calculate(
+                settings,
+                source.map_or([0.; 3], |s| s.position),
+                velocity,
+                listener.position,
+                listener.velocity.unwrap_or([0.; 3]),
+            )?
+        } else {
+            crate::doppler::DopplerCalculation {
+                ratio: 1.,
+                source_radial: 0.,
+                listener_radial: 0.,
+                velocity_clamped: false,
+                ratio_clamped: false,
+            }
+        };
+        Ok(DopplerInfo {
+            enabled,
+            ratio: v.doppler.value,
+            target,
+            target_pending: v.doppler.target != target.ratio || v.doppler_settings != settings,
+            effective_rate: spec.rate * 2f32.powf(spec.pitch_semitones / 12.) * v.doppler.value,
+            source_velocity: velocity,
+            listener_velocity: listener.velocity.unwrap_or([0.; 3]),
+            smoothing_frames: v.doppler.left,
+        })
+    }
     pub fn playback_info(
         &self,
         client: u32,
@@ -1765,6 +1855,31 @@ impl Mixer {
         );
         out.fill([0.; 2]);
         let rate = self.config.sample_rate;
+        for v in self.voices.iter_mut().flatten() {
+            let settings = v.spec.spatial.as_ref().and_then(|s| s.doppler);
+            let target = if let (Some(s), Some(settings)) = (&v.spec.spatial, settings) {
+                let l = self
+                    .listeners
+                    .get(&v.handle.client)
+                    .copied()
+                    .unwrap_or_default();
+                crate::doppler::calculate(
+                    settings,
+                    s.position,
+                    s.velocity.unwrap_or([0.; 3]),
+                    l.position,
+                    l.velocity.unwrap_or([0.; 3]),
+                )?
+                .ratio
+            } else {
+                1.
+            };
+            if v.doppler.target != target || v.doppler_settings != settings {
+                v.doppler
+                    .to(target, settings.map_or(0, |s| frames(s.smoothing_ms, rate)));
+                v.doppler_settings = settings;
+            }
+        }
         let spatial: Vec<_> = self
             .voices
             .iter()
@@ -1840,6 +1955,7 @@ impl Mixer {
             for (slot, (effect, step)) in self.voices.iter_mut().zip(spatial.iter().zip(&rates)) {
                 let Some(v) = slot else { continue };
                 v.age_frames = v.age_frames.saturating_add(1);
+                let doppler = v.doppler.step();
                 if v.resume_after
                     .as_ref()
                     .is_some_and(|r| r.settings.policy == AudioResumePolicy::Freeze)
@@ -2022,7 +2138,7 @@ impl Mixer {
                     v.tail_left = v.tail_left.saturating_sub(1);
                     v.tail_elapsed = v.tail_elapsed.saturating_add(1);
                 } else {
-                    v.position += step;
+                    v.position += step * f64::from(doppler);
                 }
                 if !v.spec.looping
                     && v.cursor

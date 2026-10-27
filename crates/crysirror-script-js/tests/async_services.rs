@@ -558,3 +558,28 @@ fn js_gain_groups_route_prepared_sources_and_preserve_partial_parent_settings(){
     "#);
     let mut b=b"RIFF".to_vec();b.extend(164u32.to_le_bytes());b.extend(b"WAVEfmt ");b.extend(16u32.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(8000u32.to_le_bytes());b.extend(16000u32.to_le_bytes());b.extend(2u16.to_le_bytes());b.extend(16u16.to_le_bytes());b.extend(b"data");b.extend(128u32.to_le_bytes());for _ in 0..64{b.extend(8192i16.to_le_bytes());}std::fs::write(dir.path().join("assets/a/group.wav"),b).unwrap();app.init().unwrap();app.start().unwrap();until(&mut app,"mix-groups-ready");
 }
+
+#[test]
+fn doppler_options_and_motion_inspection_cross_the_real_js_promise_boundary() {
+    let (dir,mut app)=app(r#"
+      let voice=null,reported=false;
+      async function onInit() {
+        audio.setMotionSettings({max_interval_ms:200,teleport_distance:20});
+        if(audio.motionSettings().teleport_distance!==20)throw Error('motion policy missing');
+        let invalid=false;try{audio.setMotionSettings({unknown:true});}catch(e){invalid=true;}
+        if(!invalid)throw Error('unknown motion policy accepted');
+        audio.setListener({position:[0,0,0],forward:[0,0,-1],up:[0,1,0],velocity:[0,0,0]});
+        voice=await audio.playSfxAsync({asset:'doppler.wav',looping:true,spatial:{position:[0,0,-10],velocity:[0,0,50],min_distance:20,max_distance:100,doppler:{speed_of_sound:100,smoothing_ms:0}}});
+      }
+      function onUpdate(dt) {
+        if(!voice||reported)return;
+        const state=audio.dopplerVoice(voice);
+        if(Math.abs(state.ratio-2)>1e-5)return;
+        if(state.effective_rate!==2 || state.motion.source.status!=='explicit')throw Error('Doppler did not reach engine DSP');
+        audio.resetMotion();reported=true;engine.log('doppler-ready');
+      }
+    "#);
+    let size=32000u32;let mut b=b"RIFF".to_vec();b.extend((36+size).to_le_bytes());b.extend(b"WAVEfmt ");b.extend(16u32.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(8000u32.to_le_bytes());b.extend(16000u32.to_le_bytes());b.extend(2u16.to_le_bytes());b.extend(16u16.to_le_bytes());b.extend(b"data");b.extend(size.to_le_bytes());for _ in 0..16000{b.extend(8192i16.to_le_bytes());}
+    std::fs::write(dir.path().join("assets/a/doppler.wav"),b).unwrap();
+    app.init().unwrap();app.start().unwrap();until(&mut app,"doppler-ready");
+}

@@ -467,3 +467,37 @@ fail. See ADR 0083.
 
 The independent authored release demo validates every PCM sample and exports a
 stereo WAVE: `cargo run --release -p crysirror-audio --example transport_timeline -- /tmp/transport.wav`.
+
+
+### Moving-source Doppler
+
+```ts
+const voice = await audio.playSfxAsync({
+  asset: 'engine.wav', follow: movingEntity,
+  spatial: {doppler: {factor: 1, speed_of_sound: 343.3, smoothing_ms: 20}}
+});
+// Missing velocity is captured from entity/global or camera/manual-listener poses.
+// Explicit spatial.velocity or setListener({...,velocity:[x,y,z]}) uses m/s.
+audio.setMotionSettings({max_interval_ms: 250, teleport_distance: 50});
+audio.resetMotion(); // next owner capture anchors automatic movement again
+const state = audio.dopplerVoice(voice);
+```
+
+Doppler is opt-in, independent of authored rate/pitch and source position. World
+units are metres. The direct radial target clamps scaled radial speeds to +/-99%
+of sound speed, then pitch to [1/max_ratio,max_ratio], with separate diagnostics.
+Output-clock smoothing continues while input is paused/starved. target is desired;
+ratio/smoothing_frames describe installed interpolation and target_pending signals
+render setup still needed. effective_rate excludes source/output sample-rate units.
+Motion reasons distinguish inferred, explicit, initial, zero-time, gap and teleport
+captures. Unchanged zero-time poses retain velocity; changed ones reset inference.
+Reset/restore clears derived histories while host motion policy persists.
+
+Pitch uses the existing linear source resampler. Downstream HRTF/echo/reverb
+histories retain output-clock behavior; reflected paths do not get independent
+Doppler and direct propagation delay is not added. Controls fence final DSP worker
+frames; inspection stays frozen. Rust calculate/MotionTracker/Mixer APIs work
+without App or any VM/device. See ADR 0084 for physical and async limits.
+
+An authored release demo asserts crossing frequencies and exports a two-second
+pass-by: `cargo run --release -p crysirror-audio --example doppler_passby -- /tmp/passby.wav --worker`.

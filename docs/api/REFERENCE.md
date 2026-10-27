@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `0d9cec36638123d1`
+API fingerprint: `768ebdf0e5892411`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -15,7 +15,7 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 - [Globals](#globals)
 - Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [Vfx](#class-vfx), [World](#class-world)
 - [Commands](#commands)
-- Data: [AudioResourceHandle](#audioresourcehandle), [AudioSourcePrepareSpec](#audiosourcepreparespec), [AudioTransformSpec](#audiotransformspec), [AudioResourceTransform](#audioresourcetransform), [AudioResourceInfo](#audioresourceinfo), [AudioResourcePreparation](#audioresourcepreparation), [AudioMixGroupSettings](#audiomixgroupsettings), [AudioMixGroupInfo](#audiomixgroupinfo), [AudioParameters](#audioparameters), [PcmBus](#pcmbus), [AudioResumeSettings](#audioresumesettings), [AudioResumePolicy](#audioresumepolicy), [AudioPlaybackInfo](#audioplaybackinfo), [ReflectionTrackingSpec](#reflectiontrackingspec), [ReflectionOptions](#reflectionoptions), [ReflectionQuery](#reflectionquery), [ReflectionPath](#reflectionpath), [ReflectionPaths](#reflectionpaths), [ReverbSpec](#reverbspec), [ReverbSettings](#reverbsettings), [ReverbSend](#reverbsend), [SceneVoicePhase](#scenevoicephase), [SceneVoiceStatus](#scenevoicestatus), [AudioAsset](#audioasset), [AudioPreparePhase](#audiopreparephase), [AudioPreparation](#audiopreparation), [PcmAudioInfo](#pcmaudioinfo), [StreamBufferSpec](#streambufferspec), [SourceBufferStatus](#sourcebufferstatus), [SeekProgress](#seekprogress), [HrtfEarOrder](#hrtfearorder), [HrtfOptions](#hrtfoptions), [HrirAsset](#hrirasset), [HrirMeasurement](#hrirmeasurement), [AcousticBackend](#acousticbackend), [AcousticMeshUpdate](#acousticmeshupdate), [AcousticGeometryStats](#acousticgeometrystats), [AcousticMeshBindingSpec](#acousticmeshbindingspec), [AcousticSceneSpec](#acousticscenespec), [AcousticMesh](#acousticmesh), [AcousticMaterial](#acousticmaterial), [AcousticSource](#acousticsource), [AcousticQuery](#acousticquery), [DirectPath](#directpath), [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand), [MenuSpec](#menuspec), [MenuItemSpec](#menuitemspec), [OperationStatus](#operationstatus), [OperationState](#operationstate), [UiEvent](#uievent), [WidgetId](#widgetid)
+- Data: [DopplerSettings](#dopplersettings), [DopplerCalculation](#dopplercalculation), [DopplerInfo](#dopplerinfo), [MotionSettings](#motionsettings), [MotionEstimate](#motionestimate), [MotionStatus](#motionstatus), [Spatial](#spatial), [VoiceSpec](#voicespec), [AudioResourceHandle](#audioresourcehandle), [AudioSourcePrepareSpec](#audiosourcepreparespec), [AudioTransformSpec](#audiotransformspec), [AudioResourceTransform](#audioresourcetransform), [AudioResourceInfo](#audioresourceinfo), [AudioResourcePreparation](#audioresourcepreparation), [AudioMixGroupSettings](#audiomixgroupsettings), [AudioMixGroupInfo](#audiomixgroupinfo), [AudioParameters](#audioparameters), [PcmBus](#pcmbus), [AudioResumeSettings](#audioresumesettings), [AudioResumePolicy](#audioresumepolicy), [AudioPlaybackInfo](#audioplaybackinfo), [ReflectionTrackingSpec](#reflectiontrackingspec), [ReflectionOptions](#reflectionoptions), [ReflectionQuery](#reflectionquery), [ReflectionPath](#reflectionpath), [ReflectionPaths](#reflectionpaths), [ReverbSpec](#reverbspec), [ReverbSettings](#reverbsettings), [ReverbSend](#reverbsend), [SceneVoicePhase](#scenevoicephase), [SceneVoiceStatus](#scenevoicestatus), [AudioAsset](#audioasset), [AudioPreparePhase](#audiopreparephase), [AudioPreparation](#audiopreparation), [PcmAudioInfo](#pcmaudioinfo), [StreamBufferSpec](#streambufferspec), [SourceBufferStatus](#sourcebufferstatus), [SeekProgress](#seekprogress), [HrtfEarOrder](#hrtfearorder), [HrtfOptions](#hrtfoptions), [HrirAsset](#hrirasset), [HrirMeasurement](#hrirmeasurement), [AcousticBackend](#acousticbackend), [AcousticMeshUpdate](#acousticmeshupdate), [AcousticGeometryStats](#acousticgeometrystats), [AcousticMeshBindingSpec](#acousticmeshbindingspec), [AcousticSceneSpec](#acousticscenespec), [AcousticMesh](#acousticmesh), [AcousticMaterial](#acousticmaterial), [AcousticSource](#acousticsource), [AcousticQuery](#acousticquery), [DirectPath](#directpath), [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand), [MenuSpec](#menuspec), [MenuItemSpec](#menuitemspec), [OperationStatus](#operationstatus), [OperationState](#operationstate), [UiEvent](#uievent), [WidgetId](#widgetid)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -70,6 +70,10 @@ Script global: `audio`.
 
 | Method | Returns | Description |
 |---|---|---|
+| `dopplerVoice(handle: Record<string, any>)` | `Record<string, any>` | Scoped desired Doppler target, last installed interpolation ratio/frames, effective user pitch/rate and captured world source/listener velocities with motion reset reasons. Frozen during final worker DSP. Spatial.doppler opts in; coordinates metres and velocities m/s. Direct radial model; no propagation delay or per-reflection Doppler. |
+| `motionSettings(—)` | `Record<string, any>` | Client automatic world-velocity inference settings: max_interval_ms=250,teleport_distance=50 metres. Explicit velocities bypass inference. Retained host policy, not a VM save. |
+| `setMotionSettings(settings: Record<string, any>)` | `void` | Set strict MotionSettings and reset this client's automatic source/listener histories. Pose capture happens once per App frame; DSP interpolation belongs to workers. |
+| `resetMotion(—)` | `void` | Reset this client's automatic source/listener pose histories for the next frame, such as a teleport. Explicit velocities are retained. Does not reset source position, user pitch/rate or DSP history. |
 | `nativeChannelInfo(channel: number)` | `any` | Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails. |
 | `playbackInfo(handle: Record<string, any>)` | `Record<string, any>` | Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters. |
 | `scheduleVoiceResume(handle: Record<string, any>, delay_ms: number, fade_ms: number)` | `void` | Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness. |
@@ -139,7 +143,7 @@ Script global: `audio`.
 | `setDucking(config: Record<string, any>)` | `void` | Dialogue-driven music ducking {gain,attack_ms,release_ms}. |
 | `setVoiceLimit(limit: number)` | `void` | Set this client's pool limit within the host's global budget; stop voices before lowering below the active count. |
 | `setSeed(seed: number)` | `void` | Reset this client's deterministic variant generator and repeat history. |
-| `setListener(listener: any)` | `void` | {position,forward,up}; null restores automatic camera listener. |
+| `setListener(listener: any)` | `void` | {position,forward,up,velocity?}; explicit velocity is world m/s, otherwise App infers from pose. null restores the camera and resets listener history. |
 | `stats(—)` | `Record<string, any>` | Mixer active/stolen/rejected voices, rendered frames, per-voice underrun frames and unclipped peak. |
 
 Commands issued: `play` → `service.play_audio`, `stop` → `service.stop_audio`.
@@ -730,6 +734,124 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 ## Data
 
 Field defaults are the serde defaults (`—`: required, or absent when unset).
+
+### DopplerSettings
+
+Used by: Spatial.doppler.
+
+Direct radial Doppler controls; opt in through Spatial.doppler.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `factor` | `f32` | `1.0` | Velocity exaggeration, 0 disables shifting; default 1, range 0..16. |
+| `speed_of_sound` | `f32` | `343.3` | Propagation speed in metres/second; default 343.3, range 1..10000. |
+| `max_ratio` | `f32` | `4.0` | Symmetric target pitch multiplier bound [1/max_ratio,max_ratio], default 4. |
+| `smoothing_ms` | `f32` | `20.0` | Output-clock linear transition in ms, default 20, range 0..1000. |
+
+### DopplerCalculation
+
+Used by: DopplerInfo.target / Rust doppler::calculate.
+
+Bounded radial calculation with separate velocity and ratio diagnostics.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `ratio` | `f32` | — | Bounded target multiplier, before interpolation and user pitch/rate. |
+| `source_radial` | `f32` | — | Source velocity projected onto source-to-listener direction, m/s. |
+| `listener_radial` | `f32` | — | Listener velocity on that same direction, m/s (opposite toward source). |
+| `velocity_clamped` | `bool` | — | Scaled radial velocity exceeded +/-99% of sound speed. |
+| `ratio_clamped` | `bool` | — | The physical radial ratio exceeded the configured symmetric pitch bound. |
+
+### DopplerInfo
+
+Used by: Audio.dopplerVoice / Rust Mixer::doppler_info.
+
+Frozen with the mixer frame while DSP runs on a worker.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `enabled` | `bool` | — | Opt-in settings exist on this spatial voice. |
+| `ratio` | `f32` | — | Current interpolated multiplier at the next output frame. |
+| `target` | `DopplerCalculation` | — | Current pose/velocity target; does not imply audible transition completion. |
+| `target_pending` | `bool` | — | Target awaits the next render block setup (counters still describe prior setup). |
+| `effective_rate` | `f32` | — | User rate times semitone pitch times interpolated Doppler multiplier. |
+| `source_velocity` | `[f32; 3]` | — | Captured world source velocity; zero when absent in standalone Mixer. |
+| `listener_velocity` | `[f32; 3]` | — | Captured world listener velocity; zero when absent in standalone Mixer. |
+| `smoothing_frames` | `u64` | — | Remaining interpolation output frames (including paused/starved time). |
+
+### MotionSettings
+
+Used by: Audio.setMotionSettings / motionSettings.
+
+Automatic pose-inference limits in the engine world metre convention.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `max_interval_ms` | `u64` | `250` | Longer frame gaps reset inference, default 250 ms, allowed 1..60000. |
+| `teleport_distance` | `f32` | `50.0` | Larger world displacement resets inference, default 50 m, range 0.001..1000. |
+
+### MotionEstimate
+
+Used by: Audio.dopplerVoice motion source/listener.
+
+Last owner capture result; independent of source/decoder playback clocks.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `velocity` | `[f32; 3]` | — | Derived or explicit world velocity in metres/second. |
+| `status` | `MotionStatus` | — | Why velocity was inferred, retained or reset at this capture. |
+
+### MotionStatus
+
+Used by: MotionEstimate.status.
+
+Observable reason for a motion capture velocity or reset.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `initial` | — | No previous pose is available. |
+| `inferred` | — | Finite difference over a positive bounded frame interval. |
+| `stationary` | — | No displacement over a positive frame interval. |
+| `zero_interval` | — | Unchanged zero-duration pose retains the previous velocity. |
+| `discontinuity` | — | Teleport threshold or changed zero-duration pose reset velocity. |
+| `gap` | — | The frame interval exceeded the configured inference limit. |
+| `explicit` | — | Caller-provided velocity bypassed inference. |
+
+### Spatial
+
+Used by: VoiceSpec.spatial / Audio.playSfx.spatial.
+
+Mono point-source position, distance gain and opt-in direct Doppler. App can infer missing velocities from world poses; standalone Mixer cannot.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `velocity` | `Option<[f32; 3]>` | `null` | Optional explicit world m/s. App infers absent velocities from poses; standalone Mixer uses zero. |
+| `doppler` | `Option<DopplerSettings>` | `null` | Opt-in direct-path Doppler; None retains existing source speed. |
+| `position` | `[f32; 3]` | `[0.0,0.0,0.0]` | World position in metres; an attachment uses this as a world-axis offset. |
+| `min_distance` | `f32` | `1.0` | Distance below which gain is one, default 1 metre. |
+| `max_distance` | `f32` | `20.0` | Zero-gain distance, greater than min_distance, default 20 metres. |
+| `attenuation` | `Attenuation` | `{"kind":"inverse_square"}` | Normalized distance-to-gain curve. |
+| `occlusion` | `f32` | `0.0` | Manual obstruction amount 0..1, independent of geometric acoustics. |
+
+### VoiceSpec
+
+Used by: Audio.playSfx / Rust Mixer::play.
+
+Shared mixer playback parameters. Public Audio calls additionally accept an asset/resource and optional entity/effect declarations outside this record.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `mix_group` | `Option<String>` | `null` | An existing client-scoped logical gain group; None bypasses groups. |
+| `bus` | `Bus` | `"sfx"` | Source bus; Master is a control bus and is rejected. |
+| `gain` | `f32` | `1.0` | Per-voice gain 0..4, default 1. |
+| `rate` | `f32` | `1.0` | Authored playback speed 0.125..4, default 1; separate from Doppler. |
+| `pitch_semitones` | `f32` | `0.0` | Authored semitone shift -24..24, default 0. |
+| `priority` | `i32` | `0` | Pool admission/stealing priority; default 0. |
+| `looping` | `bool` | `false` | Repeat source input; default false. |
+| `loop_points` | `Option<LoopPoints>` | `null` | Optional decoded-source frame range for looping. |
+| `spatial` | `Option<Spatial>` | `null` | Optional point-source spatial parameters; absent retains stereo input. |
+| `fade_in_ms` | `f32` | `0.0` | Initial transport fade in output milliseconds; default 0. |
+| `paused` | `bool` | `false` | Publish with frozen source input; default false. |
 
 ### AudioResourceHandle
 

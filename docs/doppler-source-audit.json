@@ -1,0 +1,55 @@
+{
+  "references": [
+    {
+      "repository": "https://github.com/Ralith/oddio",
+      "version": "0.7.4",
+      "crate_checksum": "c287b2b60511f53bd87e59adca987a46d4bdde6f16ad5cfa89531bffca344cf2",
+      "vcs": {
+        "git": {
+          "sha1": "85ad0723b460bc8c641198ef02bf114ef04f04f9"
+        },
+        "path_in_vcs": ""
+      },
+      "license": "MIT OR Apache-2.0",
+      "files": [
+        {
+          "path": "src/spatial.rs",
+          "sha256": "5eed603ca6f183ca03f8235703570ebc4f499b8e286d94a5d9dd0e0ea5ce3bea",
+          "bytes": 20515,
+          "scope": "complete file",
+          "copied_into_engine": false
+        },
+        {
+          "path": "src/speed.rs",
+          "sha256": "15b3c9aa304d67b6c55c71cca8f639aaa16cb5ac648e58da824f770a11764e0e",
+          "bytes": 1400,
+          "scope": "complete file",
+          "copied_into_engine": false
+        },
+        {
+          "path": "src/lib.rs",
+          "sha256": "76de34dcc0ff265b0a6014f1c1d6c7b2f09a37c75ca45a4dd14383dbbb2a60b7",
+          "bytes": 2965,
+          "scope": "complete file",
+          "copied_into_engine": false
+        }
+      ],
+      "decision": "Reviewed its complete spatial and speed modules. Its Doppler implementation uses owned scene signals, propagation-delay buffers/seek and per-ear output. This phase uses CrySirror transport/resampling and does not import/copy that scene implementation.",
+      "registry_latest_stable_at_review": "0.7.4",
+      "registry_updated_at": "2023-10-15T23:54:03.328497Z"
+    },
+    {
+      "url": "https://www.openal.org/documentation/openal-1.1-specification.pdf",
+      "version": "1.1",
+      "section": "3.5.2 Velocity Dependent Doppler Effect (PDF pages 28-30)",
+      "sha256": "b9d493c5d3165e23cdca070b7d763ae811b7f682f1a6b718f2ddce0904a28e6a",
+      "bytes": 461111,
+      "scope": "radial velocity projections, factor and speed-of-sound formula; CrySirror adds bilateral 99%-of-c and target-ratio safety bounds"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/windows/win32/api/x3daudio/ns-x3daudio-x3daudio_dsp_settings",
+      "scope": "DopplerFactor is separate from user frequency and is applied to resampling; listener/emitter radial velocity observations"
+    }
+  ],
+  "implementation": "New bounded engine-owned direct radial model, output-clock interpolation and scoped pose inference. Existing mixer/stream/DSP workers own PCM. No new dependency, SDK, native VM opcode or legacy audio host."
+}

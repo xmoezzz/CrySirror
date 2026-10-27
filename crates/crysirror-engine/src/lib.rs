@@ -18,6 +18,7 @@ pub mod assets_api;
 pub mod async_api;
 pub mod audio_api;
 mod audio_async;
+mod audio_motion;
 mod audio_groups_api;
 mod audio_resources_api;
 pub use audio_resources_api::{AudioSourcePrepareSpec, AudioTransformSpec};

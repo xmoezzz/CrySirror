@@ -4,6 +4,24 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `768ebdf0e5892411` (2026-10-27): direct Doppler and world motion capture
+
+- Spatial accepts optional velocity (m/s) and DopplerSettings; the default remains
+  disabled. An independent shared multiplier composes with user speed/semitone
+  pitch; its interpolation progresses on output time without consuming paused
+  input or restarting source/effect history. Radial and ratio clamps are visible.
+- Audio.dopplerVoice exposes desired/installed target, current ratio, effective
+  user rate and source/listener capture/reset reasons. motionSettings,
+  setMotionSettings and resetMotion control scoped automatic frame inference.
+  Entity global motion and camera/manual listener motion use teleport/gap bounds;
+  explicit velocities override inference. Restore clears history while keeping
+  host capture settings. Controls fence pending final DSP frames.
+- Audio.setListener accepts optional velocity. **Rust source compatibility:**
+  fully specified Listener/Spatial literals need the new fields or defaults.
+  JSON defaults preserve existing records with Doppler absent. No native opcode,
+  project or original/runtime save schema changes are made. The linear resampler,
+  direct radial approximation and remaining propagation limits are in ADR 0084.
+
 ## `0d9cec36638123d1` (2026-10-27): running audio transport and original PCMCH
 
 - Add Audio.scheduleVoiceResumeWithOptions with a fourth options map.

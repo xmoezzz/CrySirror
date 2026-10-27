@@ -205,6 +205,8 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-audio/src/buffered.rs",
         "crates/crysirror-audio/src/decoder.rs",
         "crates/crysirror-audio/src/mixer.rs",
+        "crates/crysirror-audio/src/doppler.rs",
+        "crates/crysirror-audio/src/motion.rs",
         "crates/crysirror-audio/src/reverb.rs",
         "crates/crysirror-acoustics/src/reverb.rs",
         "crates/crysirror-acoustics/src/reflections.rs",
@@ -239,6 +241,14 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("DopplerSettings","Spatial.doppler",sample::<crysirror_audio::doppler::DopplerSettings>(e.clone())),
+        d("DopplerCalculation","DopplerInfo.target / Rust doppler::calculate",None),
+        d("DopplerInfo","Audio.dopplerVoice / Rust Mixer::doppler_info",None),
+        d("MotionSettings","Audio.setMotionSettings / motionSettings",sample::<crysirror_audio::motion::MotionSettings>(e.clone())),
+        d("MotionEstimate","Audio.dopplerVoice motion source/listener",None),
+        d("MotionStatus","MotionEstimate.status",None),
+        d("Spatial","VoiceSpec.spatial / Audio.playSfx.spatial",sample::<crysirror_audio::mixer::Spatial>(e.clone())),
+        d("VoiceSpec","Audio.playSfx / Rust Mixer::play",sample::<crysirror_audio::mixer::VoiceSpec>(e.clone())),
         d("AudioResourceHandle","Audio.prepareSourceAsync / beginPlaySource / HostServices",None),
         d("AudioSourcePrepareSpec","Audio.beginPrepareSource / prepareSourceAsync options",sample::<crysirror_engine::AudioSourcePrepareSpec>(e.clone())),
         d("AudioTransformSpec","AudioSourcePrepareSpec.transform",sample::<crysirror_engine::AudioTransformSpec>(json!({"kind":"siglus_jitan","percent":200}))),

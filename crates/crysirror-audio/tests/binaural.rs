@@ -131,3 +131,27 @@ fn input_eof_cancels_scheduled_resume_without_fading_or_freezing_retained_hrtf_t
     near(out[65][1], 0.25);
     assert!(!mixer.is_playing(1, h));
 }
+
+#[test]
+fn doppler_resamples_input_before_hrtf_while_ear_delay_and_tail_remain_output_clocked() {
+    let (mut m, h) = setup(&[1., -0.5]);
+    let mut spatial = m.spec(1, h).unwrap().spatial.unwrap();
+    spatial.velocity = Some([-50., 0., 0.]);
+    spatial.doppler = Some(crysirror_audio::doppler::DopplerSettings {
+        speed_of_sound: 100.,
+        smoothing_ms: 0.,
+        ..Default::default()
+    });
+    m.set_spatial(1, h, Some(spatial)).unwrap();
+    let (_publisher, voice) = stream();
+    m.set_binaural(1, h, Some(voice)).unwrap();
+    let mut out = render(&mut m, 1);
+    assert!(!m.source_is_playing(1, h));
+    assert!(m.is_playing(1, h));
+    out.extend(render(&mut m, 255));
+    near(out[64][0], 1.);
+    near(out[65][0], 0.5);
+    near(out[67][1], 0.25);
+    near(out[68][1], 0.125);
+    assert!(!m.is_playing(1, h));
+}
