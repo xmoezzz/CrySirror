@@ -381,6 +381,7 @@ impl SiglusVm {
             };
             let retain = matches!(&operation, Operation::Retain(_));
             match operation {
+                Operation::EventInvalidate {form,index} => self.release_event(host,(form,index))?,
                 Operation::Speech { number, percent } => {
                     if let Some(&resource) = pending.after.ctx.koe.bindings.get(&(number, percent))
                     {

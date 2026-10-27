@@ -348,8 +348,23 @@ The complete pinned PCMEVENT scheduler and selected native state/wait/save/sourc
 functions have been reviewed. CrySirror now provides a shared owner-clock cue bank
 through Audio/HostServices: ordered/weighted emission, interval/duration policy,
 original modulo RNG option and async dependency receipts. No scheduler algorithm
-is added privately to the VM. This is a reusable prerequisite, **not completed
-PCMEVENT integration**: native opcode dispatch, RNG reconciliation, source/channel
-policy, waits and original/runtime save reconstruction remain unmapped. The
-original Siglus adapter still rejects that unsupported form. See
+is added privately to the VM. At ADR 0085 this was a reusable prerequisite, with native dispatch, RNG/source,
+wait and save mapping still open. The following ADR 0086 section supersedes that
+historical boundary for the stated mapped profile. See
 [siglus-pcmevent-source-audit.json](siglus-pcmevent-source-audit.json).
+
+## Original PCMEVENT mapped profile (ADR 0086)
+
+The ADR 0085 prerequisite is now used by the original Siglus adapter. Native event
+START/STOP/CHECK/WAIT/WAIT_KEY translate through shared HostServices cue handles
+and prepared global PCM/PCMCH resources. The VM retains native values, save/wait
+policy and portable frame continuation data. Scheduling/RNG/interval algorithms
+remain in CrySirror and public Rust/JS/TS clients can capture/restore the same data.
+
+Runtime payload schema is 6: pending preparation rewinds to a pre-selection cursor
+and restores the already-advanced native frame once. Original files still restart
+LOOP/RANDOM declarations and discard ONESHOT. No source/decoder/DSP history or
+engine handle enters the original file. Explicit aliases/default PCMCH routing,
+current unscaled native game-clock behavior and broader adapter limits remain;
+this does not establish a whole-game result. See ADR 0086 and the updated source
+scope/hash audit for exact acceptance.

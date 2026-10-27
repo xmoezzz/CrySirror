@@ -222,3 +222,66 @@ fn zero_weight_fallback_exact_intervals_and_pending_release_do_not_draw_rng() {
     bank.release(1, h).unwrap();
     assert!(bank.complete(1, h, e.serial, 0).is_err());
 }
+
+#[test]
+fn portable_cursor_resumes_rng_order_clocks_and_identity_without_a_pending_dependency() {
+    let mut bank = Sequences::default();
+    let spec = Spec {
+        mode: Mode::Weighted,
+        random: Random::Modulo32,
+        lines: vec![line("a", 10), line("b", 10)],
+        ..Default::default()
+    };
+    let h = bank.create(1, spec.clone(), 1).unwrap();
+    let e = bank.poll(1, h, None).unwrap().unwrap();
+    assert!(bank.capture(1, h).is_err());
+    bank.complete(1, h, e.serial, 0).unwrap();
+    bank.advance(1, h, 7, 7).unwrap();
+    let cursor = bank.capture(1, h).unwrap();
+    for change in 0..4 {
+        let mut c = cursor.clone();
+        match change {
+            0 => c.elapsed_ms = u64::MAX,
+            1 => c.last_index = Some(999),
+            2 => c.frame_emissions = 1025,
+            _ => c.next_ms = i64::MIN,
+        };
+        assert!(bank.restore(2, spec.clone(), c).is_err());
+    }
+    let restored = bank.restore(2, spec, cursor).unwrap();
+    assert_eq!(restored.generation, h.generation + 1);
+    for _ in 0..20 {
+        bank.advance(1, h, 10, 10).unwrap();
+        bank.advance(2, restored, 10, 10).unwrap();
+        let a = bank.poll(1, h, None).unwrap().unwrap();
+        let b = bank.poll(2, restored, None).unwrap().unwrap();
+        assert_eq!(a, b);
+        bank.complete(1, h, a.serial, 0).unwrap();
+        bank.complete(2, restored, b.serial, 0).unwrap();
+        assert_eq!(
+            bank.capture(1, h).unwrap(),
+            bank.capture(2, restored).unwrap()
+        );
+    }
+}
+#[test]
+fn portable_cursor_preserves_a_spent_frame_budget_and_invalid_snapshot_staging_is_pure() {
+    let mut bank = Sequences::default();
+    let spec = Spec {
+        mode: Mode::Loop,
+        lines: vec![line("a", 0)],
+        ..Default::default()
+    };
+    let h = bank.create(1, spec.clone(), 1).unwrap();
+    for _ in 0..1024 {
+        let e = bank.poll(1, h, None).unwrap().unwrap();
+        bank.complete(1, h, e.serial, 0).unwrap();
+    }
+    assert!(bank.poll(1, h, None).unwrap().is_none());
+    let cursor = bank.capture(1, h).unwrap();
+    cursor.validate_against(&spec).unwrap();
+    let restored = bank.restore(1, spec, cursor).unwrap();
+    assert!(bank.poll(1, restored, None).unwrap().is_none());
+    bank.advance(1, restored, 0, 0).unwrap();
+    assert_eq!(bank.poll(1, restored, None).unwrap().unwrap().serial, 1025);
+}

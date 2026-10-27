@@ -1,7 +1,7 @@
 # ADR 0085: Owner-clock cue programs and dependency receipts
 
 Date: 2026-10-27
-Status: Accepted for shared scheduling; original PCMEVENT mapping remains open
+Status: Accepted for shared scheduling; native mapping follows in ADR 0086
 
 ## Problem and source evidence
 
@@ -110,3 +110,6 @@ Native integration must translate those semantic declarations onto this bank and
 acknowledge actual shared resource durations, with proper async command commit
 and save boundaries. Existing unsupported native forms continue to fail visibly.
 No whole-game, hardware, performance ranking or complete-engine claim follows.
+
+Follow-up: ADR 0086 maps the stated original PCMEVENT profile and adds explicit
+portable cursor capture/restore. The scope above describes this earlier phase.

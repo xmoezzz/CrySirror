@@ -1395,6 +1395,32 @@
           "returns": "Record<string, any>"
         },
         {
+          "doc": "Capture a portable CueSequenceCursor after its pending dependency is acknowledged. Preserves RNG, clock, ordering and frame budget; no resource/device handles. Read-only under final DSP fencing.",
+          "name": "captureCueSequence",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Validate a portable cursor against its CueSequenceSpec and create a fresh scoped generation. Does not recreate voices or advance a clock. Old completion receipts cannot target the restored program.",
+          "name": "restoreCueSequence",
+          "params": [
+            {
+              "name": "spec",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "cursor",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
           "doc": "One owner-frame clock update, each delta 0..60000. Pending cue dependencies freeze time. Resets the 1024-emission frame budget. App does not advance these caller-owned clocks automatically.",
           "name": "advanceCueSequence",
           "params": [
@@ -5317,6 +5343,116 @@
     }
   ],
   "data": [
+    {
+      "doc": "Portable cursor returned by captureCueSequence. Contains no handle or worker dependency; restoreCueSequence validates it and creates a fresh identity.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "active",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "elapsed_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "next_ms",
+          "rust_type": "i64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "last_index",
+          "rust_type": "Option<usize>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "rng_state",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "emissions",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "frame_emissions",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "budget_exhausted",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "CueSequenceCursor",
+      "used_by": "Audio.captureCueSequence / restoreCueSequence"
+    },
+    {
+      "doc": "Portable scheduling state only; a dependency must be acknowledged first. Restoring creates a fresh identity, never revives worker/device handles.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "active",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "elapsed_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "next_ms",
+          "rust_type": "i64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "last_index",
+          "rust_type": "Option<usize>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "rng_state",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "emissions",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "frame_emissions",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "budget_exhausted",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "AudioSequenceCursor",
+      "used_by": "HostServices::capture_audio_sequence / restore_audio_sequence"
+    },
     {
       "doc": "Owner-clock cue program; it does not open or play resources by itself.",
       "fields": [
@@ -13798,7 +13934,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "2077f8fd45fb4b36",
+  "fingerprint": "1c682b7ad1fb38cd",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

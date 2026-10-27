@@ -451,6 +451,8 @@ fn info() -> &'static ClassInfo {
         method("playSfx",vec![("voice",T::Map)],T::Map,"{asset,bus?,mix_group?,gain?,rate?,pitch_semitones?,priority?,looping?,loop_points?:{start,end},fade_in_ms?,paused?,spatial?,follow?:Entity,raycast_occlusion?,acoustics?:AcousticSource,binaural?:boolean,reflections?:ReflectionTrackingSpec}; acoustics requires a ready scene; binaural requires a ready HRTF profile. These use background preparation; reflections automatically follow source/listener poses. Realtime hosts require a preloaded clip or playSfxAsync. Returns scoped generation handle."),
         method("playRandom",vec![("name",T::String),("container",T::Map),("voice",T::Map)],T::Map,"Seeded weighted variants [{asset,weight?}], gain:[min,max], pitch_semitones:[min,max], avoid_repeat; optional VoiceSpec. Realtime hosts require preloaded variants."),
         method("createCueSequence",vec![("spec",T::Map),("seed",T::Int)],T::Map,"Create a client-owned CueSequenceSpec. Returns {client,generation}. Emits symbolic cues; opens no files or voices. Explicit owner clocks and completion tokens allow async resource/voice dependencies."),
+        method("captureCueSequence",vec![("handle",T::Map)],T::Map,"Capture a portable CueSequenceCursor after its pending dependency is acknowledged. Preserves RNG, clock, ordering and frame budget; no resource/device handles. Read-only under final DSP fencing."),
+        method("restoreCueSequence",vec![("spec",T::Map),("cursor",T::Map)],T::Map,"Validate a portable cursor against its CueSequenceSpec and create a fresh scoped generation. Does not recreate voices or advance a clock. Old completion receipts cannot target the restored program."),
         method("advanceCueSequence",vec![("handle",T::Map),("game_ms",T::Int),("real_ms",T::Int)],T::Void,"One owner-frame clock update, each delta 0..60000. Pending cue dependencies freeze time. Resets the 1024-emission frame budget. App does not advance these caller-owned clocks automatically."),
         method("pollCueSequence",vec![("handle",T::Map),("options",T::Map)],T::Any,"Return pending {serial,index,key}, or null. Repeated polling is idempotent and consumes no extra RNG/time. Options seed?:u32 overrides RNG only on a new due selection, for native shared-RNG semantics. Uniform total weights (including repeat bias) <= u32::MAX."),
         method("completeCueSequence",vec![("handle",T::Map),("serial",T::Int),("duration_ms",T::Int)],T::Void,"Acknowledge a successfully published cue or explicit failed-cue policy. Reject stale receipts. Select signed interval [min,max), then optionally add known decoded duration (0..7 days). Does not start/stop audio itself."),
@@ -669,6 +671,7 @@ impl Class for AudioClass {
                     name,
                     "playbackInfo"
                         | "cueSequence"
+                        | "captureCueSequence"
                         | "dopplerVoice"
                         | "motionSettings"
                         | "nativeChannelInfo"

@@ -395,6 +395,34 @@ fn start(ctx: &mut CommandContext, ch: usize, s: &PcmChPersistentState) -> Resul
         .slot(ch)?
         .start(ch, &key, looping, fade, s.ready_flag)
 }
+pub(crate) fn check_event_channel(ctx: &CommandContext, ch: usize) -> Result<()> {
+    check_channel(ctx, ch)
+}
+pub(crate) fn stop_event_channel(ctx: &mut CommandContext, ch: usize) -> Result<()> {
+    check_channel(ctx, ch)?;
+    ctx.pcm.channels.slot(ch)?.stop(ch, 0)
+}
+pub(crate) fn play_event(
+    ctx: &mut CommandContext,
+    ch: usize,
+    key: &str,
+    event: &crate::runtime::globals::PcmEventState,
+) -> Result<()> {
+    check_channel(ctx, ch)?;
+    let state = PcmChPersistentState {
+        pcm_name: key.into(),
+        volume_type: i64::from(event.volume_type),
+        chara_no: i64::from(event.chara_no),
+        bgm_fade_target_flag: event.bgm_fade_target_flag,
+        bgm_fade2_target_flag: event.bgm_fade2_target_flag,
+        bgm_fade_source_flag: event.bgm_fade_source_flag,
+        volume: i64::from(ctx.pcm.slot_volume_raw(ch)),
+        ..Default::default()
+    };
+    start(ctx, ch, &state)?;
+    *stored(ctx, ch) = state;
+    Ok(())
+}
 pub(crate) fn restore(
     ctx: &mut CommandContext,
     ch: usize,

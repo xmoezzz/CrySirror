@@ -462,4 +462,15 @@ an idempotent serial that waits for resource/voice publication before interval
 acknowledgement. Pending dependencies freeze time. Once/loop/weighted programs,
 reset/carry timing and bounded immediate-cue draining are usable without any VM.
 Final DSP gates controls; info stays frozen. Clear/restore invalidates identities.
-See ADR 0085 for limits and the still-open original PCMEVENT semantic mapping.
+See ADR 0085 for shared limits; ADR 0086 adds the native PCMEVENT mapping below.
+
+## Portable scheduling and native PCMEVENT (ADR 0086)
+
+Core validates shared cue declarations/cursors for snapshot staging without a VM
+importing audio code. SharedHost and Audio capture/restore scheduling state into a
+fresh identity; no outstanding dependency or voice/device handle is serialized.
+Siglus now maps PCMEVENT declarations/waits/sources onto that same bank and the
+existing resource/channel pipeline. Runtime payload 6 preserves portable pre-cue
+cursors and native frame continuation intent, so async source restoration does not
+repeat the frame or random draw. Original files retain their distinct restart
+policy. See ADR 0086 for timing, routing, discovery and save boundaries.

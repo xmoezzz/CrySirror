@@ -48,3 +48,5 @@ mod audio_queue;
 mod koe_bridge;
 mod pcmch_bridge;
 mod sfx_bridge;
+
+mod pcmevent_bridge;

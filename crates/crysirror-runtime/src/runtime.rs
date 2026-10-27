@@ -148,6 +148,33 @@ impl FileSystem for SharedHost {
     }
 }
 impl HostServices for SharedHost {
+    fn capture_audio_sequence(
+        &self,
+        client: ClientId,
+        handle: crysirror_core::service::AudioSequenceHandle,
+    ) -> crysirror_core::Result<crysirror_core::service::AudioSequenceCursor> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .sequences
+            .capture(client.0, handle)
+            .map_err(|e| Error::Io(format!("audio cue cursor: {e:#}")))
+    }
+    fn restore_audio_sequence(
+        &mut self,
+        client: ClientId,
+        spec: crysirror_core::service::AudioSequenceSpec,
+        cursor: crysirror_core::service::AudioSequenceCursor,
+    ) -> crysirror_core::Result<crysirror_core::service::AudioSequenceHandle> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .sequences
+            .restore(client.0, spec, cursor)
+            .map_err(|e| Error::Io(format!("audio cue cursor: {e:#}")))
+    }
     fn create_audio_sequence(
         &mut self,
         client: ClientId,

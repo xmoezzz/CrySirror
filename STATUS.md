@@ -3465,3 +3465,86 @@ Remaining boundaries:
   timestamps. Scheduling is owner-frame granular; voice DSP remains sample-based.
   No hardware, cross-platform playback, performance ranking, propagation-delay or
   complete-engine claim is established. Broader 3D/VN/async work remains active.
+
+## 2026-10-27: Original PCMEVENT over shared cue services (ADR 0086)
+
+Implementation:
+- Original Siglus START_ONESHOT/START_LOOP/START_RANDOM, STOP, CHECK, WAIT and
+  WAIT_KEY now use engine-owned cue programs and existing global PCM/PCMCH
+  resource/voice APIs. Native code translates arguments, channel/wait/save policy,
+  derived observations and continuation intent; it has no new private scheduler,
+  weighted selection, interval RNG, decoder, mixer or renderer implementation.
+- Extended the pinned source audit with native clock feed and complete selected
+  MATH.RAND/xorshift branches at commit 5f358ef1360b0439e92aed2b749e8f25d8721954.
+  Six reference blobs match exactly; runtime/mod.rs has a pre-existing wipe_mask
+  visibility export patch. Its reviewed clock feed matches the actual pinned blob.
+  The final audit assertion caught this difference; the manifest records it, without
+  claiming whole-file equality. No original PCMEVENT/player module is copied/imported.
+  Shared Core admission validates event declarations and cursors.
+- Added public Audio.captureCueSequence/restoreCueSequence and typed HostServices
+  equivalents. Portable cursors preserve clock/line/RNG/emission/frame-budget data,
+  reject outstanding dependencies and invalid input, and restore to a fresh scoped
+  identity. These operations work independently of any VM and reconstruct no voice.
+- Native script-global RNG is injected before selection and published after exact
+  resource/voice acknowledgement, including an immediate final interval. Native
+  math and event choice share the same stream. START/STOP release the old engine
+  program in the command's commit batch, instead of leaving it alive another frame.
+- Runtime payload schema **6** stores pre-selection cursors and native frame pass
+  continuation, never worker/engine handles. Async resume does not tick input/VM
+  time or draw twice. A clock stamp avoids charging dependency time on the next
+  frame. Active events keep their owner service ticking after script EOF, without
+  replaying the script. Original file codecs remain unchanged: LOOP/RANDOM restart;
+  ONESHOT is discarded. Voices retain the existing reprepare/restart save policy.
+
+Compilation and reference validation:
+- Release workspace/all-targets check passed with desktop krkr, arc-formats,
+  acoustics-obvhs and audio rodio-output. Minimal no-default desktop reallive+avg32
+  check also passed. Existing image/RealLive/CLI warnings remain. No CI/workflow
+  or remote build automation was added or enabled.
+- Regenerated API reference/JSON/TypeScript and logged actual fingerprint
+  **2077f8fd45fb4b36 -> 1c682b7ad1fb38cd**. API/reference coverage passed.
+  Initial generation retained the expected drift/missing-fingerprint guard failures;
+  those attempts are not counted as passes.
+
+Behavior validation:
+- Shared audio scopes: **126 passed**; original VM unit/save scopes: **16 passed**;
+  native audio/PCMCH/PCMEVENT scopes: **55 passed** (including 11 PCMEVENT cases);
+  engine cursor/frame/reference scopes: **17 passed**; actual JS/TS Promise scopes:
+  **14 passed**. **228 distinct Rust tests passed**. Two ignored tests (owner NWA
+  data and an explicitly supplied system font) are excluded; earlier/focused
+  reruns are not counted again. Python 3.11 tooling: **189 passed**.
+- Shared cases test portable cursor roundtrips, fresh identity, malformed staging,
+  deterministic RNG continuation and preservation of a spent frame budget. Public
+  engine/JS cases use actual source/voice Promises and keep voice lifetime distinct
+  from scheduler restore/release. Read-only observations remain frozen under DSP
+  capacity backpressure.
+- Authored original Scene.pck cases inspect shared sequence identities, actual
+  decoded PCM, global/slot routing, interval-vs-source completion, weighted line
+  order, MATH.RAND interleaving, STOP with/without stopping PCM, and natural/key
+  waits. WAIT_KEY leaves the event running, including a later cue after script
+  EOF; loop events continue while the halted script's stack remains unchanged.
+- A real I/O-capacity gate lets host time advance while preparation is pending.
+  Snapshot/restore reproduces one selection/acknowledgement, the same RNG and
+  interval, without duplicate playback or retroactive dependency-time advancement.
+  Runtime cursor restoration and original file restart/discard policies are checked
+  separately. Unknown operations/parameters/layouts/routes and missing aliases fail.
+- The initial native run exposed a second cleanup from an original-load marker;
+  explicit import now consumes that marker once. Code review also corrected deferred
+  interval catch-up and immediate-final-interval RNG publication; stronger boundary
+  cases verify the resulting behavior. The failed initial run is not a pass.
+- Evidence: target/verification/pcmevent-{shared-regression,vm-published,
+  native-published,engine-final,js,workspace-published,minimal-published,
+  python-final}.log and pcmevent-summary.json. No game, font or proprietary data is
+  committed; no audio device or hardware result is claimed.
+
+Remaining boundaries:
+- This is the explicit resource/default PCMCH routing profile, bounded to 128
+  native event declarations and existing shared limits. Native START uses real
+  time; saved game-clock events use the current unscaled native game clock.
+  Skip acceleration, broader SCRIPT/SYSCOM routing and resource discovery remain.
+- New input edges while native audio admission is pending are not yet buffered.
+  Exact ordering of native frame-action callbacks versus this event pass also needs
+  further work; these straight-line fixtures do not establish callback compatibility.
+- Original MWND/layout/save coverage, sample-exact voice/DSP reconstruction,
+  whole-game execution, cross-platform/hardware playback and broader 3D/async
+  engine requirements remain open. The ongoing engine goal is not complete.

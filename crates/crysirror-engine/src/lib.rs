@@ -22,6 +22,7 @@ mod audio_motion;
 mod audio_groups_api;
 mod audio_resources_api;
 mod audio_sequences_api;
+pub use audio_sequences_api::CueSequenceCursor;
 pub use audio_sequences_api::{CueSequenceSpec, CueSequenceLine, CueSequenceMode, CueSequenceClock, CueSequenceTiming, CueSequenceRandom};
 pub use audio_resources_api::{AudioSourcePrepareSpec, AudioTransformSpec};
 pub mod binaural_api;

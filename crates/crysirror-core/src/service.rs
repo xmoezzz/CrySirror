@@ -548,6 +548,21 @@ pub trait TextMeasurement: Send + Sync {
 }
 
 pub trait HostServices: FileSystem {
+    fn capture_audio_sequence(
+        &self,
+        _client: ClientId,
+        _handle: AudioSequenceHandle,
+    ) -> Result<AudioSequenceCursor> {
+        Err(crate::Error::Unsupported("audio cue cursor capture"))
+    }
+    fn restore_audio_sequence(
+        &mut self,
+        _client: ClientId,
+        _spec: AudioSequenceSpec,
+        _cursor: AudioSequenceCursor,
+    ) -> Result<AudioSequenceHandle> {
+        Err(crate::Error::Unsupported("audio cue cursor restore"))
+    }
     /// Create an owner-scoped cue scheduler. It opens no assets or voices.
     fn create_audio_sequence(
         &mut self,

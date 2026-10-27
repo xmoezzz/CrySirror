@@ -35,6 +35,7 @@ pub(crate) struct Binding {
 }
 #[derive(Clone)]
 pub(crate) enum Operation {
+    EventInvalidate {form:u32,index:usize},
     Speech {
         number: i64,
         percent: u16,

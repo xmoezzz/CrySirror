@@ -507,3 +507,9 @@ handle/emission/info fields come from core/service/audio_sequence.rs. Audio's si
 cue-sequence operations share the native HostServices bank. Clocks are explicitly
 advanced by one caller; poll/ack model asynchronous resource dependencies and do
 not automatically start/stop voices. ADR 0085 documents limits and restore policy.
+
+captureCueSequence returns CueSequenceCursor only after dependency completion;
+restoreCueSequence validates it against the declaration and creates a new identity.
+Cursor fields come from the public engine wire declaration and Core DTO. Native
+snapshot staging uses the same pure validation without an audio implementation
+in the VM. Cursor restore does not implicitly recreate voices; see ADR 0086.

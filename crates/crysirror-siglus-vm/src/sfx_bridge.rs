@@ -169,6 +169,10 @@ pub struct SeEngine {
     state: State,
 }
 impl PcmEngine {
+    pub(crate) fn play_event(&mut self, key: &str) -> Result<()> {
+        self.state.play(PCM_CHANNEL, PCM_GROUP, key)
+    }
+
     pub fn volume_raw(&self) -> u8 {
         self.state.volume
     }

@@ -588,7 +588,8 @@ fn doppler_options_and_motion_inspection_cross_the_real_js_promise_boundary() {
 fn cue_sequence_dependency_receipt_crosses_actual_js_resource_and_voice_promises() {
     let (dir,mut app)=app(r#"
       async function onInit() {
-        const h=audio.createCueSequence({include_duration:true,clock:'real',lines:[{key:'cue.wav',min_ms:10,max_ms:10}]},1);
+        const spec={include_duration:true,clock:'real',lines:[{key:'cue.wav',min_ms:10,max_ms:10}]};
+        const h=audio.createCueSequence(spec,1);
         const e=audio.pollCueSequence(h,{});
         const resource=await audio.prepareSourceAsync(e.key);
         audio.advanceCueSequence(h,500,500);
@@ -599,6 +600,11 @@ fn cue_sequence_dependency_receipt_crosses_actual_js_resource_and_voice_promises
         audio.releaseSource(resource.resource);
         audio.advanceCueSequence(h,0,17);
         if(!audio.cueSequence(h).active)throw Error('last interval ended early');
+        const restored=audio.restoreCueSequence(spec,audio.captureCueSequence(h));
+        if(restored.generation===h.generation || audio.cueSequence(restored).elapsed_ms!==17)throw Error('cursor restore');
+        audio.advanceCueSequence(restored,0,1);
+        if(audio.cueSequence(restored).active)throw Error('restored interval not complete');
+        audio.releaseCueSequence(restored);
         audio.advanceCueSequence(h,0,1);
         if(audio.cueSequence(h).active)throw Error('last interval not complete');
         audio.releaseCueSequence(h);

@@ -2,9 +2,9 @@
   "repository": "https://github.com/xmoezzz/siglus_rs",
   "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
   "upstream_license": "MPL-2.0",
-  "scope": "PCMEVENT source review and shared cue-scheduler prerequisites; native opcode mapping remains open",
-  "implementation": "Engine-owned bounded cue program, explicit owner clocks and dependency receipts. No upstream PCMEVENT module/player/routing/decoder implementation imported.",
-  "limits": "Native dispatch, shared script RNG reconciliation, sound source declarations and original/runtime saves are not connected by this phase. Legacy modulo sampler is opt-in; uniform rejection sampling is the default.",
+  "scope": "Original PCMEVENT default native resource/routing profile; portable shared cursor, async frame intent, wait and save mapping",
+  "implementation": "Thin native semantic bridge calls CrySirror HostServices sequence cursor and existing resource/voice/channel APIs. All timer, weighted selection, RNG interval work, decoding, DSP and resource/transport ownership remain shared.",
+  "limits": "128 event declarations; shared sequence/source budgets and explicit canonical aliases; default PCMCH native routing. Runtime payload schema 6; original file codecs unchanged. Native skip acceleration, broader routing/discovery and whole-game acceptance remain open. Pending-admission input buffering and exact native frame-action/event ordering remain open.",
   "files": [
     {
       "path": "crates/siglus_scene_vm/src/runtime/forms/pcmevent.rs",
@@ -45,6 +45,25 @@
       "existing_reference_matches_pin": true,
       "review": "play_event_line and native channel source/routing policy reviewed for future mapping.",
       "copied_into_engine": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/math.rs",
+      "bytes": 15114,
+      "sha256": "b2c9b8eca1c911b43450e13d81b34ec89f644ae3675e473b01a2c5101a13ad20",
+      "existing_reference_matches_pin": true,
+      "review": "Complete selected xorshift32 and RAND function branches: shared script RNG and inclusive math bounds.",
+      "copied_into_engine": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/mod.rs",
+      "bytes": 657443,
+      "sha256": "6e2826deddcdc22d3cd146dc12e3ab2052b1c16fa417f380b517e689585d87e0",
+      "existing_reference_matches_pin": false,
+      "review": "Selected original tick_frame clock derivation and PCMEVENT call site; ordinary/skip game delta versus real delta.",
+      "copied_into_engine": false,
+      "reference_difference": "Pre-existing visibility-only patch: pub(crate) mod wipe_mask -> pub mod wipe_mask; clock feed and PCMEVENT call site are byte-identical to the actual pinned blob.",
+      "reference_sha256": "b9d8ec4d70df13d7855d6ff13c9384653873795c2755f128d45afd61b522121d",
+      "selected_clock_feed_matches_pin": true
     }
   ]
 }

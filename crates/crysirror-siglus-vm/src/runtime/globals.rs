@@ -1743,7 +1743,7 @@ impl Counter {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct PcmEventLine {
     pub file_name: String,
     pub probability: i32,
@@ -1756,7 +1756,7 @@ pub const PCM_EVENT_TYPE_ONESHOT: i32 = 0;
 pub const PCM_EVENT_TYPE_LOOP: i32 = 1;
 pub const PCM_EVENT_TYPE_RANDOM: i32 = 2;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct PcmEventState {
     pub event_type: i32,
     pub pcm_buf_no: i32,

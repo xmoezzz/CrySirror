@@ -135,6 +135,10 @@ declare class Audio {
   playRandom(name: string, container: Record<string, any>, voice: Record<string, any>): Record<string, any>;
   /** Create a client-owned CueSequenceSpec. Returns {client,generation}. Emits symbolic cues; opens no files or voices. Explicit owner clocks and completion tokens allow async resource/voice dependencies. */
   createCueSequence(spec: Record<string, any>, seed: number): Record<string, any>;
+  /** Capture a portable CueSequenceCursor after its pending dependency is acknowledged. Preserves RNG, clock, ordering and frame budget; no resource/device handles. Read-only under final DSP fencing. */
+  captureCueSequence(handle: Record<string, any>): Record<string, any>;
+  /** Validate a portable cursor against its CueSequenceSpec and create a fresh scoped generation. Does not recreate voices or advance a clock. Old completion receipts cannot target the restored program. */
+  restoreCueSequence(spec: Record<string, any>, cursor: Record<string, any>): Record<string, any>;
   /** One owner-frame clock update, each delta 0..60000. Pending cue dependencies freeze time. Resets the 1024-emission frame budget. App does not advance these caller-owned clocks automatically. */
   advanceCueSequence(handle: Record<string, any>, game_ms: number, real_ms: number): void;
   /** Return pending {serial,index,key}, or null. Repeated polling is idempotent and consumes no extra RNG/time. Options seed?:u32 overrides RNG only on a new due selection, for native shared-RNG semantics. Uniform total weights (including repeat bias) <= u32::MAX. */

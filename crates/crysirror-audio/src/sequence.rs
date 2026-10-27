@@ -5,9 +5,10 @@
 //! are independent of decoders, channel transport, VMs and output devices.
 use anyhow::{Context, Result, ensure};
 pub use crysirror_core::service::{
-    AudioSequenceClock as Clock, AudioSequenceEmission as Emission, AudioSequenceHandle as Handle,
-    AudioSequenceInfo as Info, AudioSequenceLine as Line, AudioSequenceMode as Mode,
-    AudioSequenceRandom as Random, AudioSequenceSpec as Spec, AudioSequenceTiming as Timing,
+    AudioSequenceClock as Clock, AudioSequenceCursor as Cursor, AudioSequenceEmission as Emission,
+    AudioSequenceHandle as Handle, AudioSequenceInfo as Info, AudioSequenceLine as Line,
+    AudioSequenceMode as Mode, AudioSequenceRandom as Random, AudioSequenceSpec as Spec,
+    AudioSequenceTiming as Timing,
 };
 use std::collections::BTreeMap;
 
@@ -115,6 +116,44 @@ pub struct Sequences {
     entries: BTreeMap<(u32, u64), Sequence>,
 }
 impl Sequences {
+    pub fn capture(&self, client: u32, h: Handle) -> Result<Cursor> {
+        let s = self.get(client, h)?;
+        ensure!(
+            s.info.pending.is_none(),
+            "cue dependency must complete before cursor capture"
+        );
+        let i = &s.info;
+        Ok(Cursor {
+            active: i.active,
+            elapsed_ms: i.elapsed_ms,
+            next_ms: i.next_ms,
+            last_index: i.last_index,
+            rng_state: i.rng_state,
+            emissions: i.emissions,
+            frame_emissions: s.frame_emissions,
+            budget_exhausted: i.budget_exhausted,
+        })
+    }
+    /// Validate portable data before admission. A new generation prevents old
+    /// completion receipts from targeting reconstructed scheduling state.
+    pub fn restore(&mut self, client: u32, spec: Spec, c: Cursor) -> Result<Handle> {
+        c.validate_against(&spec)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let h = self.create(client, spec, c.rng_state)?;
+        let s = self.get_mut(client, h)?;
+        s.frame_emissions = c.frame_emissions;
+        s.info = Info {
+            active: c.active,
+            elapsed_ms: c.elapsed_ms,
+            next_ms: c.next_ms,
+            last_index: c.last_index,
+            rng_state: c.rng_state,
+            emissions: c.emissions,
+            pending: None,
+            budget_exhausted: c.budget_exhausted,
+        };
+        Ok(h)
+    }
     pub fn clear(&mut self) {
         self.entries.clear();
     }
@@ -123,30 +162,7 @@ impl Sequences {
     }
     pub fn create(&mut self, client: u32, spec: Spec, seed: u32) -> Result<Handle> {
         ensure!(client != 0, "cue sequence requires a client");
-        ensure!(spec.lines.len() <= 1024, "cue sequence exceeds 1024 lines");
-        let mut bytes = 0;
-        for line in &spec.lines {
-            ensure!(
-                !line.key.is_empty()
-                    && line.key.len() <= 2048
-                    && !line.key.chars().any(char::is_control),
-                "invalid cue key"
-            );
-            bytes += line.key.len();
-            ensure!(
-                line.min_ms.abs_diff(0) <= INTERVAL_LIMIT as u64
-                    && line.max_ms.abs_diff(0) <= INTERVAL_LIMIT as u64,
-                "cue interval exceeds seven days"
-            );
-        }
-        ensure!(bytes <= 64 * 1024, "cue keys exceed 64 KiB");
-        if spec.random == Random::Uniform && spec.mode == Mode::Weighted {
-            let total: u64 = spec.lines.iter().map(|l| u64::from(l.weight)).sum();
-            ensure!(
-                total * if spec.soften_repeat { 2 } else { 1 } <= u64::from(u32::MAX),
-                "uniform cue weight total exceeds 32-bit period"
-            );
-        }
+        spec.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
         ensure!(
             self.entries.len() < MAX_SEQUENCES
                 && self.entries.keys().filter(|k| k.0 == client).count() < MAX_CLIENT_SEQUENCES,
@@ -232,15 +248,15 @@ impl Sequences {
             s.info.budget_exhausted = true;
             return Ok(None);
         }
-        if let Some(seed) = seed {
-            s.info.rng_state = seed;
-        }
-        let index = s.select();
         let serial = s
             .info
             .emissions
             .checked_add(1)
             .context("cue emission serial exhausted")?;
+        if let Some(seed) = seed {
+            s.info.rng_state = seed;
+        }
+        let index = s.select();
         let emission = Emission {
             serial,
             index,

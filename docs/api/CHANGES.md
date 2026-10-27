@@ -4,6 +4,20 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `1c682b7ad1fb38cd` (2026-10-27): portable cue cursors and native PCMEVENT
+
+- Audio.captureCueSequence returns a portable CueSequenceCursor only when no
+  emission awaits a dependency. restoreCueSequence validates against its spec
+  and creates a fresh scoped generation, preserving RNG/clock/order/frame budget.
+  No voices, worker receipts or resource/device handles are implicitly restored.
+- Core provides the same typed cursor and pure spec/cursor validation for staged
+  snapshots; HostServices capture/restore access the engine-owned bank.
+- Original Siglus PCMEVENT maps onto shared cue/resource/channel APIs, including
+  script-global RNG, event waits and original-file restart policy. **Breaking
+  runtime payload:** Siglus schema 5 -> 6, with no migration, adds portable event
+  cursor and frame continuation intent. Original binary file codecs are unchanged.
+  Explicit resource/default routing and remaining limits are documented in ADR 0086.
+
 ## `2077f8fd45fb4b36` (2026-10-27): owner-clock cue programs
 
 - Audio adds createCueSequence, advanceCueSequence, pollCueSequence,

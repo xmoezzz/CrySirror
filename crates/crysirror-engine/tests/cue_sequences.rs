@@ -148,3 +148,37 @@ fn pending_dsp_allows_only_frozen_observation_and_never_advances_the_cue_clock()
         false
     );
 }
+
+#[test]
+fn portable_public_cursor_roundtrip_is_validated_before_publication_and_has_a_new_identity() {
+    let (_d, mut a) = app();
+    let spec = json!({"mode":"loop","lines":[{"key":"cue","min_ms":10,"max_ms":10}]});
+    let h = call(&mut a, "createCueSequence", json!([spec, 17])).unwrap();
+    let e = call(&mut a, "pollCueSequence", json!([h, {}])).unwrap();
+    assert!(call(&mut a, "captureCueSequence", json!([h])).is_err());
+    call(&mut a, "completeCueSequence", json!([h, e["serial"], 0])).unwrap();
+    call(&mut a, "advanceCueSequence", json!([h, 7, 7])).unwrap();
+    let cursor = call(&mut a, "captureCueSequence", json!([h])).unwrap();
+    let before = call(&mut a, "cueSequence", json!([h])).unwrap();
+    let mut invalid = cursor.clone();
+    invalid["last_index"] = json!(999);
+    assert!(call(&mut a, "restoreCueSequence", json!([spec, invalid])).is_err());
+    let restored = call(&mut a, "restoreCueSequence", json!([spec, cursor])).unwrap();
+    assert_ne!(restored, h);
+    assert_eq!(
+        call(&mut a, "cueSequence", json!([restored])).unwrap(),
+        before
+    );
+    call(&mut a, "advanceCueSequence", json!([restored, 3, 3])).unwrap();
+    let next = call(&mut a, "pollCueSequence", json!([restored, {}])).unwrap();
+    assert_eq!(next["serial"], 2);
+    assert!(
+        call(
+            &mut a,
+            "completeCueSequence",
+            json!([restored, e["serial"], 0])
+        )
+        .is_err()
+    );
+    assert_eq!(call(&mut a, "cueSequence", json!([h])).unwrap(), before);
+}

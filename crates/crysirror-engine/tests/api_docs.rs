@@ -243,6 +243,8 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("CueSequenceCursor","Audio.captureCueSequence / restoreCueSequence",None),
+        d("AudioSequenceCursor","HostServices::capture_audio_sequence / restore_audio_sequence",None),
         d("CueSequenceSpec","Audio.createCueSequence",sample::<crysirror_engine::CueSequenceSpec>(e.clone())),
         d("CueSequenceLine","CueSequenceSpec.lines",sample::<crysirror_engine::CueSequenceLine>(json!({"key":"cue"}))),
         d("CueSequenceMode","CueSequenceSpec.mode",None),

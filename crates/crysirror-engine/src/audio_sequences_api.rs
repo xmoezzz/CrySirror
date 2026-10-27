@@ -110,6 +110,23 @@ impl From<CueSequenceSpec> for core::AudioSequenceSpec {
         }
     }
 }
+/// Portable cursor returned by captureCueSequence. Contains no handle or worker
+/// dependency; restoreCueSequence validates it and creates a fresh identity.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(remote = "core::AudioSequenceCursor", deny_unknown_fields)]
+pub struct CueSequenceCursor {
+    pub active: bool,
+    pub elapsed_ms: u64,
+    pub next_ms: i64,
+    pub last_index: Option<usize>,
+    pub rng_state: u32,
+    pub emissions: u64,
+    pub frame_emissions: u32,
+    pub budget_exhausted: bool,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+struct CursorPayload(#[serde(with = "CueSequenceCursor")] core::AudioSequenceCursor);
 fn arg(args: &[Value], i: usize) -> Result<&Value> {
     args.get(i).context("cue sequence argument required")
 }
@@ -136,6 +153,8 @@ pub(crate) fn call(cx: &mut EngineContext, name: &str, args: &[Value]) -> Result
     if !matches!(
         name,
         "createCueSequence"
+            | "captureCueSequence"
+            | "restoreCueSequence"
             | "advanceCueSequence"
             | "pollCueSequence"
             | "completeCueSequence"
@@ -147,7 +166,14 @@ pub(crate) fn call(cx: &mut EngineContext, name: &str, args: &[Value]) -> Result
     let state = cx.state()?;
     let client = state.client;
     let host = &mut state.runtime.host;
-    let result = if name == "createCueSequence" {
+    let result = if name == "restoreCueSequence" {
+        let spec: CueSequenceSpec = serde_json::from_value(arg(args, 0)?.to_json())?;
+        let CursorPayload(cursor) = serde_json::from_value(arg(args, 1)?.to_json())?;
+        let h = host
+            .restore_audio_sequence(client, spec.into(), cursor)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        json!({"client":h.client,"generation":h.generation})
+    } else if name == "createCueSequence" {
         let spec: CueSequenceSpec = serde_json::from_value(arg(args, 0)?.to_json())?;
         let seed = u32::try_from(integer(args, 1)?)?;
         let h = host
@@ -157,6 +183,12 @@ pub(crate) fn call(cx: &mut EngineContext, name: &str, args: &[Value]) -> Result
     } else {
         let h = handle(arg(args, 0)?)?;
         match name {
+            "captureCueSequence" => {
+                let c = host
+                    .capture_audio_sequence(client, h)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                serde_json::to_value(CursorPayload(c))?
+            }
             "advanceCueSequence" => {
                 host.advance_audio_sequence(client, h, integer(args, 1)?, integer(args, 2)?)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
