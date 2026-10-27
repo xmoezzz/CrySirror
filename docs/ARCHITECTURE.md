@@ -376,3 +376,15 @@ Audio.rendering includes prepared frames awaiting capacity. Runtime.begin_tick
 and App.begin_frame expose nonblocking completion; their synchronous counterparts
 remain explicit offline paths. See [ADR 0079](adr/0079-worker-final-audio-frames.md)
 for ownership, cancellation and the still-synchronous device queue/lifecycle.
+
+## Device worker and PCM transfer (ADR 0080)
+
+The modern desktop PCM endpoint opens/starts/destroys a CPAL stream on a dedicated
+worker. Shared bounded stereo packets, epochs and callback signals replace the
+CrySirror PCM mutex/refill buffer. OutputWatch reports readiness, retained failure
+and actual worker close completion; platform resources never enter VM/project
+state. Desktop gates startup time/input on device opening and polls failures even
+without new PCM. Explicit retry isolates sessions. CPU fake backends and a real
+silent-level device probe exercise the same endpoint. Final DSP remains frame-
+dependent; CPAL internals, clock independence and portability limits are in
+[ADR 0080](adr/0080-async-output-worker-and-bounded-pcm-transfer.md).

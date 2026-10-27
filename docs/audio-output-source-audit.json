@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-27",
+  "purpose": "device worker/API, callback and bounded queue source review; no vendored implementation",
+  "sources": [
+    {
+      "crate": "cpal-0.15.3",
+      "source_revision": "ac6cbb2ba55e61665a35ab88ae136a83380d1354",
+      "files": [
+        {
+          "path": "src/lib.rs",
+          "sha256": "3861f290ea67af769343e8910a8efadea5669b98b6340ccaeb0564d2c47c2604"
+        },
+        {
+          "path": "src/traits.rs",
+          "sha256": "b9b1d915d0ea4f024efd29cb2bfd887aab7388752c0bacf81a9e7e54acdd21be"
+        },
+        {
+          "path": "src/samples_formats.rs",
+          "sha256": "325d8b6779a667988d8f4156d4ee3968cb4d67809504e6e8d3003a94a7bc03f1"
+        },
+        {
+          "path": "src/host/coreaudio/macos/mod.rs",
+          "sha256": "0dbd11f0fc3dab26f489c4f4ca790b16abb0524653b0f23e5043fef2236d07fd"
+        }
+      ]
+    },
+    {
+      "crate": "crossbeam-queue-0.3.14",
+      "source_revision": "2920c984290229ab4e0ca0452ef09e48a82063f3",
+      "files": [
+        {
+          "path": "src/lib.rs",
+          "sha256": "e3b6c8dacf2f9f18d66c82cafdc0b2a06d3b13af91a303e66f81f069bbff4627"
+        },
+        {
+          "path": "src/array_queue.rs",
+          "sha256": "29eb637c1666101e3cc37d2098c42bed6d0e109c33f75605a408faf00519e7b4"
+        }
+      ]
+    }
+  ],
+  "latest_cpal_attempt": "0.18.2; resolution rejected because existing video/optional Rodio deps require incompatible alsa-sys links. No lockfile/native ABI migration performed."
+}

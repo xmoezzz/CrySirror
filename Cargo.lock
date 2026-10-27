@@ -1359,6 +1359,8 @@ name = "crysirror-audio"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "cpal",
+ "crossbeam-queue",
  "crysirror-acoustics",
  "crysirror-core",
  "crysirror-io",

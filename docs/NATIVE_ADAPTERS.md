@@ -261,3 +261,12 @@ must not rerun the native instruction or consume another input edge. Restore
 invalidates the obsolete frame and drops its PCM. This adds no legacy mixer or
 new VM hooks, and does not establish exact native wall-clock timing or an
 independent device clock. See [ADR 0079](adr/0079-worker-final-audio-frames.md).
+
+## Host audio output ownership (ADR 0080)
+
+Native channel resources, opcode waits and original save declarations continue
+using CrySirror APIs. The output device is now owned by an independent host
+worker, with separate readiness/failure/close observations and bounded stereo
+PCM transfer. Native waits still observe logical source/DSP publication, not
+hardware playback counters. No device handle is given to a native VM, and no
+legacy engine audio runtime is introduced. See [ADR 0080](adr/0080-async-output-worker-and-bounded-pcm-transfer.md).

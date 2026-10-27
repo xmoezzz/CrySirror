@@ -21,8 +21,9 @@ pub mod resources;
 pub mod render_job;
 pub mod scene;
 
-#[cfg(feature = "rodio-output")]
 pub mod pcm_output;
+#[cfg(feature = "cpal-output")]
+mod cpal_output;
 #[cfg(feature = "rodio-output")]
 pub mod rodio_device;
 

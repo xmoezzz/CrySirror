@@ -45,8 +45,8 @@ impl Core {
     }
     fn begin_tick(&mut self, audio: &mut Audio, ms: u64, input: InputFrame) -> Result<()> {
         ensure!(
-            !self.frame_pending(audio),
-            "desktop frame dependency pending before simulation"
+            !self.frame_pending(audio) && !audio.device_opening(),
+            "desktop frame/audio-output dependency pending before simulation"
         );
         match self {
             Core::Plain(rt) => {
@@ -58,6 +58,7 @@ impl Core {
         }
     }
     fn poll_tick(&mut self, audio: &mut Audio) -> Result<bool> {
+        audio.poll_device()?;
         match self {
             Core::Plain(rt) => audio.poll_frame(rt),
             #[cfg(feature = "scripting")]
@@ -73,14 +74,16 @@ impl Core {
         }
     }
     fn shutdown(&mut self, audio: &mut Audio) -> Result<()> {
-        match self {
+        let result = match self {
             Core::Plain(rt) => {
                 audio.cancel_frame(rt);
                 Ok(())
             }
             #[cfg(feature = "scripting")]
             Core::Scripted(app) => app.shutdown(),
-        }
+        };
+        audio.close_device();
+        result
     }
     fn quit_requested(&self) -> bool {
         match self {
@@ -513,6 +516,13 @@ impl App {
         if w.minimized {
             return Ok(());
         }
+        self.audio.poll_device()?;
+        if self.audio.device_opening() {
+            self.last_tick = Instant::now();
+            self.remainder = Duration::ZERO;
+            w.window.request_redraw();
+            return Ok(());
+        }
         if !self.core.frame_pending(&self.audio) {
             let now = Instant::now();
             let delta = now
@@ -878,6 +888,10 @@ impl ApplicationHandler for App {
         }
     }
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if let Err(error) = self.audio.poll_device() {
+            self.fail(el, error);
+            return;
+        }
         el.set_control_flow(ControlFlow::WaitUntil(
             Instant::now() + Duration::from_millis(16),
         ));
@@ -959,6 +973,71 @@ mod audio_frame_tests {
         assert!(!core.frame_pending(&audio));
         assert!(!core.rt().host.channel_audio.mixer.is_rendering());
         drop(permits);
+    }
+    #[cfg(feature = "audio")]
+    #[test]
+    fn opening_device_is_a_dependency_before_any_second_simulation_tick() {
+        use crysirror_audio::pcm_output::*;
+        use std::sync::{Arc, Condvar, Mutex, mpsc};
+        struct Stream;
+        impl OutputStream for Stream {}
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        struct Release(Arc<(Mutex<bool>, Condvar)>);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                *self.0.0.lock().unwrap() = true;
+                self.0.1.notify_all();
+            }
+        }
+        let release = Release(gate.clone());
+        let (tx, rx) = mpsc::channel();
+        let output = PcmOutput::with_backend(move |_: OutputConsumer, _: OutputSignals| {
+            tx.send(())?;
+            let lock = gate
+                .1
+                .wait_timeout_while(gate.0.lock().unwrap(), Duration::from_secs(5), |v| !*v)
+                .unwrap();
+            anyhow::ensure!(*lock.0, "authored opening gate timeout");
+            OpenedOutput::new(
+                OutputFormat {
+                    sample_rate: 48000,
+                    channels: 2,
+                    sample_format: "f32".into(),
+                },
+                Stream,
+            )
+        });
+        let watch = output.watch();
+        let mut audio = Audio::with_output(output);
+        let (_dir, rt) = runtime();
+        let mut core = Core::Plain(rt);
+        audio.sync_mixed(&[[0.25; 2]], false, 0).unwrap();
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(audio.device_opening());
+        assert!(
+            core.begin_tick(&mut audio, 10, InputFrame::default())
+                .is_err()
+        );
+        assert_eq!(core.rt().now_ms(), 0);
+        drop(release);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while audio.device_opening() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        audio.poll_device().unwrap();
+        core.begin_tick(&mut audio, 10, InputFrame::default())
+            .unwrap();
+        while !core.poll_tick(&mut audio).unwrap() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(core.rt().now_ms(), 10);
+        core.shutdown(&mut audio).unwrap();
+        while !watch.is_closed() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
     }
     #[test]
     fn plain_desktop_uses_worker_frame_completion_and_preserves_clock_under_backpressure() {

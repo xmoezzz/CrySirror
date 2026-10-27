@@ -7,7 +7,9 @@ rust-version.workspace = true
 
 [features]
 default = []
-rodio-output = ["dep:rodio"]
+cpal-output = ["dep:cpal"]
+# Compatibility device feature; the modern PCM bridge uses CPAL directly.
+rodio-output = ["dep:rodio", "cpal-output"]
 
 [dependencies]
 crysirror-io.workspace = true
@@ -15,6 +17,8 @@ crysirror-core.workspace = true
 crysirror-tasks.workspace = true
 crysirror-acoustics.workspace = true
 anyhow.workspace = true
+crossbeam-queue = "=0.3.14"
+cpal = { version = "=0.15.3", optional = true }
 serde.workspace = true
 symphonia = { version = "=0.5.5", default-features = false, features = ["wav", "pcm", "ogg", "vorbis", "mp3", "flac"] }
 rodio = { version = "0.17.3", optional = true, default-features = false, features = ["wav", "vorbis", "mp3", "flac"] }

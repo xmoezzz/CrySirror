@@ -362,3 +362,21 @@ The independent gain-group demo also supports final DSP workers:
 `cargo run --release -p crysirror-audio --example mix_groups -- /tmp/mix-worker.wav --worker`.
 It uses the same authored sample assertions as its synchronous mode, without a
 VM or output device.
+
+### Host output lifecycle
+
+Rust hosts use crysirror_audio::pcm_output::PcmOutput with cpal-output, or inject
+an OutputBackend without a platform dependency. submit admits bounded stereo
+48 kHz PCM; call poll/status/watch for opening, readiness and retained failures,
+including frames with no audio. begin_close returns a receipt; closed follows
+worker resource destruction. Drop requests cancellation without joining the
+owner. Explicit retry requires failed/closed completion and creates a new
+session. Desktop supplies startup and error polling automatically.
+
+Audio.rendering is the final DSP frame dependency; it is distinct from device
+readiness. No reflective signature/fingerprint changes accompany these Rust host
+APIs. Device state is derived host state, never a VM save or resource pointer.
+Run the optional silent-level device probe with
+`cargo run --release -p crysirror-audio --features cpal-output --example output_probe`.
+See [ADR 0080](../adr/0080-async-output-worker-and-bounded-pcm-transfer.md) for
+library pins, migration and remaining clock/resampling/device-switch limits.

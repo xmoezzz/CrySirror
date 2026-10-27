@@ -18,7 +18,7 @@ avg32 = ["dep:crysirror-avg32"]
 # a binary built with it is distributed under the AGPL. Pair with `arc-formats`
 # for TLG images.
 krkr = ["dep:crysirror-krkr"]
-audio = ["crysirror-audio/rodio-output"]
+audio = ["crysirror-audio/cpal-output"]
 gamepad = ["dep:gilrs", "scripting"]
 siglus-resources = ["dep:crysirror-siglus"]
 # Default JS/TS script host (Boa + Oxc) driving the engine object API (ADR 0005).

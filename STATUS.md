@@ -2898,3 +2898,100 @@ Remaining boundaries:
   dynamic acoustic geometry, Doppler and diffuse/higher-order propagation remain
   open. This phase adds reusable scheduling and completion capabilities, not
   whole-game compatibility or completion of the engine-wide async requirement.
+
+## 2026-10-27 — device worker, bounded PCM transfer and startup dependency (ADR 0080)
+
+Implementation:
+- Modern PcmOutput now owns a shared fixed-capacity stereo packet queue and an
+  OutputBackend factory. A dedicated worker opens/builds/starts/destroys the
+  platform stream on that same thread; it never borrows a VM/window/EngineContext.
+  Streams need not be Send. submit admits work without device I/O or thread join
+  on the caller. Opening/readiness, retained failure and actual worker-resource
+  close completion are separate OutputWatch/OutputStatus observations.
+- Crossbeam ArrayQueue 0.3.14 replaces the CrySirror Mutex<VecDeque>/512-sample
+  refill. It stores at most 12000 complete stereo 48 kHz frames, keeps newest
+  frames on overflow and records drops. Final clamp/nonfinite sanitization stays
+  after engine mixing. Pause preserves source state; epochs/reset invalidate old
+  queue/interpolation data. Callback transfer and its fixed UTF-8 error lane use
+  no control mutex or growable buffer. This is lock-free, not wait-free or a
+  claim about CPAL/OS internal locks, allocations or realtime deadlines.
+- Native stereo 48 kHz bypasses rate conversion. Other device rates use fixed
+  linear interpolation; mono averages L/R, channels 0/1 carry stereo and extra
+  channels are silent. Misaligned callback buffers fail visibly without consuming
+  input. CPAL sample conversion covers its integer/float formats. There is no
+  bandlimited resampling or surround speaker-layout implementation in this bridge.
+- begin_close and Drop request cancellation without joining the owner. Completion
+  follows stream destructor/unwind return; cleanup panic remains a failure.
+  Opening calls can only observe cancellation after returning. Explicit retry
+  requires failed/closed completion and isolates a fresh session/queue/epoch.
+  A callback failure retains its diagnostic even when close starts before cleanup.
+- Desktop now enables cpal-output, directly creating a CPAL stream rather than a
+  Rodio Sink. It polls failures without subsequent PCM, gates startup before time/
+  gamepad/input acquisition while the device opens, excludes opening wall time
+  from catch-up audio and requests close even if lifecycle shutdown fails. The
+  explicit rodio-output compatibility feature still compiles its older synchronous
+  AudioDevice API; default desktop does not use that endpoint.
+- Independently checked current CPAL 0.18.2, but Cargo resolution rejected it:
+  existing WMV CPAL 0.15/alsa-sys 0.3 conflicts with 0.18/alsa-sys 0.4 native links.
+  The implemented backend pins existing CPAL 0.15.3. Source revisions/checksums
+  are in docs/audio-output-source-audit.json. No upstream implementation, device
+  code or private legacy mixer was copied into a native adapter.
+
+Compilation:
+- Release workspace/all-target check passed with desktop krkr, arc-formats and
+  acoustics-obvhs plus the optional rodio-output compatibility feature. Minimal
+  no-default desktop reallive+avg32 check also passed. API docs regenerated;
+  reflective fingerprint remains bec05c019d833cb0, with Rust host migration logged.
+- Fixed a new unused test import and a probe example's missing local binding;
+  final validation passes. Existing CBG/RealLive/minimal-CLI warnings remain.
+  No GitHub CI/workflow or remote build was added/run. Windows/Linux/console/GPU
+  behavior and a live desktop window were not tested in this phase.
+
+Behavior validation:
+- Final release scopes: shared audio including optional device/compatibility
+  code **102 passed**; desktop CPU driver/input/output **8 passed**; original
+  Siglus audio **21 passed**; original RealLive/AVG32 bridges **12 passed**;
+  engine frame/API reference **11 passed**. **154 distinct Rust passed**, two
+  ignored excluded. Earlier/focused reruns are not counted again. Python 3.11
+  tooling: **189 passed**.
+- Eleven independent output cases exercise lazy silence, truly blocked worker
+  open/Drop and gated destruction receipts, stereo overflow/order/clamping,
+  pause/underrun, reset of cached interpolation, partial-frame rejection,
+  continuous-signal 24/44.1/96 kHz oracles across callback partitions, mono/extra
+  channels, failed-session retry, callback failure/open panic, concurrent reset/
+  overflow and failure retention through close. Callback/error transfer also
+  completes while both control mutexes are deliberately held. CPAL integer/full-
+  scale/unsigned-silence conversion has a separate device-free test.
+- A rate oracle initially omitted the lookahead input frame at its authored
+  signal endpoint; supplying that input makes the continuous linear oracle
+  valid. Its corrected sample and partition assertions pass. Desktop tests
+  verify no second simulation tick during gated opening, failure polling without
+  PCM, plain/scripted worker completion and shutdown cancellation.
+- Ran the release output_probe against the local macOS CoreAudio device:
+  stereo **48 kHz f32** opened on the worker and produced callbacks. Paused
+  state rendered **558 device frames**, retained all **128 queued frames** and
+  reported zero underruns. After reset/resume, another **128 MIN_POSITIVE-level
+  stereo frames** were dequeued by the real callback, reaching **1115 rendered
+  device frames**, then close completed with no error and an empty queue. The
+  rendered counter remained unchanged for the following **20 ms** after close.
+- This short burst intentionally exhausts its input and pads silence: its **429
+  active underrun frames** are recorded, not reported as a streaming benchmark or
+  performance pass. No listening-quality, capture-loopback, latency or sustained
+  throughput assertion was made; test values were below audibility.
+- Evidence: target/verification/output-{audio-final,desktop-final,siglus-final,
+  vn-final,engine-final,workspace-check,minimal-check,device-probe-final,python-final,
+  diff-check}.log; output-validation.json, output-summary.json and
+  output-device-probe-final.json. output-fetch.log records the rejected latest
+  CPAL attempt. Earlier logs retain the corrected oracle/example failures.
+
+Remaining boundaries:
+- Engine DSP still follows simulation frames/shared CPU admission; device callback
+  execution is not an independent engine audio render clock. Timestamped future
+  commands, clock drift correction, realtime scheduling/latency tuning,
+  bandlimited output resampling, surround/ambisonics, cross-mixer sidechains and
+  default-device monitoring remain open. Stream failure has explicit retry;
+  automatic recovery is not implemented. OS open/close cancellation is cooperative.
+- CPAL 0.18 migration requires resolving the existing video/compatibility native
+  dependency graph first. The local CoreAudio result establishes neither other
+  hardware/platform behavior nor a complete implementation of ADR 0050. Native
+  opcode/save/timing/resource discovery gaps and broader acoustics remain active.

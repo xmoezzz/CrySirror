@@ -6,6 +6,12 @@ fingerprint appears here. Mark breaking changes with **Breaking**.
 
 ## `bec05c019d833cb0` (2026-10-27): worker final audio frame completion
 
+- Host-only follow-up (ADR 0080; reflective fingerprint unchanged): PcmOutput
+  submits asynchronously and requires readiness/error polling, with a separate
+  close receipt and explicit failed-session retry. Modern desktop selects
+  cpal-output; rodio-output retains the optional synchronous compatibility API.
+  Native/project/save schemas and Audio.rendering's DSP meaning are unchanged.
+
 - Add readonly Audio.rendering for prepared capacity waits and running DSP.
   Playback/source/group queries retain the last owner-published state; DSP
   controls fail explicitly until the frame completes.

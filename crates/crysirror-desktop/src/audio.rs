@@ -32,6 +32,37 @@ impl Audio {
             pause_pending: None,
         }
     }
+    #[cfg(all(test, feature = "audio"))]
+    pub(crate) fn with_output(output: crysirror_audio::pcm_output::PcmOutput) -> Self {
+        let mut audio = Self::new(false);
+        audio.mixer_output = output;
+        audio
+    }
+    pub fn device_opening(&self) -> bool {
+        #[cfg(feature = "audio")]
+        {
+            !self.muted
+                && self.mixer_output.status().phase
+                    == crysirror_audio::pcm_output::OutputPhase::Opening
+        }
+        #[cfg(not(feature = "audio"))]
+        {
+            false
+        }
+    }
+    pub fn poll_device(&self) -> Result<()> {
+        #[cfg(feature = "audio")]
+        if !self.muted {
+            self.mixer_output.poll()?;
+        }
+        Ok(())
+    }
+    pub fn close_device(&mut self) {
+        #[cfg(feature = "audio")]
+        {
+            self.mixer_output.begin_close();
+        }
+    }
     pub fn frame_pending(&self) -> bool {
         self.frame.is_some()
     }
@@ -186,6 +217,29 @@ fn mix_pcm(first: &[[f32; 2]], second: &[[f32; 2]]) -> Result<Vec<[f32; 2]>> {
 #[cfg(test)]
 mod tests {
     use super::mix_pcm;
+    #[cfg(feature = "audio")]
+    #[test]
+    fn async_device_failure_is_visible_without_a_subsequent_pcm_submission() {
+        use crysirror_audio::pcm_output::{OutputConsumer, OutputSignals, PcmOutput};
+        let mut audio = super::Audio::new(false);
+        audio.mixer_output = PcmOutput::with_backend(|_: OutputConsumer, _: OutputSignals| {
+            anyhow::bail!("authored desktop output failure")
+        });
+        audio.sync_mixed(&[[0.25; 2]], false, 0).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !audio.mixer_output.watch().is_closed() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(
+            audio
+                .poll_device()
+                .unwrap_err()
+                .to_string()
+                .contains("authored desktop output failure")
+        );
+        audio.close_device();
+    }
     #[test]
     fn native_and_channel_pcm_add_in_stereo_before_final_clamp() {
         assert_eq!(
