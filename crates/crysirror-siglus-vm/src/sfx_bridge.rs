@@ -47,14 +47,14 @@ impl Default for State {
         }
     }
 }
-fn duration(n: i64) -> Result<f32> {
+pub(crate) fn duration(n: i64) -> Result<f32> {
     ensure!(
         n.max(0) <= 600000,
         "Siglus sound duration exceeds engine limit"
     );
     Ok(n.max(0) as f32)
 }
-fn key(s: &str) -> Result<()> {
+pub(crate) fn key(s: &str) -> Result<()> {
     ensure!(
         !s.is_empty() && s.len() <= 1024,
         "invalid Siglus sound alias"
@@ -162,6 +162,7 @@ impl State {
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct PcmEngine {
     state: State,
+    pub(crate) channels: crate::pcmch_bridge::Channels,
 }
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct SeEngine {
@@ -178,23 +179,29 @@ impl PcmEngine {
         self.state.stop(PCM_CHANNEL, fade)
     }
     pub fn stop_all(&mut self, fade: Option<i64>) -> Result<()> {
-        self.stop(fade)
+        self.stop(fade)?;
+        self.channels.stop_all(fade.unwrap_or(0))
     }
     pub fn is_playing_any(&mut self) -> bool {
-        self.state.playing
+        self.state.playing || self.channels.any()
     }
-    // PCMCH remains unbound, including its original save fields/defaults.
-    pub fn is_playing_slot(&mut self, _: usize) -> bool {
-        false
+    pub fn is_playing_slot(&mut self, ch: usize) -> bool {
+        self.channels.playing(ch)
     }
-    pub fn is_fading_slot(&mut self, _: usize) -> bool {
-        false
+    pub fn is_fading_slot(&mut self, ch: usize) -> bool {
+        self.channels.fading(ch)
     }
-    pub fn slot_volume_raw(&self, _: usize) -> i32 {
-        1000
+    pub fn slot_volume_raw(&self, ch: usize) -> i32 {
+        self.channels.volume(ch)
     }
-    pub fn slot_resume_delay_ms(&self, _: usize) -> i64 {
-        0
+    pub fn slot_resume_delay_ms(&self, ch: usize) -> i64 {
+        self.channels.delay(ch)
+    }
+    pub(crate) fn ensure_group(&mut self) -> Result<()> {
+        if !self.state.initialized {
+            self.state.volume(PCM_GROUP, self.state.volume, 0)?;
+        }
+        Ok(())
     }
     pub(crate) fn has_source(&self) -> bool {
         self.state.current.is_some()
@@ -203,16 +210,23 @@ impl PcmEngine {
         self.state.sync(i)
     }
     pub(crate) fn rebind(&mut self) -> Result<()> {
-        self.state.rebind(PCM_CHANNEL, PCM_GROUP)
+        self.state.rebind(PCM_CHANNEL, PCM_GROUP)?;
+        if !self.channels.active().is_empty() {
+            self.ensure_group()?;
+        }
+        self.channels.rebind()
     }
     pub(crate) fn validate(&self) -> Result<()> {
-        self.state.validate()
+        self.state.validate()?;
+        self.channels.validate()
     }
     pub(crate) fn pending(&self) -> bool {
-        !self.state.pending.is_empty()
+        !self.state.pending.is_empty() || self.channels.pending()
     }
     pub(crate) fn take(&mut self) -> Queue {
-        std::mem::take(&mut self.state.pending)
+        let mut queue = std::mem::take(&mut self.state.pending);
+        queue.append(self.channels.take());
+        queue
     }
 }
 impl SeEngine {

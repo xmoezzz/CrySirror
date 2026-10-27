@@ -3193,3 +3193,108 @@ Remaining boundaries:
   native spatial mappings and wider async/3D/VN capabilities remain open. No
   listening-quality, performance ranking, GPU/hardware-RT, cross-platform or
   whole-game result is implied by this CPU release validation.
+
+## 2026-10-27 — Shared transport and original PCMCH (ADR 0083)
+
+Implementation:
+- Added shared AudioPlaybackInfo transport_frames, stopping and pausing. Running
+  input intent excludes fully paused/freezing-delay time and effect tails while
+  counting decoder/seek/effect dependency holds. Playback position and publication
+  age remain separate. Unknown EOF can count its discovery frame.
+- Shared AudioResumeSettings / ResumeWithOptions preserve an ongoing pause fade
+  until an output-clock deadline, or retain the existing freezing policy.
+  reset_gain restarts a gain fade toward the latest requested target at that
+  deadline instead of multiplying an unfinished ramp. Stop deadlines are now
+  independent of later pause envelopes and remain observable through short input
+  EOF. Input EOF cancels pending resume even when HRTF/echo state is retained;
+  a new resume on already-ended input leaves its tail alone. All processing and
+  observations use the existing worker-owned DSP/publication boundary.
+- Public Audio.scheduleVoiceResume retains its three-argument signature/freeze
+  policy, including generated TypeScript. scheduleVoiceResumeWithOptions adds
+  {policy:"freeze"|"preserve",reset_gain?:boolean}; unknown policies/options fail.
+  The initial nullable fourth-argument design was replaced after checking that
+  the generated TypeScript would require it and break old three-argument callers.
+- Original PCMCH chains now translate PLAY/READY variants, pause/resume/delay,
+  independent slot volume, source/fade/DECIDE waits and checks onto engine-owned
+  prepared sources and shared channels 4+index. Global PCM remains channel 1.
+  PLAY initial fades use shared gain so later volume commands replace them;
+  native resume selects a fresh gain fade. There is no private native decoder,
+  source buffer, envelope, sample timer or output device.
+- Explicit resource aliases preserve PCM/BGM/KOE/SE selection. BGM registration
+  supplies its filename only; KOE uses koe/{number} without JITAN; SE forces an
+  actual one-shot/no-fade while preserving requested native persistent flags.
+  Declared list count defaults to 16 and is bounded at 256, subject to shared
+  voice/memory/receipt capacity. The pinned upstream Rust player allocates only
+  16 PCMCH slots; honoring a larger declared list is an explicit extension.
+  Native queues are bounded per slot and globally serial-sorted with other audio.
+  Sparse BGM registration indices are bounded at 4096 before lookup.
+- Original save codecs/layouts are unchanged. Corrected false empty-slot volume
+  1000 to native 255, retained original loop/READY/delay restart predicates and
+  PCM-first then independent BGM/KOE/SE restore order. Delay is only an original
+  file restart predicate. Runtime payload schema advances 4 -> 5 without old
+  payload migration; logical cues rebuild at source start, with READY/paused and
+  remaining integer-ms delay preserved. Pause fades rebuild fully paused and
+  pending stops rebuild stopped; exact sample/envelope/DSP history is not saved.
+- Pinned reference blobs and inspected scope are recorded in
+  docs/siglus-pcmch-source-audit.json at siglus_rs
+  5f358ef1360b0439e92aed2b749e8f25d8721954. No original SFX/player/path/decoder
+  implementation was copied into this bridge. Default native PCM routing is
+  mapped; nondefault system/category/character/dual-BGM duck flags fail visibly.
+
+Compilation:
+- Final release workspace/all-target check passed with desktop krkr, arc-formats,
+  acoustics-obvhs and optional rodio-output. Minimal no-default desktop
+  reallive+avg32 check passed. No CI/workflow/remote build was added.
+- Regenerated reference/JSON/TypeScript and logged fingerprint
+  **e73bda1334c12a7f -> 0d9cec36638123d1**. Final API reference/documentation and
+  typed three-argument compatibility checks passed. New Rust request/inspection
+  members require exhaustive matches/struct literals to be updated.
+- Initial compilation corrected a missing async-control match arm and a type-hint
+  name; initial API generation retained its expected missing-fingerprint guard
+  failure before the real fingerprint was logged. Existing CBG/RealLive/minimal
+  CLI warnings remain. All cargo validation used --release.
+
+Behavior validation:
+- Shared audio library/integration scopes: **111 passed**; Runtime/Siglus scopes:
+  **110 passed**; engine/public audio/frame/async/API and JS scopes: **53 passed**.
+  **274 distinct Rust tests passed**, four ignored excluded. The later bounded
+  BGM lookup scope supersedes the same earlier VM library cases; earlier/focused
+  reruns and API generation guard failures are not counted again. Python 3.11
+  tooling: **189 passed**.
+- Sample oracles cover preserved versus frozen delay, pause fades before/after
+  resume deadlines, running clocks through starvation/holds, latest gain targets,
+  short-source EOF with retained stop completion, pause-versus-stop deadlines,
+  scope and worker publication. An actual delayed HRTF tail keeps its full PCM
+  after input EOF cancels resume; a new source resume does not freeze/restart it.
+- Authored original Scene.pck cases verify independent global/PCMCH mixing,
+  per-slot gain, declared channel 255, integer-ms source completion, named source
+  priority, BGM filename-only mapping, KOE/SE policy, READY and delayed resume,
+  source/fade/key return values, STOP/EOF source release and failed replacement
+  retaining the previous voice/original PC before successful resource repair.
+  Resource worker gates leave original commands uncommitted until publication.
+- Both save contracts are exercised: READY/paused/looped framework cues rebuild,
+  remaining 80 ms resume delay reconstructs; original load does not reschedule
+  saved delay or restart ordinary one-shots. A stopped READY flag can restart a
+  paused cue on original load while a stopped framework snapshot stays stopped.
+  Raw original PCMCH records assert actual 255 and unchanged 37-byte field order.
+  Unknown routing/opcodes, missing aliases and sparse BGM overflow fail visibly.
+- The independent transport_timeline release example exports authored stereo
+  PCM16 **8 kHz / 2400 frames** and checks every float sample without a VM/device.
+  Python WAVE inspection confirms initial RMS 0.25, paused-delay silence and
+  post-EOF silence. Final sample/DSP checks include the input-EOF/HRTF and sparse
+  lookup follow-ups, with final workspace/minimal compilation afterward.
+- Evidence: target/verification/pcmch-final-run.json, pcmch-summary.json,
+  pcmch-{audio-eof-final,bounds-final,completion-check,completion-minimal}.log,
+  pcmch-demo-inspection.json and transport-timeline.wav. No game, font, measured
+  HRIR/SOFA data, credential or proprietary SDK was added.
+
+Remaining boundaries:
+- Full native system/category/character/dual-BGM duck routing, PCMEVENT and native
+  pack/path/append-directory discovery remain open. Frame-phase clocks are not
+  exact original wall-clock/device timing, and framework cues do not serialize
+  exact decoder/DSP history. This does not establish a whole Siglus game or all
+  original save variants.
+- Doppler/diffraction/higher-order sound, independent device clock, native spatial
+  mappings and broader engine-wide async/3D/VN requirements remain active work.
+  No listening-quality, performance ranking, GPU/hardware-RT, other-platform or
+  complete-engine result is claimed by this local CPU validation.

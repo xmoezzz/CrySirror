@@ -213,7 +213,7 @@ Optional decoded UTF-8 Gameexe BGM rows supply start/end/repeat frames, bounded
 at 4096 entries. Discovery/append dirs, encrypted Gameexe and native pack-entry
 selection are not inferred. Unsupported opcodes/property fallbacks fail visibly.
 ADR 0078 adds global PCM and SE below; ADR 0081 adds the bounded global KOE
-profile. PCMCH remains unbound.
+profile. ADR 0083 adds the bounded PCMCH profile below.
 ADR 0077 adds immutable
 CrySirror resource handles: native PLAY/READY commits after resource and voice
 preparation; RESUME after EOF/stop replays the retained resource without reopening
@@ -246,11 +246,11 @@ source needs a canonical resources alias; `koe/{number}` is an explicit CrySirro
 mapping for SE voice-number calls, without automatic pack/filename discovery.
 Missing/unknown operations fail visibly.
 
-PCM/SE declarations entered runtime payload schema 3; current schema 4 adds
+PCM/SE declarations entered runtime payload schema 3; schema 4 adds
 KOE declarations (ADR 0081). Active snapshots
 reconstruct after commit, without exact sample/age/DSP history. Original file
 layouts remain unchanged; import stops nonpersistent PCM/SE and restores their
-category volume while preserving host group parents/mute. PCMCH, PCM events,
+category volume while preserving host group parents/mute. PCM events, full PCMCH routing,
 full KOE/MWND/mouth tables, native UI sound slots and full game/save coverage
 remain open. Source audit: [siglus-sfx-source-audit.json](siglus-sfx-source-audit.json).
 
@@ -293,7 +293,7 @@ replay. Native integer-ms completion and DECIDE down-up waits retain original
 semantics within the shared frame timing model. Replacement stops the old slot
 before preparing the new source; failure remains visible at the original command.
 
-Runtime adapter snapshots use schema 4, restarting active logical cues through
+ADR 0081 introduced runtime adapter schema 4, restarting active logical cues through
 engine preparation; prior schema 3 snapshots are not migrated. Original Siglus
 save-file codecs/layouts are unchanged and restore KOE volume with playback
 stopped. Native pack/path discovery, append-directory policy, MWND/KOE_ST,
@@ -311,3 +311,22 @@ can translate onto these shared capabilities without private geometry tracing.
 Mapping a native opcode also requires its explicit HostServices facade. This
 phase adds no native opcode, resource-discovery or save mapping. The active
 Siglus/RealLive/AVG32 profiles retain their earlier acceptance limits.
+
+
+## Original Siglus PCMCH (2026-10-27, ADR 0083)
+
+The original PCMCH command chain now targets independent scoped engine channels,
+prepared sources and native gain groups. CrySirror owns decoder leases, sample
+fades, pause, delayed actions, EOF and completion. The VM holds native semantic
+cue/volume/wait/save declarations and derived observations. Global PCM is separate;
+unknown layouts/operations and nondefault native system/character/BGM duck routing
+fail visibly. Every selected source requires an explicit capability resource alias.
+
+Shared transport_frames excludes fully paused/delayed input; preserve resume keeps
+an ongoing pause fade. Stop-fade completion survives short input EOF without
+prolonging source waits. Both capabilities are independently available to Rust and
+public Audio clients. Runtime payload schema is now 5; prior schema 4 snapshots are
+not migrated. Original sound file layouts stay unchanged, with true default slot
+volume 255 and native loop/READY/delay restore predicates/order. No PCMEVENT, full
+routing/discovery, sample-perfect runtime snapshots or whole-game result is claimed.
+Source scope: [siglus-pcmch-source-audit.json](siglus-pcmch-source-audit.json).

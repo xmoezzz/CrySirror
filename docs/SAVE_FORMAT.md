@@ -42,3 +42,13 @@ receipts, decoder read-ahead, device cursors and DSP history are never serialize
 Original Siglus file codecs/header layouts stay separate and unchanged. BGM loop/
 pause/delay/volume persistence uses those existing fields and shared preparation;
 this bounded profile does not establish every original save variant.
+
+
+Current Siglus runtime audio payload is schema **5** (ADR 0083), following BGM
+schema 2, PCM/SE schema 3 and KOE schema 4. No automatic migration of older
+payloads is supplied. PCMCH declarations reconstruct running/READY/paused cues
+at source start; remaining integer-ms resume delay is scheduled again. A pending
+stop reconstructs stopped and a pause fade reconstructs fully paused. These are
+logical checkpoints, not exact decoder/DSP/device-history snapshots. Original
+PCMCH file records preserve native volume and loop/READY/delay predicates/order;
+load treats delay only as a restart predicate and does not schedule it again.

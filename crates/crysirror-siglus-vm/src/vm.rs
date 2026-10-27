@@ -13937,3 +13937,25 @@ impl SceneVm<'static> {
         self.engine_reject_unknown()
     }
 }
+
+#[cfg(test)]
+mod pcmch_save_record_tests {
+    use super::*;
+    #[test]
+    fn original_pcmch_record_writes_native_default_255_and_unchanged_field_order() {
+        let scene = crate::fixture::SceneBuilder::default().finish();
+        let stream = crate::scene_stream::SceneStream::new(&scene).unwrap();
+        let vm = SceneVm::new(stream, CommandContext::new(".".into()));
+        let mut writer = crate::original_save::OriginalStreamWriter::new();
+        vm.write_cpp_pcmch(&mut writer, 0);
+        let bytes = writer.into_inner();
+        let mut reader = crate::original_save::OriginalStreamReader::new(&bytes);
+        assert_eq!(reader.string().unwrap(), "");
+        assert_eq!(reader.string().unwrap(), "");
+        for expected in [-1, -1, 2, -1, 255, 0] {
+            assert_eq!(reader.i32().unwrap(), expected);
+        }
+        for _ in 0..5 { assert!(!reader.bool().unwrap()); }
+        assert_eq!(bytes.len(), 37);
+    }
+}

@@ -45,6 +45,11 @@ pub(crate) enum Operation {
         key: String,
         group: String,
     },
+    Channel {
+        channel: u32,
+        key: String,
+        parameters: AudioParameters,
+    },
     Retain(Play),
     Replay {
         fade: f32,

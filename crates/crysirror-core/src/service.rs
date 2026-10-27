@@ -233,13 +233,21 @@ impl Default for AudioParameters {
 pub struct AudioPlaybackInfo {
     /// Source has remaining input, even when paused; excludes processing tails.
     pub source_playing: bool,
-    /// Source clock currently frozen by pause or scheduled resume.
+    /// Source clock currently frozen by pause or a freezing scheduled resume.
     pub paused: bool,
     /// Actual prepared source loop mode.
     pub looping: bool,
     /// Output frames since voice publication, including pauses, dependency
     /// holds, starvation and effect tails. Seeking does not reset this age.
     pub age_frames: u64,
+    /// Output frames while input transport is running, including decoder/seek/
+    /// preparation holds. Excludes fully paused/delayed input and effect tails.
+    /// Pause fades count until frozen; seek, loop and playback rate do not reset it.
+    pub transport_frames: u64,
+    /// A stop fade retains completion even after source EOF.
+    pub stopping: bool,
+    /// Input will pause when its current fade completes.
+    pub pausing: bool,
     /// Current decoded-source frame, without worker read-ahead.
     pub position_frames: u64,
     /// Decoded-source frames per second.
@@ -248,10 +256,31 @@ pub struct AudioPlaybackInfo {
     pub source_frames: Option<u64>,
     /// Mixer frames per second, used by fade/delay counters.
     pub output_rate: u32,
-    /// Remaining stop/pause fade frames; ordinary gain fades are excluded.
+    /// Remaining stop deadline or pause-fade frames; gain fades are excluded.
+    /// A stop deadline is independent of a later pause envelope.
     pub fade_out_frames: u64,
     /// Remaining scheduled-resume delay in mixer frames.
     pub resume_delay_frames: u64,
+}
+/// How existing input transport behaves before a scheduled resume deadline.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AudioResumePolicy {
+    /// Freeze immediately, canceling any pending pause/stop fade.
+    #[default]
+    Freeze,
+    /// Keep running or paused, including any current pause/stop fade, until
+    /// the deadline. Source EOF or completed stop cancels the scheduled action.
+    Preserve,
+}
+/// Scheduled input/gain transition, independent of asset preparation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AudioResumeSettings {
+    /// Input behavior before the output-clock deadline.
+    pub policy: AudioResumePolicy,
+    /// At the deadline, cancel any unfinished gain ramp and fade from zero to
+    /// the latest requested gain using fade_ms, with transport envelope open.
+    /// False preserves the gain ramp and applies fade_ms to transport instead.
+    pub reset_gain: bool,
 }
 /// Deferred, client-capability audio source. No bytes or device pointers in VM state.
 #[derive(Clone, Debug)]
@@ -383,6 +412,14 @@ pub enum AudioRequest {
         channel: u32,
         delay_ms: f32,
         fade_ms: f32,
+    },
+    /// Resume at an output-clock deadline with explicit pre-deadline transport.
+    /// Later pause/stop/resume replaces this action; readiness is independent.
+    ResumeWithOptions {
+        channel: u32,
+        delay_ms: f32,
+        fade_ms: f32,
+        settings: AudioResumeSettings,
     },
     SetGain {
         channel: u32,

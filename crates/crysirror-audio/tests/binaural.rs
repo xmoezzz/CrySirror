@@ -102,3 +102,32 @@ fn acoustic_bands_and_buses_apply_to_the_same_binaural_pcm() {
     mixer.set_binaural(1, h, None).unwrap();
     near(render(&mut mixer, 1)[0][0], 0.);
 }
+
+#[test]
+fn input_eof_cancels_scheduled_resume_without_fading_or_freezing_retained_hrtf_tail() {
+    use crysirror_core::service::{AudioResumePolicy, AudioResumeSettings};
+    let (mut mixer, h) = setup(&[1., -0.5]);
+    let (_publisher, voice) = stream();
+    mixer.set_binaural(1, h, Some(voice)).unwrap();
+    let settings = AudioResumeSettings {
+        policy: AudioResumePolicy::Preserve,
+        reset_gain: true,
+    };
+    mixer
+        .schedule_resume_with_settings(1, h, 1., 2., settings)
+        .unwrap();
+    render(&mut mixer, 2);
+    let i = mixer.playback_info(1, h).unwrap();
+    assert!(!i.source_playing && !i.paused);
+    assert_eq!(i.resume_delay_frames, 0);
+    assert_eq!(i.transport_frames, 2);
+    // Re-scheduling an already-ended source leaves its independent tail alone.
+    mixer
+        .schedule_resume_with_settings(1, h, 1., 2., settings)
+        .unwrap();
+    assert_eq!(mixer.playback_info(1, h).unwrap().resume_delay_frames, 0);
+    let out = render(&mut mixer, 254);
+    near(out[62][0], 1.);
+    near(out[65][1], 0.25);
+    assert!(!mixer.is_playing(1, h));
+}

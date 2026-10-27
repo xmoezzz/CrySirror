@@ -394,3 +394,52 @@ fn shared_transport_inspection_scheduled_resume_and_native_channels_are_scoped()
     let audio = cx.singleton("Audio").unwrap();
     assert!(cx.call(audio, "playbackInfo", &[h]).is_err());
 }
+
+#[test]
+fn reflective_resume_policy_preserves_running_input_and_reports_transport_frames() {
+    let (_dir, mut app) = app();
+    let h = call(
+        &mut app,
+        "playSfx",
+        &[v(json!({"asset":"tone.wav","looping":true}))],
+    );
+    call(
+        &mut app,
+        "scheduleVoiceResumeWithOptions",
+        &[
+            h.clone(),
+            Value::Float(2.),
+            Value::Float(0.),
+            v(json!({"policy":"preserve"})),
+        ],
+    );
+    let pcm = output(&mut app, 1);
+    assert!(pcm.iter().flatten().all(|x| (*x - 0.5).abs() < 1e-6));
+    let i = call(&mut app, "playbackInfo", &[h.clone()]).to_json();
+    assert_eq!(i["transport_frames"], 48);
+    assert_eq!(i["age_frames"], 48);
+    assert_eq!(i["resume_delay_frames"], 48);
+    assert_eq!(i["stopping"], false);
+    assert_eq!(i["pausing"], false);
+    let cx = app.context();
+    let a = cx.singleton("Audio").unwrap();
+    assert!(
+        cx.call(
+            a,
+            "scheduleVoiceResumeWithOptions",
+            &[
+                h.clone(),
+                Value::Float(2.),
+                Value::Float(0.),
+                v(json!({"policy":"unknown"}))
+            ]
+        )
+        .is_err()
+    );
+    call(&mut app, "pauseVoice", &[h.clone(), Value::Bool(true)]);
+    output(&mut app, 1);
+    assert_eq!(
+        call(&mut app, "playbackInfo", &[h]).to_json()["transport_frames"],
+        48
+    );
+}

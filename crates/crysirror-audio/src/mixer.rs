@@ -7,7 +7,9 @@ use crate::decoder::{AudioSource, Clip, SourceBufferStatus, SourceRead, StereoFr
 use crate::envelope::Ramp;
 use crate::mix_groups::MixGroups;
 use anyhow::{Context, Result, bail, ensure};
-use crysirror_core::service::{AudioMixGroupInfo, AudioMixGroupSettings};
+use crysirror_core::service::{
+    AudioMixGroupInfo, AudioMixGroupSettings, AudioResumePolicy, AudioResumeSettings,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -370,6 +372,7 @@ impl Cursor {
 
 struct Voice {
     age_frames: u64,
+    transport_frames: u64,
     mix_group: Option<usize>,
     handle: VoiceHandle,
     spec: VoiceSpec,
@@ -382,8 +385,9 @@ struct Voice {
     gain: Ramp,
     pan: Ramp,
     stop_after_fade: bool,
+    stop_remaining: u64,
     pause_after_fade: bool,
-    resume_after: Option<(u64, u64)>,
+    resume_after: Option<ScheduledResume>,
     lowpass: StereoFrame,
     acoustic: Option<crysirror_acoustics::spectrum::BandFilter>,
     binaural: Option<crysirror_acoustics::binaural::BinauralVoice>,
@@ -393,6 +397,26 @@ struct Voice {
     source_ended: bool,
     tail_left: usize,
     tail_elapsed: usize,
+}
+struct ScheduledResume {
+    left: u64,
+    fade: u64,
+    settings: AudioResumeSettings,
+}
+fn resume_now(v: &mut Voice, fade: u64, settings: AudioResumeSettings) {
+    v.stop_after_fade = false;
+    v.stop_remaining = 0;
+    v.pause_after_fade = false;
+    v.spec.paused = false;
+    v.resume_after = None;
+    if settings.reset_gain {
+        v.gain = Ramp::new(if fade == 0 { v.spec.gain } else { 0. });
+        v.gain.to(v.spec.gain, fade);
+        v.envelope = Ramp::new(1.);
+    } else {
+        v.envelope = Ramp::new(if fade == 0 { 1. } else { 0. });
+        v.envelope.to(1., fade);
+    }
 }
 /// A seek publishes only once the exact decoded frame is available.
 #[derive(Clone, Debug, Serialize)]
@@ -408,16 +432,15 @@ pub struct SeekProgress {
 }
 // Transport deadlines use the output clock even when source PCM/preparation is
 // unavailable. Ordinary fade-in and source position remain frozen on starvation.
-fn silent_transport_tick(v: &mut Voice) -> bool {
+fn silent_transport_tick(v: &mut Voice) {
     if !v.stop_after_fade && !v.pause_after_fade {
-        return false;
+        return;
     }
     v.envelope.step();
     if v.pause_after_fade && v.envelope.left == 0 {
         v.spec.paused = true;
         v.pause_after_fade = false;
     }
-    v.stop_after_fade && v.envelope.left == 0 && v.envelope.value == 0.
 }
 fn constrain_tail(v: &mut Voice) {
     if v.source_ended {
@@ -892,6 +915,7 @@ impl Mixer {
         envelope.to(1., frames(spec.fade_in_ms, self.config.sample_rate));
         self.voices[slot] = Some(Voice {
             age_frames: 0,
+            transport_frames: 0,
             mix_group,
             handle,
             gain: Ramp::new(spec.gain),
@@ -904,6 +928,7 @@ impl Mixer {
             sequence,
             envelope,
             stop_after_fade: false,
+            stop_remaining: 0,
             pause_after_fade: false,
             resume_after: None,
             lowpass: [0.; 2],
@@ -1022,7 +1047,9 @@ impl Mixer {
             self.voices[h.slot as usize] = None
         } else {
             v.envelope.to(0., n);
-            v.stop_after_fade = true
+            v.stop_after_fade = true;
+            v.stop_remaining = n;
+            v.pause_after_fade = false;
         }
         Ok(())
     }
@@ -1397,7 +1424,7 @@ impl Mixer {
         }
         Ok(())
     }
-    /// Sample-clock scheduling. Delay and fade do not advance source position.
+    /// Freeze input for an output-clock delay, then run it with a fresh fade-in.
     pub fn schedule_resume(
         &mut self,
         client: u32,
@@ -1405,20 +1432,70 @@ impl Mixer {
         delay_ms: f32,
         fade_ms: f32,
     ) -> Result<()> {
+        self.schedule_resume_with_policy(client, h, delay_ms, fade_ms, AudioResumePolicy::Freeze)
+    }
+    /// Schedule a resume while optionally preserving the existing transport and
+    /// its pause/stop transition. Deadlines progress on the output sample clock.
+    pub fn schedule_resume_with_policy(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        delay_ms: f32,
+        fade_ms: f32,
+        policy: AudioResumePolicy,
+    ) -> Result<()> {
+        self.schedule_resume_with_settings(
+            client,
+            h,
+            delay_ms,
+            fade_ms,
+            AudioResumeSettings {
+                policy,
+                reset_gain: false,
+            },
+        )
+    }
+    /// Schedule transport with optional fresh gain-ramp ownership at the
+    /// deadline. The latest requested gain is read when the action executes.
+    pub fn schedule_resume_with_settings(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        delay_ms: f32,
+        fade_ms: f32,
+        settings: AudioResumeSettings,
+    ) -> Result<()> {
         duration(delay_ms)?;
         duration(fade_ms)?;
         let delay = frames(delay_ms, self.config.sample_rate);
         let fade = frames(fade_ms, self.config.sample_rate);
         let voice = self.voice(client, h)?;
-        voice.stop_after_fade = false;
-        voice.pause_after_fade = false;
-        voice.spec.paused = true;
-        voice.resume_after = Some((delay, fade));
-        if delay == 0 {
-            voice.spec.paused = false;
+        if voice.source_ended
+            || (!voice.spec.looping
+                && voice
+                    .cursor
+                    .source
+                    .frame_count()
+                    .is_some_and(|n| voice.position >= n as f64))
+        {
+            // A source action cannot restart a retained effect tail.
             voice.resume_after = None;
-            voice.envelope = Ramp::new(if fade == 0 { 1. } else { 0. });
-            voice.envelope.to(1., fade);
+            return Ok(());
+        }
+        if delay == 0 {
+            resume_now(voice, fade, settings);
+        } else {
+            if settings.policy == AudioResumePolicy::Freeze {
+                voice.stop_after_fade = false;
+                voice.stop_remaining = 0;
+                voice.pause_after_fade = false;
+                voice.spec.paused = true;
+            }
+            voice.resume_after = Some(ScheduledResume {
+                left: delay,
+                fade,
+                settings,
+            });
         }
         Ok(())
     }
@@ -1439,6 +1516,9 @@ impl Mixer {
         let voice = self.voices[h.slot as usize].as_ref().unwrap();
         Ok(crysirror_core::service::AudioPlaybackInfo {
             age_frames: voice.age_frames,
+            transport_frames: voice.transport_frames,
+            stopping: voice.stop_after_fade,
+            pausing: voice.pause_after_fade,
             source_playing: self.source_is_playing(client, h),
             paused: voice.spec.paused,
             looping: voice.spec.looping,
@@ -1446,12 +1526,14 @@ impl Mixer {
             source_rate: voice.cursor.source.sample_rate(),
             source_frames: voice.cursor.source.frame_count(),
             output_rate: self.config.sample_rate,
-            fade_out_frames: if voice.stop_after_fade || voice.pause_after_fade {
+            fade_out_frames: if voice.stop_after_fade {
+                voice.stop_remaining
+            } else if voice.pause_after_fade {
                 voice.envelope.left
             } else {
                 0
             },
-            resume_delay_frames: voice.resume_after.map_or(0, |s| s.0),
+            resume_delay_frames: voice.resume_after.as_ref().map_or(0, |s| s.left),
         })
     }
     pub fn pause_client(&mut self, client: u32, paused: bool) {
@@ -1727,7 +1809,9 @@ impl Mixer {
                     && !v.binaural_pending
                     && !v.reflection_pending
                     && !v.source_ended
-                    && v.resume_after.is_none()
+                    && v.resume_after
+                        .as_ref()
+                        .is_none_or(|r| r.settings.policy == AudioResumePolicy::Preserve)
                     && v.spec.gain > 0.
                     && c.level(Bus::Voice) > 0.
                     && self.groups.output(v.mix_group) > 0.
@@ -1756,18 +1840,21 @@ impl Mixer {
             for (slot, (effect, step)) in self.voices.iter_mut().zip(spatial.iter().zip(&rates)) {
                 let Some(v) = slot else { continue };
                 v.age_frames = v.age_frames.saturating_add(1);
-                if let Some((left, fade)) = &mut v.resume_after {
-                    let waiting = *left > 0;
-                    *left = left.saturating_sub(1);
-                    if *left == 0 {
-                        v.spec.paused = false;
-                        v.envelope = Ramp::new(if *fade == 0 { 1. } else { 0. });
-                        v.envelope.to(1., *fade);
-                        v.resume_after = None;
-                    }
-                    if waiting {
-                        continue;
-                    }
+                if v.resume_after
+                    .as_ref()
+                    .is_some_and(|r| r.settings.policy == AudioResumePolicy::Freeze)
+                {
+                    continue;
+                }
+                if !v.spec.paused
+                    && !v.source_ended
+                    && (v.spec.looping
+                        || v.cursor
+                            .source
+                            .frame_count()
+                            .is_none_or(|n| v.position < n as f64))
+                {
+                    v.transport_frames = v.transport_frames.saturating_add(1);
                 }
                 if v.spec.paused
                     || v.binaural_pending
@@ -1776,12 +1863,10 @@ impl Mixer {
                         .as_ref()
                         .is_some_and(|s| s.pending || s.error.is_some())
                 {
-                    if silent_transport_tick(v) {
-                        *slot = None;
-                    }
+                    silent_transport_tick(v);
                     continue;
                 }
-                if v.source_ended && v.tail_left == 0 {
+                if v.source_ended && v.tail_left == 0 && !v.stop_after_fade {
                     *slot = None;
                     continue;
                 }
@@ -1811,9 +1896,7 @@ impl Mixer {
                         SampleRead::Pending => {
                             self.stats.underrun_frames =
                                 self.stats.underrun_frames.saturating_add(1);
-                            if silent_transport_tick(v) {
-                                *slot = None;
-                            }
+                            silent_transport_tick(v);
                             continue;
                         }
                         SampleRead::End if v.spec.looping => {
@@ -1824,9 +1907,7 @@ impl Mixer {
                                 SampleRead::Pending => {
                                     self.stats.underrun_frames =
                                         self.stats.underrun_frames.saturating_add(1);
-                                    if silent_transport_tick(v) {
-                                        *slot = None;
-                                    }
+                                    silent_transport_tick(v);
                                     continue;
                                 }
                                 SampleRead::End => {
@@ -1836,12 +1917,13 @@ impl Mixer {
                             }
                         }
                         SampleRead::End => {
+                            v.resume_after = None;
                             let tail = v
                                 .binaural
                                 .as_ref()
                                 .map_or(0, |b| b.tail_frames())
                                 .max(v.reflections.as_ref().map_or(0, |r| r.tail_frames()));
-                            if tail > 0 {
+                            if tail > 0 || v.stop_after_fade {
                                 v.source_ended = true;
                                 v.tail_left = tail;
                                 [0.; 2]
@@ -1871,9 +1953,7 @@ impl Mixer {
                         SampleRead::Pending => {
                             self.stats.underrun_frames =
                                 self.stats.underrun_frames.saturating_add(1);
-                            if silent_transport_tick(v) {
-                                *slot = None;
-                            }
+                            silent_transport_tick(v);
                             continue;
                         }
                     }
@@ -1944,20 +2024,50 @@ impl Mixer {
                 } else {
                     v.position += step;
                 }
+                if !v.spec.looping
+                    && v.cursor
+                        .source
+                        .frame_count()
+                        .is_some_and(|n| v.position >= n as f64)
+                {
+                    v.resume_after = None;
+                }
                 if v.pause_after_fade && v.envelope.left == 0 {
                     v.spec.paused = true;
                     v.pause_after_fade = false;
                 }
-                if (v.stop_after_fade && v.envelope.left == 0 && v.envelope.value == 0.)
-                    || (v.binaural.is_none()
-                        && v.reflections.as_ref().is_none_or(|r| r.tail_frames() == 0)
-                        && !v.spec.looping
-                        && v.cursor
-                            .source
-                            .frame_count()
-                            .is_some_and(|n| v.position >= n as f64))
+                if !v.stop_after_fade
+                    && v.binaural.is_none()
+                    && v.reflections.as_ref().is_none_or(|r| r.tail_frames() == 0)
+                    && !v.spec.looping
+                    && v.cursor
+                        .source
+                        .frame_count()
+                        .is_some_and(|n| v.position >= n as f64)
                 {
                     *slot = None
+                }
+            }
+            // Apply deadlines after this output frame. Preserve mode consumes
+            // the last waiting frame using the old fade/paused state; both modes
+            // start resumed PCM on the next frame, including at chunk boundaries.
+            for slot in &mut self.voices {
+                let Some(v) = slot else { continue };
+                if v.stop_after_fade {
+                    v.stop_remaining = v.stop_remaining.saturating_sub(1);
+                    if v.stop_remaining == 0 {
+                        *slot = None;
+                        continue;
+                    }
+                }
+                let done = if let Some(r) = &mut v.resume_after {
+                    r.left = r.left.saturating_sub(1);
+                    (r.left == 0).then_some((r.fade, r.settings))
+                } else {
+                    None
+                };
+                if let Some((fade, settings)) = done {
+                    resume_now(v, fade, settings);
                 }
             }
             for c in self.clients.values_mut() {

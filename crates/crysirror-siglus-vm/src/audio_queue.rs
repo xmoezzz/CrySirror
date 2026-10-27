@@ -21,6 +21,10 @@ impl Queue {
         self.0.push((order, op));
         Ok(())
     }
+    // Only bounded category/slot queues are combined; serials retain cross-form order.
+    pub(crate) fn append(&mut self, other: Queue) {
+        self.0.extend(other.0);
+    }
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

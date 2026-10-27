@@ -495,6 +495,7 @@ impl SiglusVm {
             .unwrap_or_else(|| serde_json::json!({"vm":"original-siglus","booted":false}));
         value["audio_preparing"] = serde_json::json!(self.pending_audio.is_some());
         if let Some(vm) = &self.state.vm {
+            value["pcmch"] = vm.ctx.pcm.channels.inspect();
             value["koe"] = serde_json::json!({"number":vm.ctx.koe.current_no(),"compression_percent":vm.ctx.koe.rate(),"volume":vm.ctx.koe.volume_raw(),"cached":vm.ctx.koe.bindings.len(),"message_number":vm.ctx.globals.script.cur_koe_no,"message_character":vm.ctx.globals.script.cur_chr_no,"is_ex":vm.ctx.globals.sound_routing.koe_ex_flag});
             value["bgm"] = serde_json::json!({"name":vm.ctx.bgm.current_name(),"volume":vm.ctx.bgm.volume_raw(),"state":vm.ctx.bgm.check_state(),"looping":vm.ctx.bgm.save_loop_flag(),"paused":vm.ctx.bgm.save_pause_flag(),"delay_ms":vm.ctx.bgm.save_delay_time_ms(),"listened":vm.ctx.globals.bgm_table_flags});
         }
@@ -506,7 +507,7 @@ impl VmAdapter for SiglusVm {
         "siglus"
     }
     fn snapshot_schema(&self) -> u32 {
-        4
+        5
     }
     fn step(
         &mut self,

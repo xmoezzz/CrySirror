@@ -249,6 +249,8 @@ fn generate() -> api_doc::ApiDocs {
         d("AudioMixGroupInfo","Audio.mixGroup / nativeMixGroup / HostServices.audio_mix_group",None),
         d("AudioParameters","Rust HostServices/ChannelAudio playback parameters",None),
         d("PcmBus","AudioParameters.bus",None),
+        d("AudioResumeSettings","Rust AudioRequest::ResumeWithOptions / Mixer::schedule_resume_with_settings",None),
+        d("AudioResumePolicy","Rust AudioResumeSettings.policy / Mixer::schedule_resume_with_policy",None),
         d("AudioPlaybackInfo","Audio.playbackInfo / nativeChannelInfo / HostServices.audio_info",None),
         d("ReflectionTrackingSpec","Audio.trackVoiceReflections / playSfx.reflections",sample::<crysirror_acoustics::reflections::ReflectionTrackingSpec>(json!({}))),
         d("ReflectionOptions","Audio.beginVoiceReflections options / ReflectionQuery.options",sample::<crysirror_acoustics::reflections::ReflectionOptions>(json!({}))),
@@ -1050,4 +1052,11 @@ fn documented_text_input_methods_mutate_engine_owned_state_without_native_vm() {
     assert_eq!(ui.get(owner, 7).unwrap().text, "あ界");
     assert_eq!(ui.title, Some((owner, "engine UI".into())));
     assert_eq!(ui.cursor, Some((owner, false)));
+}
+
+#[test]
+fn audio_transport_keeps_existing_three_argument_typescript_calls_compatible() {
+    let ts = generate().typescript;
+    assert!(ts.contains("scheduleVoiceResume(handle: Record<string, any>, delay_ms: number, fade_ms: number): void;"));
+    assert!(ts.contains("scheduleVoiceResumeWithOptions(handle: Record<string, any>, delay_ms: number, fade_ms: number, options: Record<string, any>): void;"));
 }

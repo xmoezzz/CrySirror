@@ -88,6 +88,7 @@ fn paired_worker_pcm_and_published_transport_match_offline_samples() {
     .unwrap();
     assert!(a.is_rendering());
     assert_eq!(a.playback_info(1, h).unwrap().age_frames, 0);
+    assert_eq!(a.playback_info(1, h).unwrap().transport_frames, 0);
     assert!(a.set_gain(1, h, 1.).is_err());
     assert!(a.render(&mut [[0.; 2]; 1]).is_err());
     assert_eq!(a.stats().active, 1);
@@ -98,6 +99,7 @@ fn paired_worker_pcm_and_published_transport_match_offline_samples() {
     }
     assert!(!a.is_rendering());
     assert_eq!(a.playback_info(1, h).unwrap().age_frames, 1024);
+    assert_eq!(a.playback_info(1, h).unwrap().transport_frames, 1024);
     assert!(job.poll(&mut [&mut a, &mut b]).is_err());
 }
 #[test]

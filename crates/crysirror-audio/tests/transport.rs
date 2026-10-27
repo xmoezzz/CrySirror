@@ -267,6 +267,7 @@ fn stop_and_pause_deadlines_advance_on_starvation_while_source_and_initial_fade_
         }
         let info = m.playback_info(1, h).unwrap();
         assert_eq!(info.age_frames, 8);
+        assert_eq!(info.transport_frames, 8);
         assert_eq!(info.position_frames, 0);
         if mode == 2 {
             assert!(info.paused);
@@ -283,4 +284,228 @@ fn stop_and_pause_deadlines_advance_on_starvation_while_source_and_initial_fade_
             near(out[0][0], 1.);
         }
     }
+}
+
+#[test]
+fn preserving_resume_runs_the_existing_pause_fade_then_waits_without_consuming_input() {
+    use crysirror_core::service::AudioResumePolicy;
+    for delay in [1., 4.] {
+        let mut m = Mixer::new(MixerConfig {
+            sample_rate: 8000,
+            ..Default::default()
+        })
+        .unwrap();
+        let h = m
+            .play(
+                1,
+                decoder::open_pcm(PcmAudio::new(8000, vec![[1.; 2]; 128]).unwrap()),
+                VoiceSpec::default(),
+            )
+            .unwrap();
+        m.pause_fade(1, h, true, 2.).unwrap();
+        m.schedule_resume_with_policy(1, h, delay, 1., AudioResumePolicy::Preserve)
+            .unwrap();
+        let n = (delay * 8.) as usize;
+        let out = render(&mut m, n);
+        for (i, sample) in out.iter().enumerate() {
+            near(sample[0], if i < 16 { 1. - i as f32 / 16. } else { 0. });
+        }
+        let info = m.playback_info(1, h).unwrap();
+        assert_eq!(info.age_frames, n as u64);
+        assert_eq!(info.transport_frames, n.min(16) as u64);
+        assert_eq!(info.position_frames, n.min(16) as u64);
+        assert!(!info.paused && !info.pausing && !info.stopping);
+        assert_eq!(info.resume_delay_frames, 0);
+        let out = render(&mut m, 8);
+        for (i, sample) in out.iter().enumerate() {
+            near(sample[0], i as f32 / 8.);
+        }
+        assert_eq!(
+            m.playback_info(1, h).unwrap().transport_frames,
+            (n.min(16) + 8) as u64
+        );
+        m.pause(1, h, true).unwrap();
+        render(&mut m, 8);
+        assert_eq!(
+            m.playback_info(1, h).unwrap().transport_frames,
+            (n.min(16) + 8) as u64
+        );
+        m.schedule_resume(1, h, 1., 0.).unwrap();
+        render(&mut m, 8);
+        assert_eq!(
+            m.playback_info(1, h).unwrap().transport_frames,
+            (n.min(16) + 8) as u64
+        );
+        near(render(&mut m, 1)[0][0], 1.);
+    }
+}
+
+#[test]
+fn source_eof_does_not_shorten_stop_completion_and_never_replays_a_delayed_resume() {
+    use crysirror_core::service::AudioResumePolicy;
+    for known in [true, false] {
+        struct Short {
+            left: usize,
+            known: bool,
+        }
+        impl decoder::AudioSource for Short {
+            fn sample_rate(&self) -> u32 {
+                8000
+            }
+            fn frame_count(&self) -> Option<u64> {
+                self.known.then_some(4)
+            }
+            fn read(&mut self, out: &mut [[f32; 2]]) -> anyhow::Result<usize> {
+                let n = out.len().min(self.left);
+                out[..n].fill([1.; 2]);
+                self.left -= n;
+                Ok(n)
+            }
+            fn seek(&mut self, frame: u64) -> anyhow::Result<()> {
+                self.left = 4usize.saturating_sub(frame as usize);
+                Ok(())
+            }
+        }
+        let mut m = Mixer::new(MixerConfig {
+            sample_rate: 8000,
+            ..Default::default()
+        })
+        .unwrap();
+        let h = m
+            .play(1, Box::new(Short { left: 4, known }), VoiceSpec::default())
+            .unwrap();
+        m.stop(1, h, 2.).unwrap();
+        let out = render(&mut m, 8);
+        assert!(out[..4].iter().flatten().any(|x| *x > 0.));
+        assert!(out[4..].iter().flatten().all(|x| *x == 0.));
+        let info = m.playback_info(1, h).unwrap();
+        assert!(!info.source_playing && info.stopping);
+        assert_eq!(info.fade_out_frames, 8);
+        assert!(info.transport_frames <= 5); // Unknown EOF is observed on the next probe.
+        assert!(render(&mut m, 8).iter().flatten().all(|x| *x == 0.));
+        assert!(!m.is_playing(1, h));
+        let h = m
+            .play(
+                1,
+                decoder::open_pcm(PcmAudio::new(8000, vec![[1.; 2]; 4]).unwrap()),
+                VoiceSpec::default(),
+            )
+            .unwrap();
+        m.schedule_resume_with_policy(1, h, 2., 0., AudioResumePolicy::Preserve)
+            .unwrap();
+        render(&mut m, 16);
+        assert!(!m.is_playing(1, h));
+    }
+}
+
+#[test]
+fn policy_request_preserves_client_scope_and_old_resume_still_freezes() {
+    use crysirror_core::service::AudioResumePolicy;
+    let mut a = ChannelAudio::default();
+    a.submit(
+        1,
+        AudioRequest::PlayPcm {
+            channel: 4,
+            source: PcmAudio::new(48000, vec![[0.5; 2]; 1000]).unwrap(),
+            parameters: AudioParameters::default(),
+        },
+    )
+    .unwrap();
+    a.submit(
+        1,
+        AudioRequest::ResumeWithOptions {
+            channel: 4,
+            delay_ms: 1.,
+            fade_ms: 0.,
+            settings: crysirror_core::service::AudioResumeSettings {
+                policy: AudioResumePolicy::Preserve,
+                reset_gain: false,
+            },
+        },
+    )
+    .unwrap();
+    a.render(1).unwrap();
+    assert!(a.take_output().iter().flatten().all(|x| *x == 0.5));
+    assert_eq!(a.playback_info(1, 4).unwrap().unwrap().transport_frames, 48);
+    assert!(a.playback_info(2, 4).unwrap().is_none());
+    a.submit(
+        1,
+        AudioRequest::Resume {
+            channel: 4,
+            delay_ms: 1.,
+            fade_ms: 0.,
+        },
+    )
+    .unwrap();
+    a.render(1).unwrap();
+    assert!(a.take_output().iter().flatten().all(|x| *x == 0.));
+    assert_eq!(a.playback_info(1, 4).unwrap().unwrap().transport_frames, 48);
+}
+
+#[test]
+fn stop_deadline_is_independent_of_a_later_shorter_or_longer_pause_envelope() {
+    for pause_ms in [0., 1., 4.] {
+        let mut m = Mixer::new(MixerConfig {
+            sample_rate: 8000,
+            ..Default::default()
+        })
+        .unwrap();
+        let h = m
+            .play(
+                1,
+                decoder::open_pcm(PcmAudio::new(8000, vec![[1.; 2]; 128]).unwrap()),
+                VoiceSpec::default(),
+            )
+            .unwrap();
+        m.stop(1, h, 2.).unwrap();
+        m.pause_fade(1, h, true, pause_ms).unwrap();
+        render(&mut m, 8);
+        let i = m.playback_info(1, h).unwrap();
+        assert!(i.stopping);
+        assert_eq!(i.fade_out_frames, 8);
+        if pause_ms <= 1. {
+            assert!(i.paused);
+        }
+        render(&mut m, 8);
+        assert!(!m.is_playing(1, h));
+    }
+}
+
+#[test]
+fn resume_settings_reset_gain_at_deadline_using_latest_target_instead_of_multiplying_old_ramp() {
+    use crysirror_core::service::{AudioResumePolicy, AudioResumeSettings};
+    let mut m = Mixer::new(MixerConfig {
+        sample_rate: 8000,
+        ..Default::default()
+    })
+    .unwrap();
+    let h = m
+        .play(
+            1,
+            decoder::open_pcm(PcmAudio::new(8000, vec![[1.; 2]; 128]).unwrap()),
+            VoiceSpec {
+                paused: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    m.fade_gain(1, h, 0.5, 100.).unwrap();
+    m.schedule_resume_with_settings(
+        1,
+        h,
+        1.,
+        1.,
+        AudioResumeSettings {
+            policy: AudioResumePolicy::Preserve,
+            reset_gain: true,
+        },
+    )
+    .unwrap();
+    m.fade_gain(1, h, 0.75, 200.).unwrap();
+    assert!(render(&mut m, 8).iter().flatten().all(|x| *x == 0.));
+    let out = render(&mut m, 8);
+    for (i, s) in out.iter().enumerate() {
+        near(s[0], 0.75 * i as f32 / 8.);
+    }
+    near(render(&mut m, 1)[0][0], 0.75);
 }

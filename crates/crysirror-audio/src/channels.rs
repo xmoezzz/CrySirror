@@ -458,6 +458,21 @@ impl ChannelAudio {
                     self.mixer.schedule_resume(client, h, delay_ms, fade_ms)?;
                 }
             }
+            AudioRequest::ResumeWithOptions {
+                channel,
+                delay_ms,
+                fade_ms,
+                settings,
+            } => {
+                if let Some(&h) = self
+                    .voices
+                    .get(&(client, channel))
+                    .filter(|h| self.mixer.is_playing(client, **h))
+                {
+                    self.mixer
+                        .schedule_resume_with_settings(client, h, delay_ms, fade_ms, settings)?;
+                }
+            }
             AudioRequest::SetGain {
                 channel,
                 gain,

@@ -4,6 +4,35 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `0d9cec36638123d1` (2026-10-27): running audio transport and original PCMCH
+
+- Add Audio.scheduleVoiceResumeWithOptions with a fourth options map.
+  Existing three-argument scheduleVoiceResume retains its signature/freeze policy.
+  "freeze" freezes immediately; "preserve" continues the prior
+  running/paused/fading state until the output-clock deadline. Unknown strings
+  fail without changing the voice. Rust users have AudioResumePolicy and
+  AudioRequest::ResumeWithOptions / Mixer::schedule_resume_with_settings.
+  reset_gain:true rebuilds the gain fade toward the latest target at the deadline;
+  default false retains the independent gain ramp and fades transport.
+- AudioPlaybackInfo adds transport_frames, stopping and pausing. Running input
+  intent counts through decoder/seek/effect dependency holds, while fully paused
+  input, freezing delays and effect tails do not count. Publication age and
+  decoded source position retain their existing meanings.
+- **Behavior change:** a stop fade retains its completion/voice lease through
+  short-source EOF, independently of a later pause envelope. Audio.voice.playing
+  includes pending stop completion;
+  source_playing excludes it. Fades still consume ordinary voice/duration budgets.
+  Update consumers that previously treated any live voice as live source input.
+- Input EOF cancels pending resumes even while HRTF/echo tails remain. Scheduling
+  on an already-ended source leaves its independent tail alone. Rust exhaustive
+  AudioRequest matches and AudioPlaybackInfo literals must handle the new variant
+  and fields.
+- Original Siglus PCMCH now translates sources, channel controls, waits and
+  save semantics onto shared APIs. **Breaking for runtime snapshots:** adapter
+  payload schema advances 4 -> 5 without migration. Original file codecs/layouts
+  stay unchanged; empty slot volume is corrected from the false 1000 to native
+  255. Native routing/discovery/PCMEVENT remain bounded or unsupported. See ADR 0083.
+
 ## `e73bda1334c12a7f` (2026-10-27): moving acoustic instances and World bindings
 
 - Add Audio.beginUpdateAcousticScene / updateAcousticsAsync with atomic

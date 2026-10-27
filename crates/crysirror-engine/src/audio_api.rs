@@ -160,7 +160,7 @@ pub(crate) fn prepare(cx: &mut EngineContext, dt_ms: u64) -> Result<usize> {
     sync_generation(cx.state()?);
     crate::audio_async::poll(cx.state()?)?;
     crate::acoustics_api::poll(cx.state()?)?;
-    crate::acoustics_api::update_instances(cx.state()?,dt_ms)?;
+    crate::acoustics_api::update_instances(cx.state()?, dt_ms)?;
     crate::binaural_api::poll(cx.state()?)?;
     crate::reverb_api::poll(cx.state()?)?;
     crate::reflections_api::poll(cx.state()?)?;
@@ -377,15 +377,16 @@ fn method(
 }
 fn playback_json(info: crysirror_core::service::AudioPlaybackInfo) -> Value {
     Value::from_json(
-        serde_json::json!({"age_frames":info.age_frames,"source_playing":info.source_playing,"paused":info.paused,"looping":info.looping,"position_frames":info.position_frames,"source_rate":info.source_rate,"source_frames":info.source_frames,"output_rate":info.output_rate,"fade_out_frames":info.fade_out_frames,"resume_delay_frames":info.resume_delay_frames}),
+        serde_json::json!({"age_frames":info.age_frames,"transport_frames":info.transport_frames,"stopping":info.stopping,"pausing":info.pausing,"source_playing":info.source_playing,"paused":info.paused,"looping":info.looping,"position_frames":info.position_frames,"source_rate":info.source_rate,"source_frames":info.source_frames,"output_rate":info.output_rate,"fade_out_frames":info.fade_out_frames,"resume_delay_frames":info.resume_delay_frames}),
     )
 }
 fn info() -> &'static ClassInfo {
     static INFO: OnceLock<ClassInfo> = OnceLock::new();
     INFO.get_or_init(||ClassInfo{name:"Audio",doc:"Scoped voice pool, streaming music and deterministic CPU mixing; classic channels share this output.",properties:vec![PropertyInfo{name:"sampleRate",ty:T::Int,writable:false,doc:"Mixer output frames per second."},PropertyInfo{name:"rendering",ty:T::Bool,writable:false,doc:"A prepared or running audio frame awaits owner publication; playback queries retain the previous published state and controls require completion."}],methods:vec![
         method("nativeChannelInfo",vec![("channel",T::Int)],T::Any,"Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails."),
-        method("playbackInfo",vec![("handle",T::Map)],T::Map,"Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, paused/loop state and output-clock fade-out/resume-delay counters."),
+        method("playbackInfo",vec![("handle",T::Map)],T::Map,"Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters."),
         method("scheduleVoiceResume",vec![("handle",T::Map),("delay_ms",T::Number),("fade_ms",T::Number)],T::Void,"Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness."),
+        method("scheduleVoiceResumeWithOptions",vec![("handle",T::Map),("delay_ms",T::Number),("fade_ms",T::Number),("options",T::Map)],T::Void,"Resume after an output-clock delay. Options policy:freeze (default) or preserve continues the prior input/pause fade until the deadline. reset_gain:true restarts a gain fade from zero to the latest target instead of fading transport; default false preserves an independent gain ramp. Later pause/stop/resume replaces it; EOF cancels it. Readiness is independent."),
         method("channelStatus",vec![("channel",T::Int)],T::Map,"Desired SceneState epoch and derived queued/loading/playing/paused/ended/failed readiness, position and error. Stopped declarations take precedence; frame synchronization prepares/publishes playback."),
         method("play",vec![("channel",T::Int),("voice",T::Map)],T::Void,"Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics."),
         method("stop",vec![("channel",T::Int)],T::Void,"Stop a classic channel."),
@@ -440,7 +441,7 @@ fn info() -> &'static ClassInfo {
         method("pauseVoice",vec![("handle",T::Map),("paused",T::Bool)],T::Void,"Pause without advancing the source or fade clock."),
         method("seekVoice",vec![("handle",T::Map),("frame",T::Int)],T::Void,"Synchronous exact seek. Worker-buffered streams require beginSeekVoice/seekVoiceAsync."),
         method("setVoice",vec![("handle",T::Map),("options",T::Map)],T::Void,"Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed."),
-        method("voice",vec![("handle",T::Map)],T::Map,"{playing,source_playing,position_seconds?}; playing includes effect tails, source_playing excludes them. Stale/stolen/ended handles are inactive."),
+        method("voice",vec![("handle",T::Map)],T::Map,"{playing,source_playing,position_seconds?}; playing includes pending stop completion and effect tails; source_playing excludes both. Stale/stolen/ended handles are inactive."),
         method("setMixGroup",vec![("name",T::String),("settings",T::Map),("fade_ms",T::Optional(Box::new(T::Number)))],T::Void,"Create/update a client logical gain group in pooled and native/media mixers after validating both. Partial settings: parent?:string|null, gain?:0..4, muted?:boolean; new defaults parent=null,gain=1,muted=false. Parent must exist in both namespaces; cycles/depth>8/budgets fail atomically. Fade uses each output clock, including silence/paused sources. This is gain control, not an effect submix."),
         method("mixGroup",vec![("name",T::String)],T::Any,"Pooled AudioMixGroupInfo for the next output frame, or null. Controls multiply voice gain and ancestors before bus/master and reverb sends. Host controls persist through playback clear/restore; DSP history is not saved."),
         method("nativeMixGroup",vec![("name",T::String)],T::Any,"Native/media mixer AudioMixGroupInfo or null. Native adapters may define scoped groups independently of pooled voices."),
@@ -473,7 +474,7 @@ fn handle(cx: &mut EngineContext, args: &[Value]) -> Result<VoiceHandle> {
     Ok(h)
 }
 fn entity(cx: &mut EngineContext, value: &Value) -> Result<EntityHandle> {
-    crate::builtin::handle(cx,value.as_object()?)
+    crate::builtin::handle(cx, value.as_object()?)
 }
 pub(crate) fn voice_options(
     cx: &mut EngineContext,
@@ -705,14 +706,40 @@ impl Class for AudioClass {
                     cx.state()?.mixer_audio.mixer.playback_info(client, h)?,
                 ));
             }
-            "scheduleVoiceResume" => {
+            "scheduleVoiceResume" | "scheduleVoiceResumeWithOptions" => {
                 let h = handle(cx, args)?;
-                cx.state()?.mixer_audio.mixer.schedule_resume(
-                    client,
-                    h,
-                    arg(args, 1, "delay")?.as_f32()?,
-                    arg(args, 2, "fade")?.as_f32()?,
-                )?;
+                let settings = if name == "scheduleVoiceResume" {
+                    crysirror_core::service::AudioResumeSettings::default()
+                } else {
+                    #[derive(Deserialize)]
+                    #[serde(deny_unknown_fields)]
+                    struct Options {
+                        #[serde(default)]
+                        policy: Option<String>,
+                        #[serde(default)]
+                        reset_gain: bool,
+                    }
+                    let o: Options = serde_json::from_value(arg(args, 3, "options")?.to_json())?;
+                    let policy = match o.policy.as_deref().unwrap_or("freeze") {
+                        "freeze" => crysirror_core::service::AudioResumePolicy::Freeze,
+                        "preserve" => crysirror_core::service::AudioResumePolicy::Preserve,
+                        _ => bail!("audio resume policy must be freeze or preserve"),
+                    };
+                    crysirror_core::service::AudioResumeSettings {
+                        policy,
+                        reset_gain: o.reset_gain,
+                    }
+                };
+                cx.state()?
+                    .mixer_audio
+                    .mixer
+                    .schedule_resume_with_settings(
+                        client,
+                        h,
+                        arg(args, 1, "delay")?.as_f32()?,
+                        arg(args, 2, "fade")?.as_f32()?,
+                        settings,
+                    )?;
             }
             "channelStatus" => {
                 let channel = u32::try_from(arg(args, 0, "channel")?.as_i64()?)?;

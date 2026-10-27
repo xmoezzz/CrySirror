@@ -325,7 +325,11 @@ fn audio_promises_prepare_play_seek_release_and_preserve_shared_mixer_handles() 
         if(!audio.voice(voice).playing)throw Error('SFX not published');
         const transport=audio.playbackInfo(voice);
         if(transport.source_rate!==8000 || transport.source_frames!==16000)throw Error('bad source transport units');
-        audio.scheduleVoiceResume(voice,2,1);
+        if(transport.transport_frames!==0 || transport.stopping || transport.pausing)throw Error('bad initial transport state');
+        audio.scheduleVoiceResumeWithOptions(voice,2,1,{policy:'preserve',reset_gain:true});
+        if(audio.playbackInfo(voice).paused)throw Error('preserve froze input');
+        let badPolicy=false;try{audio.scheduleVoiceResumeWithOptions(voice,2,1,{policy:'unknown'});}catch(e){badPolicy=true;}
+        if(!badPolicy)throw Error('unknown resume policy accepted');
         if(audio.playbackInfo(voice).resume_delay_frames!==96)throw Error('bad output clock delay');
         audio.pauseVoice(voice,false);
         audio.clearSfxCache();if(!audio.voice(voice).playing)throw Error('cache clear stopped live PCM');

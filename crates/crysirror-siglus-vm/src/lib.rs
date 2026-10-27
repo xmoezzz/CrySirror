@@ -46,4 +46,5 @@ mod bgm_bridge;
 
 mod audio_queue;
 mod koe_bridge;
+mod pcmch_bridge;
 mod sfx_bridge;

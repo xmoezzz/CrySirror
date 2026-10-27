@@ -1,0 +1,63 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "upstream_license": "MPL-2.0",
+  "scope": "PCMCH semantic arguments, sources, waits and original sound save/restore; default native routing only",
+  "implementation": "Thin original VM adapter uses shared prepared resources, channels, output transport clocks, sample envelopes and delayed actions; no original SFX/player/decoder/timer/path engine copied or linked.",
+  "prior_audits": [
+    "siglus-bgm-source-audit.json",
+    "siglus-sfx-source-audit.json",
+    "siglus-koe-source-audit.json"
+  ],
+  "limits": "Declared PCMCH.CNT default16/max256; explicit resource aliases; shared channel budgets may reject admission. Pinned original backend has global plus16 PCMCH slots; this adapter honors declared list size. Nondefault character/system/category/BGM-duck routes fail visibly.",
+  "files": [
+    {
+      "path": "crates/siglus_scene_vm/src/audio/sfx_engine.rs",
+      "sha256": "48d732ae36d1e5876cd71d4e52b9dd578d4a311adff18fe05dcef9b8e376deea",
+      "bytes": 45457,
+      "review": "Complete original slot/control/transport implementation, including 17-slot PcmEngine and integer-ms EOF; prior ADR 0078 source review.",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/pcmch.rs",
+      "sha256": "3b9adac29ce1bcad4bdfa9df641eae6c550471c2342b1fd7e102f20542eb583d",
+      "bytes": 21263,
+      "review": "Complete source: argument IDs, source priority, restore order, waits and unsupported fallback.",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/syscom.rs",
+      "sha256": "9a6eab7ce406cacdbd649018e549b1a5e1be9d432063d06296d14bf60dab0445",
+      "bytes": 247483,
+      "review": "Complete selected pcmch_routed_volume, mul_raw, chrkoe_route and update_audio_routing functions; nondefault routing excluded visibly.",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/wait.rs",
+      "sha256": "75aae7791c1683e9f5fb22f3b0d377a957efe18ebdc72febdef94e1f14fbe9f3",
+      "bytes": 72576,
+      "review": "Complete selected audio wait predicates and DECIDE down/up return path; prior audio source audits.",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/codes.rs",
+      "sha256": "95c3edb1a8884bcbfb94cc876ae79dab1cc2a6485ffaa4db4bbb5b31437f5f70",
+      "bytes": 235093,
+      "review": "PCMCH form/opcode constants.",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/vm.rs",
+      "sha256": "e0bbd6546ef6e1375c36ceadbd321ce8f7af8d180c61f011ef28da60e2db8d62",
+      "bytes": 610381,
+      "review": "Complete selected original_pcmch_count, write_cpp_pcmch/read_cpp_pcmch and sound save/load functions.",
+      "existing_reference_matches_pin": true,
+      "copied_into_bridge": false
+    }
+  ]
+}

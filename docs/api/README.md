@@ -436,3 +436,34 @@ audits and remaining deformation/prototype/refit/age-policy limitations.
 The device-free worker demo exports authored closed/open/closed audio and checks
 corresponding echo visibility: `cargo run --release -p crysirror-audio --example
 moving_acoustic_door -- /tmp/moving-door.wav`.
+
+
+### Running transport and resume policy
+
+```ts
+audio.scheduleVoiceResumeWithOptions(voice, 200, 30, {policy: "preserve", reset_gain: true});
+const state = audio.playbackInfo(voice);
+// transport_frames counts running input intent, excluding fully paused input.
+// stopping/pausing distinguish the two fade completion policies.
+```
+
+Existing three-argument scheduleVoiceResume calls retain freezing behavior.
+WithOptions takes policy:"freeze" (default) or "preserve". "preserve" continues
+the prior transport/pause fade until the output-clock deadline. Input EOF cancels
+the action even while effects drain; scheduling on ended input leaves tails alone. Both policies resume PCM on the next
+frame after the last waiting frame. Pause/stop/resume replaces an old schedule.
+Decoder starvation/seek/effect preparation count running intent but do not advance
+decoded position; fully paused/delayed input and effect tails do not count.
+
+Stop completion can retain a silent voice after input EOF until fade_out_frames
+reaches zero. A later pause fade does not change that stop deadline.
+Audio.voice.playing includes that state; source_playing stays false.
+Existing voice and 600000 ms duration budgets apply. All inspection stays frozen
+at the previous publication while a final DSP worker frame runs. Rust clients
+use AudioResumeSettings and AudioRequest::ResumeWithOptions. reset_gain:true
+restarts the gain ramp from zero to its latest requested target at the deadline;
+false preserves the gain ramp and applies the fade to transport. Unknown options
+fail. See ADR 0083.
+
+The independent authored release demo validates every PCM sample and exports a
+stereo WAVE: `cargo run --release -p crysirror-audio --example transport_timeline -- /tmp/transport.wav`.

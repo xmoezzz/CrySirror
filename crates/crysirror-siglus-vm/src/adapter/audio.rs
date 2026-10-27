@@ -91,6 +91,13 @@ impl SiglusVm {
                     .map_err(err)?,
             )?;
         }
+        for ch in vm.ctx.pcm.channels.active() {
+            vm.ctx.pcm.channels.sync(
+                ch,
+                host.audio_info(client, crate::pcmch_bridge::channel(ch))
+                    .map_err(err)?,
+            )?;
+        }
         if vm.ctx.se.has_source() {
             vm.ctx.se.sync(
                 host.audio_info(client, crate::sfx_bridge::SE_CHANNEL)
@@ -447,6 +454,30 @@ impl SiglusVm {
                     });
                 }
 
+                Operation::Channel {
+                    channel,
+                    key,
+                    parameters,
+                } => {
+                    let asset = self.state.config.resources.get(&key).with_context(|| {
+                        format!("Siglus PCMCH requires config.resources alias for {key:?}")
+                    })?;
+                    let ticket = host
+                        .begin_audio_resource(
+                            client,
+                            AudioAsset {
+                                path: VfsPath::new(Mount::Asset, asset).map_err(err)?,
+                                frame_limit: None,
+                            },
+                            true,
+                        )
+                        .map_err(err)?;
+                    pending.ticket = Some(Stage::NativeResource {
+                        ticket,
+                        channel,
+                        parameters,
+                    });
+                }
                 Operation::Control(request) => {
                     host.submit_audio(client, request).map_err(err)?;
                     if pending.after.ctx.bgm.current.is_some()

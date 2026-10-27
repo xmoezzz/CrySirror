@@ -21,10 +21,12 @@ declare class Audio {
   readonly rendering: boolean;
   /** Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails. */
   nativeChannelInfo(channel: number): any;
-  /** Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, paused/loop state and output-clock fade-out/resume-delay counters. */
+  /** Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters. */
   playbackInfo(handle: Record<string, any>): Record<string, any>;
   /** Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness. */
   scheduleVoiceResume(handle: Record<string, any>, delay_ms: number, fade_ms: number): void;
+  /** Resume after an output-clock delay. Options policy:freeze (default) or preserve continues the prior input/pause fade until the deadline. reset_gain:true restarts a gain fade from zero to the latest target instead of fading transport; default false preserves an independent gain ramp. Later pause/stop/resume replaces it; EOF cancels it. Readiness is independent. */
+  scheduleVoiceResumeWithOptions(handle: Record<string, any>, delay_ms: number, fade_ms: number, options: Record<string, any>): void;
   /** Desired SceneState epoch and derived queued/loading/playing/paused/ended/failed readiness, position and error. Stopped declarations take precedence; frame synchronization prepares/publishes playback. */
   channelStatus(channel: number): Record<string, any>;
   /** Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics. */
@@ -133,7 +135,7 @@ declare class Audio {
   seekVoice(handle: Record<string, any>, frame: number): void;
   /** Update {gain?,pan?:0..1,fade_ms?,rate?,pitch_semitones?,paused?,spatial?}. Fade applies to gain/pan. Pitch/rate change resampling speed. */
   setVoice(handle: Record<string, any>, options: Record<string, any>): void;
-  /** {playing,source_playing,position_seconds?}; playing includes effect tails, source_playing excludes them. Stale/stolen/ended handles are inactive. */
+  /** {playing,source_playing,position_seconds?}; playing includes pending stop completion and effect tails; source_playing excludes both. Stale/stolen/ended handles are inactive. */
   voice(handle: Record<string, any>): Record<string, any>;
   /** Create/update a client logical gain group in pooled and native/media mixers after validating both. Partial settings: parent?:string|null, gain?:0..4, muted?:boolean; new defaults parent=null,gain=1,muted=false. Parent must exist in both namespaces; cycles/depth>8/budgets fail atomically. Fade uses each output clock, including silence/paused sources. This is gain control, not an effect submix. */
   setMixGroup(name: string, settings: Record<string, any>, fade_ms: number | null): void;

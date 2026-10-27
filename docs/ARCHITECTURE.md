@@ -426,3 +426,16 @@ changes scene_generation; pose-only commits change revision. Automatic direct/
 tracked echo work may publish a completed older pose revision and then refresh,
 with geometry_stale/age visible. Whole-scene and HRTF-latency changes retain
 strict invalidation. See ADR 0082 for limits and remaining deformation/refit work.
+
+
+## Shared transport and PCMCH (ADR 0083)
+
+AudioPlaybackInfo separates publication age, running transport frames and decoded
+position. Delayed resume can freeze input immediately or preserve its current
+pause fade until the deadline. Stop completion remains observable after input
+EOF, separate from source and processing tails. All counters/envelopes/scheduled
+actions execute in the shared mixer and its worker frame publication boundary.
+Original Siglus PCMCH uses scoped prepared resources and channels 4+index; native
+code retains only cue/volume/mode/wait/save policy. Runtime payload schema is 5;
+original file codecs/layouts retain their native contract. See ADR 0083 for
+explicit routing, timing, restore and channel-budget limits.

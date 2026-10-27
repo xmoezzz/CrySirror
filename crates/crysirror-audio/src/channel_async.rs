@@ -373,6 +373,7 @@ impl ChannelAudio {
             }
             AudioRequest::Pause { channel, .. }
             | AudioRequest::Resume { channel, .. }
+            | AudioRequest::ResumeWithOptions { channel, .. }
             | AudioRequest::SetGain { channel, .. }
             | AudioRequest::SetPan { channel, .. }
             | AudioRequest::SetLooped { channel, .. } => (*channel, false),
