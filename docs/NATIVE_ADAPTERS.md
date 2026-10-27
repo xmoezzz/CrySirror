@@ -212,9 +212,11 @@ An explicit resources alias maps each native music file to a client engine asset
 Optional decoded UTF-8 Gameexe BGM rows supply start/end/repeat frames, bounded
 at 4096 entries. Discovery/append dirs, encrypted Gameexe and native pack-entry
 selection are not inferred. Unsupported opcodes/property fallbacks fail visibly.
-PCM/PCMCH/SE/voice are not integrated by this phase. RESUME after EOF/stop
-also fails visibly until an engine-owned retained-source resource can preserve
-the native bytes; reopening an asset path is not treated as equivalent replay.
+PCM/PCMCH/SE/voice are not integrated by this phase. ADR 0077 adds immutable
+CrySirror resource handles: native PLAY/READY commits after resource and voice
+preparation; RESUME after EOF/stop replays the retained resource without reopening
+its original path. Stopped runtime snapshots reconstruct resources without hidden
+playback. Handles are ephemeral; rebuilding a snapshot still needs the assets.
 
 Runtime Siglus payload schema is 2. Pending checkpoints replay uncommitted native
 commands; active restores reprepare declarations at authored start. Original file

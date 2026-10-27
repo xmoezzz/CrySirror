@@ -394,6 +394,12 @@ fn info() -> &'static ClassInfo {
         method("clearAcousticScene",vec![],T::Void,"Remove this client's scene and pending build, and disable acoustic processing on its active voices. Explicit probes retain their captured scene."),
         method("acousticStats",vec![],T::Map,"Client scene/revision/backend, source queue counts and host geometry reservations. Scene reservations are conservative, not an allocator/VRAM measurement."),
         method("acousticVoice",vec![("handle",T::Map)],T::Map,"Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy."),
+        method("beginPrepareSource",vec![("asset",T::String),("options",T::Optional(Box::new(T::Map)))],T::Int,"Snapshot a client asset and probe its decoder on bounded workers. Options: measure_frames=false (scan when the header has no count), frame_limit. At most 128 MiB encoded per resource; bounded host bytes and handles. sourcePreparation publishes an immutable resource handle, without playback."),
+        method("sourcePreparation",vec![("ticket",T::Int)],T::Map,"Client/restore-scoped pending/ready/failed preparation; ready result has resource:{client,id} and AudioResourceInfo. Release the receipt separately from its resource."),
+        method("cancelSourcePreparation",vec![("ticket",T::Int)],T::Void,"Cancel/release preparation without publishing an unobserved result. Already published resources remain retained until releaseSource or restore."),
+        method("sourceInfo",vec![("resource",T::Map)],T::Map,"Read a live client's immutable AudioResourceInfo. Released/foreign/obsolete handles fail."),
+        method("releaseSource",vec![("resource",T::Map)],T::Void,"Invalidate future lookups. Admitted playback and existing independent decoder leases retain encoded bytes until their actual last owner drops. Handles are not save data."),
+        method("beginPlaySource",vec![("resource",T::Map),("voice",T::Map)],T::Int,"Prepare an independent buffered decoder on workers from an immutable resource, without reopening VFS. VoiceSpec and spatial/acoustic/HRTF/reflection options match beginPlaySfx, excluding asset. playbackStatus returns result.handle."),
         method("beginPlaySfx",vec![("voice",T::Map)],T::Int,"Prepare SFX on bounded workers and publish a shared mixer voice; playbackStatus returns result.handle."),
         method("beginPreloadSfx",vec![("asset",T::String)],T::Int,"Decode and cache SFX on workers without starting a voice."),
         method("beginPlayMusic",vec![("name",T::String),("voice",T::Map),("crossfade_ms",T::Number)],T::Int,"Open and prewarm bounded streaming music on workers; old music fades only after successful publication."),
@@ -610,6 +616,9 @@ impl Class for AudioClass {
         args: &[Value],
     ) -> Result<Value> {
         sync_generation(cx.state()?);
+        if let Some(result) = crate::audio_resources_api::call(cx, name, args)? {
+            return Ok(result);
+        }
         if let Some(result) = crate::audio_async::call(cx, name, args)? {
             return Ok(result);
         }

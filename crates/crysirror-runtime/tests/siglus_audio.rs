@@ -350,14 +350,6 @@ fn unknown_audio_opcode_fails_instead_of_becoming_a_fake_property() {
     .unwrap();
     let error = format!("{:#}", r.tick(0, InputFrame::default()).unwrap_err());
     assert!(error.contains("exceeds 4096"), "{error}");
-    let mut s = SceneBuilder::default();
-    play(&mut s, c::ELM_BGM_PLAY_ONESHOT);
-    bgm(&mut s, c::ELM_BGM_STOP, &[0], fm::VOID);
-    bgm(&mut s, c::ELM_BGM_RESUME, &[0], fm::VOID);
-    finish(&mut s);
-    let (_dir, mut r) = fixture(s, 61);
-    let error = format!("{:#}", r.tick(0, InputFrame::default()).unwrap_err());
-    assert!(error.contains("engine-retained source resource"), "{error}");
 }
 
 #[test]
@@ -451,4 +443,126 @@ fn native_audio_wait_key_returns_decide_or_natural_value_without_stopping_a_loop
             assert_eq!(native(&r)["int_stack"], json!([0, 42]));
         }
     }
+}
+
+#[test]
+fn stopped_and_eof_resume_reuse_engine_resource_after_original_file_is_removed() {
+    for stop in [false, true] {
+        let mut s = SceneBuilder::default();
+        play(&mut s, c::ELM_BGM_PLAY_ONESHOT);
+        s.command(
+            &[c::ELM_GLOBAL_TIMEWAIT],
+            0,
+            &[if stop { 2 } else { 4 }],
+            fm::VOID,
+        );
+        if stop {
+            bgm(&mut s, c::ELM_BGM_STOP, &[0], fm::VOID);
+        }
+        bgm(&mut s, c::ELM_BGM_RESUME_WAIT, &[0], fm::VOID);
+        finish(&mut s);
+        let (dir, mut r) = fixture(s, 61);
+        tick(&mut r, 0);
+        assert_eq!(r.host.channel_audio.resources.resource_count(), 1);
+        std::fs::remove_file(dir.path().join("assets/a/tone.wav")).unwrap();
+        if !stop {
+            tick(&mut r, 2); // the first source reaches EOF before RESUME executes
+            assert!(!r.host.channel_audio.is_playing(1, 0));
+        }
+        tick(&mut r, 2); // resumed source starts at seven and finishes in this mix
+        assert_eq!(r.host.channel_audio.resources.resource_count(), 1);
+        let out = r.host.channel_audio.take_output();
+        assert!((out[0][0] - 140. / 32768.).abs() < 1e-6);
+        tick(&mut r, 0);
+        assert_eq!(native(&r)["int_stack"], json!([42]));
+    }
+}
+#[test]
+fn stopped_snapshot_rebinds_resource_without_hidden_playback_and_can_resume() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY);
+    bgm(&mut s, c::ELM_BGM_STOP, &[0], fm::VOID);
+    s.command(
+        &[c::ELM_GLOBAL_BGMTABLE, c::ELM_BGMTABLE_SET_ALL_FLAG],
+        0,
+        &[0],
+        fm::VOID,
+    );
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[10], fm::VOID);
+    bgm(&mut s, c::ELM_BGM_RESUME, &[0], fm::VOID);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[1000], fm::VOID);
+    finish(&mut s);
+    let (dir, mut r) = fixture(s, 61);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["bgm"]["state"], 0);
+    let saved = r.snapshot().unwrap();
+    r.restore(&saved).unwrap();
+    tick(&mut r, 0);
+    assert_eq!(r.host.channel_audio.resources.resource_count(), 1);
+    assert!(!r.host.channel_audio.is_playing(1, 0));
+    assert_eq!(native(&r)["bgm"]["listened"], json!([false]));
+    std::fs::remove_file(dir.path().join("assets/a/tone.wav")).unwrap();
+    tick(&mut r, 10);
+    let info = r.host.audio_info(ClientId(1), 0).unwrap().unwrap();
+    assert_eq!(info.position_frames, 36); // 480 output frames, then the [20,61) loop
+    assert!(info.looping);
+    // Original STOP clears the outer loop/name flags, while its prepared slot
+    // retains the actual loop region. RESUME must not invent a new name.
+    assert_eq!(native(&r)["bgm"]["looping"], false);
+    assert!(native(&r)["bgm"]["name"].is_null());
+    assert!((r.host.channel_audio.take_output()[0][0] - 140. / 32768.).abs() < 1e-6);
+}
+
+#[test]
+fn ended_named_slot_snapshot_prepares_without_restarting_and_resume_keeps_its_start() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY_ONESHOT);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[10], fm::VOID);
+    bgm(&mut s, c::ELM_BGM_RESUME_WAIT, &[0], fm::VOID);
+    finish(&mut s);
+    let (dir, mut r) = fixture(s, 61);
+    tick(&mut r, 0);
+    tick(&mut r, 2);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["bgm"]["state"], 0);
+    assert_eq!(native(&r)["bgm"]["name"], "song");
+    let saved = r.snapshot().unwrap();
+    r.restore(&saved).unwrap();
+    tick(&mut r, 0);
+    assert_eq!(r.host.channel_audio.resources.resource_count(), 1);
+    assert!(!r.host.channel_audio.is_playing(1, 0));
+    std::fs::remove_file(dir.path().join("assets/a/tone.wav")).unwrap();
+    tick(&mut r, 8);
+    assert!((r.host.channel_audio.take_output()[0][0] - 140. / 32768.).abs() < 1e-6);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([42]));
+}
+
+#[test]
+fn failed_voice_stage_releases_new_resource_and_preserves_the_previous_prepared_slot() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY);
+    s.command_string(
+        &[c::ELM_GLOBAL_BGM, c::ELM_BGM_PLAY_ONESHOT],
+        0,
+        "bad",
+        &[],
+        fm::VOID,
+    );
+    finish(&mut s);
+    let (dir, mut r) = fixture(s, 61);
+    std::fs::write(
+        dir.path().join("assets/a/Gameexe.ini"),
+        "#BGM.000=\"Song\",\"native-music\",7,61,20\n#BGM.001=\"bad\",\"native-music\",61,61,20\n",
+    )
+    .unwrap();
+    let error = format!("{:#}", r.tick(0, InputFrame::default()).unwrap_err());
+    assert!(error.contains("range"), "{error}");
+    assert_eq!(r.host.channel_audio.resources.resource_count(), 1);
+    assert_eq!(native(&r)["bgm"]["name"], "song");
+    assert_eq!(native(&r)["bgm"]["listened"], json!([true, false]));
+    let info = r.host.audio_info(ClientId(1), 0).unwrap().unwrap();
+    assert!(info.source_playing);
+    assert!(info.looping);
+    assert_eq!(info.position_frames, 7);
 }

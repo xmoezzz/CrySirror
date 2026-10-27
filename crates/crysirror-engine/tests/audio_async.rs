@@ -547,3 +547,132 @@ fn canonical_failed_preparation_reports_channel_and_faults_the_frame_visibly() {
     assert_eq!(status["phase"], "failed");
     assert!(status["error"].as_str().is_some_and(|e| !e.is_empty()));
 }
+
+fn source(app: &mut App) -> Value {
+    let t = call(
+        app,
+        "beginPrepareSource",
+        &[v(json!("tone.wav")), v(json!({"measure_frames":true}))],
+    );
+    let end = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        let s = call(app, "sourcePreparation", &[t.clone()]).to_json();
+        if s["state"] != "pending" {
+            break s;
+        }
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    assert_eq!(status["state"], "ready", "{status}");
+    assert_eq!(status["result"]["info"]["source_frames"], 16000);
+    call(app, "cancelSourcePreparation", &[t]);
+    v(status["result"]["resource"].clone())
+}
+#[test]
+fn prepared_source_is_shared_by_modern_and_native_audio_and_admitted_lease_survives_release() {
+    use crysirror_core::service::{AudioParameters, AudioRequest, HostServices};
+    let (dir, mut app) = app();
+    let resource = source(&mut app);
+    let h = crysirror_core::service::AudioResourceHandle {
+        client: 1,
+        id: resource.to_json()["id"].as_u64().unwrap(),
+    };
+    std::fs::remove_file(dir.path().join("assets/a/tone.wav")).unwrap();
+    let t = app
+        .runtime_mut()
+        .unwrap()
+        .host
+        .begin_audio(
+            ClientId(1),
+            AudioRequest::PlayResource {
+                channel: 9,
+                resource: h,
+                parameters: AudioParameters {
+                    paused: true,
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        app.runtime_mut()
+            .unwrap()
+            .host
+            .audio_preparation(ClientId(1), t)
+            .unwrap()
+            .phase,
+        crysirror_core::service::AudioPreparePhase::Ready
+    );
+    app.runtime_mut()
+        .unwrap()
+        .host
+        .release_audio(ClientId(1), t)
+        .unwrap();
+    app.context().state().unwrap().client = ClientId(2);
+    assert!(invoke(&mut app, "sourceInfo", &[resource.clone()]).is_err());
+    assert!(invoke(&mut app, "releaseSource", &[resource.clone()]).is_err());
+    app.context().state().unwrap().client = ClientId(1);
+    let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
+    let t = call(
+        &mut app,
+        "beginPlaySource",
+        &[resource.clone(), v(json!({"looping":true,"paused":true}))],
+    );
+    call(&mut app, "releaseSource", &[resource.clone()]);
+    assert!(invoke(&mut app, "sourceInfo", &[resource.clone()]).is_err());
+    assert!(invoke(&mut app, "beginPlaySource", &[resource, v(json!({}))]).is_err());
+    gate.finish();
+    let result = wait(&mut app, &t);
+    assert_eq!(result["state"], "ready", "{result}");
+    let voice = v(result["result"]["handle"].clone());
+    call(&mut app, "cancelPlaybackJob", &[t]);
+    call(&mut app, "pauseVoice", &[voice.clone(), Value::Bool(false)]);
+    let pcm = output(&mut app, 1);
+    assert!((pcm[0][0] - 0.5).abs() < 1e-6);
+    call(&mut app, "stopVoice", &[voice, v(json!(0))]);
+    app.runtime_mut()
+        .unwrap()
+        .host
+        .submit_audio(
+            ClientId(1),
+            AudioRequest::Resume {
+                channel: 9,
+                delay_ms: 0.,
+                fade_ms: 0.,
+            },
+        )
+        .unwrap();
+    let pcm = output(&mut app, 1);
+    assert!((pcm[0][0] - 0.5).abs() < 1e-6);
+}
+#[test]
+fn restore_invalidates_source_resources_and_canceling_preparation_does_not_publish() {
+    let (_dir, mut app) = app();
+    let saved = app.runtime().unwrap().snapshot().unwrap();
+    let resource = source(&mut app);
+    app.runtime_mut().unwrap().restore(&saved).unwrap();
+    assert!(invoke(&mut app, "sourceInfo", &[resource]).is_err());
+    let null_options = call(
+        &mut app,
+        "beginPrepareSource",
+        &[v(json!("tone.wav")), Value::Null],
+    );
+    call(&mut app, "cancelSourcePreparation", &[null_options]);
+    let gate = Gate::block(app.runtime().unwrap().assets.io_tasks());
+    let ticket = call(&mut app, "beginPrepareSource", &[v(json!("tone.wav"))]);
+    app.context().state().unwrap().client = ClientId(2);
+    assert!(invoke(&mut app, "cancelSourcePreparation", &[ticket.clone()]).is_err());
+    app.context().state().unwrap().client = ClientId(1);
+    call(&mut app, "cancelSourcePreparation", &[ticket.clone()]);
+    gate.finish();
+    assert!(invoke(&mut app, "sourcePreparation", &[ticket]).is_err());
+    assert_eq!(
+        app.runtime()
+            .unwrap()
+            .host
+            .channel_audio
+            .resources
+            .resource_count(),
+        0
+    );
+}

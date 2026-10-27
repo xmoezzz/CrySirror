@@ -336,3 +336,16 @@ Native Siglus BGM translates those operations through HostServices while retaini
 its original VM command until preparation commits. Gallery flags and native wait/
 save/value policies remain VM state, without a second audio engine. Restore queues
 derived declarations after candidate commit; source/device history is not saved.
+
+## Prepared audio resources (ADR 0077)
+
+Native/media ChannelAudio and the modern Audio API share AudioResources:
+client-scoped immutable encoded snapshots, owner-published preparation receipts,
+and independent worker-created decoder leases. Releasing a handle blocks future
+lookup; admitted/live playback keeps encoded storage charged until its last lease
+drops. Restore clears capabilities without resetting outstanding byte charges.
+Core owns only plain contracts. No resource handles or decoder/device pointers
+enter VM saves. Siglus stopped/EOF replay now submits the same PlayResource API;
+stopped snapshot reconstruction prepares a resource without starting a voice.
+See [ADR 0077](adr/0077-prepared-audio-resources-and-native-replay.md) for budgets,
+read races, metadata limits and remaining native/async boundaries.

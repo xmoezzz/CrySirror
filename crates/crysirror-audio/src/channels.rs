@@ -276,6 +276,7 @@ pub(super) fn prepare(
 }
 pub struct ChannelAudio {
     pub mixer: Mixer,
+    pub resources: crate::resources::AudioResources,
     pub(super) voices: BTreeMap<(u32, u32), VoiceHandle>,
     pub(super) clients: BTreeSet<u32>,
     pub(super) output: Vec<StereoFrame>,
@@ -290,6 +291,7 @@ impl Default for ChannelAudio {
                 ..Default::default()
             })
             .expect("valid channel mixer"),
+            resources: Default::default(),
             voices: BTreeMap::new(),
             clients: BTreeSet::new(),
             output: Vec::new(),
@@ -390,7 +392,7 @@ impl ChannelAudio {
                 )?;
                 self.publish(client, channel, ready)?;
             }
-            AudioRequest::PlayAsset { .. } => {
+            AudioRequest::PlayAsset { .. } | AudioRequest::PlayResource { .. } => {
                 anyhow::bail!("asset channel playback requires begin preparation")
             }
             AudioRequest::Play {

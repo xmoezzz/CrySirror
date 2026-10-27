@@ -148,6 +148,73 @@ impl FileSystem for SharedHost {
     }
 }
 impl HostServices for SharedHost {
+    fn begin_audio_resource(
+        &mut self,
+        client: ClientId,
+        asset: crysirror_core::service::AudioAsset,
+        measure_frames: bool,
+    ) -> crysirror_core::Result<u64> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        let storage = self.fs.storage(client)?;
+        self.channel_audio
+            .begin_resource_preparation(client.0, asset, measure_frames, storage)
+            .map_err(|e| Error::Io(format!("audio resource preparation: {e:#}")))
+    }
+    fn audio_resource_preparation(
+        &mut self,
+        client: ClientId,
+        ticket: u64,
+    ) -> crysirror_core::Result<crysirror_core::service::AudioResourcePreparation> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .resources
+            .preparation(client.0, ticket)
+            .map_err(|e| Error::Io(format!("audio resource preparation: {e:#}")))
+    }
+    fn release_audio_resource_preparation(
+        &mut self,
+        client: ClientId,
+        ticket: u64,
+    ) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .resources
+            .release_preparation(client.0, ticket)
+            .map_err(|e| Error::Io(format!("audio resource receipt: {e:#}")))
+    }
+    fn audio_resource_info(
+        &self,
+        client: ClientId,
+        resource: crysirror_core::service::AudioResourceHandle,
+    ) -> crysirror_core::Result<crysirror_core::service::AudioResourceInfo> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .resources
+            .capture(client.0, resource)
+            .map(|r| r.info())
+            .map_err(|e| Error::Io(format!("audio resource inspection: {e:#}")))
+    }
+    fn release_audio_resource(
+        &mut self,
+        client: ClientId,
+        resource: crysirror_core::service::AudioResourceHandle,
+    ) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .resources
+            .release(client.0, resource)
+            .map_err(|e| Error::Io(format!("audio resource release: {e:#}")))
+    }
     fn audio_info(
         &self,
         client: ClientId,

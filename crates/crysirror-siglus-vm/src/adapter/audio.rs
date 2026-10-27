@@ -3,7 +3,7 @@
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Native command commit gate. Worker tickets never enter VM/save bytes.
 use super::*;
-use crate::bgm_bridge::{CHANNEL, Operation, Play};
+use crate::bgm_bridge::{Binding, CHANNEL, Operation, Play};
 use crysirror_core::service::{
     AudioAsset, AudioParameters, AudioPreparePhase, AudioRequest, PcmBus,
 };
@@ -12,7 +12,35 @@ use std::collections::VecDeque;
 pub(super) struct Pending {
     after: SceneVm<'static>,
     operations: VecDeque<Operation>,
-    ticket: Option<(u64, Play)>,
+    ticket: Option<Stage>,
+}
+enum Stage {
+    Resource {
+        ticket: u64,
+        play: Play,
+        parameters: AudioParameters,
+        only: bool,
+    },
+    Voice {
+        ticket: u64,
+        play: Play,
+        binding: Binding,
+        fresh: bool,
+    },
+}
+fn bind(
+    vm: &mut SceneVm<'static>,
+    host: &mut dyn HostServices,
+    client: ClientId,
+    binding: Binding,
+) -> Result<()> {
+    if let Some(old) = vm.ctx.bgm.binding.replace(binding.clone()) {
+        if old.resource != binding.resource {
+            host.release_audio_resource(client, old.resource)
+                .map_err(err)?;
+        }
+    }
+    Ok(())
 }
 fn number(value: Option<&str>, default: i64) -> Result<i64> {
     let Some(v) = value else { return Ok(default) };
@@ -61,28 +89,91 @@ impl SiglusVm {
         };
         let client = ClientId(self.state.client);
         loop {
-            if let Some((ticket, play)) = pending.ticket.as_ref() {
-                let status = match host.audio_preparation(client, *ticket) {
-                    Ok(status) => status,
+            if let Some(stage) = pending.ticket.take() {
+                let result = match &stage {
+                    Stage::Resource { ticket, .. } => host
+                        .audio_resource_preparation(client, *ticket)
+                        .map(|s| (s.phase, s.error, s.resource)),
+                    Stage::Voice { ticket, .. } => host
+                        .audio_preparation(client, *ticket)
+                        .map(|s| (s.phase, s.error, None)),
+                };
+                let (phase, error, resource) = match result {
+                    Ok(s) => s,
                     Err(error) => {
+                        pending.ticket = Some(stage);
                         self.pending_audio = Some(pending);
                         return Err(anyhow::anyhow!("{error}"));
                     }
                 };
-                match status.phase {
-                    AudioPreparePhase::Pending => {
-                        self.pending_audio = Some(pending);
-                        return Ok(false);
+                if phase == AudioPreparePhase::Pending {
+                    pending.ticket = Some(stage);
+                    self.pending_audio = Some(pending);
+                    return Ok(false);
+                }
+                match stage {
+                    Stage::Resource {
+                        ticket,
+                        play,
+                        parameters,
+                        only,
+                    } => {
+                        host.release_audio_resource_preparation(client, ticket)
+                            .map_err(err)?;
+                        ensure!(
+                            phase == AudioPreparePhase::Ready,
+                            "{}",
+                            error
+                                .unwrap_or_else(|| "Siglus BGM resource preparation failed".into())
+                        );
+                        let binding = Binding {
+                            resource: resource.context("ready BGM resource missing")?,
+                            parameters,
+                        };
+                        if only {
+                            bind(&mut pending.after, host, client, binding)?;
+                        } else {
+                            let request = AudioRequest::PlayResource {
+                                channel: CHANNEL,
+                                resource: binding.resource,
+                                parameters: binding.parameters.clone(),
+                            };
+                            let ticket = match host.begin_audio(client, request) {
+                                Ok(t) => t,
+                                Err(e) => {
+                                    host.release_audio_resource(client, binding.resource)
+                                        .map_err(err)?;
+                                    return Err(anyhow::anyhow!("{e}"));
+                                }
+                            };
+                            pending.ticket = Some(Stage::Voice {
+                                ticket,
+                                play,
+                                binding,
+                                fresh: true,
+                            });
+                            continue;
+                        }
                     }
-                    AudioPreparePhase::Failed => {
-                        let failure = status
-                            .error
-                            .unwrap_or_else(|| "Siglus BGM preparation failed".into());
-                        host.release_audio(client, *ticket).map_err(err)?;
-                        anyhow::bail!("{failure}");
-                    }
-                    AudioPreparePhase::Ready => {
-                        host.release_audio(client, *ticket).map_err(err)?;
+                    Stage::Voice {
+                        ticket,
+                        play,
+                        mut binding,
+                        fresh,
+                    } => {
+                        host.release_audio(client, ticket).map_err(err)?;
+                        if phase != AudioPreparePhase::Ready {
+                            if fresh {
+                                host.release_audio_resource(client, binding.resource)
+                                    .map_err(err)?;
+                            }
+                            anyhow::bail!(
+                                "{}",
+                                error.unwrap_or_else(
+                                    || "Siglus BGM playback preparation failed".into()
+                                )
+                            );
+                        }
                         if play.delay > 0 {
                             host.submit_audio(
                                 client,
@@ -101,9 +192,10 @@ impl SiglusVm {
                                 .ctx
                                 .bgm
                                 .set_initial_position(info.position_frames);
+                            binding.parameters.start_frame = Some(info.position_frames);
                         }
+                        bind(&mut pending.after, host, client, binding)?;
                         pending.after.ctx.bgm.sync(info);
-                        pending.ticket = None;
                     }
                 }
             }
@@ -111,6 +203,7 @@ impl SiglusVm {
                 self.state.vm = Some(pending.after);
                 return Ok(true);
             };
+            let retain = matches!(&operation, Operation::Retain(_));
             match operation {
                 Operation::Control(request) => {
                     host.submit_audio(client, request).map_err(err)?;
@@ -120,15 +213,69 @@ impl SiglusVm {
                         .bgm
                         .sync(host.audio_info(client, CHANNEL).map_err(err)?);
                 }
-                Operation::Play(play) => {
-                    let request = self.bgm_request(&mut pending.after, &play)?;
-                    let ticket = host.begin_audio(client, request).map_err(err)?;
-                    pending.ticket = Some((ticket, play));
+                Operation::Play(play) | Operation::Retain(play) => {
+                    // Retain is only queued while reconstructing a stopped slot.
+                    let only = retain;
+                    let (asset, parameters) = self.bgm_request(&mut pending.after, &play, !only)?;
+                    let ticket = host
+                        .begin_audio_resource(client, asset, true)
+                        .map_err(err)?;
+                    pending.ticket = Some(Stage::Resource {
+                        ticket,
+                        play,
+                        parameters,
+                        only,
+                    });
+                }
+                Operation::Replay { fade, delay } => {
+                    let mut binding = pending
+                        .after
+                        .ctx
+                        .bgm
+                        .binding
+                        .clone()
+                        .context("Siglus BGM slot has no prepared resource")?;
+                    let mut play = pending
+                        .after
+                        .ctx
+                        .bgm
+                        .current
+                        .clone()
+                        .context("Siglus BGM slot has no declaration")?;
+                    play.fade_in = fade as i64;
+                    play.delay = delay as i64;
+                    play.paused = false;
+                    play.fade_out = 0;
+                    binding.parameters.gain = f32::from(pending.after.ctx.bgm.volume_raw()) / 255.;
+                    binding.parameters.paused = delay > 0.;
+                    binding.parameters.fade_ms = if delay > 0. { 0. } else { fade };
+                    binding.parameters.replace_fade_ms = 0.;
+                    let ticket = host
+                        .begin_audio(
+                            client,
+                            AudioRequest::PlayResource {
+                                channel: CHANNEL,
+                                resource: binding.resource,
+                                parameters: binding.parameters.clone(),
+                            },
+                        )
+                        .map_err(err)?;
+                    pending.ticket = Some(Stage::Voice {
+                        ticket,
+                        play,
+                        binding,
+                        fresh: false,
+                    });
                 }
             }
         }
     }
-    fn bgm_request(&self, vm: &mut SceneVm<'static>, play: &Play) -> Result<AudioRequest> {
+    fn bgm_request(
+        &self,
+        vm: &mut SceneVm<'static>,
+        play: &Play,
+        mark_listened: bool,
+    ) -> Result<(AudioAsset, AudioParameters)> {
         let mut file = play.name.clone();
         let mut start = 0;
         let mut end = -1;
@@ -157,7 +304,7 @@ impl SiglusVm {
                 let count = cfg
                     .get_usize("BGM.CNT")
                     .unwrap_or_else(|| cfg.indexed_count("BGM"));
-                if index < count {
+                if mark_listened && index < count {
                     vm.ctx.globals.bgm_table_flags.resize(
                         count.max(vm.ctx.globals.bgm_table_flags.len()),
                         vm.ctx.globals.bgm_table_all_flag,
@@ -175,14 +322,12 @@ impl SiglusVm {
             self.state.config.resources.get(&file).with_context(|| {
                 format!("Siglus BGM requires config.resources alias for {file:?}")
             })?;
-        Ok(AudioRequest::PlayAsset {
-            channel: CHANNEL,
-            source: AudioAsset {
+        Ok((
+            AudioAsset {
                 path: VfsPath::new(Mount::Asset, asset).map_err(err)?,
                 frame_limit: (end >= 0).then_some(end.max(0) as u64),
             },
-            intro: None,
-            parameters: AudioParameters {
+            AudioParameters {
                 bus: PcmBus::Music,
                 gain: f32::from(vm.ctx.bgm.volume_raw()) / 255.,
                 start_frame: Some(if play.start == -1 { start } else { play.start }.max(0) as u64),
@@ -198,6 +343,6 @@ impl SiglusVm {
                 replace_fade_ms: play.fade_out.max(0) as f32,
                 ..Default::default()
             },
-        })
+        ))
     }
 }

@@ -228,6 +228,7 @@ pub(crate) fn call(cx: &mut EngineContext, method: &str, args: &[Value]) -> Resu
     if !matches!(
         method,
         "beginPlaySfx"
+            | "beginPlaySource"
             | "beginPreloadSfx"
             | "beginPlayMusic"
             | "playbackStatus"
@@ -316,6 +317,50 @@ pub(crate) fn call(cx: &mut EngineContext, method: &str, args: &[Value]) -> Resu
         return Ok(Some(Value::from_json(value)));
     }
     cx.state()?.mixer_audio.jobs.admit(owner)?;
+    if method == "beginPlaySource" {
+        let h = crate::audio_resources_api::handle(owner, arg(args, 0)?)?;
+        let (asset, spec, attachment) = voice_options(cx, arg(args, 1)?, false)?;
+        ensure!(asset.is_none(), "resource playback does not accept asset");
+        let state = cx.state()?;
+        let resource = state
+            .runtime
+            .host
+            .channel_audio
+            .resources
+            .capture(owner, h)?;
+        let pool = state.runtime.assets.io_tasks();
+        let worker_pool = pool.clone();
+        let charge = Charge::new(state.mixer_audio.jobs.budget.clone(), STREAM_BYTES)?;
+        let ticket = state.mixer_audio.jobs.jobs.submit(
+            owner,
+            epoch,
+            "audio_resource_play",
+            &pool,
+            move |cancel| {
+                cancel.check()?;
+                let source = resource.open()?;
+                let loop_start = spec.loop_points.map(|p| p.start);
+                let mut source = BufferedSource::prepare_cancellable(
+                    source,
+                    worker_pool,
+                    StreamBufferSpec::default(),
+                    loop_start,
+                    &cancel,
+                )?;
+                source.retain_storage(Arc::new(charge))?;
+                cancel.check()?;
+                Ok(Product::Prepared {
+                    asset: format!("<resource:{}>", h.id),
+                    clip: None,
+                    stream: Some(Box::new(source)),
+                    spec: Some(spec),
+                    attachment,
+                    music: None,
+                })
+            },
+        )?;
+        return Ok(Some(Value::Int(ticket.try_into()?)));
+    }
     let preload = method == "beginPreloadSfx";
     let music = method == "beginPlayMusic";
     let (asset, spec, attachment, music_options) = if preload {

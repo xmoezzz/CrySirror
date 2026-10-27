@@ -4,6 +4,26 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `5b75e19d7feee9bf` (2026-10-27): immutable prepared audio resources
+
+- Add Audio.beginPrepareSource/sourcePreparation/cancelSourcePreparation,
+  sourceInfo/releaseSource and beginPlaySource, plus prepareSourceAsync and
+  playSourceAsync. Resource handles and playback voices have separate lifetimes;
+  temporary receipt release keeps published resources, and resource release keeps
+  admitted/live decoder leases. Client/restore checks reject stale capabilities.
+- Core adds AudioResourceHandle/Info/Preparation, HostServices resource methods
+  and AudioRequest::PlayResource. Encoded snapshots and independent decoder
+  instances live in crysirror-audio; Core stays dependency/device free.
+- Resource preparation and playback decode on bounded workers with explicit
+  publication/cancel boundaries and residency reservations. Snapshot restores
+  rebuild logical declarations, never serialized handles or encoded tracks.
+- Siglus RESUME after stop/EOF now replays the retained CrySirror resource,
+  without re-resolving the original asset. Stopped snapshots prepare without
+  starting hidden playback. Other native audio and full async output remain open.
+- Additive JS/TS API; the Rust AudioRequest enum gains a variant, so exhaustive
+  downstream matches must add PlayResource. Runtime/native save layouts remain
+  unchanged (Siglus runtime payload schema 2). ADR 0077.
+
 ## `4aee8cb171139420` (2026-10-27): shared audio transport and native Siglus BGM
 
 - Add Audio.playbackInfo(handle), nativeChannelInfo(channel) and

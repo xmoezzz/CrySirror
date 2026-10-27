@@ -289,3 +289,23 @@ HostServices.audio_info or Mixer/ChannelAudio.playback_info. AudioParameters can
 publish paused, start at an exact source frame, clamp an authored range or fade
 the replaced source. These are reusable engine operations without any VN VM.
 See [ADR 0076](../adr/0076-shared-audio-transport-and-siglus-bgm.md).
+
+### Immutable prepared audio sources
+
+```ts
+const prepared = await audio.prepareSourceAsync("music.ogg", {measure_frames: true});
+const voice = await audio.playSourceAsync(prepared.resource, {looping: true});
+audio.releaseSource(prepared.resource); // voice retains its admitted source lease
+// A new playSourceAsync call now needs another live prepared resource.
+```
+
+prepareSourceAsync returns {resource,info}; its temporary preparation receipt is
+released automatically. Each playSourceAsync creates an independent decoder on
+workers and returns the ordinary VoiceHandle, supporting existing spatial/effect,
+seek and transport APIs. Releasing the resource blocks future lookup, while
+admitted/live playback keeps encoded bytes until the actual last lease drops.
+Handles/tickets are client-scoped, ephemeral and invalid after restore. Known
+source_frames include an optional frame limit; unknown physical length stays
+null unless measured. Preparing may scan/discard decoded chunks when requested;
+it does not retain a full PCM track. Header probing is not full-file validation.
+See [ADR 0077](../adr/0077-prepared-audio-resources-and-native-replay.md) for limits.

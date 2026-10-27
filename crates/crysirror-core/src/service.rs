@@ -221,6 +221,37 @@ pub struct AudioAsset {
     /// Optional native declared decoded-frame boundary.
     pub frame_limit: Option<u64>,
 }
+/// Ephemeral client-scoped immutable audio resource. IDs are not reused during
+/// a host process; handles never enter project or native/runtime save bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AudioResourceHandle {
+    /// Owning client capability.
+    pub client: u32,
+    /// Host-minted resource identity, distinct from a playback voice.
+    pub id: u64,
+}
+/// Encoded snapshot metadata, independent of playback cursors and devices.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AudioResourceInfo {
+    /// Decoded-source frames per second.
+    pub source_rate: u32,
+    /// Bounded decoded-source length when known/measured.
+    pub source_frames: Option<u64>,
+    /// Immutable encoded snapshot bytes retained by the resource.
+    pub encoded_bytes: u64,
+}
+/// Resource preparation and publication, separate from creating a voice.
+#[derive(Clone, Debug)]
+pub struct AudioResourcePreparation {
+    /// Pending, ready or failed resource work.
+    pub phase: AudioPreparePhase,
+    /// Published resource capability, present only when ready.
+    pub resource: Option<AudioResourceHandle>,
+    /// Published metadata, present only when ready.
+    pub info: Option<AudioResourceInfo>,
+    /// Retained preparation error.
+    pub error: Option<String>,
+}
 /// Acknowledgement of preparation and owner publication, separate from EOF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AudioPreparePhase {
@@ -243,6 +274,13 @@ pub struct AudioPreparation {
 /// and decoder resources are not part of logical VM snapshots.
 #[derive(Clone, Debug)]
 pub enum AudioRequest {
+    /// Open an independent decoder over an existing immutable encoded resource
+    /// on workers. Releasing its handle does not invalidate admitted/live work.
+    PlayResource {
+        channel: u32,
+        resource: AudioResourceHandle,
+        parameters: AudioParameters,
+    },
     /// Publish a worker-prepared PCM resource without opening a codec.
     PlayPcm {
         channel: u32,
@@ -403,6 +441,48 @@ pub trait TextMeasurement: Send + Sync {
 }
 
 pub trait HostServices: FileSystem {
+    /// Snapshot/probe a client asset on workers. Optional length measurement
+    /// streams/discards decoded chunks when the container has no frame count.
+    fn begin_audio_resource(
+        &mut self,
+        _client: ClientId,
+        _asset: AudioAsset,
+        _measure_frames: bool,
+    ) -> Result<u64> {
+        Err(crate::Error::Unsupported("prepared audio resources"))
+    }
+    fn audio_resource_preparation(
+        &mut self,
+        _client: ClientId,
+        _ticket: u64,
+    ) -> Result<AudioResourcePreparation> {
+        Err(crate::Error::Unsupported("prepared audio resource status"))
+    }
+    /// Cancel unpublished work or release its receipt; a published resource stays.
+    fn release_audio_resource_preparation(
+        &mut self,
+        _client: ClientId,
+        _ticket: u64,
+    ) -> Result<()> {
+        Err(crate::Error::Unsupported("prepared audio resource receipt"))
+    }
+    fn audio_resource_info(
+        &self,
+        _client: ClientId,
+        _resource: AudioResourceHandle,
+    ) -> Result<AudioResourceInfo> {
+        Err(crate::Error::Unsupported(
+            "prepared audio resource inspection",
+        ))
+    }
+    /// Remove lookup authority. Already admitted/live playback keeps its lease.
+    fn release_audio_resource(
+        &mut self,
+        _client: ClientId,
+        _resource: AudioResourceHandle,
+    ) -> Result<()> {
+        Err(crate::Error::Unsupported("prepared audio resource release"))
+    }
     fn audio_playing(&self, _client: ClientId, _channel: u32) -> Result<bool> {
         Err(crate::Error::Unsupported("engine audio status"))
     }

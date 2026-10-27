@@ -236,6 +236,9 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("AudioResourceHandle","Audio.prepareSourceAsync / beginPlaySource / HostServices",None),
+        d("AudioResourceInfo","Audio.sourceInfo / sourcePreparation / HostServices",None),
+        d("AudioResourcePreparation","Rust HostServices.audio_resource_preparation",None),
         d("AudioParameters","Rust HostServices/ChannelAudio playback parameters",None),
         d("PcmBus","AudioParameters.bus",None),
         d("AudioPlaybackInfo","Audio.playbackInfo / nativeChannelInfo / HostServices.audio_info",None),

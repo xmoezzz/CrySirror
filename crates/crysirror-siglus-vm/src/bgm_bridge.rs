@@ -12,7 +12,9 @@ use crate::{
     },
 };
 use anyhow::{Result, bail, ensure};
-use crysirror_core::service::{AudioPlaybackInfo, AudioRequest};
+use crysirror_core::service::{
+    AudioParameters, AudioPlaybackInfo, AudioRequest, AudioResourceHandle,
+};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const CHANNEL: u32 = 0;
@@ -27,8 +29,15 @@ pub(crate) struct Play {
     pub delay: i64,
 }
 #[derive(Clone)]
+pub(crate) struct Binding {
+    pub resource: AudioResourceHandle,
+    pub parameters: AudioParameters,
+}
+#[derive(Clone)]
 pub(crate) enum Operation {
     Play(Play),
+    Retain(Play),
+    Replay { fade: f32, delay: f32 },
     Control(AudioRequest),
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -42,6 +51,8 @@ pub struct BgmEngine {
     initial_position: u64,
     delay: i64,
     pub(crate) current: Option<Play>,
+    #[serde(skip)]
+    pub(crate) binding: Option<Binding>,
     #[serde(skip)]
     pub(crate) pending: Vec<Operation>,
 }
@@ -57,6 +68,7 @@ impl Default for BgmEngine {
             initial_position: 0,
             delay: 0,
             current: None,
+            binding: None,
             pending: vec![],
         }
     }
@@ -241,15 +253,18 @@ impl BgmEngine {
         let fade_ms = milliseconds(fade)?;
         let delay_ms = milliseconds(delay)?;
         if self.current.is_some() {
-            ensure!(
-                self.state != 0,
-                "Siglus BGM.RESUME after EOF/stop requires an engine-retained source resource; use PLAY to prepare a new source"
-            );
-            self.pending.push(Operation::Control(AudioRequest::Resume {
-                channel: CHANNEL,
-                delay_ms,
-                fade_ms,
-            }));
+            if self.state == 0 {
+                self.pending.push(Operation::Replay {
+                    fade: fade_ms,
+                    delay: delay_ms,
+                });
+            } else {
+                self.pending.push(Operation::Control(AudioRequest::Resume {
+                    channel: CHANNEL,
+                    delay_ms,
+                    fade_ms,
+                }));
+            }
             self.paused = false;
             self.delay = delay.max(0);
             self.state = if delay > 0 { 3 } else { 1 };
@@ -261,13 +276,18 @@ impl BgmEngine {
     }
     /// Recreate derived playback only after a candidate restore is committed.
     pub(crate) fn rebind(&mut self) {
-        if self.state != 0 && self.name.is_some() {
-            if let Some(mut play) = self.current.clone() {
+        self.binding = None;
+        if let Some(mut play) = self.current.clone() {
+            if self.state != 0 && self.name.is_some() {
                 play.paused = self.paused || (self.state == 3 && self.delay == 0);
                 play.delay = self.delay;
                 play.fade_in = 0;
                 play.fade_out = 0;
                 self.pending.push(Operation::Play(play));
+            } else {
+                // A stopped slot retains source metadata; restoring it must not
+                // create an audible voice merely to reconstruct the resource.
+                self.pending.push(Operation::Retain(play));
             }
         }
     }

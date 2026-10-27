@@ -173,6 +173,50 @@
   ],
   "async_bindings": [
     {
+      "cancel": "cancelSourcePreparation",
+      "class": "Audio",
+      "completion": "result",
+      "name": "prepareSourceAsync",
+      "params": [
+        {
+          "name": "asset",
+          "optional": false,
+          "type": "string"
+        },
+        {
+          "name": "options",
+          "optional": true,
+          "type": "Record<string, any> | null"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginPrepareSource",
+      "status": "sourcePreparation"
+    },
+    {
+      "cancel": "cancelPlaybackJob",
+      "class": "Audio",
+      "completion": "result.handle",
+      "name": "playSourceAsync",
+      "params": [
+        {
+          "name": "resource",
+          "optional": false,
+          "type": "Record<string, any>"
+        },
+        {
+          "name": "voice",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<Record<string, any>>",
+      "start": "beginPlaySource",
+      "status": "playbackStatus"
+    },
+    {
       "cancel": "cancelPlaybackJob",
       "class": "Audio",
       "completion": "result.handle",
@@ -1028,6 +1072,80 @@
             }
           ],
           "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Snapshot a client asset and probe its decoder on bounded workers. Options: measure_frames=false (scan when the header has no count), frame_limit. At most 128 MiB encoded per resource; bounded host bytes and handles. sourcePreparation publishes an immutable resource handle, without playback.",
+          "name": "beginPrepareSource",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any> | null"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Client/restore-scoped pending/ready/failed preparation; ready result has resource:{client,id} and AudioResourceInfo. Release the receipt separately from its resource.",
+          "name": "sourcePreparation",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Cancel/release preparation without publishing an unobserved result. Already published resources remain retained until releaseSource or restore.",
+          "name": "cancelSourcePreparation",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Read a live client's immutable AudioResourceInfo. Released/foreign/obsolete handles fail.",
+          "name": "sourceInfo",
+          "params": [
+            {
+              "name": "resource",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Invalidate future lookups. Admitted playback and existing independent decoder leases retain encoded bytes until their actual last owner drops. Handles are not save data.",
+          "name": "releaseSource",
+          "params": [
+            {
+              "name": "resource",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Prepare an independent buffered decoder on workers from an immutable resource, without reopening VFS. VoiceSpec and spatial/acoustic/HRTF/reflection options match beginPlaySfx, excluding asset. playbackStatus returns result.handle.",
+          "name": "beginPlaySource",
+          "params": [
+            {
+              "name": "resource",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "voice",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
         },
         {
           "doc": "Prepare SFX on bounded workers and publish a shared mixer voice; playbackStatus returns result.handle.",
@@ -4929,6 +5047,81 @@
     }
   ],
   "data": [
+    {
+      "doc": "Ephemeral client-scoped immutable audio resource. IDs are not reused during a host process; handles never enter project or native/runtime save bytes.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Owning client capability.",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Host-minted resource identity, distinct from a playback voice.",
+          "name": "id",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "AudioResourceHandle",
+      "used_by": "Audio.prepareSourceAsync / beginPlaySource / HostServices"
+    },
+    {
+      "doc": "Encoded snapshot metadata, independent of playback cursors and devices.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Decoded-source frames per second.",
+          "name": "source_rate",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Bounded decoded-source length when known/measured.",
+          "name": "source_frames",
+          "rust_type": "Option<u64>"
+        },
+        {
+          "default": null,
+          "doc": "Immutable encoded snapshot bytes retained by the resource.",
+          "name": "encoded_bytes",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "AudioResourceInfo",
+      "used_by": "Audio.sourceInfo / sourcePreparation / HostServices"
+    },
+    {
+      "doc": "Resource preparation and publication, separate from creating a voice.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Pending, ready or failed resource work.",
+          "name": "phase",
+          "rust_type": "AudioPreparePhase"
+        },
+        {
+          "default": null,
+          "doc": "Published resource capability, present only when ready.",
+          "name": "resource",
+          "rust_type": "Option<AudioResourceHandle>"
+        },
+        {
+          "default": null,
+          "doc": "Published metadata, present only when ready.",
+          "name": "info",
+          "rust_type": "Option<AudioResourceInfo>"
+        },
+        {
+          "default": null,
+          "doc": "Retained preparation error.",
+          "name": "error",
+          "rust_type": "Option<String>"
+        }
+      ],
+      "name": "AudioResourcePreparation",
+      "used_by": "Rust HostServices.audio_resource_preparation"
+    },
     {
       "doc": "",
       "fields": [
@@ -12441,7 +12634,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "4aee8cb171139420",
+  "fingerprint": "5b75e19d7feee9bf",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

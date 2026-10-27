@@ -26,6 +26,26 @@ pub struct AsyncBinding {
 pub const BINDINGS: &[AsyncBinding] = &[
     AsyncBinding {
         class: "Audio",
+        name: "prepareSourceAsync",
+        start: "beginPrepareSource",
+        status: "sourcePreparation",
+        cancel: "cancelSourcePreparation",
+        completion: "result",
+        returns: "Record<string, any>",
+        release: true,
+    },
+    AsyncBinding {
+        class: "Audio",
+        name: "playSourceAsync",
+        start: "beginPlaySource",
+        status: "playbackStatus",
+        cancel: "cancelPlaybackJob",
+        completion: "result.handle",
+        returns: "Record<string, any>",
+        release: true,
+    },
+    AsyncBinding {
+        class: "Audio",
         name: "playSfxAsync",
         start: "beginPlaySfx",
         status: "playbackStatus",

@@ -83,6 +83,18 @@ declare class Audio {
   acousticStats(): Record<string, any>;
   /** Read pending/result/error for a client-owned live voice. Automatic queries use latest queued poses and preserve the last ready coefficients while busy. */
   acousticVoice(handle: Record<string, any>): Record<string, any>;
+  /** Snapshot a client asset and probe its decoder on bounded workers. Options: measure_frames=false (scan when the header has no count), frame_limit. At most 128 MiB encoded per resource; bounded host bytes and handles. sourcePreparation publishes an immutable resource handle, without playback. */
+  beginPrepareSource(asset: string, options: Record<string, any> | null): number;
+  /** Client/restore-scoped pending/ready/failed preparation; ready result has resource:{client,id} and AudioResourceInfo. Release the receipt separately from its resource. */
+  sourcePreparation(ticket: number): Record<string, any>;
+  /** Cancel/release preparation without publishing an unobserved result. Already published resources remain retained until releaseSource or restore. */
+  cancelSourcePreparation(ticket: number): void;
+  /** Read a live client's immutable AudioResourceInfo. Released/foreign/obsolete handles fail. */
+  sourceInfo(resource: Record<string, any>): Record<string, any>;
+  /** Invalidate future lookups. Admitted playback and existing independent decoder leases retain encoded bytes until their actual last owner drops. Handles are not save data. */
+  releaseSource(resource: Record<string, any>): void;
+  /** Prepare an independent buffered decoder on workers from an immutable resource, without reopening VFS. VoiceSpec and spatial/acoustic/HRTF/reflection options match beginPlaySfx, excluding asset. playbackStatus returns result.handle. */
+  beginPlaySource(resource: Record<string, any>, voice: Record<string, any>): number;
   /** Prepare SFX on bounded workers and publish a shared mixer voice; playbackStatus returns result.handle. */
   beginPlaySfx(voice: Record<string, any>): number;
   /** Decode and cache SFX on workers without starting a voice. */
@@ -756,6 +768,8 @@ declare const vfx: Vfx;
 
 /** JS/TS service awaits; callbacks run on owner lifecycle entries. */
 interface CancellablePromise<T> extends Promise<T> { readonly ticket: number | null; cancel(): void; }
+interface Audio { prepareSourceAsync(asset: string, options?: Record<string, any> | null): CancellablePromise<Record<string, any>>; }
+interface Audio { playSourceAsync(resource: Record<string, any>, voice: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { playSfxAsync(voice: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { preloadSfxAsync(asset: string): CancellablePromise<Record<string, any>>; }
 interface Audio { playMusicAsync(name: string, voice: Record<string, any>, crossfade_ms: number): CancellablePromise<Record<string, any>>; }

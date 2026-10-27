@@ -58,9 +58,9 @@ impl Drop for Charge {
 }
 fn channel(request: &AudioRequest) -> Result<u32> {
     match request {
-        AudioRequest::Play { channel, .. } | AudioRequest::PlayAsset { channel, .. } => {
-            Ok(*channel)
-        }
+        AudioRequest::Play { channel, .. }
+        | AudioRequest::PlayAsset { channel, .. }
+        | AudioRequest::PlayResource { channel, .. } => Ok(*channel),
         _ => anyhow::bail!("preparation requires a play request"),
     }
 }
@@ -72,6 +72,7 @@ impl ChannelAudio {
         self.jobs.intent.clear();
         self.jobs.channels.clear();
         self.mixer.clear();
+        self.resources.clear();
         self.voices.clear();
         self.output.clear();
         self.remainder = 0;
@@ -81,6 +82,22 @@ impl ChannelAudio {
     pub fn configure_preparation(&mut self, pool: TaskPool, nonblocking: bool) {
         self.jobs.pool = Some(pool);
         self.jobs.nonblocking = nonblocking;
+    }
+    pub fn begin_resource_preparation(
+        &mut self,
+        client: u32,
+        asset: crysirror_core::service::AudioAsset,
+        measure_frames: bool,
+        storage: Arc<dyn ClientStorage>,
+    ) -> Result<u64> {
+        self.resources.begin(
+            client,
+            asset,
+            measure_frames,
+            storage,
+            self.jobs.pool.clone(),
+            self.jobs.nonblocking,
+        )
     }
     /// Native callers retain their current event until preparation reports Ready.
     pub fn begin_preparation(
@@ -92,9 +109,9 @@ impl ChannelAudio {
         let channel = channel(&request)?;
         self.jobs.jobs.admit(client)?;
         let p = match &request {
-            AudioRequest::Play { parameters, .. } | AudioRequest::PlayAsset { parameters, .. } => {
-                parameters
-            }
+            AudioRequest::Play { parameters, .. }
+            | AudioRequest::PlayAsset { parameters, .. }
+            | AudioRequest::PlayResource { parameters, .. } => parameters,
             _ => unreachable!(),
         };
         ensure!(
@@ -127,6 +144,7 @@ impl ChannelAudio {
                 );
                 source.bytes.len() + intro.as_ref().map_or(0, |v| v.bytes.len())
             }
+            AudioRequest::PlayResource { .. } => 0,
             AudioRequest::PlayAsset { source, intro, .. } => {
                 ensure!(
                     source.path.mount() == Mount::Asset
@@ -139,6 +157,11 @@ impl ChannelAudio {
             }
             _ => unreachable!(),
         } + 4 * 1024 * 1024;
+        let resource = if let AudioRequest::PlayResource { resource, .. } = &request {
+            Some(self.resources.capture(client, *resource)?)
+        } else {
+            None
+        };
         let budget = self.jobs.budget.clone();
         ensure!(
             budget
@@ -169,6 +192,14 @@ impl ChannelAudio {
                     (
                         source(encoded, gain)?,
                         intro.map(|v| source(v, gain)).transpose()?,
+                        p,
+                    )
+                }
+                AudioRequest::PlayResource { parameters: p, .. } => {
+                    let opened = resource.context("prepared resource missing")?.open()?;
+                    (
+                        crate::channels::wrap_source(opened, None, p.decode_gain)?,
+                        None,
                         p,
                     )
                 }
@@ -298,7 +329,8 @@ impl ChannelAudio {
         let (channel, stop) = match request {
             AudioRequest::Play { channel, .. }
             | AudioRequest::PlayAsset { channel, .. }
-            | AudioRequest::PlayPcm { channel, .. } => (*channel, false),
+            | AudioRequest::PlayPcm { channel, .. }
+            | AudioRequest::PlayResource { channel, .. } => (*channel, false),
             AudioRequest::Stop { channel, fade_ms } => {
                 ensure!(
                     fade_ms.is_finite() && (0.0..=600000.).contains(fade_ms),

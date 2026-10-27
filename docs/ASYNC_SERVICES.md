@@ -195,3 +195,27 @@ checkpoints contain the original instruction, not tickets; active restores queue
 logical audio declarations after candidate validation. Boot/Gameexe reads, bounded
 metadata translation, VM ordering, final mixing/output and teardown remain owner
 boundaries. This is partial progress on ADR 0050, not full engine-wide async.
+
+## Prepared audio resources (ADR 0077)
+
+Audio.beginPrepareSource(asset, {measure_frames?, frame_limit?}) returns a
+client/restore-scoped ticket. sourcePreparation observes Pending/Ready/Failed;
+only this observation publishes completed resources. cancelSourcePreparation
+cancels/releases a receipt without publishing an unobserved result. Ready result
+is {resource:{client,id},info:{source_rate,source_frames,encoded_bytes}}.
+Audio.prepareSourceAsync returns that result and releases the temporary receipt.
+Audio.sourceInfo checks a live handle; releaseSource invalidates future lookup.
+
+Audio.beginPlaySource(resource, voiceOptions)/playSourceAsync capture a source
+lease at admission and create an independent buffered decoder on workers. They
+use existing playbackStatus/cancelPlaybackJob and scoped VoiceHandle completion.
+Voice options match beginPlaySfx, including spatial/effect dependencies, excluding
+asset. Releasing the resource after admission cannot cancel that captured lease;
+new lookups fail. Each voice keeps its own seek/read cursor. Restore invalidates
+resources/jobs and old instances release storage only on actual completion/drop.
+
+Native HostServices adds the same resource preparation/info/release contract and
+AudioRequest::PlayResource. Siglus resource and voice completion stages keep the
+original command uncommitted until Ready. Stopped/EOF RESUME uses the retained
+resource instead of path lookup. Stopped snapshot reconstruction starts no voice.
+Budgets and remaining synchronous boundaries are in ADR 0077.

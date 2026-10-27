@@ -422,3 +422,49 @@ fn reflection_promises_publish_captured_paths_and_a_prepared_shared_voice() {
     std::fs::write(dir.path().join("assets/a/pulse.wav"),wave).unwrap();
     app.init().unwrap();app.start().unwrap();until(&mut app,"tracking-ready");
 }
+
+#[test]
+fn prepared_audio_promises_publish_resources_independent_of_receipts_and_voices() {
+    let (dir, mut app) = app(r#"
+        async function onInit() {
+            const prepared=await audio.prepareSourceAsync('tone.wav',{measure_frames:true});
+            const resource=prepared.resource;
+            if(prepared.info.source_frames!==64 || audio.sourceInfo(resource).source_rate!==8000) throw Error('source metadata');
+            const voice=await audio.playSourceAsync(resource,{paused:true,looping:true});
+            audio.releaseSource(resource);
+            let stale=false;try{audio.sourceInfo(resource);}catch(e){stale=true;}
+            if(!stale || !audio.voice(voice).source_playing) throw Error('lease missing');
+            audio.pauseVoice(voice,false);audio.stopVoice(voice,0);
+            engine.log('source-promises-ready');
+        }
+    "#);
+    let size = 128u32;
+    let mut b = b"RIFF".to_vec();
+    b.extend((36 + size).to_le_bytes());
+    b.extend(b"WAVEfmt ");
+    b.extend(16u32.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(8000u32.to_le_bytes());
+    b.extend(16000u32.to_le_bytes());
+    b.extend(2u16.to_le_bytes());
+    b.extend(16u16.to_le_bytes());
+    b.extend(b"data");
+    b.extend(size.to_le_bytes());
+    for _ in 0..64 {
+        b.extend(8192i16.to_le_bytes());
+    }
+    std::fs::write(dir.path().join("assets/a/tone.wav"), b).unwrap();
+    app.init().unwrap();
+    app.start().unwrap();
+    until(&mut app, "source-promises-ready");
+    assert_eq!(
+        app.runtime()
+            .unwrap()
+            .host
+            .channel_audio
+            .resources
+            .resource_count(),
+        0
+    );
+}

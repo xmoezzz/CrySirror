@@ -2615,3 +2615,92 @@ Remaining boundaries:
   disposal and teardown remain synchronous boundaries. Dynamic acoustic geometry,
   Doppler, higher/diffuse reflections and complete engine-wide async remain open.
   The larger modern engine/VN capability goal remains active.
+
+## 2026-10-27 — immutable prepared audio resources and Siglus retained-slot replay (ADR 0077)
+
+Implementation:
+- Added engine-owned AudioResources/PreparedSound, independent of any VM/device.
+  Core exposes plain scoped AudioResourceHandle/Info/Preparation and HostServices
+  resource preparation/status/info/release; AudioRequest::PlayResource captures
+  an immutable source lease before worker admission. Core gains no dependency.
+- Workers snapshot client-capability encoded assets, probe shared decoders and
+  optionally scan/discard bounded chunks when frame count is unknown. Each play
+  creates its own decoder/cursor and uses existing buffered realtime transport;
+  explicit offline native hosts retain immediate preparation receipts. A measured
+  source boundary propagates into independent decoder instances. Unknown lengths
+  are not presented as exact merely because a frame cap was requested.
+- The bank bounds encoded assets at 128 MiB, handles at 32/client and 128/host,
+  and retained preparation receipts at 16/client and 64/host. Atomic reservations
+  cap the bank at 512 MiB, including estimated probe/metadata allowances; these
+  are not whole-process RSS measurements. Stream/mixer budgets are separate.
+  Snapshot Vec storage moves into an Arc without another full encoded copy.
+- Only scoped preparation observation publishes resources. Cancellation cannot
+  publish unobserved completed work. Receipt release keeps published resources;
+  resource release prevents new lookup while admitted/live decoder leases retain
+  bytes. Clear/restore invalidates capabilities without resetting charges still
+  held by actual workers/instances. IDs use the existing monotonic host namespace.
+- Modern Rust/JS/TS Audio adds beginPrepareSource/sourcePreparation/
+  cancelSourcePreparation, sourceInfo/releaseSource and beginPlaySource, with
+  prepareSourceAsync/playSourceAsync helpers. Voice spatial/follow/acoustic/HRTF/
+  reflection options use the existing shared publication path. Asset in resource
+  voice options is rejected; optional preparation options accept omission/null.
+- Siglus PLAY/READY now has separate engine resource and voice completion stages.
+  Original PC/stacks remain uncommitted until publication. Failed second-stage
+  preparation releases its new resource and preserves the previous slot.
+  RESUME/RESUME_WAIT after EOF/stop uses the retained engine resource without
+  resolving/reopening its original file. Slot loop/range and current gain/fade/
+  delay translate into shared parameters; STOP's cleared outer name/loop values
+  remain distinct from the prepared source's loop region.
+- Stopped/ended logical runtime declarations reconstruct only a resource, with
+  no hidden voice or new gallery mark. Active declarations restart at authored
+  start. Bindings/tickets are serde-skipped; Siglus runtime schema stays 2 and
+  original file layouts stay unchanged. Snapshots still require asset aliases
+  and files to rebuild; they do not embed encoded/decoder/device/DSP state.
+- Existing pinned Siglus BGM/source audit remains applicable; reviewed retained
+  slot prepare/start/stop/resume/retire behavior, without copying a native player,
+  decoder, sample buffer, envelope, mixer or renderer into the adapter. API docs
+  regenerated and logged: 4aee8cb171139420 -> 5b75e19d7feee9bf.
+
+Compilation:
+- Final local release workspace/all-target check passed with desktop krkr,
+  arc-formats and acoustics-obvhs. Minimal no-default desktop reallive+avg32 check
+  passed. Existing CBG/RealLive/minimal-CLI warnings remain. No CI, remote build,
+  audio output device, GPU, Windows/Linux or console behavior was exercised.
+
+Behavior validation:
+- Final selected Rust suites: shared audio/core/compat/tasks **109 passed**;
+  Runtime/Siglus **105 passed** (full run plus final 11-case native audio rerun
+  replacing its earlier 10-case subset); engine audio/acoustics/HRTF/reverb/
+  reflections and API reference **52 passed**; RealLive/AVG32 bridges **12 passed**;
+  JS async services **9 passed**. **287 distinct passed**, four ignored excluded.
+  Focused reruns/earlier extra smoke cases are not added again. Python 3.11
+  tooling: **189 passed**.
+- Five independent resource tests verify immutable bytes after replacement,
+  independent seek/read cursors, WAV/Ogg/MP3/FLAC decoder instances, propagated
+  frame metadata, worker-only reads, foreign/stale handles, ready-unobserved and
+  queued cancellation, handle bounds, failed probe cleanup, admitted playback
+  after release, and byte charges until the actual last lease drops after clear.
+- Modern API tests share one resource between pooled and native channels, remove
+  the original file, release the handle while admitted playback is worker-gated,
+  then assert original 0.5-amplitude PCM. Other-client lookup/release, restore,
+  optional options and canceled preparation are checked. JS promises publish
+  resources/voices and preserve their separate receipt/handle/instance lifetimes.
+- Eleven authored original SceneVm audio cases include deletion of the source
+  file before stopped/EOF RESUME_WAIT, frame-seven PCM replay, inactive named and
+  stopped snapshot reconstruction, preserved gallery/outer-loop semantics and
+  failed voice-stage cleanup preserving the previous audible looping resource.
+  Existing original-save, waits/keys/delay/fade/volume, failure/retry, worker gate,
+  same-name idempotence, source-versus-effect-tail and unknown-op cases pass.
+- Evidence: target/verification/resources-{shared-tests,runtime-tests,engine-tests,
+  vn-bridge-tests,js-tests,siglus-tests,bank-final,python,workspace-final,
+  minimal-final}.log. API generation/reference is included in engine-tests.
+
+Remaining boundaries:
+- This closes ADR 0076's retained-source replay gap. Native PCM/PCMCH/SE/voice,
+  full-game/native resource discovery/encrypted Gameexe, full async final DSP/
+  mixing/output, dynamic acoustic geometry, Doppler and higher/diffuse reflection
+  remain open. Inactive snapshot reconstruction follows committed VM state;
+  halted VMs are not stepped solely to observe subsequent audio EOF, so their
+  snapshots can retain the last active declaration. Same-size writes during
+  snapshot reads can race; probing known-length sources is not full-file packet
+  validation. Broader engine/VN and ADR 0050 goals remain active.
