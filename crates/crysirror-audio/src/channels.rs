@@ -162,6 +162,7 @@ pub(crate) struct PreparedChannel {
     pub spec: VoiceSpec,
     pub start: u64,
     pub pan: f32,
+    pub replace_fade_ms: f32,
 }
 pub(super) fn prepare(
     encoded: Box<dyn AudioSource>,
@@ -204,7 +205,29 @@ pub(super) fn prepare(
             at: 0,
         });
     }
-    let loop_points = if p.looping && loop_start > 0 {
+    let mut start = match p.start_frame {
+        Some(frame) => frame,
+        None => {
+            p.start_ms
+                .checked_mul(tail.sample_rate() as u64)
+                .context("audio start position overflow")?
+                / 1000
+        }
+    };
+    let mut looping = p.looping;
+    if p.clamp_range {
+        let end = tail
+            .frame_count()
+            .context("clamped audio range needs a known sample count")?;
+        start = start.min(end);
+        loop_start = loop_start.min(end);
+        looping &= loop_start < end;
+        if start >= end && looping {
+            start = loop_start;
+        }
+        ensure!(start < end, "empty clamped audio range");
+    }
+    let loop_points = if looping && loop_start > 0 {
         Some(LoopPoints {
             start: loop_start,
             end: tail
@@ -225,17 +248,17 @@ pub(super) fn prepare(
         bus,
         gain: p.gain,
         rate: p.rate,
-        looping: p.looping,
+        looping,
         loop_points,
         fade_in_ms: p.fade_ms,
+        paused: p.paused,
         ..Default::default()
     };
     spec.validate()?;
-    let start = p
-        .start_ms
-        .checked_mul(tail.sample_rate() as u64)
-        .context("audio start position overflow")?
-        / 1000;
+    ensure!(
+        p.replace_fade_ms.is_finite() && (0. ..=600000.).contains(&p.replace_fade_ms),
+        "audio replacement fade duration"
+    );
     ensure!(
         tail.frame_count().is_none_or(|len| start <= len),
         "audio start position exceeds source"
@@ -248,6 +271,7 @@ pub(super) fn prepare(
         spec,
         start,
         pan: p.pan,
+        replace_fade_ms: p.replace_fade_ms,
     })
 }
 pub struct ChannelAudio {
@@ -275,6 +299,17 @@ impl Default for ChannelAudio {
     }
 }
 impl ChannelAudio {
+    pub fn playback_info(
+        &self,
+        client: u32,
+        channel: u32,
+    ) -> Result<Option<crysirror_core::service::AudioPlaybackInfo>> {
+        self.voices
+            .get(&(client, channel))
+            .filter(|h| self.mixer.is_playing(client, **h))
+            .map(|h| self.mixer.playback_info(client, *h))
+            .transpose()
+    }
     /// Authoritative, client-scoped channel state from the shared mixer.
     pub fn is_playing(&self, client: u32, channel: u32) -> bool {
         self.voices
@@ -370,7 +405,11 @@ impl ChannelAudio {
                 self.play(client, channel, encoded, intro, p)?;
             }
             AudioRequest::Stop { channel, fade_ms } => {
-                if let Some(&h) = self.voices.get(&(client, channel)) {
+                if let Some(&h) = self
+                    .voices
+                    .get(&(client, channel))
+                    .filter(|h| self.mixer.is_playing(client, **h))
+                {
                     self.mixer.stop(client, h, fade_ms)?;
                 }
             }
@@ -379,8 +418,25 @@ impl ChannelAudio {
                 paused,
                 fade_ms,
             } => {
-                if let Some(&h) = self.voices.get(&(client, channel)) {
+                if let Some(&h) = self
+                    .voices
+                    .get(&(client, channel))
+                    .filter(|h| self.mixer.is_playing(client, **h))
+                {
                     self.mixer.pause_fade(client, h, paused, fade_ms)?;
+                }
+            }
+            AudioRequest::Resume {
+                channel,
+                delay_ms,
+                fade_ms,
+            } => {
+                if let Some(&h) = self
+                    .voices
+                    .get(&(client, channel))
+                    .filter(|h| self.mixer.is_playing(client, **h))
+                {
+                    self.mixer.schedule_resume(client, h, delay_ms, fade_ms)?;
                 }
             }
             AudioRequest::SetGain {
@@ -388,7 +444,11 @@ impl ChannelAudio {
                 gain,
                 fade_ms,
             } => {
-                if let Some(&h) = self.voices.get(&(client, channel)) {
+                if let Some(&h) = self
+                    .voices
+                    .get(&(client, channel))
+                    .filter(|h| self.mixer.is_playing(client, **h))
+                {
                     self.mixer.fade_gain(client, h, gain, fade_ms)?;
                 }
             }
@@ -397,7 +457,11 @@ impl ChannelAudio {
                 looping,
                 loop_start,
             } => {
-                if let Some(&h) = self.voices.get(&(client, channel)) {
+                if let Some(&h) = self
+                    .voices
+                    .get(&(client, channel))
+                    .filter(|h| self.mixer.is_playing(client, **h))
+                {
                     self.mixer.set_looped(client, h, looping, loop_start)?;
                 }
             }
@@ -406,7 +470,11 @@ impl ChannelAudio {
                 pan,
                 fade_ms,
             } => {
-                if let Some(&h) = self.voices.get(&(client, channel)) {
+                if let Some(&h) = self
+                    .voices
+                    .get(&(client, channel))
+                    .filter(|h| self.mixer.is_playing(client, **h))
+                {
                     self.mixer.set_pan(client, h, pan, fade_ms)?;
                 }
             }
@@ -439,6 +507,7 @@ impl ChannelAudio {
             spec,
             start,
             pan,
+            replace_fade_ms,
         } = prepared;
         let previous = self
             .voices
@@ -449,15 +518,20 @@ impl ChannelAudio {
             previous.is_some() || self.mixer.stats().active < 256,
             "shared channel voice capacity"
         );
-        if let Some(old) = previous {
-            self.mixer.stop(client, old, 0.)?;
-        }
-        let h = self.mixer.play(client, tail, spec)?;
-        if start > 0 {
-            if self.mixer.begin_seek(client, h, start).is_err() {
-                self.mixer.seek(client, h, start)?;
+        let h = if let Some(old) = previous.filter(|_| replace_fade_ms == 0.) {
+            self.mixer.replace(client, old, tail, spec)?
+        } else {
+            ensure!(
+                self.mixer.has_spare_voice(client),
+                "channel crossfade requires a spare voice"
+            );
+            let handle = self.mixer.play(client, tail, spec)?;
+            if let Some(old) = previous {
+                self.mixer.stop(client, old, replace_fade_ms)?;
             }
-        }
+            handle
+        };
+        self.mixer.prepared_position(client, h, start)?;
         self.mixer.set_pan(client, h, pan, 0.)?;
         self.voices.insert((client, channel), h);
         Ok(())
@@ -488,5 +562,65 @@ impl ChannelAudio {
     }
     pub fn take_output(&mut self) -> Vec<StereoFrame> {
         std::mem::take(&mut self.output)
+    }
+}
+
+#[cfg(test)]
+mod prepared_cursor_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct Source {
+        at: u64,
+        seeks: Arc<AtomicUsize>,
+    }
+    impl AudioSource for Source {
+        fn sample_rate(&self) -> u32 {
+            48000
+        }
+        fn frame_count(&self) -> Option<u64> {
+            Some(100)
+        }
+        fn read_position(&self) -> Option<u64> {
+            Some(self.at)
+        }
+        fn read(&mut self, out: &mut [StereoFrame]) -> Result<usize> {
+            let n = out.len().min((100 - self.at) as usize);
+            for frame in &mut out[..n] {
+                *frame = [self.at as f32 / 100.; 2];
+                self.at += 1;
+            }
+            Ok(n)
+        }
+        fn seek(&mut self, frame: u64) -> Result<()> {
+            self.seeks.fetch_add(1, Ordering::SeqCst);
+            self.at = frame;
+            Ok(())
+        }
+    }
+    #[test]
+    fn worker_prepared_cursor_does_not_seek_again_on_publication_or_first_mix() {
+        let seeks = Arc::new(AtomicUsize::new(0));
+        let prepared = prepare(
+            Box::new(Source {
+                at: 0,
+                seeks: seeks.clone(),
+            }),
+            None,
+            AudioParameters {
+                start_frame: Some(7),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(seeks.load(Ordering::SeqCst), 1);
+        let mut channels = ChannelAudio::default();
+        channels.publish(1, 0, prepared).unwrap();
+        let mut output = [[0.; 2]; 1];
+        channels.mixer.render(&mut output).unwrap();
+        assert!((output[0][0] - 0.07).abs() < 1e-6);
+        assert_eq!(seeks.load(Ordering::SeqCst), 1);
     }
 }

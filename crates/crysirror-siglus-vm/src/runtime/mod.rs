@@ -475,6 +475,12 @@ pub fn dispatch_form_code(ctx: &mut CommandContext, id: u32, args: &[Value]) -> 
         ));
         return Ok(true);
     }
+    if constants::matches_form_id(id, ctx.ids.form_global_bgm, gf::BGM) {
+        return crate::bgm_bridge::dispatch(ctx, args);
+    }
+    if constants::matches_form_id(id, ctx.ids.form_global_bgm_table, gf::BGMTABLE) {
+        return crate::bgm_bridge::dispatch_table(ctx, args);
+    }
     if id == gf::TIMEWAIT {
         return forms::timewait::dispatch(ctx, false, args);
     }

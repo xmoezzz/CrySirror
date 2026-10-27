@@ -353,9 +353,17 @@ fn method(
         doc,
     }
 }
+fn playback_json(info: crysirror_core::service::AudioPlaybackInfo) -> Value {
+    Value::from_json(
+        serde_json::json!({"source_playing":info.source_playing,"paused":info.paused,"looping":info.looping,"position_frames":info.position_frames,"source_rate":info.source_rate,"source_frames":info.source_frames,"output_rate":info.output_rate,"fade_out_frames":info.fade_out_frames,"resume_delay_frames":info.resume_delay_frames}),
+    )
+}
 fn info() -> &'static ClassInfo {
     static INFO: OnceLock<ClassInfo> = OnceLock::new();
     INFO.get_or_init(||ClassInfo{name:"Audio",doc:"Scoped voice pool, streaming music and deterministic CPU mixing; classic channels share this output.",properties:vec![PropertyInfo{name:"sampleRate",ty:T::Int,writable:false,doc:"Mixer output frames per second."}],methods:vec![
+        method("nativeChannelInfo",vec![("channel",T::Int)],T::Any,"Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails."),
+        method("playbackInfo",vec![("handle",T::Map)],T::Map,"Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, paused/loop state and output-clock fade-out/resume-delay counters."),
+        method("scheduleVoiceResume",vec![("handle",T::Map),("delay_ms",T::Number),("fade_ms",T::Number)],T::Void,"Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness."),
         method("channelStatus",vec![("channel",T::Int)],T::Map,"Desired SceneState epoch and derived queued/loading/playing/paused/ended/failed readiness, position and error. Stopped declarations take precedence; frame synchronization prepares/publishes playback."),
         method("play",vec![("channel",T::Int),("voice",T::Map)],T::Void,"Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics."),
         method("stop",vec![("channel",T::Int)],T::Void,"Stop a classic channel."),
@@ -619,6 +627,32 @@ impl Class for AudioClass {
         }
         let client = cx.state()?.client.0;
         match name {
+            "nativeChannelInfo" => {
+                let channel = u32::try_from(arg(args, 0, "channel")?.as_i64()?)?;
+                return Ok(cx
+                    .state()?
+                    .runtime
+                    .host
+                    .channel_audio
+                    .playback_info(client, channel)?
+                    .map(playback_json)
+                    .unwrap_or(Value::Null));
+            }
+            "playbackInfo" => {
+                let h = handle(cx, args)?;
+                return Ok(playback_json(
+                    cx.state()?.mixer_audio.mixer.playback_info(client, h)?,
+                ));
+            }
+            "scheduleVoiceResume" => {
+                let h = handle(cx, args)?;
+                cx.state()?.mixer_audio.mixer.schedule_resume(
+                    client,
+                    h,
+                    arg(args, 1, "delay")?.as_f32()?,
+                    arg(args, 2, "fade")?.as_f32()?,
+                )?;
+            }
             "channelStatus" => {
                 let channel = u32::try_from(arg(args, 0, "channel")?.as_i64()?)?;
                 let s = cx.state()?;

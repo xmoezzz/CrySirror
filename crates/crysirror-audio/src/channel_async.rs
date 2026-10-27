@@ -104,6 +104,10 @@ impl ChannelAudio {
                 && (0.0..=1.).contains(&p.pan),
             "channel audio gain/pan"
         );
+        ensure!(
+            p.replace_fade_ms.is_finite() && (0. ..=600000.).contains(&p.replace_fade_ms),
+            "channel replacement fade"
+        );
         crate::mixer::VoiceSpec {
             gain: p.gain,
             rate: p.rate,
@@ -303,6 +307,7 @@ impl ChannelAudio {
                 (*channel, true)
             }
             AudioRequest::Pause { channel, .. }
+            | AudioRequest::Resume { channel, .. }
             | AudioRequest::SetGain { channel, .. }
             | AudioRequest::SetPan { channel, .. }
             | AudioRequest::SetLooped { channel, .. } => (*channel, false),

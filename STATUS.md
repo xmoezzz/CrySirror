@@ -2494,3 +2494,124 @@ Remaining boundaries:
   async migration, new GPU/hardware RT, other-platform/audio-device behavior or
   additional commercial VN opcode/save compatibility is claimed. The broader
   modern engine/VN capability objective remains active.
+
+## Shared transport and original Siglus BGM (ADR 0076, 2026-10-27)
+
+Implementation:
+- Added reusable core AudioPlaybackInfo/HostServices.audio_info and shared
+  Mixer/ChannelAudio inspection. Decoded-source frame/rate/length, source
+  completion, pause/loop mode and output-clock fade/delay counters are distinct.
+  Audio.playbackInfo/nativeChannelInfo/scheduleVoiceResume expose the same
+  engine resources without a native VM. Canonical channelStatus stays separate.
+- AudioParameters now supports exact start_frame overriding start_ms, paused
+  publication, optional clamped source/loop ranges and replacement crossfade.
+  Workers seek/prewarm once; owner publication synchronizes both logical and
+  resampling cursors so the first mix does not perform another seek. Immediate
+  replacement uses the exact channel slot and restores old state on validation
+  failure. Crossfade needs a spare voice; capacity failure preserves old audio
+  without stealing another channel. Ended/stolen controls are idempotent.
+- Added scheduled resume with a fresh fade-in and output-clock delay. Explicit
+  stop/pause deadlines now progress through source starvation/preparation and
+  silent paused input; source position and ordinary initial fade stay frozen
+  without PCM. Pause/stop/resume supersedes a pending schedule. The mixer still
+  executes DSP/output synchronously; no whole-engine async completion is claimed.
+- Replaced Siglus BGM's unbound logical placeholder with semantic operations over
+  shared channel services. Original SceneVm execution, positional/named argument
+  decoding, native value/state codes and wait machinery remain. PLAY/one-shot/
+  wait/READY, retained-source pause/resume/delay, stop/fade waits, WAIT_KEY,
+  volume/name/position/check and BGMTABLE flags have mapped bounded profiles.
+  No native BGM decoder/player/Kira hub/mixer/renderer was copied into the hook.
+- Resource admission retains post-command VM state separately while the visible
+  VM stays at the original instruction/arguments. Only Ready commits it; failure
+  releases the receipt without running following instructions. Unexpected status
+  errors keep the same live ticket. Native resource work remains cooperative,
+  client-scoped and independent of other clients' playback.
+- Native BGM files require explicit client resources aliases. Optional decoded
+  UTF-8 Gameexe rows provide start/end/repeat frames; rows/declared count are
+  bounded at 4096. Unknown opcodes/property fallbacks and malformed layouts fail
+  visibly. Native gallery flags remain VM logical/save state, not engine DSP.
+- Native Siglus runtime payload schema changed 1 -> 2; incompatible old payloads
+  require migration. Pending snapshots serialize the uncommitted instruction,
+  never tickets. Active snapshots reprepare declarations after candidate commit
+  at authored start, without claiming device/sample-history checkpoints. New
+  logical-state validation rejects malformed restored BGM before resource work.
+  Original file codecs/header/layouts remain unchanged. Existing import rollback
+  now advertises transactional import; direct original-file operations reject
+  an in-flight resource command instead of mutating its separately retained VM.
+- Verified the existing original Git pin 5f358ef1360b0439e92aed2b749e8f25d8721954
+  and its 2519-file tree. Nine scoped source audit records cover full BGM/audio
+  files and selected complete resource/wait/argument/save call paths, with exact
+  immutable hashes in docs/siglus-bgm-source-audit.json. Existing reference
+  opt-in-device differences are explicit; this is not whole-engine semantic
+  coverage. Normal Siglus VM dependency inspection excludes kira, rodio, cpal,
+  wgpu, winit and ash. API docs regenerated/logged
+  1ff0b7ce813fb81e -> 4aee8cb171139420; Rust literal/enum and VM-payload breaking
+  changes are documented separately from additive JS/TS methods.
+
+Compilation:
+- Local release workspace/all-target check passed with desktop krkr, arc-formats
+  and acoustics-obvhs. Minimal no-default desktop reallive+avg32 check passed.
+  Existing CBG/RealLive/minimal-CLI warnings remain. No GitHub CI or remote
+  build ran; no output device/GPU or Windows/Linux behavior was exercised.
+
+Behavior validation:
+- Shared audio/core/compat/tasks suites: **104 passed**, one owner NWA-resource
+  case ignored. Runtime/Siglus unit, native audio and media snapshot suites:
+  **70 passed**, one font case ignored. Engine audio/acoustics/HRTF/reverb/
+  reflections: **42 passed**. RealLive/AVG32 bridges: **12 passed**, one font
+  case ignored. JS async services: **8 passed**, one font case ignored. API
+  reference: **6 passed**. Total: **242 distinct Rust tests passed**, four
+  ignored excluded. Focused reruns are not counted twice. Python 3.11 tooling:
+  **189 passed**.
+- Four transport sample cases verify exact frame-seven paused publication,
+  source/output units, bounded range/repeat clamping, delayed resume/fade samples,
+  cancellation, silent stop/pause deadlines on starvation/preparation, ordinary
+  fade-in hold, source freeze, stale controls and atomic failed replacement.
+  A full **256-voice** pool rejects crossfade without stealing/publishing, retains
+  old audible samples, then replaces the exact channel immediately. A separate
+  counted-source unit proves **one seek total** across worker preparation,
+  publication and first mix.
+- Seven authored native PCK/SCN cases run the original interpreter: worker-blocked
+  playback retains PC/arguments while another client's PCM advances; Ready starts
+  at source frame seven; source waits resume arithmetic while a real shared BVH
+  echo remains/drains; pending checkpoints replay without tickets. READY, delayed
+  resume, pause fade, WAIT_FADE and RESUME_WAIT observe shared state/positions.
+  WAIT_KEY returns 1 only after DECIDE release, returns 0 on natural EOF, and
+  leaves a looping sound running. Broken resources retain the original PC and
+  retry after repair. Same-loop-name playback succeeds without reopening a
+  deleted source; active snapshots rebind; gallery count/listened flags persist.
+  Unknown operations, oversized tables and unsupported freed-source RESUME fail.
+- Original native save-file export/import passes playing and READY-paused loop
+  declarations with volume 128/255 and authored start/end/repeat frames. Invalid
+  import rolls back native state; successful import reopens through shared
+  preparation and resumes the original VM checkpoint. Actual PCM amplitude is
+  checked before export/reload. Existing native save/text/DECIDE cases still pass.
+  This bounded evidence does not establish every original save variant or title.
+- Modern class tests inspect actual pooled/native channel state, exact output-
+  clock delay and sample-level fade, and reject foreign handles/channels. JS
+  inspects original 8 kHz source units versus the 48 kHz output delay counter
+  through the new registry methods. Native generated music, scenes and Gameexe
+  fixtures are self-authored; no game, measured HRIR, font, SDK or device data
+  is redistributed. API blessing initially required logging its new fingerprint;
+  the final logged reference check passed.
+- Evidence in target/verification: transport-library-final-tests.log,
+  transport-siglus-final-tests.log, transport-engine-final-tests.log,
+  transport-other-native-tests.log, transport-js-tests.log,
+  transport-api-final-tests.log, transport-workspace-check.log,
+  transport-minimal-check.log, transport-python-tests.log,
+  transport-final-focused.log, transport-native-validated-tests.log,
+  transport-cursor-final-tests.log and siglus-bgm-dependencies.txt.
+
+Remaining boundaries:
+- RESUME after EOF/immediate stop needs an engine-owned retained prepared-source
+  resource to match native data retention and replay. It explicitly fails;
+  reopening a mutable asset path is not substituted as equivalent behavior.
+  This shared resource primitive is the next concrete audio gap, also relevant
+  to KiriKiri WaveSoundBuffer. Explicit PLAY remains new resource preparation.
+- Other Siglus audio forms (PCM/PCMCH/SE/voice), resource/append discovery,
+  encrypted Gameexe conversion, native archive-entry selection and broader native
+  text/layout/save/game coverage remain open. Native boot/Gameexe reads, bounded
+  metadata translation, original VM ordering, final DSP/output, owner allocation/
+  disposal and teardown remain synchronous boundaries. Dynamic acoustic geometry,
+  Doppler, higher/diffuse reflections and complete engine-wide async remain open.
+  The larger modern engine/VN capability goal remains active.

@@ -324,3 +324,15 @@ history and two-plan crossfades. Initial short sources wait for HRTF then echoes
 Scene/latency changes mute obsolete taps until a compatible replacement arrives.
 Scopes, completion, fair admission, coalescing, residency leases and source-EOF
 versus echo-drain boundaries are explicit; final mixing/output remains owner work.
+
+
+## Shared source transport and Siglus BGM (2026-10-27)
+
+[ADR 0076](adr/0076-shared-audio-transport-and-siglus-bgm.md) adds exact-frame,
+paused and crossfaded channel publication plus source/output-clock inspection
+and scheduled resume. Workers prepare sources; the owner publishes an already
+prepared cursor; the mixer owns samples, delay counters and transport fades.
+Native Siglus BGM translates those operations through HostServices while retaining
+its original VM command until preparation commits. Gallery flags and native wait/
+save/value policies remain VM state, without a second audio engine. Restore queues
+derived declarations after candidate commit; source/device history is not saved.

@@ -1618,6 +1618,7 @@ dependencies = [
  "anyhow",
  "blake3",
  "cap-std",
+ "crysirror-acoustics",
  "crysirror-asset",
  "crysirror-audio",
  "crysirror-core",

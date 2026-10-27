@@ -140,15 +140,33 @@ pub enum PcmBus {
 }
 #[derive(Clone, Debug)]
 pub struct AudioParameters {
+    /// Mixer voice gain, default 1.
     pub gain: f32,
+    /// Legacy amplitude applied by the shared decoded-source wrapper, default 1.
     pub decode_gain: f32,
+    /// Source playback rate, default 1.
     pub rate: f32,
+    /// Stereo balance 0..1, with 0.5 centered.
     pub pan: f32,
+    /// Repeat source input, default false.
     pub looping: bool,
+    /// Decoded-source frame to repeat from, default zero.
     pub loop_start: u64,
+    /// Startup position in source milliseconds unless start_frame is set.
     pub start_ms: u64,
+    /// Exact decoded-source frame; when present this overrides start_ms.
+    pub start_frame: Option<u64>,
+    /// Clamp authored source/loop positions to the prepared source boundary.
+    pub clamp_range: bool,
+    /// Publish without consuming samples until an explicit resume.
+    pub paused: bool,
+    /// Fade the previous channel voice after successful replacement publication.
+    pub replace_fade_ms: f32,
+    /// Initial fade-in duration in milliseconds.
     pub fade_ms: f32,
+    /// False keeps a currently active channel instead of reopening it.
     pub restart: bool,
+    /// Shared output bus, default Sfx.
     pub bus: PcmBus,
 }
 impl Default for AudioParameters {
@@ -161,11 +179,39 @@ impl Default for AudioParameters {
             looping: false,
             loop_start: 0,
             start_ms: 0,
+            start_frame: None,
+            clamp_range: false,
+            paused: false,
+            replace_fade_ms: 0.,
             fade_ms: 0.,
             restart: true,
             bus: PcmBus::Sfx,
         }
     }
+}
+/// Shared source transport inspection. Processing tails do not prolong source
+/// completion. Frame positions are decoded-source units; fade/delay counts use
+/// output_rate. No device or executable pointers cross this boundary.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AudioPlaybackInfo {
+    /// Source has remaining input, even when paused; excludes processing tails.
+    pub source_playing: bool,
+    /// Source clock currently frozen by pause or scheduled resume.
+    pub paused: bool,
+    /// Actual prepared source loop mode.
+    pub looping: bool,
+    /// Current decoded-source frame, without worker read-ahead.
+    pub position_frames: u64,
+    /// Decoded-source frames per second.
+    pub source_rate: u32,
+    /// Prepared source boundary, when known.
+    pub source_frames: Option<u64>,
+    /// Mixer frames per second, used by fade/delay counters.
+    pub output_rate: u32,
+    /// Remaining stop/pause fade frames; ordinary gain fades are excluded.
+    pub fade_out_frames: u64,
+    /// Remaining scheduled-resume delay in mixer frames.
+    pub resume_delay_frames: u64,
 }
 /// Deferred, client-capability audio source. No bytes or device pointers in VM state.
 #[derive(Clone, Debug)]
@@ -223,6 +269,13 @@ pub enum AudioRequest {
     Pause {
         channel: u32,
         paused: bool,
+        fade_ms: f32,
+    },
+    /// Freeze the source now, then resume after an output-clock delay with a
+    /// fresh fade-in. A later pause/stop/resume replaces this scheduled action.
+    Resume {
+        channel: u32,
+        delay_ms: f32,
         fade_ms: f32,
     },
     SetGain {
@@ -352,6 +405,12 @@ pub trait TextMeasurement: Send + Sync {
 pub trait HostServices: FileSystem {
     fn audio_playing(&self, _client: ClientId, _channel: u32) -> Result<bool> {
         Err(crate::Error::Unsupported("engine audio status"))
+    }
+    /// Current shared channel transport, or None for an ended/unallocated voice.
+    fn audio_info(&self, _client: ClientId, _channel: u32) -> Result<Option<AudioPlaybackInfo>> {
+        Err(crate::Error::Unsupported(
+            "channel audio transport inspection",
+        ))
     }
     fn query_engine(&mut self, _client: ClientId, _query: EngineQuery) -> Result<Vec<u8>> {
         Err(crate::Error::Unsupported("engine state query"))

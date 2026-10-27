@@ -178,3 +178,20 @@ Natural source EOF cancels new updates and drains the installed plan; native
 waits still use source completion. Clear/restore invalidate tasks and resources.
 The sample loop does not reclaim retired plans; control-side disposal and final
 mix/output remain synchronous. See ADR 0075 for exact limits and lifetime policy.
+
+
+## Audio transport and Siglus command publication (ADR 0076)
+
+Exact startup frames, paused publication and optional replacement crossfade are
+shared channel parameters. Workers seek/prewarm once; publication sets the logical
+cursor without another seek. Shared inspection distinguishes source units from
+output-clock stop/pause fades and delayed resume. Control deadlines progress
+across decoder starvation while source and ordinary fade-in clocks remain held.
+
+Siglus BGM keeps before/after original VM states around admitted audio work and
+commits only on Ready. Failed receipts release without acknowledging the native
+instruction; unexpected status-query errors retain their existing ticket. Pending
+checkpoints contain the original instruction, not tickets; active restores queue
+logical audio declarations after candidate validation. Boot/Gameexe reads, bounded
+metadata translation, VM ordering, final mixing/output and teardown remain owner
+boundaries. This is partial progress on ADR 0050, not full engine-wide async.

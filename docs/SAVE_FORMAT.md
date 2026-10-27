@@ -32,3 +32,13 @@ The in-memory host demonstrates file namespace separation and atomic map
 replacement only. Actual durable save files require a platform implementation
 of `FileSystem::write_atomic`, including platform-specific failure/recovery
 semantics and safe path resolution.
+
+
+Native Siglus runtime payload schema 2 (ADR 0076) includes logical BGM state.
+Schema-1 payloads require migration; the envelope rejects a mismatch. Pending
+resource checkpoints retain the original uncommitted instruction. Active audio
+restores declarations at authored range start after candidate commit; worker
+receipts, decoder read-ahead, device cursors and DSP history are never serialized.
+Original Siglus file codecs/header layouts stay separate and unchanged. BGM loop/
+pause/delay/volume persistence uses those existing fields and shared preparation;
+this bounded profile does not establish every original save variant.

@@ -13805,6 +13805,7 @@ impl<'a> SceneVm<'a> {
 // of the data VM. Serialize its actual stacks/frames/globals, not a replay log.
 impl SceneVm<'static> {
     pub fn engine_validate(&self) -> Result<()> {
+        self.ctx.bgm.validate()?;
         crate::message::validate(&self.ctx)?;
         anyhow::ensure!(
             self.int_stack.len() <= 1_000_000

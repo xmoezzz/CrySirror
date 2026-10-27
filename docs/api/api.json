@@ -661,6 +661,47 @@
       "global": "audio",
       "methods": [
         {
+          "doc": "Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails.",
+          "name": "nativeChannelInfo",
+          "params": [
+            {
+              "name": "channel",
+              "type": "number"
+            }
+          ],
+          "returns": "any"
+        },
+        {
+          "doc": "Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, paused/loop state and output-clock fade-out/resume-delay counters.",
+          "name": "playbackInfo",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness.",
+          "name": "scheduleVoiceResume",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "delay_ms",
+              "type": "number"
+            },
+            {
+              "name": "fade_ms",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Desired SceneState epoch and derived queued/loading/playing/paused/ended/failed readiness, position and error. Stopped declarations take precedence; frame synchronization prepares/publishes playback.",
           "name": "channelStatus",
           "params": [
@@ -4888,6 +4929,195 @@
     }
   ],
   "data": [
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Mixer voice gain, default 1.",
+          "name": "gain",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Legacy amplitude applied by the shared decoded-source wrapper, default 1.",
+          "name": "decode_gain",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Source playback rate, default 1.",
+          "name": "rate",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Stereo balance 0..1, with 0.5 centered.",
+          "name": "pan",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Repeat source input, default false.",
+          "name": "looping",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Decoded-source frame to repeat from, default zero.",
+          "name": "loop_start",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Startup position in source milliseconds unless start_frame is set.",
+          "name": "start_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Exact decoded-source frame; when present this overrides start_ms.",
+          "name": "start_frame",
+          "rust_type": "Option<u64>"
+        },
+        {
+          "default": null,
+          "doc": "Clamp authored source/loop positions to the prepared source boundary.",
+          "name": "clamp_range",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Publish without consuming samples until an explicit resume.",
+          "name": "paused",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Fade the previous channel voice after successful replacement publication.",
+          "name": "replace_fade_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Initial fade-in duration in milliseconds.",
+          "name": "fade_ms",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "False keeps a currently active channel instead of reopening it.",
+          "name": "restart",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Shared output bus, default Sfx.",
+          "name": "bus",
+          "rust_type": "PcmBus"
+        }
+      ],
+      "name": "AudioParameters",
+      "used_by": "Rust HostServices/ChannelAudio playback parameters"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Music",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Sfx",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Voice",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ambient",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ui",
+          "rust_type": ""
+        }
+      ],
+      "name": "PcmBus",
+      "used_by": "AudioParameters.bus"
+    },
+    {
+      "doc": "Shared source transport inspection. Processing tails do not prolong source completion. Frame positions are decoded-source units; fade/delay counts use output_rate. No device or executable pointers cross this boundary.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Source has remaining input, even when paused; excludes processing tails.",
+          "name": "source_playing",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Source clock currently frozen by pause or scheduled resume.",
+          "name": "paused",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Actual prepared source loop mode.",
+          "name": "looping",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Current decoded-source frame, without worker read-ahead.",
+          "name": "position_frames",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Decoded-source frames per second.",
+          "name": "source_rate",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Prepared source boundary, when known.",
+          "name": "source_frames",
+          "rust_type": "Option<u64>"
+        },
+        {
+          "default": null,
+          "doc": "Mixer frames per second, used by fade/delay counters.",
+          "name": "output_rate",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Remaining stop/pause fade frames; ordinary gain fades are excluded.",
+          "name": "fade_out_frames",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Remaining scheduled-resume delay in mixer frames.",
+          "name": "resume_delay_frames",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "AudioPlaybackInfo",
+      "used_by": "Audio.playbackInfo / nativeChannelInfo / HostServices.audio_info"
+    },
     {
       "doc": "Automatic pose-refresh policy over the same single-bounce simulator.",
       "fields": [
@@ -12211,7 +12441,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "1ff0b7ce813fb81e",
+  "fingerprint": "4aee8cb171139420",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

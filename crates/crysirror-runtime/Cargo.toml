@@ -32,4 +32,5 @@ blake3.workspace = true
 cap-std.workspace = true
 
 [dev-dependencies]
+crysirror-acoustics.workspace = true
 tempfile = "3.12"

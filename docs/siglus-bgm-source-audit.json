@@ -1,0 +1,98 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "upstream_license": "MPL-2.0",
+  "git_tree_files": 2519,
+  "scope": "BGM native argument/value/wait/save/resource-policy review; no complete-game or whole-engine semantic audit claim",
+  "implementation": "Original SceneVm and native codecs remain; new semantic bridge submits CrySirror HostServices audio operations. No legacy BGM decoder/player/mixer or renderer is copied or linked by this bridge. The existing optional upstream source tree remains reference material.",
+  "resource_profile": "Explicit client resources aliases; decoded UTF-8 Gameexe BGM rows optionally provide start/end/repeat samples; at most 4096 entries. No implicit native filesystem search, encrypted Gameexe conversion, pack selection or append-directory discovery.",
+  "reference_note": "Existing kira_hub.rs has the previously documented native-audio opt-in changes; source hashes here identify the original immutable Git blobs.",
+  "files": [
+    {
+      "path": "crates/siglus_scene_vm/src/audio/engine.rs",
+      "sha256": "507738a12ed88400f2fe070a1b8b84bb5e1de69093fa6476a23eb15e8e4f8f51",
+      "bytes": 44915,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/audio/bgm.rs",
+      "sha256": "6ca352b418678e2040ad2c56b31ea73a00865ccbf967886288d96c4669a0db2e",
+      "bytes": 24039,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/audio/mod.rs",
+      "sha256": "925c6a5072a1fff22e3c9e28aef2165168fb4ad5d5615ae1a184579596ccab6b",
+      "bytes": 472,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/audio/kira_hub.rs",
+      "sha256": "d32a67162700a73192e98378900d50cb22fd3bc68817acce914703dfbaef6a4b",
+      "bytes": 8664,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/bgm.rs",
+      "sha256": "8cbea1c310452ad4e42af32c8d71793d93042494c959347dee4732f7164d789b",
+      "bytes": 8619,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/forms/bgm_table.rs",
+      "sha256": "ee48503b88516406ecdc54f4c9796a3868c3fea167b5a0d09e24a740047056af",
+      "bytes": 6270,
+      "review": "complete source file",
+      "copied_into_bridge": false,
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/resource.rs",
+      "sha256": "24a2bfef2c8931cf4915807eecca6f6ad23a41f19b2a7a0e32e4b45fdba85e44",
+      "bytes": 58722,
+      "review": "complete selected functions/call paths",
+      "copied_into_bridge": false,
+      "functions_or_paths": [
+        "find_audio_path_with_append_dir"
+      ],
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/wait.rs",
+      "sha256": "75aae7791c1683e9f5fb22f3b0d377a957efe18ebdc72febdef94e1f14fbe9f3",
+      "bytes": 72576,
+      "review": "complete selected functions/call paths",
+      "copied_into_bridge": false,
+      "functions_or_paths": [
+        "AudioWait",
+        "audio completion/skip predicates",
+        "wait_audio_with_return",
+        "notify_movie_down_up"
+      ],
+      "existing_reference_matches_pin": true
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/vm.rs",
+      "sha256": "e0bbd6546ef6e1375c36ceadbd321ce8f7af8d180c61f011ef28da60e2db8d62",
+      "bytes": 610381,
+      "review": "complete selected functions/call paths",
+      "copied_into_bridge": false,
+      "functions_or_paths": [
+        "CD_COMMAND positional/named argument decoding",
+        "canonical_runtime_form_id",
+        "original BGM audio save/load codec"
+      ],
+      "existing_reference_matches_pin": true
+    }
+  ]
+}

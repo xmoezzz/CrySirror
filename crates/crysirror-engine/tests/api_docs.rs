@@ -236,6 +236,9 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("AudioParameters","Rust HostServices/ChannelAudio playback parameters",None),
+        d("PcmBus","AudioParameters.bus",None),
+        d("AudioPlaybackInfo","Audio.playbackInfo / nativeChannelInfo / HostServices.audio_info",None),
         d("ReflectionTrackingSpec","Audio.trackVoiceReflections / playSfx.reflections",sample::<crysirror_acoustics::reflections::ReflectionTrackingSpec>(json!({}))),
         d("ReflectionOptions","Audio.beginVoiceReflections options / ReflectionQuery.options",sample::<crysirror_acoustics::reflections::ReflectionOptions>(json!({}))),
         d("ReflectionQuery","Audio.beginReflectionProbe",sample::<crysirror_acoustics::reflections::ReflectionQuery>(json!({"source":[0,0,2],"listener":[0,0,0]}))),

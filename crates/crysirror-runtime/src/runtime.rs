@@ -148,6 +148,18 @@ impl FileSystem for SharedHost {
     }
 }
 impl HostServices for SharedHost {
+    fn audio_info(
+        &self,
+        client: ClientId,
+        channel: u32,
+    ) -> crysirror_core::Result<Option<crysirror_core::service::AudioPlaybackInfo>> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.channel_audio
+            .playback_info(client.0, channel)
+            .map_err(|e| Error::Io(format!("shared audio transport: {e:#}")))
+    }
     fn audio_playing(&self, client: ClientId, channel: u32) -> crysirror_core::Result<bool> {
         if !self.clients.contains(&client) {
             return Err(Error::NotFound);

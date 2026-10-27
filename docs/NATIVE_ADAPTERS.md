@@ -196,3 +196,28 @@ resources without private echo algorithms. This phase adds no native opcode or
 save mapping. Original RealLive/AVG32 bridge fixtures still verify source waits
 while engine-owned effects drain; that bounded evidence does not establish full
 game support or native automatic spatialization.
+
+
+## Original Siglus BGM through shared transport (ADR 0076)
+
+BGM forms now translate native arguments, state codes and wait predicates onto
+HostServices begin_audio/audio_preparation/submit_audio/audio_info. The adapter
+owns no decoder/mixer/fader. Resource admission keeps the VM at its original
+command until owner publication; failures do not acknowledge following arithmetic.
+READY/pause/delayed resume, source/fade waits, WAIT_KEY return values, registered
+name/position/volume and same-loop-name semantics have authored native fixtures.
+BGMTABLE flags remain private native logical/save state.
+
+An explicit resources alias maps each native music file to a client engine asset.
+Optional decoded UTF-8 Gameexe BGM rows supply start/end/repeat frames, bounded
+at 4096 entries. Discovery/append dirs, encrypted Gameexe and native pack-entry
+selection are not inferred. Unsupported opcodes/property fallbacks fail visibly.
+PCM/PCMCH/SE/voice are not integrated by this phase. RESUME after EOF/stop
+also fails visibly until an engine-owned retained-source resource can preserve
+the native bytes; reopening an asset path is not treated as equivalent replay.
+
+Runtime Siglus payload schema is 2. Pending checkpoints replay uncommitted native
+commands; active restores reprepare declarations at authored start. Original file
+codecs remain intact, with BGM persistence translated through shared preparation.
+No whole-game, every-save-variant, device or other-platform claim follows. See
+[siglus-bgm-source-audit.json](siglus-bgm-source-audit.json) and ADR 0076.

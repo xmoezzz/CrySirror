@@ -119,3 +119,22 @@ UPSTREAM.md and upstream-files.json.
 The actual original code was compiled in tools/compare_scene_upstream.py and
 175,700 observations agreed with the migration (docs/engine-systems-differential.json).
 This compares the selected algorithms, not complete native games or VM behavior.
+
+
+## Siglus BGM semantic bridge (2026-10-27)
+
+The original Git tree at 5f358ef1360b0439e92aed2b749e8f25d8721954 is locally
+available and verified (2519 tracked files). The BGM review covers complete
+engine/form/table/container and audio module/hub source, plus selected complete
+resource, wait, VM argument and native save call paths. Exact Git-blob hashes and
+scope are in [siglus-bgm-source-audit.json](siglus-bgm-source-audit.json). Existing
+reference kira_hub.rs opt-in-device changes remain distinct from the immutable
+upstream hash. This is a scoped semantic audit, not whole-engine/game acceptance.
+
+No native BGM engine implementation was copied into the new hook. Original VM
+execution and codecs remain; new logical/syscall adapters submit CrySirror shared
+channel resources/transport. Exact-frame startup, paused/crossfaded publication,
+inspection, delayed resume and starvation-independent control fades are shared
+engine capabilities, independently tested without the VM. Resource aliases and
+bounded decoded Gameexe rows define the explicit initial profile; ADR 0076 records
+unsupported resource discovery/audio/forms and remaining async boundaries.

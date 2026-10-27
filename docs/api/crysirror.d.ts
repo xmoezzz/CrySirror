@@ -17,6 +17,12 @@ declare class Assets {
 declare class Audio {
   /** Mixer output frames per second. */
   readonly sampleRate: number;
+  /** Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails. */
+  nativeChannelInfo(channel: number): any;
+  /** Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, paused/loop state and output-clock fade-out/resume-delay counters. */
+  playbackInfo(handle: Record<string, any>): Record<string, any>;
+  /** Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness. */
+  scheduleVoiceResume(handle: Record<string, any>, delay_ms: number, fade_ms: number): void;
   /** Desired SceneState epoch and derived queued/loading/playing/paused/ended/failed readiness, position and error. Stopped declarations take precedence; frame synchronization prepares/publishes playback. */
   channelStatus(channel: number): Record<string, any>;
   /** Classic {asset,looping?,gain?,bus?} channel, preserving SceneState trace/save semantics. */

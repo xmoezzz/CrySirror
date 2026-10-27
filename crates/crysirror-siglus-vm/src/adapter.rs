@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
+mod audio;
 use crate::{
     io_fs, platform_time,
     runtime::CommandContext,
@@ -102,6 +103,7 @@ struct Machine {
 }
 pub struct SiglusVm {
     state: Machine,
+    pending_audio: Option<audio::Pending>,
 }
 fn err(e: impl std::fmt::Display) -> Error {
     Error::Io(e.to_string())
@@ -125,6 +127,7 @@ impl SiglusVm {
                 now_ms: 0,
                 published: Default::default(),
             },
+            pending_audio: None,
         })
     }
     fn path(key: &str) -> Result<VfsPath> {
@@ -253,6 +256,16 @@ impl SiglusVm {
             if self.state.vm.is_none() {
                 self.boot(host)?;
             }
+            if !self.poll_audio(host)? {
+                return Ok(VmYield::BudgetExhausted);
+            }
+            if !self.state.vm.as_ref().unwrap().ctx.bgm.pending.is_empty() {
+                let before = self.state.vm.as_ref().unwrap().clone();
+                if !self.begin_audio_batch(host, before)? {
+                    return Ok(VmYield::BudgetExhausted);
+                }
+            }
+            self.sync_audio(host)?;
             {
                 let vm = self.state.vm.as_mut().unwrap();
                 crate::message::sync_progress(&mut vm.ctx, ClientId(self.state.client), host)?;
@@ -367,6 +380,13 @@ impl SiglusVm {
                         host.write_atomic(ClientId(self.state.client), &Self::path(&key)?, &bytes)
                             .map_err(err)?;
                     }
+                    if !vm.ctx.bgm.pending.is_empty() {
+                        if !self.begin_audio_batch(host, before.clone())? {
+                            self.publish(host)?;
+                            return Ok(VmYield::BudgetExhausted);
+                        }
+                    }
+                    let vm = self.state.vm.as_mut().unwrap();
                     let halted = vm.is_halted();
                     let blocked = vm.is_blocked();
                     let boundary = vm.proc_generation() != generation;
@@ -412,6 +432,10 @@ impl SiglusVm {
     }
     pub fn export_original_save(&mut self) -> Result<Vec<u8>> {
         ensure!(
+            self.pending_audio.is_none(),
+            "native BGM preparation pending"
+        );
+        ensure!(
             self.state.config.message_window.is_none(),
             "native original-save MWND reconstruction is not implemented for the plain message profile; runtime snapshots remain supported"
         );
@@ -422,6 +446,10 @@ impl SiglusVm {
             .engine_original_file()
     }
     pub fn import_original_save(&mut self, bytes: &[u8]) -> Result<()> {
+        ensure!(
+            self.pending_audio.is_none(),
+            "native BGM preparation pending"
+        );
         ensure!(
             self.state.config.message_window.is_none(),
             "native original-save MWND reconstruction is not implemented for the plain message profile; runtime snapshots remain supported"
@@ -447,11 +475,17 @@ impl SiglusVm {
         result
     }
     pub fn diagnostics(&self) -> serde_json::Value {
-        self.state
+        let mut value = self
+            .state
             .vm
             .as_ref()
             .map(|v| v.engine_diagnostics())
-            .unwrap_or_else(|| serde_json::json!({"vm":"original-siglus","booted":false}))
+            .unwrap_or_else(|| serde_json::json!({"vm":"original-siglus","booted":false}));
+        value["audio_preparing"] = serde_json::json!(self.pending_audio.is_some());
+        if let Some(vm) = &self.state.vm {
+            value["bgm"] = serde_json::json!({"name":vm.ctx.bgm.current_name(),"volume":vm.ctx.bgm.volume_raw(),"state":vm.ctx.bgm.check_state(),"looping":vm.ctx.bgm.save_loop_flag(),"paused":vm.ctx.bgm.save_pause_flag(),"delay_ms":vm.ctx.bgm.save_delay_time_ms(),"listened":vm.ctx.globals.bgm_table_flags});
+        }
+        value
     }
 }
 impl VmAdapter for SiglusVm {
@@ -459,7 +493,7 @@ impl VmAdapter for SiglusVm {
         "siglus"
     }
     fn snapshot_schema(&self) -> u32 {
-        1
+        2
     }
     fn step(
         &mut self,
@@ -470,10 +504,12 @@ impl VmAdapter for SiglusVm {
         self.execute(host, input, budget).map_err(err)
     }
     fn snapshot(&self) -> crysirror_core::Result<Vec<u8>> {
+        // Pending preparation leaves the serialized VM at its original command.
+        // Restore replays that uncommitted command without saving worker tickets.
         binary().serialize(&self.state).map_err(err)
     }
     fn restore(&mut self, bytes: &[u8]) -> crysirror_core::Result<()> {
-        let state: Machine = binary().deserialize(bytes).map_err(err)?;
+        let mut state: Machine = binary().deserialize(bytes).map_err(err)?;
         if state.client != self.state.client || state.config != self.state.config {
             return Err(Error::SnapshotMismatch("native client/config"));
         }
@@ -484,7 +520,11 @@ impl VmAdapter for SiglusVm {
                 return Err(Error::SnapshotMismatch("native message configuration"));
             }
         }
+        if let Some(vm) = state.vm.as_mut() {
+            vm.ctx.bgm.rebind();
+        }
         self.state = state;
+        self.pending_audio = None;
         Ok(())
     }
     fn restore_resources(&mut self, host: &mut dyn HostServices) -> crysirror_core::Result<()> {
@@ -511,6 +551,9 @@ impl VmAdapter for SiglusVm {
     }
     fn import_original_save(&mut self, bytes: &[u8]) -> crysirror_core::Result<()> {
         SiglusVm::import_original_save(self, bytes).map_err(err)
+    }
+    fn original_save_import_is_transactional(&self) -> bool {
+        true
     }
     fn diagnostics(&self) -> Vec<u8> {
         serde_json::to_vec(&self.diagnostics()).unwrap_or_default()
@@ -950,12 +993,28 @@ mod verification_tests {
         let (mut vm, mut host) = plain_message_machine(&["\n", "A"]);
         vm.step(&mut host, InputFrame::default(), 1000).unwrap();
         vm.step(&mut host, InputFrame::default(), 1000).unwrap();
-        let crysirror_scene::layer::Paint::GlyphRun { glyphs, .. } =
-            &host.engine.layers.get(ClientId(1), crate::message::MESSAGE_LAYER).unwrap().paint
-            else { panic!("glyph run") };
+        let crysirror_scene::layer::Paint::GlyphRun { glyphs, .. } = &host
+            .engine
+            .layers
+            .get(ClientId(1), crate::message::MESSAGE_LAYER)
+            .unwrap()
+            .paint
+        else {
+            panic!("glyph run")
+        };
         assert_eq!(glyphs[0].baseline, [0., 45.]);
-        assert!(vm.export_original_save().unwrap_err().to_string().contains("MWND reconstruction"));
-        assert!(vm.import_original_save(b"native").unwrap_err().to_string().contains("MWND reconstruction"));
+        assert!(
+            vm.export_original_save()
+                .unwrap_err()
+                .to_string()
+                .contains("MWND reconstruction")
+        );
+        assert!(
+            vm.import_original_save(b"native")
+                .unwrap_err()
+                .to_string()
+                .contains("MWND reconstruction")
+        );
     }
     #[test]
     fn unsupported_message_forms_fail_before_publishing_partial_text() {

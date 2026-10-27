@@ -323,6 +323,11 @@ fn audio_promises_prepare_play_seek_release_and_preserve_shared_mixer_handles() 
         if(!released)throw Error('retained preload ticket');
         const voice=await audio.playSfxAsync({asset:'tone.wav',looping:true});
         if(!audio.voice(voice).playing)throw Error('SFX not published');
+        const transport=audio.playbackInfo(voice);
+        if(transport.source_rate!==8000 || transport.source_frames!==16000)throw Error('bad source transport units');
+        audio.scheduleVoiceResume(voice,2,1);
+        if(audio.playbackInfo(voice).resume_delay_frames!==96)throw Error('bad output clock delay');
+        audio.pauseVoice(voice,false);
         audio.clearSfxCache();if(!audio.voice(voice).playing)throw Error('cache clear stopped live PCM');
         audio.stopVoice(voice,0);
         const music=await audio.playMusicAsync('bgm',{asset:'tone.wav'},0);

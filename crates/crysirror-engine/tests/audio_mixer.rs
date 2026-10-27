@@ -116,12 +116,14 @@ fn real_samples_pause_seek_partial_parameters_buses_and_scope() {
     near(output(&mut app, 16)[0][0], 0.4375); // client b reads different bytes and bus defaults
     let cx = app.context();
     let a = cx.singleton("Audio").unwrap();
-    assert!(cx
-        .call(a, "playSfx", &[v(json!({"asset":"../tone.wav"}))])
-        .is_err());
-    assert!(cx
-        .call(a, "playSfx", &[v(json!({"asset":"tone.wav","unknown":1}))])
-        .is_err());
+    assert!(
+        cx.call(a, "playSfx", &[v(json!({"asset":"../tone.wav"}))])
+            .is_err()
+    );
+    assert!(
+        cx.call(a, "playSfx", &[v(json!({"asset":"tone.wav","unknown":1}))])
+            .is_err()
+    );
 }
 #[test]
 fn channel_retrigger_restore_and_pooled_voices_share_one_output() {
@@ -326,9 +328,69 @@ fn entity_attachment_tracks_camera_and_stale_generation_stops() {
     )
     .unwrap();
     assert!(output(&mut app, 16).iter().flatten().all(|x| *x == 0.));
-    assert!(!call(&mut app, "voice", &[h])
-        .field("playing")
+    assert!(
+        !call(&mut app, "voice", &[h])
+            .field("playing")
+            .unwrap()
+            .as_bool()
+            .unwrap()
+    );
+}
+
+#[test]
+fn shared_transport_inspection_scheduled_resume_and_native_channels_are_scoped() {
+    let (_dir, mut app) = app();
+    let h = call(
+        &mut app,
+        "playSfx",
+        &[v(json!({"asset":"tone.wav","looping":true}))],
+    );
+    call(
+        &mut app,
+        "scheduleVoiceResume",
+        &[h.clone(), Value::Float(2.), Value::Float(1.)],
+    );
+    let info = call(&mut app, "playbackInfo", &[h.clone()]).to_json();
+    assert_eq!(info["resume_delay_frames"], 96);
+    assert_eq!(info["output_rate"], 48000);
+    assert!(output(&mut app, 2).iter().flatten().all(|s| *s == 0.));
+    let info = call(&mut app, "playbackInfo", &[h.clone()]).to_json();
+    assert_eq!(info["position_frames"], 0);
+    assert_eq!(info["paused"], false);
+    let pcm = output(&mut app, 1);
+    near(pcm[0][0], 0.);
+    assert!(pcm.last().unwrap()[0] > 0.4);
+    app.context()
+        .state()
         .unwrap()
-        .as_bool()
-        .unwrap());
+        .runtime
+        .host
+        .channel_audio
+        .submit(
+            1,
+            crysirror_core::service::AudioRequest::PlayPcm {
+                channel: 8,
+                source: crysirror_core::service::PcmAudio::new(48000, vec![[0.25; 2]; 100])
+                    .unwrap(),
+                parameters: crysirror_core::service::AudioParameters {
+                    start_frame: Some(7),
+                    paused: true,
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        call(&mut app, "nativeChannelInfo", &[Value::Int(8)]).to_json()["position_frames"],
+        7
+    );
+    app.context().state().unwrap().client = ClientId(2);
+    assert!(
+        call(&mut app, "nativeChannelInfo", &[Value::Int(8)])
+            .to_json()
+            .is_null()
+    );
+    let cx = app.context();
+    let audio = cx.singleton("Audio").unwrap();
+    assert!(cx.call(audio, "playbackInfo", &[h]).is_err());
 }

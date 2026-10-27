@@ -264,3 +264,28 @@ scene disables tracking; clearVoiceReflections cancels tracking/effects. Changin
 settings or switching static/tracked mode cuts history. See [ADR 0075](../adr/0075-tracked-reflection-plans.md)
 for bounds and remaining physical/async limits. An authored wet-only moving demo:
 `cargo run --release -p crysirror-audio --example moving_reflections -- /tmp/echoes`.
+
+
+## Source transport and native channels
+
+```typescript
+const sound = await audio.playSfxAsync({ asset: 'step.wav', paused: true });
+audio.scheduleVoiceResume(sound, 200, 30);
+const transport = audio.playbackInfo(sound);
+// position_frames/source_rate use decoded-source units.
+// resume_delay_frames/fade_out_frames use output_rate.
+```
+
+Scheduled resume freezes input, waits on the output sample clock and starts a
+fresh fade-in; pause/stop/resume replaces the schedule. Explicit stop/pause fade
+counters progress even when decoder input is unavailable. Source position and
+ordinary fade-in do not advance through missing PCM. Preparation readiness is
+separate from scheduled transport.
+
+nativeChannelInfo(channel) queries the caller's shared native/media channel
+and returns null when no voice is retained; source_playing excludes DSP tails.
+It is distinct from canonical SceneState channelStatus. Rust clients use
+HostServices.audio_info or Mixer/ChannelAudio.playback_info. AudioParameters can
+publish paused, start at an exact source frame, clamp an authored range or fade
+the replaced source. These are reusable engine operations without any VN VM.
+See [ADR 0076](../adr/0076-shared-audio-transport-and-siglus-bgm.md).

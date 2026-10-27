@@ -41,3 +41,5 @@ pub use message::MessageWindow;
 pub mod fixture;
 #[cfg(test)]
 mod native_save_tests;
+
+mod bgm_bridge;

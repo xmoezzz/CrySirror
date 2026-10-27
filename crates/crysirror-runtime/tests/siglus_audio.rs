@@ -1,0 +1,454 @@
+// Copyright (c) 2026 CrySirror contributors.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
+//! Authored native Scene.scn bytes call shared audio services; no old mixer.
+use crysirror_core::{
+    service::{AudioParameters, AudioRequest, HostServices, InputFrame, PcmAudio},
+    state::ClientId,
+};
+use crysirror_runtime::Runtime;
+use crysirror_siglus_vm::{
+    fixture::SceneBuilder,
+    runtime::{
+        constants::{cd, fm, op},
+        forms::codes as c,
+    },
+};
+use serde_json::{Value as Json, json};
+use std::{
+    sync::{Arc, Condvar, Mutex},
+    time::{Duration, Instant},
+};
+fn wave() -> Vec<u8> {
+    let size = 2000u32;
+    let mut b = b"RIFF".to_vec();
+    b.extend((36 + size).to_le_bytes());
+    b.extend(b"WAVEfmt ");
+    b.extend(16u32.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(48000u32.to_le_bytes());
+    b.extend(96000u32.to_le_bytes());
+    b.extend(2u16.to_le_bytes());
+    b.extend(16u16.to_le_bytes());
+    b.extend(b"data");
+    b.extend(size.to_le_bytes());
+    for i in 0..1000i16 {
+        b.extend((i * 20).to_le_bytes());
+    }
+    b
+}
+fn fixture(scene: SceneBuilder, end: u32) -> (tempfile::TempDir, Runtime) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("assets/a")).unwrap();
+    std::fs::write(
+        dir.path().join("assets/a/Scene.pck"),
+        crysirror_siglus_vm::fixture::pack_scene(&scene.finish()),
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("assets/a/tone.wav"), wave()).unwrap();
+    std::fs::write(
+        dir.path().join("assets/a/Gameexe.ini"),
+        format!("#BGM.000=\"Song\",\"native-music\",7,{end},20\n"),
+    )
+    .unwrap();
+    let project = json!({"schema":2,"name":"native audio","content_revision":"1","canvas":[64,64],"assets":"assets","clients":[{"name":"a","adapter":"siglus","game":"authored","asset_prefix":"a","config":{"scene":"Scene.pck","format":"pck","string_codec":"plain","gameexe":"Gameexe.ini","resources":{"native-music":"tone.wav"}}},{"name":"b","adapter":"crysirror-script-v1","game":"other","program":[]}]});
+    let path = dir.path().join("project.json");
+    std::fs::write(&path, serde_json::to_vec(&project).unwrap()).unwrap();
+    let runtime = Runtime::load(&path, &dir.path().join("state")).unwrap();
+    (dir, runtime)
+}
+fn bgm(s: &mut SceneBuilder, operation: i32, args: &[i32], ret: i32) {
+    s.command(&[c::ELM_GLOBAL_BGM, operation], 0, args, ret);
+}
+fn play(s: &mut SceneBuilder, operation: i32) {
+    s.command_string(&[c::ELM_GLOBAL_BGM, operation], 0, " SONG ", &[], fm::VOID);
+}
+fn finish(s: &mut SceneBuilder) {
+    s.int(6);
+    s.int(7);
+    s.code.push(cd::OPERATE_2);
+    s.i32(fm::INT);
+    s.i32(fm::INT);
+    s.code.push(op::MULTIPLE);
+    s.code.push(cd::EOF);
+}
+fn native(r: &Runtime) -> Json {
+    r.inspect()["sessions"][0]["native"].clone()
+}
+fn tick(r: &mut Runtime, ms: u64) {
+    r.tick(ms, InputFrame::default()).unwrap();
+}
+fn until(r: &mut Runtime, mut done: impl FnMut(&Runtime) -> bool) {
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        tick(r, 0);
+        if done(r) {
+            return;
+        }
+        assert!(Instant::now() < end, "{}", native(r));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+struct Gate(Arc<(Mutex<bool>, Condvar)>, Vec<crysirror_tasks::Task<()>>);
+impl Gate {
+    fn block(pool: crysirror_tasks::TaskPool) -> Self {
+        let state = Arc::new((Mutex::new(false), Condvar::new()));
+        let mut jobs = vec![];
+        let (tx, rx) = std::sync::mpsc::channel();
+        for _ in 0..pool.stats().workers {
+            let s = state.clone();
+            let tx = tx.clone();
+            jobs.push(
+                pool.spawn(move |_| {
+                    tx.send(())?;
+                    let (v, _) = s
+                        .1
+                        .wait_timeout_while(s.0.lock().unwrap(), Duration::from_secs(10), |v| !*v)
+                        .unwrap();
+                    anyhow::ensure!(*v, "gate timeout");
+                    Ok(())
+                })
+                .unwrap(),
+            );
+        }
+        for _ in 0..jobs.len() {
+            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        Self(state, jobs)
+    }
+    fn release(mut self) {
+        *self.0.0.lock().unwrap() = true;
+        self.0.1.notify_all();
+        for j in self.1.drain(..) {
+            j.wait().unwrap();
+        }
+    }
+}
+impl Drop for Gate {
+    fn drop(&mut self) {
+        *self.0.0.lock().unwrap() = true;
+        self.0.1.notify_all();
+    }
+}
+
+#[test]
+fn native_play_wait_preserves_command_during_workers_and_waits_for_source_not_effect_tails() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY_WAIT);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 61);
+    r.set_audio_nonblocking(true);
+    let gate = Gate::block(r.assets.io_tasks());
+    r.host
+        .submit_audio(
+            ClientId(2),
+            AudioRequest::PlayPcm {
+                channel: 0,
+                source: PcmAudio::new(48000, vec![[0.25; 2]; 4800]).unwrap(),
+                parameters: AudioParameters::default(),
+            },
+        )
+        .unwrap();
+    tick(&mut r, 0);
+    let pc = native(&r)["pc"].clone();
+    let checkpoint = r.snapshot().unwrap();
+    for _ in 0..3 {
+        tick(&mut r, 1);
+        assert_eq!(native(&r)["pc"], pc);
+        assert_ne!(native(&r)["int_stack"], json!([42]));
+        assert!(r.host.audio_info(ClientId(1), 0).unwrap().is_none());
+    }
+    assert!(
+        r.host
+            .audio_info(ClientId(2), 0)
+            .unwrap()
+            .unwrap()
+            .position_frames
+            > 0
+    );
+    gate.release();
+    until(&mut r, |r| {
+        r.host.audio_info(ClientId(1), 0).unwrap().is_some()
+    });
+    assert_eq!(
+        r.host
+            .audio_info(ClientId(1), 0)
+            .unwrap()
+            .unwrap()
+            .position_frames,
+        7
+    );
+    assert_ne!(native(&r)["int_stack"], json!([42]));
+    let scene=crysirror_acoustics::AcousticScene::build(serde_json::from_value(json!({"materials":[{"absorption":[0,0,0],"transmission":[0,0,0],"scattering":0}],"meshes":[{"id":1,"vertices":[[-50,-50,-12],[50,-50,-12],[50,50,-12],[-50,50,-12]],"triangles":[[0,1,2],[0,2,3]]}]})).unwrap()).unwrap();
+    let query = serde_json::from_value(json!({"source":[0,0,2],"listener":[0,0,0]})).unwrap();
+    let paths = crysirror_acoustics::reflections::simulate(&scene, &query).unwrap();
+    r.host
+        .channel_audio
+        .set_reflections(
+            1,
+            0,
+            Some(
+                crysirror_acoustics::reflection_dsp::EarlyReflections::prepare(48000, paths, 0)
+                    .unwrap(),
+            ),
+        )
+        .unwrap();
+    tick(&mut r, 2);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([42]));
+    assert!(
+        !r.host
+            .audio_info(ClientId(1), 0)
+            .unwrap()
+            .unwrap()
+            .source_playing
+    );
+    tick(&mut r, 80);
+    assert!(
+        r.host
+            .channel_audio
+            .take_output()
+            .iter()
+            .flatten()
+            .any(|s| s.abs() > 0.00001)
+    );
+    // Pending worker receipts were absent from the checkpoint; restoring replays
+    // the original uncommitted instruction through the same engine resource API.
+    r.restore(&checkpoint).unwrap();
+    until(&mut r, |r| {
+        r.host.audio_info(ClientId(1), 0).unwrap().is_some()
+    });
+    tick(&mut r, 2);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([42]));
+}
+#[test]
+fn native_ready_delayed_resume_pause_fade_and_resume_wait_use_engine_transport() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_READY_ONESHOT);
+    bgm(&mut s, c::ELM_BGM_CHECK, &[], fm::INT);
+    s.element(&[c::ELM_GLOBAL_BGM, c::ELM_BGM_RESUME]);
+    s.int(0);
+    s.int(2);
+    s.code.push(cd::COMMAND);
+    for n in [0, 2, fm::INT, fm::INT, 1, 0, fm::VOID] {
+        s.i32(n);
+    }
+    bgm(&mut s, c::ELM_BGM_CHECK, &[], fm::INT);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[4], fm::VOID);
+    bgm(&mut s, c::ELM_BGM_PAUSE, &[2], fm::VOID);
+    bgm(&mut s, c::ELM_BGM_CHECK, &[], fm::INT);
+    bgm(&mut s, c::ELM_BGM_WAIT_FADE, &[], fm::VOID);
+    bgm(&mut s, c::ELM_BGM_CHECK, &[], fm::INT);
+    bgm(&mut s, c::ELM_BGM_GET_PLAY_POS, &[], fm::INT);
+    bgm(&mut s, c::ELM_BGM_RESUME_WAIT, &[0], fm::VOID);
+    bgm(&mut s, c::ELM_BGM_CHECK, &[], fm::INT);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 500);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([3, 3]));
+    tick(&mut r, 2);
+    let info = r.host.audio_info(ClientId(1), 0).unwrap().unwrap();
+    assert_eq!(info.position_frames, 7);
+    assert!(!info.paused);
+    tick(&mut r, 2);
+    let info = r.host.audio_info(ClientId(1), 0).unwrap().unwrap();
+    assert!(info.paused);
+    assert_eq!(info.position_frames, 103);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([3, 3, 2, 3, 103]));
+    tick(&mut r, 10);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([3, 3, 2, 3, 103, 0, 42]));
+}
+#[test]
+fn failed_audio_keeps_original_pc_and_repaired_resource_can_retry_without_stack_loss() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY_ONESHOT);
+    finish(&mut s);
+    let (dir, mut r) = fixture(s, 61);
+    std::fs::write(dir.path().join("assets/a/tone.wav"), b"broken").unwrap();
+    r.set_audio_nonblocking(true);
+    tick(&mut r, 0);
+    let pc = native(&r)["pc"].clone();
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        if r.tick(0, InputFrame::default()).is_err() {
+            break;
+        }
+        assert!(Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(native(&r)["pc"], pc);
+    assert_ne!(native(&r)["int_stack"], json!([42]));
+    std::fs::write(dir.path().join("assets/a/tone.wav"), wave()).unwrap();
+    until(&mut r, |r| native(r)["halted"] == true);
+    assert_eq!(native(&r)["int_stack"], json!([42]));
+}
+#[test]
+fn same_looping_name_is_idempotent_and_active_checkpoint_rebinds_shared_audio() {
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[2], fm::VOID);
+    play(&mut s, c::ELM_BGM_PLAY);
+    s.command(
+        &[c::ELM_GLOBAL_BGMTABLE, c::ELM_BGMTABLE_GET_BGM_CNT],
+        0,
+        &[],
+        fm::INT,
+    );
+    s.command_string(
+        &[c::ELM_GLOBAL_BGMTABLE, c::ELM_BGMTABLE_GET_LISTEN_BY_NAME],
+        0,
+        "song",
+        &[],
+        fm::INT,
+    );
+    finish(&mut s);
+    let (dir, mut r) = fixture(s, 61);
+    tick(&mut r, 0);
+    let saved = r.snapshot().unwrap();
+    std::fs::remove_file(dir.path().join("assets/a/tone.wav")).unwrap();
+    tick(&mut r, 2);
+    assert_eq!(native(&r)["int_stack"], json!([1, 1, 42]));
+    assert!(r.host.audio_info(ClientId(1), 0).unwrap().unwrap().looping);
+    std::fs::write(dir.path().join("assets/a/tone.wav"), wave()).unwrap();
+    r.restore(&saved).unwrap();
+    tick(&mut r, 0);
+    assert_eq!(
+        r.host
+            .audio_info(ClientId(1), 0)
+            .unwrap()
+            .unwrap()
+            .position_frames,
+        7
+    );
+    tick(&mut r, 2);
+    assert_eq!(native(&r)["int_stack"], json!([1, 1, 42]));
+}
+#[test]
+fn unknown_audio_opcode_fails_instead_of_becoming_a_fake_property() {
+    let mut s = SceneBuilder::default();
+    bgm(&mut s, 9876, &[], fm::VOID);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 61);
+    let error = format!("{:#}", r.tick(0, InputFrame::default()).unwrap_err());
+    assert!(error.contains("unsupported Siglus BGM opcode"), "{error}");
+    let mut s = SceneBuilder::default();
+    s.command(
+        &[c::ELM_GLOBAL_BGMTABLE, c::ELM_BGMTABLE_GET_BGM_CNT],
+        0,
+        &[],
+        fm::INT,
+    );
+    let (dir, mut r) = fixture(s, 61);
+    std::fs::write(
+        dir.path().join("assets/a/Gameexe.ini"),
+        "#BGM.CNT=999999999\n",
+    )
+    .unwrap();
+    let error = format!("{:#}", r.tick(0, InputFrame::default()).unwrap_err());
+    assert!(error.contains("exceeds 4096"), "{error}");
+    let mut s = SceneBuilder::default();
+    play(&mut s, c::ELM_BGM_PLAY_ONESHOT);
+    bgm(&mut s, c::ELM_BGM_STOP, &[0], fm::VOID);
+    bgm(&mut s, c::ELM_BGM_RESUME, &[0], fm::VOID);
+    finish(&mut s);
+    let (_dir, mut r) = fixture(s, 61);
+    let error = format!("{:#}", r.tick(0, InputFrame::default()).unwrap_err());
+    assert!(error.contains("engine-retained source resource"), "{error}");
+}
+
+#[test]
+fn original_save_codec_restores_bgm_declaration_through_shared_preparation() {
+    for paused in [false, true] {
+        let mut s = SceneBuilder::default();
+        play(
+            &mut s,
+            if paused {
+                c::ELM_BGM_READY
+            } else {
+                c::ELM_BGM_PLAY
+            },
+        );
+        bgm(&mut s, c::ELM_BGM_SET_VOLUME, &[128], fm::VOID);
+        s.command(&[c::ELM_GLOBAL_SAVEPOINT], 0, &[], fm::INT);
+        s.command(&[c::ELM_GLOBAL_TIMEWAIT], 0, &[10000], fm::VOID);
+        finish(&mut s);
+        let (_dir, mut r) = fixture(s, 61);
+        tick(&mut r, 0);
+        let saved = r.export_original_save(ClientId(1)).unwrap();
+        assert!(saved.len() > 128);
+        tick(&mut r, 2);
+        let pcm = r.host.channel_audio.take_output();
+        let expected = if paused {
+            0.
+        } else {
+            140. / 32768. * 128. / 255.
+        };
+        assert!((pcm[0][0] - expected).abs() < 1e-6);
+        let before = native(&r);
+        assert!(
+            r.import_original_save(ClientId(1), b"invalid original save")
+                .is_err()
+        );
+        assert_eq!(native(&r), before);
+        r.import_original_save(ClientId(1), &saved).unwrap();
+        tick(&mut r, 0);
+        let info = r.host.audio_info(ClientId(1), 0).unwrap().unwrap();
+        assert!(info.looping);
+        assert_eq!(info.position_frames, 7);
+        assert_eq!(native(&r)["bgm"]["name"], "song");
+        assert_eq!(native(&r)["bgm"]["state"], if paused { 3 } else { 1 });
+        assert_eq!(native(&r)["bgm"]["volume"], 128);
+        for _ in 0..10 {
+            tick(&mut r, 1000);
+        }
+        tick(&mut r, 0);
+        assert_eq!(native(&r)["int_stack"], json!([1, 42]));
+    }
+}
+
+#[test]
+fn native_audio_wait_key_returns_decide_or_natural_value_without_stopping_a_loop() {
+    for looping in [false, true] {
+        let mut s = SceneBuilder::default();
+        play(
+            &mut s,
+            if looping {
+                c::ELM_BGM_PLAY
+            } else {
+                c::ELM_BGM_PLAY_ONESHOT
+            },
+        );
+        bgm(&mut s, c::ELM_BGM_WAIT_KEY, &[], fm::INT);
+        finish(&mut s);
+        let (_dir, mut r) = fixture(s, 61);
+        tick(&mut r, 0);
+        if looping {
+            r.tick(
+                0,
+                InputFrame {
+                    buttons_down: 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_ne!(native(&r)["int_stack"], json!([1, 42]));
+            r.tick(0, InputFrame::default()).unwrap();
+            assert_eq!(native(&r)["int_stack"], json!([1, 42]));
+            assert!(
+                r.host
+                    .audio_info(ClientId(1), 0)
+                    .unwrap()
+                    .unwrap()
+                    .source_playing
+            );
+        } else {
+            tick(&mut r, 2);
+            tick(&mut r, 0);
+            assert_eq!(native(&r)["int_stack"], json!([0, 42]));
+        }
+    }
+}

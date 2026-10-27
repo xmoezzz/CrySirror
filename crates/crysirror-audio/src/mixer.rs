@@ -401,6 +401,7 @@ struct Voice {
     pan: Ramp,
     stop_after_fade: bool,
     pause_after_fade: bool,
+    resume_after: Option<(u64, u64)>,
     lowpass: StereoFrame,
     acoustic: Option<crysirror_acoustics::spectrum::BandFilter>,
     binaural: Option<crysirror_acoustics::binaural::BinauralVoice>,
@@ -422,6 +423,19 @@ pub struct SeekProgress {
     pub pending: bool,
     /// Retained worker/seek failure, when present.
     pub error: Option<String>,
+}
+// Transport deadlines use the output clock even when source PCM/preparation is
+// unavailable. Ordinary fade-in and source position remain frozen on starvation.
+fn silent_transport_tick(v: &mut Voice) -> bool {
+    if !v.stop_after_fade && !v.pause_after_fade {
+        return false;
+    }
+    v.envelope.step();
+    if v.pause_after_fade && v.envelope.left == 0 {
+        v.spec.paused = true;
+        v.pause_after_fade = false;
+    }
+    v.stop_after_fade && v.envelope.left == 0 && v.envelope.value == 0.
 }
 fn constrain_tail(v: &mut Voice) {
     if v.source_ended {
@@ -720,6 +734,7 @@ impl Mixer {
             envelope,
             stop_after_fade: false,
             pause_after_fade: false,
+            resume_after: None,
             lowpass: [0.; 2],
             acoustic: None,
             binaural: None,
@@ -733,6 +748,52 @@ impl Mixer {
         self.generations[slot] = generation;
         self.sequence = sequence;
         Ok(handle)
+    }
+    /// Replace this exact voice without stealing another channel. Validation
+    /// failure restores the previous source/effect state.
+    pub fn replace(
+        &mut self,
+        client: u32,
+        previous: VoiceHandle,
+        source: Box<dyn AudioSource>,
+        spec: VoiceSpec,
+    ) -> Result<VoiceHandle> {
+        self.spec(client, previous)?;
+        let old = self.voices[previous.slot as usize].take();
+        match self.play(client, source, spec) {
+            Ok(handle) => Ok(handle),
+            Err(error) => {
+                self.voices[previous.slot as usize] = old;
+                Err(error)
+            }
+        }
+    }
+    pub(crate) fn has_spare_voice(&self, client: u32) -> bool {
+        self.voices.iter().any(Option::is_none)
+            && self.clients.get(&client).is_none_or(|c| {
+                c.voice_limit.is_none_or(|limit| {
+                    self.voices
+                        .iter()
+                        .flatten()
+                        .filter(|v| v.handle.client == client)
+                        .count()
+                        < limit
+                })
+            })
+    }
+    /// The channel worker already sought/prewarmed this source. Publishing its
+    /// logical cursor must not launch a second seek or consume a sample.
+    pub(crate) fn prepared_position(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        frame: u64,
+    ) -> Result<()> {
+        let voice = self.voice(client, h)?;
+        voice.position = frame as f64;
+        voice.cursor.start = frame;
+        voice.cursor.next = frame;
+        Ok(())
     }
     fn voice(&mut self, client: u32, h: VoiceHandle) -> Result<&mut Voice> {
         ensure!(client == h.client, "audio handle belongs to another client");
@@ -774,6 +835,7 @@ impl Mixer {
         duration(fade_ms)?;
         let n = frames(fade_ms, self.config.sample_rate);
         let v = self.voice(client, h)?;
+        v.resume_after = None;
         if n == 0 {
             self.voices[h.slot as usize] = None
         } else {
@@ -1111,7 +1173,9 @@ impl Mixer {
         Ok(())
     }
     pub fn pause(&mut self, client: u32, h: VoiceHandle, paused: bool) -> Result<()> {
-        self.voice(client, h)?.spec.paused = paused;
+        let voice = self.voice(client, h)?;
+        voice.resume_after = None;
+        voice.spec.paused = paused;
         Ok(())
     }
     pub fn pause_fade(
@@ -1124,6 +1188,7 @@ impl Mixer {
         duration(duration_ms)?;
         let count = frames(duration_ms, self.config.sample_rate);
         let voice = self.voice(client, h)?;
+        voice.resume_after = None;
         if paused && count == 0 {
             voice.spec.paused = true;
             voice.pause_after_fade = false;
@@ -1136,6 +1201,54 @@ impl Mixer {
             voice.envelope.to(1., count);
         }
         Ok(())
+    }
+    /// Sample-clock scheduling. Delay and fade do not advance source position.
+    pub fn schedule_resume(
+        &mut self,
+        client: u32,
+        h: VoiceHandle,
+        delay_ms: f32,
+        fade_ms: f32,
+    ) -> Result<()> {
+        duration(delay_ms)?;
+        duration(fade_ms)?;
+        let delay = frames(delay_ms, self.config.sample_rate);
+        let fade = frames(fade_ms, self.config.sample_rate);
+        let voice = self.voice(client, h)?;
+        voice.stop_after_fade = false;
+        voice.pause_after_fade = false;
+        voice.spec.paused = true;
+        voice.resume_after = Some((delay, fade));
+        if delay == 0 {
+            voice.spec.paused = false;
+            voice.resume_after = None;
+            voice.envelope = Ramp::new(if fade == 0 { 1. } else { 0. });
+            voice.envelope.to(1., fade);
+        }
+        Ok(())
+    }
+    pub fn playback_info(
+        &self,
+        client: u32,
+        h: VoiceHandle,
+    ) -> Result<crysirror_core::service::AudioPlaybackInfo> {
+        self.spec(client, h)?;
+        let voice = self.voices[h.slot as usize].as_ref().unwrap();
+        Ok(crysirror_core::service::AudioPlaybackInfo {
+            source_playing: self.source_is_playing(client, h),
+            paused: voice.spec.paused,
+            looping: voice.spec.looping,
+            position_frames: voice.position.max(0.).floor() as u64,
+            source_rate: voice.cursor.source.sample_rate(),
+            source_frames: voice.cursor.source.frame_count(),
+            output_rate: self.config.sample_rate,
+            fade_out_frames: if voice.stop_after_fade || voice.pause_after_fade {
+                voice.envelope.left
+            } else {
+                0
+            },
+            resume_delay_frames: voice.resume_after.map_or(0, |s| s.0),
+        })
     }
     pub fn pause_client(&mut self, client: u32, paused: bool) {
         for v in self.voices.iter_mut().flatten() {
@@ -1401,6 +1514,19 @@ impl Mixer {
             }
             for (slot, (effect, step)) in self.voices.iter_mut().zip(spatial.iter().zip(&rates)) {
                 let Some(v) = slot else { continue };
+                if let Some((left, fade)) = &mut v.resume_after {
+                    let waiting = *left > 0;
+                    *left = left.saturating_sub(1);
+                    if *left == 0 {
+                        v.spec.paused = false;
+                        v.envelope = Ramp::new(if *fade == 0 { 1. } else { 0. });
+                        v.envelope.to(1., *fade);
+                        v.resume_after = None;
+                    }
+                    if waiting {
+                        continue;
+                    }
+                }
                 if v.spec.paused
                     || v.binaural_pending
                     || v.reflection_pending
@@ -1408,6 +1534,10 @@ impl Mixer {
                         .as_ref()
                         .is_some_and(|s| s.pending || s.error.is_some())
                 {
+                    if silent_transport_tick(v) {
+                        retire_dialogue(v, &mut self.clients);
+                        *slot = None;
+                    }
                     continue;
                 }
                 if v.source_ended && v.tail_left == 0 {
@@ -1441,6 +1571,10 @@ impl Mixer {
                         SampleRead::Pending => {
                             self.stats.underrun_frames =
                                 self.stats.underrun_frames.saturating_add(1);
+                            if silent_transport_tick(v) {
+                                retire_dialogue(v, &mut self.clients);
+                                *slot = None;
+                            }
                             continue;
                         }
                         SampleRead::End if v.spec.looping => {
@@ -1451,6 +1585,10 @@ impl Mixer {
                                 SampleRead::Pending => {
                                     self.stats.underrun_frames =
                                         self.stats.underrun_frames.saturating_add(1);
+                                    if silent_transport_tick(v) {
+                                        retire_dialogue(v, &mut self.clients);
+                                        *slot = None;
+                                    }
                                     continue;
                                 }
                                 SampleRead::End => {
@@ -1497,6 +1635,10 @@ impl Mixer {
                         SampleRead::Pending => {
                             self.stats.underrun_frames =
                                 self.stats.underrun_frames.saturating_add(1);
+                            if silent_transport_tick(v) {
+                                retire_dialogue(v, &mut self.clients);
+                                *slot = None;
+                            }
                             continue;
                         }
                     }

@@ -4,6 +4,35 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `4aee8cb171139420` (2026-10-27): shared audio transport and native Siglus BGM
+
+- Add Audio.playbackInfo(handle), nativeChannelInfo(channel) and
+  scheduleVoiceResume(handle, delay_ms, fade_ms), plus AudioPlaybackInfo,
+  AudioParameters and PcmBus reference data. Source frames/rate/length stay
+  distinct from output-clock fade/delay counters and retained effect tails.
+- Shared Rust AudioParameters adds start_frame (overrides start_ms), paused,
+  replace_fade_ms and clamp_range; defaults None/false/zero/false preserve old
+  playback. Worker-prepared cursor publication avoids a redundant seek.
+  Immediate channel replacement does not steal another channel; crossfade needs
+  a spare voice, and failure preserves the old resource. Ended controls are no-op.
+- AudioRequest::Resume and Mixer.schedule_resume provide sample-clock delayed
+  resume with a fresh fade-in. Later pause/stop/resume replaces that schedule.
+  Explicit stop/pause deadlines continue across input starvation/preparation;
+  source position and ordinary fade-in remain frozen without ready PCM.
+- **Breaking (Rust):** explicit AudioParameters literals must supply new fields
+  or use ..Default::default(); exhaustive AudioRequest matches must handle Resume.
+  Existing JS/TS methods retain signatures; new registry APIs are additive.
+- **Breaking (Siglus runtime payload):** native VM schema is now 2; old schema-1
+  payloads require migration. Original Siglus save-file codecs are unchanged.
+  Pending resource checkpoints replay the original instruction; active audio
+  restores declarations at authored start without saving worker/device history.
+- Native Siglus BGM/BGMTABLE now call shared channel services with explicit
+  resources aliases and bounded decoded Gameexe metadata. Original waits and
+  values remain in the VM; unsupported audio/forms fail visibly. This is a
+  bounded audio profile; RESUME after EOF/stop still requires retained-source
+  resources and fails visibly. This is not full-game compatibility. See ADR 0076 and the pinned
+  source audit for translation, commit, resource and remaining async boundaries.
+
 ## `1ff0b7ce813fb81e` (2026-10-27): automatic reflection tracking
 
 - Add Audio.trackVoiceReflections and ReflectionTrackingSpec. SFX/random/music
