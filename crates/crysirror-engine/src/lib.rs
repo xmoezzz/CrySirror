@@ -31,6 +31,7 @@ pub mod builtin;
 pub mod canvas_api;
 pub mod context;
 pub mod input_api;
+pub mod input_events_api;
 pub mod lifecycle;
 pub mod localization;
 pub mod object;

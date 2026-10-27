@@ -368,3 +368,14 @@ engine handle enters the original file. Explicit aliases/default PCMCH routing,
 current unscaled native game-clock behavior and broader adapter limits remain;
 this does not establish a whole-game result. See ADR 0086 and the updated source
 scope/hash audit for exact acceptance.
+
+## Siglus buffered input during audio admission (ADR 0087)
+
+The ADR 0086 pending-input gap is addressed for the existing framed VK/DECIDE
+profile. Incoming InputFrame data enters the shared Core/Scene InputInbox before
+audio worker polling. Routing and acknowledgement happen once at a fresh owner
+pass; resource completion first resumes the interrupted script. Runtime payload
+7 preserves queued logical intents and that continuation; original file import
+discards old backlog. Existing original file layouts stay unchanged. This adds
+no raw OS/IME/analog input, extra native key mapping or frame-action ordering
+acceptance. Other adapters' input admission remains further work.

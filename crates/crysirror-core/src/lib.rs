@@ -8,6 +8,7 @@ extern crate std;
 
 pub mod binary;
 pub mod graphics;
+pub mod input_buffer;
 pub mod path;
 pub mod save;
 pub mod service;

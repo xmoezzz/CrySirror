@@ -26,6 +26,7 @@ pub struct EngineState {
     pub log: VecDeque<String>,
     pub quit_requested: bool,
     pub actions: crate::input_api::ActionMap,
+    pub input_events: crate::input_events_api::InputEvents,
     pub localization: crate::localization::LocalizationRuntime,
     pub rich_text: crate::text_api::TextRuntime,
     /// Derived AI data: navigation grid, path caches (never saved).

@@ -113,6 +113,7 @@ impl App {
                 log: VecDeque::new(),
                 quit_requested: false,
                 actions: Default::default(),
+                input_events: Default::default(),
                 localization: Default::default(),
                 rich_text: Default::default(),
                 ai: Default::default(),
@@ -380,6 +381,7 @@ impl App {
         let _span = profiler.span(profiler.frame() + 1, "engine.frame");
         let step = {
             let s = self.cx.state()?;
+            crate::input_events_api::observe(s,input)?;
             s.input = input;
             s.actions.begin_frame(input);
             s.fixed_step_ms

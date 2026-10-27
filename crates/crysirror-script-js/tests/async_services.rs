@@ -325,7 +325,8 @@ fn audio_promises_prepare_play_seek_release_and_preserve_shared_mixer_handles() 
         if(!audio.voice(voice).playing)throw Error('SFX not published');
         const transport=audio.playbackInfo(voice);
         if(transport.source_rate!==8000 || transport.source_frames!==16000)throw Error('bad source transport units');
-        if(transport.transport_frames!==0 || transport.stopping || transport.pausing)throw Error('bad initial transport state');
+        // Promise polling may resume after a mixer frame; publication is not a zero-time fence.
+        if(transport.transport_frames>transport.age_frames || !transport.source_playing || transport.paused || transport.stopping || transport.pausing)throw Error('bad published transport state');
         audio.scheduleVoiceResumeWithOptions(voice,2,1,{policy:'preserve',reset_gain:true});
         if(audio.playbackInfo(voice).paused)throw Error('preserve froze input');
         let badPolicy=false;try{audio.scheduleVoiceResumeWithOptions(voice,2,1,{policy:'unknown'});}catch(e){badPolicy=true;}
@@ -614,4 +615,30 @@ fn cue_sequence_dependency_receipt_crosses_actual_js_resource_and_voice_promises
     "#);
     let mut b=b"RIFF".to_vec();b.extend(164u32.to_le_bytes());b.extend(b"WAVEfmt ");b.extend(16u32.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(1u16.to_le_bytes());b.extend(8000u32.to_le_bytes());b.extend(16000u32.to_le_bytes());b.extend(2u16.to_le_bytes());b.extend(16u16.to_le_bytes());b.extend(b"data");b.extend(128u32.to_le_bytes());for _ in 0..64{b.extend(8192i16.to_le_bytes());}
     std::fs::write(dir.path().join("assets/a/cue.wav"),b).unwrap();app.init().unwrap();app.start().unwrap();until(&mut app,"cue-sequence-ready");
+}
+
+#[test]
+fn input_journal_js_reads_exact_high_bits_and_restores_with_a_fresh_receipt_epoch() {
+    let (_dir,mut app)=app(r#"
+      let done=false;
+      function onInit(){input.enableEvents(8);}
+      function onUpdate(){
+        if(done)return;
+        const batch=input.events(8);
+        if(!batch.samples.length)return;
+        const mask=BigInt(batch.samples[0].frame.buttons_down);
+        if(mask!==((1n<<60n)|1n))throw Error('input mask lost precision');
+        const snapshot=input.captureEvents();
+        input.restoreEvents(snapshot);
+        let stale=false;try{input.ackEvents(batch.receipt);}catch(e){stale=true;}
+        if(!stale)throw Error('old receipt survived restore');
+        const again=input.events(8);
+        if(again.samples[0].frame.buttons_down!==batch.samples[0].frame.buttons_down)throw Error('input replay changed');
+        input.ackEvents(again.receipt);input.disableEvents();
+        done=true;engine.log('input-journal-ready');
+      }
+    "#);
+    app.init().unwrap();app.start().unwrap();let mask=(1u64<<60)|1;
+    app.frame(1,InputFrame {buttons_down:mask,buttons_pressed:mask,..Default::default()}).unwrap();
+    assert!(app.engine().unwrap().log.iter().any(|s|s.contains("input-journal-ready")));
 }

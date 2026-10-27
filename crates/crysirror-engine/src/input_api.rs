@@ -690,6 +690,13 @@ fn info() -> &'static ClassInfo {
     I.get_or_init(||ClassInfo{name:"Input",doc:"Session-scoped keyboard/mouse/gamepad actions with runtime rebinding and semantic prompt tokens.",properties:vec![
         PropertyInfo{name:"pointer",ty:T::List(Box::new(T::Int)),writable:false,doc:"Canvas pointer position."},PropertyInfo{name:"pointerDelta",ty:T::List(Box::new(T::Int)),writable:false,doc:"Pointer delta this frame."},PropertyInfo{name:"keys",ty:T::List(Box::new(T::String)),writable:false,doc:"Supported physical key names."},PropertyInfo{name:"lastDevice",ty:T::String,writable:false,doc:"keyboard_mouse or gamepad, based on meaningful activity."},PropertyInfo{name:"pendingRebind",ty:T::Optional(Box::new(T::String)),writable:false,doc:"Action waiting for a new physical binding."},
     ],methods:vec![
+        method("enableEvents",vec![("capacity",T::Int)],T::Void,"Enable/replace this client's opt-in logical input journal (1..4096 samples). Accepted App frames feed it once. Disabled by default; action queries remain independent. Overflow is visible, with no silent edge drop."),
+        method("disableEvents",vec![],T::Void,"Release this client's journal. Old receipts cannot affect a newly enabled journal."),
+        method("events",vec![("maximum",T::Int)],T::Map,"Publish an ordered prefix {samples:[InputSample],receipt:InputReceipt|null}. Reads are idempotent until acknowledgement; leased samples cannot be rewritten by pointer-motion coalescing. Journal JSON u64 values are exact decimal strings (including masks, sequences and timestamps); echo receipts directly. Records model framed digital buttons/pointer, not raw OS/text/gamepad-axis events."),
+        method("ackEvents",vec![("receipt",T::Map)],T::Void,"Acknowledge only a published prefix for this client and epoch. Stale/foreign receipts fail without consuming input."),
+        method("eventStats",vec![],T::Map,"enabled,client,epoch,pending,capacity. Does not publish or consume samples. Queues are scoped independently of action bindings."),
+        method("captureEvents",vec![],T::Map,"Capture portable InputBufferSnapshot logical intents. Contains no device handles. Existing Runtime restore disables public journals; restoreEvents explicitly restores captured data."),
+        method("restoreEvents",vec![("snapshot",T::Map)],T::Void,"Validate and atomically replace a logical journal under a fresh epoch. Snapshot observation time must not exceed the current owner clock. Never restores hardware handles or action-map device state."),
         method("bind",vec![("action",T::String),("keys",T::List(Box::new(T::String)))],T::Void,"Replace keyboard bindings."),
         method("rebind",vec![("action",T::String),("spec",T::Map)],T::Void,"Replace {bindings:[{kind:'key'|'button'|'axis',...}],threshold?:0.5}. Validated atomically."),
         method("bindings",vec![("action",T::String)],T::Map,"Read action bindings."),
@@ -742,6 +749,7 @@ impl Class for InputClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if let Some(value)=crate::input_events_api::call(cx,method,args)? {return Ok(value);}
         let actions = &mut cx.state()?.actions;
         Ok(match method {
             "bind" => {

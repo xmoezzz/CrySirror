@@ -3548,3 +3548,50 @@ Remaining boundaries:
 - Original MWND/layout/save coverage, sample-exact voice/DSP reconstruction,
   whole-game execution, cross-platform/hardware playback and broader 3D/async
   engine requirements remain open. The ongoing engine goal is not complete.
+
+
+## 2026-10-27: Shared logical input journals and native continuations (ADR 0087)
+
+Implementation:
+- Core owns bounded input normalization, immutable published prefixes, scoped
+  receipts, atomic admission and portable validation. Scene supplies shared
+  serde transport. Optional public Input journals and Siglus use the same kernel.
+  JSON u64 masks/clocks/receipts use exact decimal strings; binary saves retain u64.
+- Siglus captures input before audio admission and resumes an interrupted script
+  before consuming the next queued intent. Runtime payload 7 preserves backlog
+  and phase; original files keep their codecs and discard pre-load clicks.
+  The adapter only maps native VK/DECIDE/wait semantics, with no private queue.
+- Source audit rechecked three original blobs against siglus_rs commit
+  5f358ef1360b0439e92aed2b749e8f25d8721954; hashes and reference bytes match.
+
+Compilation and reference validation:
+- Release workspace/all-target check passed with krkr, arc-formats,
+  acoustics-obvhs and rodio-output; minimal desktop reallive+avg32 also passed.
+  Existing warnings remain. No GitHub CI/workflow was added or run.
+- Regenerated API reference/JSON/TypeScript; actual fingerprint changed
+  1c682b7ad1fb38cd -> 4b42007e15453574 and is logged. Final coverage/docs passed.
+
+Behavior validation:
+- Release scopes: Core input 5, Scene 22, original VM 16, native audio/PCMCH/
+  PCMEVENT 58, engine input/frame/reference 23, actual JS async services 15:
+  **139 distinct Rust tests passed**; one external-font test ignored, excluded.
+  Python 3.11 tooling: **189 passed**. Repeated focused runs are not added again.
+- Cases cover capacity/owner/epoch errors, immutable motion leases, exact high
+  mask bits in actual JS, multi-client atomic ingress and restore invalidation.
+  Native worker gates retain two clicks across preparation and snapshots, route
+  down/up after event readiness, and discard pre-load clicks on original import.
+- An initial command was rejected for duplicate --lib flags; corrected scopes
+  ran successfully. Expected generation guards caught drift/missing fingerprint.
+  The full JS run exposed an old zero-time assumption at Promise completion;
+  single/full diagnostics passed but did not erase that failure. The test now
+  checks stable source/pause/stop state and transport <= age, allowing a mixer
+  publication before Promise polling. The corrected final suite passed.
+- Evidence: target/verification/input-inbox-{core-tests,vm-scene,native-final,
+  engine-final,js-published,workspace,minimal,python}.log and input-inbox-summary.json.
+
+Remaining boundaries:
+- Framed digital/pointer data only; no raw OS/IME/analog/sub-frame capture or
+  hardware restoration. Public journals are opt-in; native default capacity256
+  fails visibly on overflow. Other native adapters have not been migrated.
+- Original frame-action versus audio-event ordering remains open. No complete
+  game, hardware or whole-engine result is claimed. The broader goal remains.

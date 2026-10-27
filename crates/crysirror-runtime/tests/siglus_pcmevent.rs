@@ -527,3 +527,143 @@ fn a_loop_keeps_its_owner_service_running_after_the_original_script_reaches_eof(
     assert_eq!(event(&r, 0)["current_line"], 0);
     assert_eq!(native(&r)["int_stack"], json!([42]));
 }
+
+fn block_input_resources(r: &Runtime) -> Vec<crysirror_tasks::TaskPermit> {
+    let pool = r.assets.io_tasks();
+    (0..pool.stats().capacity)
+        .map(|_| pool.reserve().unwrap())
+        .collect()
+}
+#[test]
+fn queued_pulses_survive_command_preparation_and_snapshot_without_clicking_through_future_waits() {
+    let mut s = SceneBuilder::default();
+    s.command_string(&[c::ELM_GLOBAL_PCM, c::ELM_PCM_PLAY], 0, "a", &[], fm::VOID);
+    for _ in 0..2 {
+        s.command(&[c::ELM_GLOBAL_TIMEWAIT_KEY], 0, &[10000], fm::INT);
+    }
+    finish(&mut s);
+    let (_d, mut r) = fixture(s);
+    r.set_audio_nonblocking(true);
+    let permits = block_input_resources(&r);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["audio_preparing"], true);
+    for _ in 0..2 {
+        r.tick(
+            1,
+            InputFrame {
+                buttons_pressed: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(native(&r)["queued_input"]["pending"], 2);
+    let saved = r.snapshot().unwrap();
+    drop(permits);
+    until(&mut r, |r| {
+        native(r)["audio_preparing"] == false
+            && native(r)["queued_input"]["pump_continuation"] == false
+    });
+    assert_eq!(native(&r)["int_stack"], json!([]));
+    assert_eq!(native(&r)["queued_input"]["pending"], 2);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([1]));
+    assert_eq!(native(&r)["queued_input"]["pending"], 1);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([1, 1, 42]));
+    r.restore(&saved).unwrap();
+    until(&mut r, |r| {
+        native(r)["audio_preparing"] == false
+            && native(r)["queued_input"]["pump_continuation"] == false
+    });
+    assert_eq!(native(&r)["int_stack"], json!([]));
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([1]));
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([1, 1, 42]));
+}
+#[test]
+fn queued_decide_release_arriving_during_an_event_pass_is_delivered_after_voice_readiness() {
+    let mut s = SceneBuilder::default();
+    start(
+        &mut s,
+        0,
+        c::ELM_PCMEVENT_START_ONESHOT,
+        0,
+        &[("a", &[100])],
+        true,
+    );
+    command(&mut s, 0, c::ELM_PCMEVENT_WAIT_KEY, &[], fm::INT);
+    finish(&mut s);
+    let (_d, mut r) = fixture(s);
+    tick(&mut r, 0);
+    r.set_audio_nonblocking(true);
+    let permits = block_input_resources(&r);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["event_frame_pending"], true);
+    r.tick(
+        1,
+        InputFrame {
+            buttons_down: 1,
+            buttons_pressed: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    tick(&mut r, 1);
+    assert_eq!(native(&r)["queued_input"]["pending"], 2);
+    drop(permits);
+    until(&mut r, |r| native(r)["event_frame_pending"] == false);
+    assert_ne!(native(&r)["int_stack"], json!([1, 42]));
+    until(&mut r, |r| native(r)["int_stack"] == json!([1, 42]));
+    assert!(shared(&r, 0).active);
+    assert_eq!(native(&r)["queued_input"]["pending"], 0);
+    tick(&mut r, 0);
+    assert_eq!(native(&r)["int_stack"], json!([1, 42]));
+}
+
+#[test]
+fn original_file_import_discards_preload_clicks_instead_of_replaying_them_into_the_loaded_wait() {
+    let mut s = SceneBuilder::default();
+    s.command_string(&[c::ELM_GLOBAL_PCM, c::ELM_PCM_PLAY], 0, "a", &[], fm::VOID);
+    s.command(&[c::ELM_GLOBAL_SAVEPOINT], 0, &[], fm::INT);
+    s.command(&[c::ELM_GLOBAL_TIMEWAIT_KEY], 0, &[10000], fm::INT);
+    finish(&mut s);
+    let (_d, mut r) = fixture(s);
+    r.set_audio_nonblocking(true);
+    let permits = block_input_resources(&r);
+    tick(&mut r, 0);
+    r.tick(
+        1,
+        InputFrame {
+            buttons_pressed: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    drop(permits);
+    until(&mut r, |r| {
+        native(r)["audio_preparing"] == false
+            && native(r)["queued_input"]["pump_continuation"] == false
+    });
+    assert_eq!(native(&r)["queued_input"]["pending"], 1);
+    let file = r.export_original_save(ClientId(1)).unwrap();
+    r.import_original_save(ClientId(1), &file).unwrap();
+    assert_eq!(native(&r)["queued_input"]["pending"], 0);
+    let before = native(&r)["int_stack"].clone();
+    for _ in 0..3 {
+        tick(&mut r, 0);
+        assert_eq!(native(&r)["int_stack"], before);
+    }
+    r.tick(
+        0,
+        InputFrame {
+            buttons_pressed: 1 << 16,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    until(&mut r, |r| {
+        native(r)["int_stack"].as_array().unwrap().last() == Some(&json!(42))
+    });
+}

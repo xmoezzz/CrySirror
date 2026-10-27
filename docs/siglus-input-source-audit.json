@@ -1,0 +1,34 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "upstream_license": "MPL-2.0",
+  "scope": "Framed input ingress over native audio admission and script/event continuations; existing VK/DECIDE profile only",
+  "implementation": "CrySirror Core owns journal normalization, FIFO, leases and portable validation; Scene owns shared wire transport and existing stock primitives. Adapter maps semantics and native phase continuation.",
+  "limits": "No raw OS/IME/analog capture, new native key mappings or frame-action ordering acceptance; runtime payload7, original file codecs unchanged.",
+  "files": [
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/input.rs",
+      "bytes": 22023,
+      "sha256": "db14cec9adcea4f1407f8305cb56af280abe1f6eda031ce0dafeb6d6203389d0",
+      "reference_matches_pin": true,
+      "review": "Complete 717-line native InputState: stocks, down-up consumption, clear/use/next lifecycle, mouse/flick and 32-button backend domain. Existing Scene primitive reused, not copied by this phase.",
+      "new_code_copied": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/runtime/wait.rs",
+      "bytes": 72576,
+      "sha256": "75aae7791c1683e9f5fb22f3b0d377a957efe18ebdc72febdef94e1f14fbe9f3",
+      "reference_matches_pin": true,
+      "review": "Complete selected wait notification and DECIDE/event-key completion branches; prior audio/PCMEVENT source audits.",
+      "new_code_copied": false
+    },
+    {
+      "path": "crates/siglus_scene_vm/src/vm.rs",
+      "bytes": 610381,
+      "sha256": "e0bbd6546ef6e1375c36ceadbd321ce8f7af8d180c61f011ef28da60e2db8d62",
+      "reference_matches_pin": true,
+      "review": "Complete selected step, step_inner wait/delayed-return prefix and normal script proc pump; pending instruction resumes its existing owner pass.",
+      "new_code_copied": false
+    }
+  ]
+}

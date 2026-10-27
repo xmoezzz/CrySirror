@@ -2780,6 +2780,68 @@
       "global": "input",
       "methods": [
         {
+          "doc": "Enable/replace this client's opt-in logical input journal (1..4096 samples). Accepted App frames feed it once. Disabled by default; action queries remain independent. Overflow is visible, with no silent edge drop.",
+          "name": "enableEvents",
+          "params": [
+            {
+              "name": "capacity",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Release this client's journal. Old receipts cannot affect a newly enabled journal.",
+          "name": "disableEvents",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Publish an ordered prefix {samples:[InputSample],receipt:InputReceipt|null}. Reads are idempotent until acknowledgement; leased samples cannot be rewritten by pointer-motion coalescing. Journal JSON u64 values are exact decimal strings (including masks, sequences and timestamps); echo receipts directly. Records model framed digital buttons/pointer, not raw OS/text/gamepad-axis events.",
+          "name": "events",
+          "params": [
+            {
+              "name": "maximum",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Acknowledge only a published prefix for this client and epoch. Stale/foreign receipts fail without consuming input.",
+          "name": "ackEvents",
+          "params": [
+            {
+              "name": "receipt",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "enabled,client,epoch,pending,capacity. Does not publish or consume samples. Queues are scoped independently of action bindings.",
+          "name": "eventStats",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Capture portable InputBufferSnapshot logical intents. Contains no device handles. Existing Runtime restore disables public journals; restoreEvents explicitly restores captured data.",
+          "name": "captureEvents",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Validate and atomically replace a logical journal under a fresh epoch. Snapshot observation time must not exceed the current owner clock. Never restores hardware handles or action-map device state.",
+          "name": "restoreEvents",
+          "params": [
+            {
+              "name": "snapshot",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Replace keyboard bindings.",
           "name": "bind",
           "params": [
@@ -5343,6 +5405,154 @@
     }
   ],
   "data": [
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "sequence",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "time_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "pressed includes observed up->down transitions and explicit pulses.",
+          "name": "frame",
+          "rust_type": "InputFrame"
+        },
+        {
+          "default": null,
+          "doc": "End-of-frame releases, including an explicit press pulse not held down.",
+          "name": "released",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "InputSample",
+      "used_by": "Input.events samples; journal JSON u64 fields are decimal strings"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "epoch",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "sequence",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "InputReceipt",
+      "used_by": "Input.events receipt / ackEvents; JSON epoch/sequence are decimal strings"
+    },
+    {
+      "doc": "Portable logical input, not hardware state. Owner supplies a fresh epoch when reconstructing it so old acknowledgement receipts cannot be reused.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "schema",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "capacity",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "next_sequence",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "consumed_sequence",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "base_down",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "observed",
+          "rust_type": "Option<InputFrame>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "observed_time",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "leased_through",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "samples",
+          "rust_type": "Vec<InputSample>"
+        }
+      ],
+      "name": "InputBufferSnapshot",
+      "used_by": "Input.captureEvents / restoreEvents; schema 1, JSON u64 fields are decimal strings"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "buttons_down",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "buttons_pressed",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "pointer_x",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "pointer_y",
+          "rust_type": "i32"
+        }
+      ],
+      "name": "InputFrame",
+      "used_by": "InputSample.frame; journal wire uses decimal strings for masks"
+    },
     {
       "doc": "Portable cursor returned by captureCueSequence. Contains no handle or worker dependency; restoreCueSequence validates it and creates a fresh identity.",
       "fields": [
@@ -13934,7 +14144,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "1c682b7ad1fb38cd",
+  "fingerprint": "4b42007e15453574",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

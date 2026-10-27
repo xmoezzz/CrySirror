@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 mod audio;
 mod events;
+mod input;
 use crate::{
     io_fs, platform_time,
     runtime::CommandContext,
@@ -98,7 +99,8 @@ struct Machine {
     vm: Option<SceneVm<'static>>,
     #[serde(skip)]
     io: io_fs::State,
-    last_buttons: u64,
+    inputs: crysirror_scene::input_buffer::InputInbox,
+    pump_continuation: bool,
     now_ms: u64,
     event_cursors: BTreeMap<events::Key, events::Record>,
     event_frame: Option<events::Frame>,
@@ -128,7 +130,10 @@ impl SiglusVm {
                 config,
                 vm: None,
                 io: Default::default(),
-                last_buttons: 0,
+                inputs: crysirror_scene::input_buffer::InputInbox(
+                    crysirror_core::input_buffer::InputBuffer::new(client.0, 1, 256)?,
+                ),
+                pump_continuation: false,
                 now_ms: 0,
                 event_cursors: BTreeMap::new(),
                 event_frame: None,
@@ -260,6 +265,10 @@ impl SiglusVm {
         budget: u32,
     ) -> Result<VmYield> {
         self.state.now_ms = host.now_ms();
+        self.state
+            .inputs
+            .0
+            .push(self.state.client, self.state.now_ms, input)?;
         let now = self.state.now_ms;
         platform_time::scoped(now, || -> Result<VmYield> {
             if self.state.vm.is_none() {
@@ -270,106 +279,32 @@ impl SiglusVm {
                 return Ok(VmYield::BudgetExhausted);
             }
             let resumed_events = self.state.event_frame.is_some();
-            if !resumed_events {
-                let has_audio = {
-                    let vm = self.state.vm.as_ref().unwrap();
-                    !vm.ctx.bgm.pending.is_empty()
-                        || vm.ctx.pcm.pending()
-                        || vm.ctx.se.pending()
-                        || !vm.ctx.koe.pending.is_empty()
-                };
-                if has_audio {
-                    let before = self.state.vm.as_ref().unwrap().clone();
-                    if !self.begin_audio_batch(host, before)? {
-                        return Ok(VmYield::BudgetExhausted);
-                    }
+            let has_audio = {
+                let vm = self.state.vm.as_ref().unwrap();
+                !vm.ctx.bgm.pending.is_empty()
+                    || vm.ctx.pcm.pending()
+                    || vm.ctx.se.pending()
+                    || !vm.ctx.koe.pending.is_empty()
+            };
+            if has_audio {
+                let before = self.state.vm.as_ref().unwrap().clone();
+                if !self.begin_audio_batch(host, before)? {
+                    return Ok(VmYield::BudgetExhausted);
                 }
+            }
+            if !resumed_events && !self.state.pump_continuation {
                 self.sync_audio(host)?;
+                crate::message::sync_progress(
+                    &mut self.state.vm.as_mut().unwrap().ctx,
+                    ClientId(self.state.client),
+                    host,
+                )?;
+                self.apply_queued_input(host)?;
                 {
                     let vm = self.state.vm.as_mut().unwrap();
-                    crate::message::sync_progress(&mut vm.ctx, ClientId(self.state.client), host)?;
-                    vm.ctx.input.next_frame();
-                    for (bit, key) in [
-                        (1, crysirror_scene::input::VmKey::Enter),
-                        (2, crysirror_scene::input::VmKey::Space),
-                        (4, crysirror_scene::input::VmKey::ArrowLeft),
-                        (8, crysirror_scene::input::VmKey::ArrowRight),
-                        (16, crysirror_scene::input::VmKey::ArrowUp),
-                        (32, crysirror_scene::input::VmKey::ArrowDown),
-                        (64, crysirror_scene::input::VmKey::Tab),
-                    ] {
-                        if input.buttons_pressed & bit != 0
-                            || (input.buttons_down & bit != 0 && self.state.last_buttons & bit == 0)
-                        {
-                            vm.ctx.input.on_key_down(key);
-                        }
-                        if input.buttons_down & bit == 0
-                            && (self.state.last_buttons & bit != 0
-                                || input.buttons_pressed & bit != 0)
-                        {
-                            vm.ctx.input.on_key_up(key);
-                            // Original on_key_up only releases wait-key procs after a
-                            // completed DECIDE down-up, not an arbitrary key-down.
-                            if matches!(
-                                key,
-                                crysirror_scene::input::VmKey::Enter
-                                    | crysirror_scene::input::VmKey::Space
-                            ) {
-                                let vk = crysirror_scene::input::vmkey_to_vk_code(key).unwrap();
-                                if vm.ctx.input.vk_down_up_stock(vk) {
-                                    if crate::message::complete_on_decide(
-                                        &mut vm.ctx,
-                                        ClientId(self.state.client),
-                                        host,
-                                    )? {
-                                        continue;
-                                    }
-                                    let skipped = vm.ctx.wait.notify_movie_down_up(
-                                        &mut vm.ctx.globals,
-                                        &vm.ctx.ids,
-                                        1,
-                                    );
-                                    if !skipped {
-                                        vm.ctx.wait.notify_key(&mut vm.ctx.globals, &vm.ctx.ids);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    vm.ctx.input.on_mouse_move(input.pointer_x, input.pointer_y);
-                    let bit = 1 << 16;
-                    let mouse = crate::runtime::input::VmMouseButton::Left;
-                    if input.buttons_pressed & bit != 0
-                        || (input.buttons_down & bit != 0 && self.state.last_buttons & bit == 0)
-                    {
-                        vm.ctx.input.on_mouse_down(mouse);
-                    }
-                    if input.buttons_down & bit == 0
-                        && (self.state.last_buttons & bit != 0 || input.buttons_pressed & bit != 0)
-                    {
-                        vm.ctx.input.on_mouse_up(mouse);
-                        if vm.ctx.input.vk_down_up_stock(0x01) {
-                            let revealed = crate::message::complete_on_decide(
-                                &mut vm.ctx,
-                                ClientId(self.state.client),
-                                host,
-                            )?;
-                            let skipped = !revealed
-                                && vm.ctx.wait.notify_movie_down_up(
-                                    &mut vm.ctx.globals,
-                                    &vm.ctx.ids,
-                                    1,
-                                );
-                            if !skipped && !revealed {
-                                vm.ctx.wait.notify_key(&mut vm.ctx.globals, &vm.ctx.ids);
-                            }
-                        }
-                    }
-                    vm.ctx.sync_script_input_from_runtime();
                     vm.begin_script_proc_pump();
                     vm.tick_frame()?;
                 }
-                self.state.last_buttons = input.buttons_down;
                 self.begin_event_frame()?;
             }
             if !self.drive_events(host)? {
@@ -411,6 +346,7 @@ impl SiglusVm {
                         self.state.event_cursors.clear();
                         self.state.event_frame = None;
                         self.state.event_clock_ms = Some(self.state.now_ms);
+                        self.discard_queued_input()?;
                     }
                     let vm = self.state.vm.as_mut().unwrap();
                     vm.engine_reject_unknown()?;
@@ -423,6 +359,7 @@ impl SiglusVm {
                         || vm.ctx.se.pending()
                         || !vm.ctx.koe.pending.is_empty()
                     {
+                        self.state.pump_continuation = true;
                         if !self.begin_audio_batch(host, before.clone())? {
                             self.publish(host)?;
                             return Ok(VmYield::BudgetExhausted);
@@ -433,6 +370,7 @@ impl SiglusVm {
                     let blocked = vm.is_blocked();
                     let boundary = vm.proc_generation() != generation;
                     if halted || blocked || boundary {
+                        self.state.pump_continuation = false;
                         self.publish(host)?;
                         let vm = self.state.vm.as_ref().unwrap();
                         let event_work = vm
@@ -455,6 +393,7 @@ impl SiglusVm {
                     break;
                 }
             }
+            self.state.pump_continuation = false;
             self.publish(host)?;
             Ok(VmYield::BudgetExhausted)
         })
@@ -532,6 +471,8 @@ impl SiglusVm {
             self.state.event_cursors.clear();
             self.state.event_frame = None;
             self.state.event_clock_ms = Some(self.state.now_ms);
+            self.state.pump_continuation = false;
+            self.discard_queued_input()?;
         }
         result
     }
@@ -542,6 +483,7 @@ impl SiglusVm {
             .as_ref()
             .map(|v| v.engine_diagnostics())
             .unwrap_or_else(|| serde_json::json!({"vm":"original-siglus","booted":false}));
+        value["queued_input"] = serde_json::json!({"pending":self.state.inputs.0.len(),"capacity":self.state.inputs.0.capacity(),"pump_continuation":self.state.pump_continuation});
         value["native_rng"] =
             serde_json::json!(self.state.vm.as_ref().map(|v| v.ctx.globals.rng_state));
         value["pcmevents"] = self.event_diagnostics();
@@ -560,7 +502,7 @@ impl VmAdapter for SiglusVm {
         "siglus"
     }
     fn snapshot_schema(&self) -> u32 {
-        6
+        7
     }
     fn step(
         &mut self,
@@ -581,6 +523,12 @@ impl VmAdapter for SiglusVm {
             return Err(Error::SnapshotMismatch("native client/config"));
         }
         state.config.validate().map_err(err)?;
+        if state.inputs.0.client() != state.client
+            || state.inputs.0.observed_time() > state.now_ms
+            || (state.pump_continuation && state.event_frame.is_some())
+        {
+            return Err(Error::SnapshotMismatch("native input/continuation"));
+        }
         Self::validate_event_state(&state).map_err(err)?;
         if let Some(vm) = &state.vm {
             vm.engine_validate().map_err(err)?;

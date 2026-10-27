@@ -414,6 +414,20 @@ declare class Input {
   readonly lastDevice: string;
   /** Action waiting for a new physical binding. */
   readonly pendingRebind: string | null;
+  /** Enable/replace this client's opt-in logical input journal (1..4096 samples). Accepted App frames feed it once. Disabled by default; action queries remain independent. Overflow is visible, with no silent edge drop. */
+  enableEvents(capacity: number): void;
+  /** Release this client's journal. Old receipts cannot affect a newly enabled journal. */
+  disableEvents(): void;
+  /** Publish an ordered prefix {samples:[InputSample],receipt:InputReceipt|null}. Reads are idempotent until acknowledgement; leased samples cannot be rewritten by pointer-motion coalescing. Journal JSON u64 values are exact decimal strings (including masks, sequences and timestamps); echo receipts directly. Records model framed digital buttons/pointer, not raw OS/text/gamepad-axis events. */
+  events(maximum: number): Record<string, any>;
+  /** Acknowledge only a published prefix for this client and epoch. Stale/foreign receipts fail without consuming input. */
+  ackEvents(receipt: Record<string, any>): void;
+  /** enabled,client,epoch,pending,capacity. Does not publish or consume samples. Queues are scoped independently of action bindings. */
+  eventStats(): Record<string, any>;
+  /** Capture portable InputBufferSnapshot logical intents. Contains no device handles. Existing Runtime restore disables public journals; restoreEvents explicitly restores captured data. */
+  captureEvents(): Record<string, any>;
+  /** Validate and atomically replace a logical journal under a fresh epoch. Snapshot observation time must not exceed the current owner clock. Never restores hardware handles or action-map device state. */
+  restoreEvents(snapshot: Record<string, any>): void;
   /** Replace keyboard bindings. */
   bind(action: string, keys: string[]): void;
   /** Replace {bindings:[{kind:'key'|'button'|'axis',...}],threshold?:0.5}. Validated atomically. */

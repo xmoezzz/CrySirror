@@ -513,3 +513,10 @@ restoreCueSequence validates it against the declaration and creates a new identi
 Cursor fields come from the public engine wire declaration and Core DTO. Native
 snapshot staging uses the same pure validation without an audio implementation
 in the VM. Cursor restore does not implicitly recreate voices; see ADR 0086.
+
+Input's opt-in journal methods share Core InputSample/InputReceipt/InputBufferSnapshot
+and Scene's transport. Journal JSON uses decimal strings for all u64 fields,
+including masks, times, sequences and epochs; native binary snapshots use u64.
+Echo receipts directly and use BigInt for full masks in JS. This does not change
+unrelated numeric APIs. The schema and ingress/acknowledgement boundaries are in
+ADR 0087. Current-frame action bindings are independent of journal consumption.

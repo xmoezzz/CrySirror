@@ -4,6 +4,25 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `4b42007e15453574` (2026-10-27): shared logical input journals
+
+- Input adds opt-in enableEvents/disableEvents, events/ackEvents, eventStats and
+  captureEvents/restoreEvents. App accepted-frame ingress feeds independent scoped
+  journals once; ordinary action bindings/queries remain independent.
+- Core owns framed edge normalization, bounded FIFO admission, unleased pointer
+  coalescing, immutable read prefixes and client/epoch receipts. Native Siglus and
+  public Input use the same kernel and Scene's shared transport implementation.
+- Journal JSON u64 masks, sequences, epochs and timestamps use exact decimal
+  strings; echo receipts directly. Binary native snapshots retain u64 encoding.
+  Portable schema-1 data contains no device/task handles. Runtime restore disables
+  public journals; explicit restoreEvents creates a fresh epoch.
+- **Breaking native runtime payload:** Siglus schema 7 adds the logical inbox and
+  script-pass continuation, replacing the private latest-button baseline. Async
+  sound preparation no longer drops framed input or consumes queued pulses before
+  the resumed script establishes its next wait. Original file codecs are unchanged;
+  original import discards pre-load intents. Limits and remaining raw-input/frame
+  callback boundaries are in ADR 0087.
+
 ## `1c682b7ad1fb38cd` (2026-10-27): portable cue cursors and native PCMEVENT
 
 - Audio.captureCueSequence returns a portable CueSequenceCursor only when no

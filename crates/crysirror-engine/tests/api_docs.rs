@@ -203,6 +203,7 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-engine/src/audio_resources_api.rs",
         "crates/crysirror-engine/src/audio_sequences_api.rs",
         "crates/crysirror-core/src/service/audio_sequence.rs",
+        "crates/crysirror-core/src/input_buffer.rs",
         "crates/crysirror-audio/src/scene.rs",
         "crates/crysirror-audio/src/buffered.rs",
         "crates/crysirror-audio/src/decoder.rs",
@@ -243,6 +244,10 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("InputSample","Input.events samples; journal JSON u64 fields are decimal strings",None),
+        d("InputReceipt","Input.events receipt / ackEvents; JSON epoch/sequence are decimal strings",None),
+        d("InputBufferSnapshot","Input.captureEvents / restoreEvents; schema 1, JSON u64 fields are decimal strings",None),
+        d("InputFrame","InputSample.frame; journal wire uses decimal strings for masks",None),
         d("CueSequenceCursor","Audio.captureCueSequence / restoreCueSequence",None),
         d("AudioSequenceCursor","HostServices::capture_audio_sequence / restore_audio_sequence",None),
         d("CueSequenceSpec","Audio.createCueSequence",sample::<crysirror_engine::CueSequenceSpec>(e.clone())),

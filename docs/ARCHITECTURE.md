@@ -474,3 +474,14 @@ existing resource/channel pipeline. Runtime payload 6 preserves portable pre-cue
 cursors and native frame continuation intent, so async source restoration does not
 repeat the frame or random draw. Original files retain their distinct restart
 policy. See ADR 0086 for timing, routing, discovery and save boundaries.
+
+## Logical input journals (ADR 0087)
+
+Core's input buffer owns framed normalization, bounded admission, immutable leased
+prefixes and owner receipts. Scene supplies one portable serde transport. Opt-in
+public Input journals and the native Siglus InputInbox share this engine kernel;
+no input replay algorithm lives privately in a VM. App ingress preflights enabled
+clients atomically. Siglus captures before audio readiness checks and preserves
+its script/event continuation, consuming one ordered input at a fresh owner pass.
+Runtime payload 7 saves logical intents; original files discard pre-load backlog.
+See ADR 0087 for exact JSON u64 transport and remaining raw/callback boundaries.

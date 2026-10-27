@@ -8,6 +8,7 @@ pub mod canvas;
 pub mod components;
 pub mod gameplay;
 pub mod input;
+pub mod input_buffer;
 pub mod layer;
 pub mod material;
 pub mod model;
