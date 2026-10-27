@@ -53,6 +53,11 @@ pub trait ImageDecoder: Send + Sync {
 }
 pub mod associated;
 pub mod bitmap;
+pub mod effects;
+pub mod vector;
+pub mod warp;
+pub mod transition;
+pub mod row_copy;
 pub mod composition;
 mod dds;
 pub mod packed;

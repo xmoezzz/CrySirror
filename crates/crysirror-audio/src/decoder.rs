@@ -91,6 +91,7 @@ pub trait AudioSource: Send {
 /// Unified resident-resource decoder used by channels, data-VM playback and
 /// engine Audio APIs. Native codecs share the same AudioSource/mixer contract.
 pub fn open_memory(bytes: Arc<[u8]>, extension: Option<&str>) -> Result<Box<dyn AudioSource>> {
+    if let Some(source)=crate::synth::open(bytes.clone(),extension)?{return Ok(source)}
     if let Some(source) = crate::native::open_if_native(bytes.clone())? {
         return Ok(source);
     }
@@ -105,6 +106,10 @@ pub fn open_reader(
     extension: Option<&str>,
 ) -> Result<Box<dyn AudioSource>> {
     use std::io::Read;
+    if crate::synth::is_extension(extension){
+        let mut bytes=Vec::new();reader.take(8*1024*1024+1).read_to_end(&mut bytes)?;
+        return crate::synth::open(Arc::from(bytes),extension)?.context("synth decoder absent");
+    }
     if reader.is_seekable() {
         let start = reader.stream_position()?;
         let mut prefix = [0u8; 4];

@@ -52,3 +52,5 @@ impl core::error::Error for Error {}
 pub mod deferred_dispatch;
 
 pub mod region_map;
+
+pub mod image_processing;

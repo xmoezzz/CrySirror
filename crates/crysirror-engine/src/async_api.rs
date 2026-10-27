@@ -24,6 +24,9 @@ pub struct AsyncBinding {
     pub release: bool,
 }
 pub const BINDINGS: &[AsyncBinding] = &[
+    AsyncBinding{class:"Bitmap",name:"rowCopyAsync",start:"beginRowCopy",status:"effectStatus",cancel:"cancelEffect",completion:"result.surface",returns:"string",release:true},
+    AsyncBinding {class:"Bitmap",name:"transitionAsync",start:"beginTransition",status:"effectStatus",cancel:"cancelEffect",completion:"result.surface",returns:"string",release:true},
+    AsyncBinding {class:"Bitmap",name:"applyEffectAsync",start:"beginEffect",status:"effectStatus",cancel:"cancelEffect",completion:"result.surface",returns:"string",release:true},
     AsyncBinding {
         class: "Audio",
         name: "prepareSourceAsync",

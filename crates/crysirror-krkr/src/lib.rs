@@ -26,3 +26,5 @@ mod pointer;
 pub mod storage;
 
 pub use adapter::{Config, KrkrFactory, KrkrVm, register};
+
+mod image_api;

@@ -116,6 +116,11 @@ impl Class for BitmapClass {
             doc: "Client-scoped CPU RGBA bitmaps; paths feed Layers and share its surface limits. Transient pixels are not runtime snapshots.",
             properties: vec![],
             methods: vec![
+                method("beginRowCopy",vec![("slot",T::Int),("source",T::Int),("options",T::Map)],T::Int,"Prepare a SineRowCopy from a shared bitmap snapshot. Full-image clip; uncovered destination pixels are preserved. Uses effectStatus/cancelEffect."),
+                method("beginTransition",vec![("slot",T::Int),("other",T::Int),("options",T::Map),("mask",T::Optional(Box::new(T::Int)))],T::Int,"Prepare a snapshot crossfade/rule-mask/blur transition into slot at explicit ImageTransition progress. Inputs must be client-owned equal-size bitmaps. Uses effectStatus/cancelEffect and rejects a stale target revision."),
+                method("beginEffect",vec![("slot",T::Int),("effects",T::List(Box::new(T::Map)))],T::Int,"Prepare an ImageEffect chain on shared workers. Captures immutable pixels and the target revision; effectStatus publishes only if the client/epoch/revision still match. Max 4M pixels, 16 effects."),
+                method("effectStatus",vec![("ticket",T::Int)],T::Map,"Poll a bitmap effect without waiting. Ready includes result.surface; stale or failed work is visible and does not overwrite newer pixels."),
+                method("cancelEffect",vec![("ticket",T::Int)],T::Void,"Release a bitmap effect ticket and cancel unfinished work. Completed published pixels remain engine-owned."),
                 method("create", vec![("slot",T::Int),("width",T::Int),("height",T::Int),("rgba",T::Optional(Box::new(T::List(Box::new(T::Int)))))], T::String,
                     "Create/replace a slot with uniform RGBA (default transparent). Returns __surface/<slot>."),
                 method("load", vec![("slot",T::Int),("source",T::String)],T::String,
@@ -147,6 +152,7 @@ impl Class for BitmapClass {
         name: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if let Some(v)=crate::bitmap_async::call(cx.state()?,name,args)?{return Ok(v)}
         let slot = number(args, 0, "slot")?;
         let state = cx.state()?;
         match name {

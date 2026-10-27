@@ -46,7 +46,7 @@ pub(crate) fn this_of(rt: &Rt, this: Option<ObjectHandle>, what: &str) -> Result
     Ok(rt.bound_this(this).unwrap_or(this))
 }
 
-fn object_arg(v: &Variant) -> Option<ObjectHandle> {
+pub(crate) fn object_arg(v: &Variant) -> Option<ObjectHandle> {
     match v {
         Variant::Object(h) => Some(*h),
         Variant::Closure(c) => Some(c.this_obj.unwrap_or(c.object)),
@@ -1115,27 +1115,23 @@ fn install_layer(rt: &mut Rt) {
                 Ok(Variant::Void)
             }),
             ("loadImages", layer_load_images),
-            // The stock KAG3 loader always calls this, even with nine void
-            // arguments. An identity transform needs no retained operation.
-            // Nonidentity correction must acquire a shared Canvas capability.
-            ("adjustGamma", |rt, t, a| {
-                let h = this_of(rt, t, "Layer.adjustGamma")?;
-                rt.host().layer(h)?;
-                if a.len() > 9 {
-                    return Err(unsupported("Layer.adjustGamma", "nine channel parameters"));
-                }
-                for i in 0..9 {
-                    if let Some(v) = a.get(i).filter(|v| !matches!(v, Variant::Void)) {
-                        let expected = [1.0, 0.0, 255.0][i % 3];
-                        if v.to_real()? != expected {
-                            return Err(unsupported(
-                                "Layer.adjustGamma",
-                                "nonidentity Canvas gamma correction",
-                            ));
-                        }
-                    }
-                }
-                Ok(Variant::Void)
+            ("adjustGamma", crate::image_api::gamma),
+            ("doGrayScale", |rt, t, _| {
+                crate::image_api::begin(rt, t, json!({"kind":"grayscale"}))
+            }),
+            ("flipLR", |rt, t, _| {
+                crate::image_api::begin(
+                    rt,
+                    t,
+                    json!({"kind":"flip","horizontal":true,"vertical":false}),
+                )
+            }),
+            ("flipUD", |rt, t, _| {
+                crate::image_api::begin(
+                    rt,
+                    t,
+                    json!({"kind":"flip","horizontal":false,"vertical":true}),
+                )
             }),
             ("fillRect", layer_fill_rect),
             ("colorRect", layer_color_rect),
@@ -1587,6 +1583,16 @@ fn layer_load_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> R
         .opaque(&path)
         .map_err(|e| TjsError::runtime(e.to_string()))?;
     rt.host_mut().layer_mut(h)?.full_alpha = opaque.then_some(255);
+    rt.host_mut().layer_mut(h)?.image_source =
+        Some(crysirror_core::image_processing::ImageInput::Asset {
+            path: path.clone(),
+            size: [w as u32, ht as u32],
+            fingerprint: Some(
+                images
+                    .fingerprint(&path)
+                    .map_err(|e| TjsError::runtime(e.to_string()))?,
+            ),
+        });
     Ok(Variant::Void)
 }
 

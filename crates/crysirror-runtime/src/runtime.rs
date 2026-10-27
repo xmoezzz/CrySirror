@@ -113,6 +113,8 @@ pub struct SharedHost {
     pub text: crysirror_text::TextSystem,
     decoders: crysirror_image::DecoderRegistry,
     image_dimensions: BTreeMap<(ClientId, String), ([u32; 2], bool)>,
+    image_tasks: crysirror_tasks::TaskPool,
+    image_memory: Arc<std::sync::atomic::AtomicUsize>,
 }
 impl SharedHost {
     /// Drain all client PCM blocks for one host frame, mixing without clipping.
@@ -685,6 +687,7 @@ impl HostServices for SharedHost {
             storage: self.fs.storage(client)?,
             decoders: self.decoders.clone(),
             sizes: std::sync::Mutex::new(BTreeMap::new()),
+            owner:client, tasks:self.image_tasks.clone(), memory:self.image_memory.clone(),
         }))
     }
     fn text_measurement(
@@ -1014,6 +1017,8 @@ impl Runtime {
             vfx: Default::default(),
             project,
             host: SharedHost {
+                image_tasks: assets.cpu_tasks(),
+                image_memory: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 scene: SceneState::default(),
                 engine,
                 fs,
@@ -2091,11 +2096,20 @@ mod siglus_pack_tests {
 /// Image metadata handle over the same scoped storage and decoder registry the
 /// renderer uses; sizes are cached per handle.
 struct SharedImageMetadata {
+    owner:ClientId,
+    tasks:crysirror_tasks::TaskPool,
+    memory:Arc<std::sync::atomic::AtomicUsize>,
     storage: Arc<dyn crysirror_core::service::ClientStorage>,
     decoders: crysirror_image::DecoderRegistry,
-    sizes: std::sync::Mutex<BTreeMap<String, ([u32; 2],bool)>>,
+    sizes: std::sync::Mutex<BTreeMap<String, ([u32; 2],bool,[u8;32])>>,
 }
 impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
+    fn fingerprint(&self,asset:&str)->crysirror_core::Result<[u8;32]>{self.size(asset)?;self.sizes.lock().map_err(|_|Error::Io("image metadata lock".into()))?.get(asset).map(|v|v.2).ok_or(Error::NotFound)}
+
+    fn begin_process(&self,input:crysirror_core::image_processing::ImageInput,effects:Arc<[u8]>)->crysirror_core::Result<crysirror_core::image_processing::ImageJob>{
+        crate::image_processing::begin(self.owner,input,effects,self.storage.clone(),self.decoders.clone(),self.tasks.clone(),self.memory.clone())
+    }
+
     fn opaque(&self,asset:&str)->crysirror_core::Result<bool>{self.size(asset)?;self.sizes.lock().map_err(|_|Error::Io("image metadata lock".into()))?.get(asset).map(|v|v.1).ok_or(Error::NotFound)}
     fn size(&self, asset: &str) -> crysirror_core::Result<[u32; 2]> {
         let mut sizes = self
@@ -2119,7 +2133,7 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
             sizes.clear();
         }
         let opaque=image.rgba.chunks_exact(4).all(|p|p[3]==255);
-        sizes.insert(asset.to_owned(), ([image.width, image.height],opaque));
+        sizes.insert(asset.to_owned(), ([image.width, image.height],opaque,*blake3::hash(&bytes).as_bytes()));
         Ok([image.width, image.height])
     }
 }

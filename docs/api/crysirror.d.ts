@@ -188,6 +188,16 @@ declare class Audio {
 }
 /** Client-scoped CPU RGBA bitmaps; paths feed Layers and share its surface limits. Transient pixels are not runtime snapshots. */
 declare class Bitmap {
+  /** Prepare a SineRowCopy from a shared bitmap snapshot. Full-image clip; uncovered destination pixels are preserved. Uses effectStatus/cancelEffect. */
+  beginRowCopy(slot: number, source: number, options: Record<string, any>): number;
+  /** Prepare a snapshot crossfade/rule-mask/blur transition into slot at explicit ImageTransition progress. Inputs must be client-owned equal-size bitmaps. Uses effectStatus/cancelEffect and rejects a stale target revision. */
+  beginTransition(slot: number, other: number, options: Record<string, any>, mask: number | null): number;
+  /** Prepare an ImageEffect chain on shared workers. Captures immutable pixels and the target revision; effectStatus publishes only if the client/epoch/revision still match. Max 4M pixels, 16 effects. */
+  beginEffect(slot: number, effects: Record<string, any>[]): number;
+  /** Poll a bitmap effect without waiting. Ready includes result.surface; stale or failed work is visible and does not overwrite newer pixels. */
+  effectStatus(ticket: number): Record<string, any>;
+  /** Release a bitmap effect ticket and cancel unfinished work. Completed published pixels remain engine-owned. */
+  cancelEffect(ticket: number): void;
   /** Create/replace a slot with uniform RGBA (default transparent). Returns __surface/<slot>. */
   create(slot: number, width: number, height: number, rgba: number[] | null): string;
   /** Decode a client asset or copy an existing client surface into a mutable slot. */
@@ -832,6 +842,9 @@ declare const vfx: Vfx;
 
 /** JS/TS service awaits; callbacks run on owner lifecycle entries. */
 interface CancellablePromise<T> extends Promise<T> { readonly ticket: number | null; cancel(): void; }
+interface Bitmap { rowCopyAsync(slot: number, source: number, options: Record<string, any>): CancellablePromise<string>; }
+interface Bitmap { transitionAsync(slot: number, other: number, options: Record<string, any>, mask?: number | null): CancellablePromise<string>; }
+interface Bitmap { applyEffectAsync(slot: number, effects: Record<string, any>[]): CancellablePromise<string>; }
 interface Audio { prepareSourceAsync(asset: string, options?: Record<string, any> | null): CancellablePromise<Record<string, any>>; }
 interface Audio { playSourceAsync(resource: Record<string, any>, voice: Record<string, any>): CancellablePromise<Record<string, any>>; }
 interface Audio { playSfxAsync(voice: Record<string, any>): CancellablePromise<Record<string, any>>; }

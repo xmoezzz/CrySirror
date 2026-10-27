@@ -109,3 +109,61 @@ fn typescript_bitmaps_publish_shared_pixels_and_feed_transformed_filtered_layers
         (1., 0.5, true)
     );
 }
+
+#[test]
+fn typescript_awaits_shared_image_effects_and_transitions_before_presentation() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join("assets")).unwrap();
+    let p = tmp.path().join("project.json");
+    std::fs::write(&p,serde_json::to_vec(&serde_json::json!({"schema":2,"name":"bitmap-effects-ts","content_revision":"1","assets":"assets","canvas":[32,32],"clients":[{"name":"game","adapter":"crysirror-script-v1","game":"test"}]})).unwrap()).unwrap();
+    let mut app = App::new(
+        Runtime::load(&p, &tmp.path().join("state")).unwrap(),
+        "game",
+    )
+    .unwrap();
+    app.add_script_host(Box::new(JsHost::with_source("effects","effects.ts",r#"
+      async function onStart():Promise<void> {
+        bitmap.create(1,2,1,[128,0,0,255]);
+        const image:string=await bitmap.applyEffectAsync(1,[{kind:'gamma',gamma:[2,2,2],floor:[0,0,0],ceiling:[255,255,255]}]);
+        bitmap.create(2,2,1,[0,0,255,255]);
+        const mixed:string=await bitmap.transitionAsync(1,2,{progress:0.5,softness:0,blur:0});
+        layers.put({id:7,rect:[0,0,2,1],paint:{kind:'image',asset:mixed}});
+        engine.log('effects-ready');
+      }
+    "#).unwrap())).unwrap();
+    app.init().unwrap();
+    app.start().unwrap();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        app.frame(1, InputFrame::default()).unwrap();
+        if app
+            .engine()
+            .unwrap()
+            .log
+            .iter()
+            .any(|l| l == "effects-ready")
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "{:?}",
+            app.engine().unwrap().log
+        );
+        std::thread::yield_now();
+    }
+    let state = app.context().state().unwrap();
+    let surface = state
+        .runtime
+        .assets
+        .surface(state.client, "__surface/1")
+        .unwrap();
+    assert_eq!(&*surface.rgba, &[91, 0, 128, 255, 91, 0, 128, 255]);
+    assert!(state
+        .runtime
+        .host
+        .engine
+        .layers
+        .get(state.client, 7)
+        .is_some());
+}

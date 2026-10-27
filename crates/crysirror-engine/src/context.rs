@@ -12,6 +12,7 @@ use std::collections::VecDeque;
 
 /// Everything the OOP API can reach. Device handles never live here.
 pub struct EngineState {
+    pub bitmap_jobs: crate::bitmap_async::BitmapJobs,
     pub streaming: crate::systems::StreamingRuntime,
     /// Project/VM scheduler: shared World/Layer/UI, VFS and native VM sessions.
     pub runtime: Runtime,

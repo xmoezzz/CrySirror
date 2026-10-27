@@ -580,7 +580,7 @@ fn native_regions_reparent_visibility_and_identity_gamma_use_shared_state() {
     b.enabled=false;if(child.nodeEnabled)throw new Exception('disabled ancestry');b.enabled=true;
     var bad=false;try{b.parent=child;}catch(e){bad=true;}if(!bad)throw new Exception('cycle admitted');
     child.adjustGamma();child.adjustGamma(1,0,255,1,0,255,1,0,255);
-    bad=false;try{child.adjustGamma(2);}catch(e){bad=true;}if(!bad)throw new Exception('nonidentity gamma silently accepted');
+    bad=false;try{child.adjustGamma(0);}catch(e){bad=true;}if(!bad)throw new Exception('invalid gamma silently accepted');
     Debug.message('native-region-tree-ok');
     "#,
         &[],
@@ -663,4 +663,127 @@ fn invalidation_releases_shared_native_voice_even_without_super_finalize() {
         assert!(std::time::Instant::now() < end);
         std::thread::yield_now();
     }
+}
+
+#[test]
+fn native_image_filters_resume_original_tjs_and_publish_shared_resource_pixels() {
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::Duration;
+    let (d, mut r) = fixture(
+        r#"
+    var w=new Window();var root=new Layer(w,null);var l=new Layer(w,root);
+    l.loadImages('image/effects.png');l.face=dfProvince;l.fillRect(0,0,1,1,9);l.face=dfAuto;l.adjustGamma(2,0,255,2,0,255,2,0,255);
+    Debug.message('gamma-ready');l.flipLR();if(l.getProvincePixel(1,0)!=9||l.getProvincePixel(0,0)!=0)throw new Exception('flip province');l.doGrayScale();
+    l.visible=true;w.visible=true;Debug.message('shared-image-done');
+    "#,
+        &[],
+    );
+    image::RgbaImage::from_raw(2, 1, vec![128, 0, 0, 255, 0, 255, 0, 255])
+        .unwrap()
+        .save(d.path().join("assets/game/image/effects.png"))
+        .unwrap();
+    let pool = r.assets.cpu_tasks();
+    let gate = Arc::new((Mutex::new(false), Condvar::new()));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut jobs = vec![];
+    for _ in 0..pool.stats().workers {
+        let gate = gate.clone();
+        let tx = tx.clone();
+        jobs.push(
+            pool.spawn(move |_| {
+                tx.send(())?;
+                let (lock, wake) = &*gate;
+                let (value, _) = wake
+                    .wait_timeout_while(lock.lock().unwrap(), Duration::from_secs(10), |v| !*v)
+                    .unwrap();
+                anyhow::ensure!(*value, "image gate timeout");
+                Ok(())
+            })
+            .unwrap(),
+        );
+    }
+    for _ in 0..jobs.len() {
+        rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+    r.tick(0, InputFrame::default()).unwrap();
+    let n = &r.inspect()["sessions"][0]["native"];
+    assert_eq!(n["suspended"], true);
+    assert!(!n["log_tail"].to_string().contains("gamma-ready"));
+    r.tick(
+        1,
+        InputFrame {
+            buttons_pressed: buttons::ENTER,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    {
+        let (lock, wake) = &*gate;
+        *lock.lock().unwrap() = true;
+        wake.notify_all();
+    }
+    let end = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        r.tick(1, InputFrame::default()).unwrap();
+        let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+        if log.contains("shared-image-done") {
+            assert_eq!(log.matches("gamma-ready").count(), 1);
+            break;
+        }
+        assert!(std::time::Instant::now() < end);
+        std::thread::yield_now();
+    }
+    let surface = r
+        .assets
+        .surface(ClientId(1), "__surface/1073741826")
+        .unwrap();
+    assert_eq!(&*surface.rgba, &[182, 182, 182, 255, 38, 38, 38, 255]);
+    assert_eq!(
+        r.inspect()["sessions"][0]["native"]["owns_framebuffer"],
+        false
+    );
+    drop(jobs);
+}
+
+#[test]
+fn layer_ex_raster_plugin_routes_real_copy_to_shared_image_worker() {
+    let (d, mut r) = fixture(
+        r#"
+ Plugins.link('layerExRaster.dll');
+ var w=new Window();var root=new Layer(w,null);var src=new Layer(w,root);src.loadImages('image/raster.png');
+ var dst=new Layer(w,root);dst.setImageSize(5,2);dst.copyRaster(src,3,4,4,1);
+ if(Plugins.getStatus('layerExRaster.dll').kind!='engine_facade')throw new Exception('fake raster plugin');
+ Debug.message('raster-facade-ready');
+ "#,
+        &[],
+    );
+    let mut image = image::RgbaImage::new(5, 2);
+    for (i, p) in image.pixels_mut().enumerate() {
+        *p = image::Rgba([(i as u8 + 1) * 10, 0, 0, 255]);
+    }
+    image
+        .save(d.path().join("assets/game/image/raster.png"))
+        .unwrap();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        r.tick(1, InputFrame::default()).unwrap();
+        if r.inspect()["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("raster-facade-ready")
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < end);
+        std::thread::yield_now();
+    }
+    let image = r
+        .assets
+        .surface(ClientId(1), "__surface/1073741827")
+        .unwrap();
+    assert_eq!(
+        image.rgba.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>(),
+        [20, 30, 40, 50, 255, 255, 255, 60, 70, 80]
+    );
+    assert_eq!(image.rgba[19], 0);
+    assert_eq!(image.rgba[23], 0);
 }

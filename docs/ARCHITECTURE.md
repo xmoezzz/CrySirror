@@ -504,3 +504,22 @@ Rust callbacks that cannot retain a TJS continuation fail on async admission.
 Source reads/metadata still include synchronous paths; full engine async remains
 an ADR 0050 requirement. See ADR 0088 for native save, hit testing, media/effect
 and plugin limits. There is no second general-purpose engine in this adapter.
+
+## Shared synthesis and asynchronous image products (ADR 0089–0090)
+
+`crysirror-audio::synth` is an independent decoder source for finite YM2608
+register scores and a bounded PMD-M profile. It reuses prepared resources,
+decoder workers, voices, buses and worker final mixing; native VMs do not own a
+second music engine/output. ROM/ADPCM and unsupported driver modes fail visibly.
+
+`crysirror-image` owns pixel effects, tiny-skia vector paths, projective sampling,
+mask/blur transitions and native-compatible sine row copying. Core exposes safe
+immutable image inputs/resources and pollable processing contracts. Runtime uses
+the existing asset CPU pool with bounded processing memory. Public Bitmap jobs
+add client/epoch/destination-revision publication checks and awaitable JS bindings.
+KiriKiri only translates parameters and parks/resumes its original TJS stack.
+Images are ordinary engine resources, never a hosted legacy composed screen.
+Asset content fingerprints keep worker mutations tied to the image observed by a
+native load. These are CPU resource operations; GPU shader equivalents and
+arbitrary Canvas readback remain separate work. Source/provenance and supported
+native profiles are recorded in `docs/synth-image-source-audit.json` and ADR 0090.

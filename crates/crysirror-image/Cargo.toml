@@ -12,5 +12,6 @@ image.workspace = true
 crysirror-core.workspace = true
 crysirror-resource.workspace = true
 serde_json.workspace = true
+tiny-skia = { version = "=0.12.0", default-features = false, features = ["std", "simd"] }
 
 byteorder = "1"

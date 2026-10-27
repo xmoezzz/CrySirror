@@ -91,8 +91,10 @@ Known-uniform masks and Core province regions support input. Text, images, solid
 fills, whole-destination atlas-cell copies and hierarchy properties are admitted.
 Default/arrow/hidden cursors and empty hints are supported; other cursor resources,
 nonempty tooltip UI, focusable layers and modal input require additional mappings.
-Identity adjustGamma is an actual no-op; nonidentity gamma, grayscale, flips,
-blur, unsupported blend/clip/partial-replace operations fail visibly.
+Identity adjustGamma is an actual no-op. ADR 0090 subsequently adds shared
+worker gamma, grayscale and flips for loaded/processed/uniform images, plus
+a full-clip layerExRaster facade. Composed Canvas/text readback, unsupported
+blend/clip/partial-replace operations still fail visibly.
 
 ## Native persistence and deliberately incomplete surfaces
 

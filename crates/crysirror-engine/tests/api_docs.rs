@@ -189,6 +189,11 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-scene/src/canvas.rs",
         "crates/crysirror-core/src/service.rs",
         "crates/crysirror-image/src/associated.rs",
+        "crates/crysirror-image/src/effects.rs",
+        "crates/crysirror-image/src/vector.rs",
+        "crates/crysirror-image/src/transition.rs",
+        "crates/crysirror-image/src/row_copy.rs",
+        "crates/crysirror-audio/src/synth/mod.rs",
         "crates/crysirror-image/src/bitmap.rs",
         "crates/crysirror-resource/src/context.rs",
         "crates/crysirror-resource/src/transforms.rs",
@@ -244,6 +249,14 @@ fn generate() -> api_doc::ApiDocs {
     let e = json!({});
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
+        d("ImageEffect","Bitmap.applyEffectAsync; shared worker effects",None),
+        d("VectorPath","ImageEffect.vector.path",None),
+        d("PathCommand","VectorPath.commands",None),
+        d("PathStroke","VectorPath.stroke",None),
+        d("ImageTransition","Bitmap.transitionAsync options",None),
+        d("SineRowCopy","Bitmap.rowCopyAsync options / native copyRaster",None),
+        d("RegisterScore","Audio.prepareSourceAsync .opna assets",None),
+        d("RegisterWrite","RegisterScore.writes (output sample clock)",None),
         d("SimpleTextPlacement","Text.positionSimple / TextMeasurement::position_simple",None),
         d("WindowPolicy","Ui.setWindowPolicy / UiSystem.window_policy",None),
         d("InputSample","Input.events samples; journal JSON u64 fields are decimal strings",None),

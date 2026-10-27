@@ -69,7 +69,7 @@ impl Config {
         for name in &self.plugin_shells {
             let name = crate::plugins::canonical(name).map_err(|e| anyhow::anyhow!("{e}"))?;
             ensure!(
-                !matches!(name.as_str(), "menu.dll" | "kagparser.dll"),
+                !matches!(name.as_str(), "menu.dll" | "kagparser.dll" | "layerexraster.dll"),
                 "engine facade cannot be replaced by a plugin shell"
             );
         }
@@ -438,6 +438,9 @@ impl KrkrVm {
     fn drive_sound(&mut self, h: &mut dyn HostServices) -> Result<bool> {
         for _ in 0..128 {
             self.flush(h)?;
+            if !crate::image_api::poll(self.rt.as_mut().unwrap(), h, self.client)? {
+                return Ok(false);
+            }
             if !crate::save_struct::poll(self.rt.as_mut().unwrap())? {
                 return Ok(false);
             }

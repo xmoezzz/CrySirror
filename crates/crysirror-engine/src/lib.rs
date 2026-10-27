@@ -27,6 +27,8 @@ pub use audio_sequences_api::{CueSequenceSpec, CueSequenceLine, CueSequenceMode,
 pub use audio_resources_api::{AudioSourcePrepareSpec, AudioTransformSpec};
 pub mod binaural_api;
 pub mod bitmap_api;
+mod bitmap_async;
+pub use bitmap_async::BitmapJobs;
 pub mod builtin;
 pub mod canvas_api;
 pub mod context;

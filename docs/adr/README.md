@@ -122,3 +122,5 @@ moves to `done` only with recorded behavior evidence.
 | [0086](0086-native-pcmevent-and-portable-cue-cursors.md) | Native Siglus PCMEVENT and portable scheduling intent | implemented bounded profile; original frame-action timing remains open |
 | [0087](0087-logical-input-journals-and-native-continuations.md) | Shared logical input receipts and native script/audio continuation | implemented framed input profile; raw OS/IME/analog events remain open |
 | [0088](0088-kag3-semantic-adapter-and-shared-prerequisites.md) | Original KAG3 facade over shared text, dispatch, regions, audio and atomic writes | bounded native profile; full games/saves/media/effects remain open |
+| [0089](0089-shared-opna-and-pmd-sources.md) | Shared YM2608 register-score and bounded PMD-M audio sources | implemented profile; full chip/PMD and UK2 VM remain open |
+| [0090](0090-shared-worker-image-resources.md) | Shared worker image resources, vector/perspective/transitions and native effect facades | implemented CPU profile; composed Canvas readback and complete plugin compatibility remain open |

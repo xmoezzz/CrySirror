@@ -21,11 +21,9 @@ anyhow.workspace = true
 crossbeam-queue = "=0.3.14"
 cpal = { version = "=0.15.3", optional = true }
 serde.workspace = true
+serde_json.workspace = true
 symphonia = { version = "=0.5.5", default-features = false, features = ["wav", "pcm", "ogg", "vorbis", "mp3", "flac"] }
 rodio = { version = "0.17.3", optional = true, default-features = false, features = ["wav", "vorbis", "mp3", "flac"] }
 
 # Device-free native resource codecs, not the original engine runtime.
 siglus_assets = { path = "../siglus-upstream/siglus_assets" }
-
-[dev-dependencies]
-serde_json.workspace = true

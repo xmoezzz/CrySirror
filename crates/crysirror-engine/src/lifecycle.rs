@@ -102,6 +102,7 @@ impl App {
         builtin::register(&mut classes)?;
         Ok(Self {
             cx: EngineContext::new(EngineState {
+                bitmap_jobs:Default::default(),
                 streaming: Default::default(),
                 runtime,
                 client,

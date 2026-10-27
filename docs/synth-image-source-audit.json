@@ -1,0 +1,141 @@
+{
+  "date": "2026-10-27",
+  "purpose": "Shared synth and image capabilities, not hosted native engines",
+  "sources": [
+    {
+      "repository": "https://github.com/xmoezzz/siglus_rs",
+      "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+      "files": [
+        {
+          "path": "src/engine/opna.rs",
+          "bytes": 24062,
+          "sha256": "ce25025f3cd220ba0c7e6769ff0624aa6186a255ae69a64b6df9246150a81e35",
+          "review": "Complete DSP/driver source inspected and adapted into shared audio with retained MPL provenance.",
+          "new_code_copied": true
+        },
+        {
+          "path": "src/engine/pmd.rs",
+          "bytes": 71920,
+          "sha256": "d971acbc50529451809bfe3f2c6921ab8a2cf9bbb664ae52ac0b903f9b054eda",
+          "review": "Complete DSP/driver source inspected and adapted into shared audio with retained MPL provenance.",
+          "new_code_copied": true
+        },
+        {
+          "path": "src/engine/audio.rs",
+          "bytes": 3500,
+          "sha256": "5ffd728c7fb2e9149e182b3a795914026894df23f72fd96b8080c4f9f3656c9f",
+          "review": "Complete file inspected; semantic/source boundary reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "README.md",
+          "bytes": 4296,
+          "sha256": "541eda7c9b20f007559cc59f8e41a1e90fc8b4f163af9111f8878a961fb8063b",
+          "review": "Complete file inspected; semantic/source boundary reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "Cargo.toml",
+          "bytes": 418,
+          "sha256": "f8682d8cfcd52611a0a8c675b884a55e7f7c1608c34ae4b3c1a24b4e8ea3e728",
+          "review": "Complete file inspected; semantic/source boundary reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "src/music.rs",
+          "bytes": 14893,
+          "sha256": "5787a6993119ab8e7d37dc50c03136fb15e05aa7a61d8a866cf65c0ca3a7b65f",
+          "review": "Selected complete native operation/wrapper functions inspected; reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "../../Cargo.toml (workspace root)",
+          "bytes": 1086,
+          "sha256": "a77b9f973a7dcf45c4ef6a473e6950d0393c377f20078f27e610b90f17f6d62f",
+          "review": "Complete exact-revision workspace manifest inspected; workspace.package.license is MPL-2.0, inherited by UK2.",
+          "new_code_copied": false
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/wamsoft/layerExRaster",
+      "commit": "a4c9be0c7510cca552e27c0c3e931b2eaee399af",
+      "files": [
+        {
+          "path": "main.cpp",
+          "bytes": 3274,
+          "sha256": "734af610c7d22c3f7ea9fa76576f76f4d67fa44c37e9090db5121b7efb00d1af",
+          "review": "Complete file inspected; semantic/source boundary reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "layerExBase.hpp",
+          "bytes": 3042,
+          "sha256": "aedcd21692b2a0ea261409bb9c66174bd67927e9314c9fafc31abcc7c6d11de3",
+          "review": "Complete file inspected; semantic/source boundary reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "readme.txt",
+          "bytes": 329,
+          "sha256": "111e00352bb68208d4b89913b2b270e4ab3d65b456e2295b32eed4dcd4b3dea2",
+          "review": "Complete file inspected; semantic/source boundary reference only.",
+          "new_code_copied": false
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/krkrz/krkrz",
+      "commit": "fd5c4baa6a2ef5978db1bd043634351f48667daf",
+      "files": [
+        {
+          "path": "visual/LayerIntf.cpp",
+          "bytes": 304542,
+          "sha256": "9cf4cb58f0d63c53ba2c7ec7b0f09ca44a51bb43a92f09fb4aad6b1f90441556",
+          "review": "Selected complete native operation/wrapper functions inspected; reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "visual/tvpgl.c",
+          "bytes": 199311,
+          "sha256": "eb340b75da8c43a7bad100938dcbc9fcab416fb58d7c247d706c13b701fe6074",
+          "review": "Selected complete native operation/wrapper functions inspected; reference only.",
+          "new_code_copied": false
+        },
+        {
+          "path": "visual/gl/blend_functor_c.h",
+          "bytes": 38622,
+          "sha256": "74433f2574ad8dae84575f350a248b3e3a8d3bdb6494295129b8b5c657e1eb62",
+          "review": "Selected complete native operation/wrapper functions inspected; reference only.",
+          "new_code_copied": false
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/liulifox233/Kirakira",
+      "commit": "c451918023477620ff9055a2eb8a6714b947d9c1",
+      "files": [
+        {
+          "path": "crates/krkr-plugins/src/layer_ex_raster.rs",
+          "bytes": 17340,
+          "sha256": "cd5c37f6b88e17be5e5078109cde60085b6afe8ac0ca4710b4f7f1a7e681dbba",
+          "review": "Complete file inspected; semantic/source boundary reference only.",
+          "new_code_copied": false
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "tiny-skia",
+      "version": "0.12.0",
+      "checksum": "47ffee5eaaf5527f630fb0e356b90ebdec84d5d18d937c5e440350f88c5a91ea",
+      "note": "Existing locked dependency, now directly used by shared image. Public path/pixmap/paint/stroke APIs inspected in local pinned crate source. Notices retained by dependency."
+    }
+  ],
+  "exclusions": [
+    "No UK2 VM, Kira output/mixer or general engine copied",
+    "No C++ plugin binary or legacy renderer imported",
+    "No fonts, chip ROMs, sample banks, proprietary game data or generated captures shipped"
+  ]
+}

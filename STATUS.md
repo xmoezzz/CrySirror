@@ -3667,3 +3667,74 @@ Remaining boundaries:
   live seek and delayed fades remain open. Nested Rust parser/input callbacks
   cannot suspend; async admission there fails. Source/metadata reads still have
   synchronous boundaries. ADR 0050 and the wider engine work remain unfinished.
+
+## 2026-10-27 — shared Yamaha sources and worker image capabilities (ADR 0089–0090)
+
+Implementation:
+- Extracted the pinned UK2 pure YM2608 DSP and PMD score driver into shared
+  crysirror-audio, retaining MPL provenance; no UK2 VM, Kira output or second
+  mixer/renderer was imported. Existing Audio resources, decoder workers, buses
+  and worker final mixing consume .opna register scores and bounded PMD-M
+  .pmd/.mmm streams independently of any VM. Unsupported chip/driver modes,
+  malformed directory/voice reads and zero-time loops fail visibly. Exact rational
+  chip clocks, partition-invariant reads and replay seek bounds are explicit.
+- Shared crysirror-image owns gamma/gray/invert/flips/noise, premultiplied Gaussian
+  blur, tiny-skia vector paths/strokes, inverse projective sampling, mask/blur
+  transitions and preserved-edge sine row copying. Core immutable image leases
+  and owner-polled completion contain no device handles. Runtime reserves the
+  existing CPU pool and bounded processing memory before accepting work.
+- Public Bitmap begin/status/cancel and JS awaitable effect/transition/row-copy
+  APIs use immutable source snapshots and client/epoch/target-revision checks.
+  Native KiriKiri gamma/gray/flips and a real layerExRaster.dll copyRaster facade
+  call that same shared service and resume the original TJS continuation only
+  after publication. LR/UD flips also reflect shared Core province regions.
+  Loaded/processed/uniform full-clip images are admitted; arbitrary composed
+  Canvas/text readback, partial clip and native overlapping self-copy fail.
+- Added self-authored examples/shared-effects and audio chiptune examples.
+  Sources/pins/hashes and exclusions are in docs/synth-image-source-audit.json.
+  No fonts, ROMs, sample banks, game files, captures or compiled outputs added.
+
+Compilation:
+- Release desktop build with krkr,arc-formats,acoustics-obvhs passed.
+- Release workspace --all-targets check with desktop krkr/arc-formats/
+  acoustics-obvhs and audio rodio-output passed. Existing CBG/RealLive warnings
+  remain. An initial command incorrectly named the acoustics feature on audio;
+  feature resolution failed before compilation, then the corrected command passed.
+
+Behavior validation completed:
+- Release synth integration: 4 passed; shared image-effect pixels: 7 passed;
+  Core regions: 3 passed; public shared-effect/audio ownership tests: 3 passed.
+  Earlier library regressions: audio 15 passed, 1 ignored; image 63 passed.
+  The ignored environment-dependent audio test is not counted as a pass.
+- Release native bridge with an explicitly supplied system font: 18 passed,
+  including shared worker/TJS dependency gating, image pixels, province reflection
+  and Plugins.link/copyRaster behavior. No native engine framebuffer is owned.
+- Release JS/TypeScript Bitmap regressions: 2 passed, including awaited shared
+  effects and transitions followed by ordinary retained-layer presentation.
+- Release generated API docs: 7 passed; command coverage: 1 passed. Fingerprint
+  be619476a3bcddb4 -> 4fa7e1d7f355d61a regenerated and logged.
+- Explicit external stock KAG3 regression: 1 passed with the pinned checkout and
+  supplied system font; the originally ignored test was actually executed.
+- Python 3.11 tooling suite: 189 passed. Default Python lacked tomllib during
+  source-audit generation; that failed invocation was rerun with Python 3.11.
+- Actual public-API showcase captured at 780x520 on Apple M5 / Metal, raster
+  renderer. All eight panels and labels visually inspected: original, gamma,
+  Gaussian, vector, perspective, row distortion, mask and blur transition. This
+  is one local raster capture, not GPU effect timing, hardware RT or cross-platform
+  evidence. Self-authored WAV contains 96000 stereo PCM16 frames at 48000 Hz;
+  worker mixing asserted finite/nonzero output with peak 0.3520. No live device
+  or physical chip parity is claimed.
+- Initial DSP edition/borrow issues and the expected generated-API fingerprint
+  guard were corrected before final validation. Evidence stays ignored under
+  target/verification/synth-effects-*.log, shared-effects.png and synth-demo/.
+
+Remaining boundaries:
+- This adds reusable capabilities, not a complete UK2 VM or all PMD/chip dialects.
+  ADPCM/ROM banks, FM3 special mode and unsupported driver modes fail explicitly.
+  This is a sound model with procedural rhythm, not silicon-accurate emulation.
+- ADR 0088's former nonidentity gamma/gray/flip gaps are superseded only for the
+  image-resource profile above. Full native save/media/blend/clip/mask semantics,
+  general Canvas readback, GDI/metafiles and arbitrary plugin DLL compatibility
+  remain open. Engine mask/blur transitions do not claim KaichoTrans equivalence.
+- Processing is CPU-worker based. GPU shader variants, metadata/discovery async,
+  every other ADR 0050 boundary and broader 3D engine completion remain open.

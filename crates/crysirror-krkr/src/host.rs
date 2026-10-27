@@ -26,6 +26,7 @@ const MAX_LOG: usize = 4096;
 
 #[derive(Clone, Debug)]
 pub struct LayerState {
+    pub image_source: Option<crysirror_core::image_processing::ImageInput>,
     pub regions: crysirror_core::region_map::RegionMap,
     pub slot: u32,
     pub window: usize,
@@ -89,6 +90,7 @@ pub enum Batch {
 }
 
 pub struct KrkrHost {
+    pub image_job: Option<(usize, crysirror_core::image_processing::ImageJob, [bool; 2])>,
     pub io_barrier: bool,
     pub writes: std::collections::VecDeque<Box<dyn crysirror_core::service::StorageWrite>>,
     pub can_suspend: bool,
@@ -122,6 +124,7 @@ pub struct KrkrHost {
 impl KrkrHost {
     pub fn new(canvas: [u32; 2], font: String) -> Self {
         Self {
+            image_job: None,
             io_barrier: false,
             writes: Default::default(),
             can_suspend: true,
@@ -189,8 +192,12 @@ impl KrkrHost {
             {
                 if let Some(l) = self.layers.values_mut().find(|l| l.slot as u64 == id) {
                     l.image_modified = true;
+                    l.image_source = None;
                     match op["op"].as_str() {
                         Some("clear") => {
+                            if let Ok(color)=serde_json::from_value::<[u8;4]>(op["color"].clone()){
+                                l.image_source=Some(crysirror_core::image_processing::ImageInput::Solid{size:[l.image_width as u32,l.image_height as u32],color});
+                            }
                             l.full_alpha =
                                 op["color"][3].as_u64().and_then(|v| u8::try_from(v).ok())
                         }
@@ -267,6 +274,7 @@ impl KrkrHost {
         let primary = parent.is_none();
         let size = DEFAULT_LAYER_SIZE as i64;
         let state = LayerState {
+            image_source: None,
             regions: crysirror_core::region_map::RegionMap::new(
                 self.client,
                 [size as u32, size as u32],

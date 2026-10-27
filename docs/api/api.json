@@ -173,6 +173,87 @@
   ],
   "async_bindings": [
     {
+      "cancel": "cancelEffect",
+      "class": "Bitmap",
+      "completion": "result.surface",
+      "name": "rowCopyAsync",
+      "params": [
+        {
+          "name": "slot",
+          "optional": false,
+          "type": "number"
+        },
+        {
+          "name": "source",
+          "optional": false,
+          "type": "number"
+        },
+        {
+          "name": "options",
+          "optional": false,
+          "type": "Record<string, any>"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<string>",
+      "start": "beginRowCopy",
+      "status": "effectStatus"
+    },
+    {
+      "cancel": "cancelEffect",
+      "class": "Bitmap",
+      "completion": "result.surface",
+      "name": "transitionAsync",
+      "params": [
+        {
+          "name": "slot",
+          "optional": false,
+          "type": "number"
+        },
+        {
+          "name": "other",
+          "optional": false,
+          "type": "number"
+        },
+        {
+          "name": "options",
+          "optional": false,
+          "type": "Record<string, any>"
+        },
+        {
+          "name": "mask",
+          "optional": true,
+          "type": "number | null"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<string>",
+      "start": "beginTransition",
+      "status": "effectStatus"
+    },
+    {
+      "cancel": "cancelEffect",
+      "class": "Bitmap",
+      "completion": "result.surface",
+      "name": "applyEffectAsync",
+      "params": [
+        {
+          "name": "slot",
+          "optional": false,
+          "type": "number"
+        },
+        {
+          "name": "effects",
+          "optional": false,
+          "type": "Record<string, any>[]"
+        }
+      ],
+      "release_on_success": true,
+      "returns": "CancellablePromise<string>",
+      "start": "beginEffect",
+      "status": "effectStatus"
+    },
+    {
       "cancel": "cancelSourcePreparation",
       "class": "Audio",
       "completion": "result",
@@ -1749,6 +1830,85 @@
       "doc": "Client-scoped CPU RGBA bitmaps; paths feed Layers and share its surface limits. Transient pixels are not runtime snapshots.",
       "global": "bitmap",
       "methods": [
+        {
+          "doc": "Prepare a SineRowCopy from a shared bitmap snapshot. Full-image clip; uncovered destination pixels are preserved. Uses effectStatus/cancelEffect.",
+          "name": "beginRowCopy",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "source",
+              "type": "number"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Prepare a snapshot crossfade/rule-mask/blur transition into slot at explicit ImageTransition progress. Inputs must be client-owned equal-size bitmaps. Uses effectStatus/cancelEffect and rejects a stale target revision.",
+          "name": "beginTransition",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "other",
+              "type": "number"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "mask",
+              "type": "number | null"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Prepare an ImageEffect chain on shared workers. Captures immutable pixels and the target revision; effectStatus publishes only if the client/epoch/revision still match. Max 4M pixels, 16 effects.",
+          "name": "beginEffect",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "effects",
+              "type": "Record<string, any>[]"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Poll a bitmap effect without waiting. Ready includes result.surface; stale or failed work is visible and does not overwrite newer pixels.",
+          "name": "effectStatus",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Release a bitmap effect ticket and cancel unfinished work. Completed published pixels remain engine-owned.",
+          "name": "cancelEffect",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
         {
           "doc": "Create/replace a slot with uniform RGBA (default transparent). Returns __surface/<slot>.",
           "name": "create",
@@ -5460,6 +5620,290 @@
     }
   ],
   "data": [
+    {
+      "doc": "Reusable image operations. All channels are straight RGBA bytes; RGB-only transforms preserve alpha. Effects never silently select a different effect. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Two-input whole-pixel row copy; preserves uncovered destination pixels.",
+          "name": "sine_row_copy",
+          "rust_type": "spec: crate::row_copy::SineRowCopy"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "transition",
+          "rust_type": "spec: crate::transition::ImageTransition"
+        },
+        {
+          "default": null,
+          "doc": "Engine vector path on the existing image with source-over composition.",
+          "name": "vector",
+          "rust_type": "path: crate::vector::VectorPath"
+        },
+        {
+          "default": null,
+          "doc": "Map the whole source into a convex quad, keeping canvas dimensions.",
+          "name": "perspective",
+          "rust_type": "quad: [[f32; 2]; 4]"
+        },
+        {
+          "default": null,
+          "doc": "Per-channel pow(value/255,1/gamma), floor/ceiling in byte units. Fully transparent pixels keep hidden RGB, matching the Krkr gamma profile.",
+          "name": "gamma",
+          "rust_type": "gamma: [f32; 3], floor: [i32; 3], ceiling: [i32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Integer luminance: (54R+183G+19B)/256, truncated.",
+          "name": "grayscale",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "invert",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Separable Gaussian on premultiplied floating RGBA, clamped image edges.",
+          "name": "gaussian_blur",
+          "rust_type": "sigma: f32"
+        },
+        {
+          "default": null,
+          "doc": "Deterministic signed uniform RGB noise. Alpha is unchanged.",
+          "name": "noise",
+          "rust_type": "seed: u32, amplitude: u8, monochrome: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "flip",
+          "rust_type": "horizontal: bool, vertical: bool"
+        },
+        {
+          "default": null,
+          "doc": "Whole-pixel row displacement: round(sin(phase+y*frequency)*amplitude). Source edges clamp. Phase/frequency are radians, amplitude is pixels.",
+          "name": "raster",
+          "rust_type": "amplitude: f32, frequency: f32, phase: f32"
+        }
+      ],
+      "name": "ImageEffect",
+      "used_by": "Bitmap.applyEffectAsync; shared worker effects"
+    },
+    {
+      "doc": "Solid fills/strokes with antialiasing and a six-value affine transform [scale_x,skew_y,skew_x,scale_y,translate_x,translate_y]. Stroke caps are butt, joins are miter with limit 4. No font drawing, GDI brush or metafile aliases.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "commands",
+          "rust_type": "Vec<PathCommand>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "fill",
+          "rust_type": "Option<[u8; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "stroke",
+          "rust_type": "Option<PathStroke>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "transform",
+          "rust_type": "[f32; 6]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "even_odd",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "VectorPath",
+      "used_by": "ImageEffect.vector.path"
+    },
+    {
+      "doc": "A geometric path command; curves use explicit control points. Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "move",
+          "rust_type": "to: [f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "line",
+          "rust_type": "to: [f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "quad",
+          "rust_type": "control: [f32; 2], to: [f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "cubic",
+          "rust_type": "control1: [f32; 2], control2: [f32; 2], to: [f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "close",
+          "rust_type": ""
+        }
+      ],
+      "name": "PathCommand",
+      "used_by": "VectorPath.commands"
+    },
+    {
+      "doc": "A solid-color stroke with butt caps and miter joins.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "color",
+          "rust_type": "[u8; 4]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "width",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "PathStroke",
+      "used_by": "VectorPath.stroke"
+    },
+    {
+      "doc": "A resource transition at explicit progress. A mask reveals bright pixels first; softness is the normalized reveal ramp. Endpoints preserve exact input bytes. Blur grows toward the midpoint; this is an engine profile, not an alias for every legacy transition provider's arithmetic.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "progress",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "softness",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "blur",
+          "rust_type": "f32"
+        }
+      ],
+      "name": "ImageTransition",
+      "used_by": "Bitmap.transitionAsync options"
+    },
+    {
+      "doc": "Whole-image copy profile. Unlike sampling distortion, uncovered destination pixels retain their old values. Displacement truncates toward zero; the phase advances per row from -omega*time/cycle*(image_height/2), with integer height/2.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "amplitude",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "lines",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "cycle",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "time",
+          "rust_type": "i64"
+        }
+      ],
+      "name": "SineRowCopy",
+      "used_by": "Bitmap.rowCopyAsync options / native copyRaster"
+    },
+    {
+      "doc": "Engine-owned finite Yamaha YM2608 score, serialized as a `.opna` JSON asset. FM/SSG and procedural rhythm only; no chip ROM, ADPCM, FM3 special mode or hardware timer/status interface. This is a sound model, not silicon parity.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "schema",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "output_rate",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "frames",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "writes",
+          "rust_type": "Vec<RegisterWrite>"
+        }
+      ],
+      "name": "RegisterScore",
+      "used_by": "Audio.prepareSourceAsync .opna assets"
+    },
+    {
+      "doc": "A register write immediately before the given output sample. Input order resolves simultaneous writes. This clock is independent of render frames.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "frame",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "port",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "register",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "value",
+          "rust_type": "u8"
+        }
+      ],
+      "name": "RegisterWrite",
+      "used_by": "RegisterScore.writes (output sample clock)"
+    },
     {
       "doc": "One Unicode scalar at an unwrapped floating-point baseline. Synthetic bold does not change this simple layout's advance; shaping has a separate API.",
       "fields": [
@@ -14249,7 +14693,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "be619476a3bcddb4",
+  "fingerprint": "4fa7e1d7f355d61a",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

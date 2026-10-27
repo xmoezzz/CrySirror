@@ -12,3 +12,5 @@ pub mod vfs;
 pub mod vfx;
 pub use model::Project;
 pub use runtime::{AdapterRegistry, Runtime};
+
+mod image_processing;

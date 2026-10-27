@@ -10,6 +10,7 @@ pub mod buffered;
 pub mod channels;
 mod channel_async;
 pub mod decoder;
+pub mod synth;
 pub mod doppler;
 pub mod motion;
 pub mod legacy_pcm;

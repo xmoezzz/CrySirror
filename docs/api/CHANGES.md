@@ -4,6 +4,24 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `4fa7e1d7f355d61a` (2026-10-27): shared synth and asynchronous image resources
+
+- Bitmap adds beginEffect, beginTransition, beginRowCopy, effectStatus and
+  cancelEffect; JS exposes applyEffectAsync, transitionAsync and rowCopyAsync.
+  Jobs use shared CPU workers and publish only to the original client/epoch/
+  destination revision. Sources and masks are immutable snapshots.
+- ImageEffect, vector path/stroke/commands, ImageTransition and SineRowCopy
+  specifications document gamma/gray/invert/blur/noise/flips, vector raster,
+  perspective and transitions. These CPU resource operations are reusable without
+  a VM. Native KiriKiri maps selected calls to the same service (ADR 0090).
+- RegisterScore/RegisterWrite define finite .opna assets; existing shared Audio
+  source APIs also accept bounded PMD-M .pmd/.mmm inputs. ADR 0089 records exact
+  synthesis/driver limits; no UK2 VM or ROM is imported.
+- Core adds device-free ImageInput/ImageResource/ImageProcess contracts,
+  ImageMetadata processing/fingerprint hooks and RegionMap.flip. Default providers
+  reject unsupported services. No device pointers or executable plugin payloads
+  are added to portable state.
+
 ## `be619476a3bcddb4` (2026-10-27): shared KAG3 prerequisites
 
 - Text.positionSimple and the device-free TextMeasurement::position_simple return

@@ -407,3 +407,24 @@ copy operation. Unloaded VideoOverlay declarations and identity gamma admission
 are explicitly not completed media/effect integrations. See the source review
 pins/hashes in [kag3-source-audit.json](kag3-source-audit.json) and separate actual
 compilation/behavior records in STATUS.md.
+
+## Shared plugin graphics and UK2-derived audio capabilities (2026-10-27)
+
+ADR 0089 extracts the pinned UK2 pure OPNA/PMD DSP into shared crysirror-audio.
+Any adapter may prepare .opna/.pmd/.mmm sources through existing HostServices;
+no UK2 VM integration is added by this phase. No Kira/device/ROM is imported.
+
+ADR 0090 adds shared image processing and native KiriKiri adjustGamma,
+doGrayScale and flips on loaded/processed/uniform images. LR/UD flips also
+reflect Core province regions. Operations execute on shared workers; original
+TJS resumes only after individual image-resource publication. Nested callbacks
+without a resumable boundary, unsupported blend profiles and composed Canvas/
+text readback fail. Legacy script reads and image discovery remain synchronous.
+
+Plugins.link('layerExRaster.dll') now installs the copyRaster engine facade,
+using shared sine-row copying with full clip boxes and immutable source images.
+Uncovered destination pixels are retained. Partial clipping and overlapping
+self-copy remain unsupported. The modern vector/perspective/transition APIs are
+available independently; this phase does not advertise arbitrary third-party
+DLLs, complete layerExDraw/GDI or KaichoTrans compatibility. Native errors and
+remaining save/media/clip limitations from ADR 0088 still apply.

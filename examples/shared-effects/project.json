@@ -1,0 +1,9 @@
+{
+  "schema": 2,
+  "name": "CrySirror shared image effects",
+  "content_revision": "shared-effects-1",
+  "canvas": [780, 520],
+  "background": [12, 16, 26, 255],
+  "assets": "assets",
+  "clients": [{"name": "game", "adapter": "crysirror-script-v1", "game": "shared-effects"}]
+}

@@ -51,6 +51,24 @@ impl RegionMap {
         self.fills.push(([left, top, right, bottom], region));
         Ok(())
     }
+    /// Reflect all region rectangles, preserving last-fill precedence.
+    pub fn flip(&mut self, client: u32, horizontal: bool, vertical: bool) -> Result<()> {
+        if client != self.client {
+            return Err(Error::Invalid("foreign region map"));
+        }
+        for (rect, _) in &mut self.fills {
+            let [l, t, r, b] = *rect;
+            if horizontal {
+                rect[0] = self.size[0] as i64 - r;
+                rect[2] = self.size[0] as i64 - l;
+            }
+            if vertical {
+                rect[1] = self.size[1] as i64 - b;
+                rect[3] = self.size[1] as i64 - t;
+            }
+        }
+        Ok(())
+    }
     pub fn get(&self, client: u32, point: [i64; 2]) -> Result<u32> {
         if client != self.client {
             return Err(Error::Invalid("foreign region map"));

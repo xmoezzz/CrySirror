@@ -549,6 +549,16 @@ pub trait ClientStorage: Send + Sync {
 /// synchronously (for example a layer's image size right after a load) hold
 /// it between steps instead of borrowing the host or decoding privately.
 pub trait ImageMetadata: Send + Sync {
+    /// Encoded content identity observed by the metadata decode. Native retained
+    /// image processing rejects a changed file rather than transforming new bytes.
+    fn fingerprint(&self,_asset:&str)->Result<[u8;32]>{Err(crate::Error::Unsupported("image content identity"))}
+
+    /// Shared image operations encoded as a bounded ImageEffect array. A
+    /// provider reserves worker/memory capacity before accepting the input.
+    fn begin_process(&self, _source:crate::image_processing::ImageInput, _effects:Arc<[u8]>)->Result<crate::image_processing::ImageJob>{
+        Err(crate::Error::Unsupported("worker image processing"))
+    }
+
     fn size(&self, asset: &str) -> Result<[u32; 2]>;
     /// True only when every decoded texel has alpha 255.
     fn opaque(&self, _asset: &str) -> Result<bool> {

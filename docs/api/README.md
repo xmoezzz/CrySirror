@@ -520,3 +520,21 @@ including masks, times, sequences and epochs; native binary snapshots use u64.
 Echo receipts directly and use BigInt for full masks in JS. This does not change
 unrelated numeric APIs. The schema and ingress/acknowledgement boundaries are in
 ADR 0087. Current-frame action bindings are independent of journal consumption.
+
+## Worker image effects and synthesized audio
+
+Use `await bitmap.applyEffectAsync(slot, effects)` for a validated `ImageEffect[]`
+chain, `transitionAsync(slot, other, options, mask?)` for snapshot transitions, or
+`rowCopyAsync(slot, source, options)` for preserved-edge sine row copies. The
+underlying begin/effectStatus/cancel methods expose the same owner-polled jobs
+without JS. Destination edits invalidate an older pending result. See
+`examples/shared-effects/showcase.ts`; its checker, mask and vector geometry are
+self-authored through public APIs and need no game assets. These are CPU image
+products usable by ordinary retained layers, not GPU shader-pass descriptors.
+
+Existing `Audio.prepareSource`/`playSource` also accept schema-1 `.opna` register
+scores and bounded PMD-M `.pmd`/`.mmm` streams. `RegisterScore`/`RegisterWrite`
+describe exact output-frame events. `cargo run --release -p crysirror-audio
+--example chiptune -- /tmp/crysirror-chiptune` generates its own register asset and
+renders two seconds through the shared worker mixer. No ROM/sample bank is
+included. Unsupported chip/driver modes and bounded seek rules are in ADR 0089.
