@@ -4,7 +4,61 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `94359a5460ac7b99` (2026-10-28): canvas fade, copy provenance, glyph blur
+
+- Canvas adds `fade` {id, rect, opacity}: the region's alpha is scaled by
+  opacity/255, colour kept; the region is frozen as one isolated snapshot.
+- Canvas copies record provenance: copying a saved region back to its unchanged
+  origin composes (region over the saved surface's earlier content) instead of
+  nesting clones. Observable output is unchanged; node growth becomes linear.
+- Paint::GlyphRun adds optional `blur` {radius 0..=64, level}: glyph coverage
+  blurred with the KiriKiri circular kernel and scaled by level/256
+  (crysirror_text::glyph_blur, ported from krkrz fd5c4baa).
+- Rust-only: crysirror_runtime::structured_text::parse_toml. No breaking changes.
+
+## `224cb89811441323` (2026-10-28): keep-alpha fills, audio loop end, encoded uploads
+
+- Canvas `fill` adds `keep_alpha` (krkr `holdAlpha`): the region's existing
+  content is recoloured and its alpha kept. Not combinable with `replace`.
+- AudioParameters adds `loop_end` (default None = loop at the source end), used
+  for `.sli` loop links; the shared mixer already honoured LoopPoints.end.
+- Rust-only additions: `HostServices::upload_encoded_image` decodes
+  provider-owned encoded bytes through the engine decoder registry and
+  registers them like `upload_rgba`; crysirror-audio decodes Ogg Opus
+  (pure-Rust `opus-decoder`, mapping family 0) and parses `.sli` loop
+  information (`crysirror_audio::sli`).
+- This regeneration also records the ImageComposite math variants and the
+  Canvas/Layers declarations of the previous entry, which had not been
+  regenerated. No breaking changes.
+
+## `08381e9cfceae9bf` (2026-10-28): isolated subtrees, frozen snapshots and drawing profiles
+
+- Layers adds beginCrossfade, crossfadeStatus and endCrossfade, backed by
+  engine-owned clock/state and isolated subtree rendering (ADR 0094).
+- Canvas adds copy_subtree; Paint::Snapshot stores an original-size frozen static
+  subtree and renders as one cached texture, so whole-snapshot opacity and scaling
+  preserve overlap. Solid/immutable engine PNG dependencies are admitted; dynamic
+  content, ordinary mutable files, uncaptured fonts and nesting fail explicitly.
+- The reference now includes the existing retained Canvas resize/fill/affine
+  copy and draw-clip declarations authored during game-kr bring-up. Canvas
+  commands remain available through Canvases.apply.
+- Rust-only additions: scoped storage metadata and bounded text-file encoding;
+  shared Motion workers and validated dynamic PuppetFrames; native Rust MP4
+  video streams (AVC/HEVC/AV1) through existing Media workers. MP4 audio remains
+  unsupported. These are reusable engine capabilities, not hosted VM renderers.
+- Full-engine dependency baseline becomes Rust 1.95; only local Rust 1.98.1 has
+  been exercised. Source pins/codec limits are recorded in crysirror-video.
+
+
 ## `4fa7e1d7f355d61a` (2026-10-27): shared synth and asynchronous image resources
+
+Rust/native extension on 2026-10-28 (reflected registry signatures unchanged):
+Core adds optional read streams, container-origin queries and provider directory
+listing; Archive adds authenticated requested-name resolution. Worker publication
+preserves that lookup. Shared HXV4 resources, document values and vector geometry
+are independently usable; native JSON/solid LayerExDraw and directory/known-archive
+URI mappings are bounded facades. ADR 0091–0093 record limits. No linkZ/bootstrap,
+full DLL catalog or whole-game completion is claimed.
 
 - Bitmap adds beginEffect, beginTransition, beginRowCopy, effectStatus and
   cancelEffect; JS exposes applyEffectAsync, transitionAsync and rowCopyAsync.

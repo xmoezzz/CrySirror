@@ -759,6 +759,8 @@ impl<'a> Lexer<'a> {
                     closed = true;
                     break;
                 }
+                // CrySirror patch: a regexp literal never spans a line break.
+                '\n' | '\r' => break,
                 _ => {}
             }
         }

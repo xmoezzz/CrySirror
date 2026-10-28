@@ -49,6 +49,10 @@ pub struct MenuItemSpec {
     /// Render a noninteractive separator row.
     #[serde(default)]
     pub separator: bool,
+    /// Accelerator text shown beside the label (e.g. `Ctrl+F12`). Displayed
+    /// only: keyboard activation is not yet bound by the menu service.
+    #[serde(default)]
+    pub shortcut: String,
     /// Nested menu items, at most sixteen levels.
     #[serde(default)]
     pub children: Vec<MenuItemSpec>,

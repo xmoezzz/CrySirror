@@ -27,6 +27,7 @@ pub struct MenuState {
     visible: bool,
     radio: bool,
     group: u32,
+    shortcut: String,
 }
 fn state(rt: &Rt, h: ObjectHandle) -> Result<&MenuState> {
     rt.host()
@@ -63,6 +64,7 @@ fn make(rt: &mut Rt, h: ObjectHandle, window: usize, caption: String) -> Result<
             visible: true,
             radio: false,
             group: 0,
+            shortcut: String::new(),
         },
     );
     rt.set_object_member(h,"owner",Variant::Object(ObjectHandle(window)));
@@ -188,6 +190,7 @@ fn item(host: &KrkrHost, h: usize, depth: u8) -> Result<MenuItemSpec> {
         radio: m.radio,
         group: m.group,
         separator: m.caption == "-",
+        shortcut: m.shortcut.clone(),
         children: m
             .children
             .iter()
@@ -498,16 +501,18 @@ pub fn install(rt: &mut Rt) {
             ),
             (
                 "shortcut",
-                |_, _| Ok(Variant::String(String::new())),
-                |_, _, value| {
-                    if value.to_tjs_string()?.is_empty() {
-                        Ok(())
-                    } else {
-                        Err(unsupported(
-                            "MenuItem.shortcut",
-                            "native accelerator action mapping",
-                        ))
+                |rt, this| {
+                    let h = this_of(rt, this, "MenuItem.shortcut")?;
+                    Ok(Variant::String(state(rt, h)?.shortcut.clone()))
+                },
+                |rt, this, value| {
+                    let h = this_of(rt, this, "MenuItem.shortcut")?;
+                    let text = value.to_tjs_string()?;
+                    if text.len() > 64 {
+                        return Err(TjsError::runtime("MenuItem.shortcut too long"));
                     }
+                    state_mut(rt, h)?.shortcut = text;
+                    Ok(())
                 },
             ),
         ],

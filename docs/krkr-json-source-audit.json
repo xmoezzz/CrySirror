@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-28",
+  "repository": "https://github.com/wamsoft/json",
+  "commit": "331577f704d1d64c648646f2a4fdfd4b816f9387",
+  "files": [
+    {
+      "path": "Main.cpp",
+      "bytes": 25495,
+      "sha256": "41513db323496b3fbdd4032002d83b21d2646ce34ee480d029dd67274d41abf6"
+    },
+    {
+      "path": "Writer.hpp",
+      "bytes": 3956,
+      "sha256": "62030d2c491534f67ebfcb1b4e457ead4018e6136d538e67cd4ab95a790a9d5a"
+    },
+    {
+      "path": "readme.txt",
+      "bytes": 294,
+      "sha256": "7bacd9a986859a85d13f876a068acfb8b0c0b4ce791fa954140174f3c0997ac8"
+    },
+    {
+      "path": "manual.tjs",
+      "bytes": 1343,
+      "sha256": "6ac57447b1f763c5fadb2cf60dd7cb6f34a7a60cf884a24231d5ba814ef8ad0e"
+    }
+  ],
+  "new_upstream_code_copied": false,
+  "scope": "Complete Main.cpp and Writer.hpp, readme/manual parameter/reference review; new Rust implementation, no C++/Kirakira parser import."
+}

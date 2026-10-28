@@ -94,13 +94,15 @@ pub(crate) fn begin(
     }
     let effects: Vec<ImageEffect> =
         serde_json::from_slice(&effects).map_err(|e| Error::Io(e.to_string()))?;
-    if effects.is_empty() || effects.len() > 16 {
+    if (effects.is_empty() && !matches!(&input, ImageInput::Composite { .. })) || effects.len() > 16 {
         return Err(Error::Limit("image effect chain length"));
     }
     for effect in &effects {
         effect.validate().map_err(|e| Error::Io(e.to_string()))?;
     }
-    let size = input_size(owner, &input)?;
+    let mut graph_nodes = 0;
+    let mut graph_bytes = 0;
+    let size = input_size(owner, &input, 0, &mut graph_nodes, &mut graph_bytes)?;
     let pair = matches!(
         &input,
         ImageInput::Transition { .. } | ImageInput::Raster { .. }
@@ -126,15 +128,12 @@ pub(crate) fn begin(
     }
     let bytes =
         crysirror_image::rgba_len(size[0], size[1]).map_err(|e| Error::Io(e.to_string()))?;
-    if u64::from(size[0]) * u64::from(size[1]) > crysirror_image::effects::MAX_EFFECT_PIXELS {
-        return Err(Error::Limit("image effect pixel budget"));
-    }
     let output = Charge::new(memory.clone(), bytes)?;
     // Gaussian's two f32 planes, two RGBA products and a bounded encoded asset.
     let scratch = Charge::new(
         memory,
-        bytes * 16
-            + if matches!(input, ImageInput::Asset { .. } | ImageInput::Raster { .. }) {
+        bytes * 16 + graph_bytes
+            + if matches!(input, ImageInput::Asset { .. } | ImageInput::Raster { .. } | ImageInput::Composite { .. }) {
                 128 * 1024 * 1024
             } else {
                 0
@@ -207,8 +206,28 @@ pub(crate) fn begin(
     }))
 }
 
-fn input_size(owner: ClientId, input: &ImageInput) -> Result<[u32; 2]> {
+fn input_size(owner: ClientId, input: &ImageInput, depth: usize, nodes: &mut usize, bytes: &mut usize) -> Result<[u32; 2]> {
+    *nodes += 1;
+    if depth > 32 || *nodes > 256 { return Err(Error::Limit("image composition graph")); }
+
     let size = match input {
+        ImageInput::Composite { base, layers } => {
+            let size = input_size(owner, base, depth + 1, nodes, bytes)?;
+            for layer in layers {
+                if layer.source[2] < 0 || layer.source[3] < 0
+                    || layer.source.iter().chain(&layer.destination).any(|v| v.unsigned_abs() > 1_000_000) {
+                    return Err(Error::Invalid("image composite coordinates"));
+                }
+                if matches!(layer.input.as_ref(), ImageInput::Raster { .. } | ImageInput::Transition { .. }) {
+                    return Err(Error::Invalid("composite pair-effect input"));
+                }
+                input_size(owner, &layer.input, depth + 1, nodes, bytes)?;
+            }
+            if matches!(base.as_ref(), ImageInput::Raster { .. } | ImageInput::Transition { .. }) {
+                return Err(Error::Invalid("composite pair-effect base"));
+            }
+            size
+        }
         ImageInput::Asset { path, size, .. } => {
             crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Asset, path)?;
             *size
@@ -245,12 +264,13 @@ fn input_size(owner: ClientId, input: &ImageInput) -> Result<[u32; 2]> {
             {
                 return Err(Error::Invalid("nested image input"));
             }
-            let size = input_size(owner, destination)?;
-            input_size(owner, source)?;
+            let size = input_size(owner, destination, depth + 1, nodes, bytes)?;
+            input_size(owner, source, depth + 1, nodes, bytes)?;
             size
         }
     };
-    crysirror_image::rgba_len(size[0], size[1]).map_err(|e| Error::Io(e.to_string()))?;
+    *bytes = bytes.checked_add(crysirror_image::rgba_len(size[0], size[1]).map_err(|e| Error::Io(e.to_string()))?)
+        .filter(|n| *n <= 128 * 1024 * 1024).ok_or(Error::Limit("image composition byte budget"))?;
     if u64::from(size[0]) * u64::from(size[1]) > crysirror_image::effects::MAX_EFFECT_PIXELS {
         return Err(Error::Limit("image effect pixel budget"));
     }
@@ -264,6 +284,32 @@ fn load(
 ) -> anyhow::Result<ImageSurface> {
     cancel.check()?;
     match input {
+        ImageInput::Composite { base, layers } => {
+            use crysirror_image::bitmap::{BitmapRect, BlitOptions, PixelMath};
+            let mut image = load(base, storage, decoders, cancel)?;
+            for layer in layers {
+                cancel.check()?;
+                let source = load(&layer.input, storage, decoders, cancel)?;
+                let mode = match layer.math {
+                    ImageCompositeMath::Copy => PixelMath::Copy,
+                    ImageCompositeMath::OpaqueScalar256 => PixelMath::OpaqueScalar256,
+                    ImageCompositeMath::MaskScalar256 => PixelMath::MaskScalar256,
+                    ImageCompositeMath::OpaqueOnAlphaScalar256 => PixelMath::OpaqueOnAlphaScalar256,
+                    ImageCompositeMath::AlphaOnAlphaScalar256 => PixelMath::AlphaOnAlphaScalar256,
+                };
+                // A bounded row is the cancellation granularity; no worker owns
+                // native VM state and publication occurs only after all rows.
+                for row in 0..layer.source[3] {
+                    if row % 32 == 0 { cancel.check()?; }
+                    image.blit(&source, BlitOptions {
+                        source_rect: BitmapRect::new(layer.source[0], layer.source[1] + row, layer.source[2] as u32, 1),
+                        destination: [layer.destination[0], layer.destination[1] + row],
+                        opacity: layer.opacity, mode, color_key: None,
+                    })?;
+                }
+            }
+            Ok(image)
+        }
         ImageInput::Solid { size, color } => ImageSurface::filled(size[0], size[1], *color),
         ImageInput::Resource(r) => {
             let size = r.size();

@@ -59,7 +59,7 @@ The default dependencies pin `wgpu = 29.0.3` and `winit = 0.30.12`. This is a
 chosen API baseline, not a claim that these are the latest versions or that
 upstream engines already compile against it. Cargo.lock now records a real,
 successfully built dependency resolution. Resolved dependencies require Rust
-1.89; the workspace declares that minimum, but only 1.98.1 was tested here.
+1.95 (required by the native Rust MP4 codecs); the workspace declares that minimum, but only 1.98.1 was tested here.
 A full dependency license audit is still pending.
 
 ## What is in the implementation

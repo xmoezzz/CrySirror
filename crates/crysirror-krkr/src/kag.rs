@@ -16,6 +16,8 @@ use krkr_tjs2::{
 #[derive(Clone)]
 pub struct ParserState {
     pub boundary: bool,
+    /// KAGParserEx format, fixed at construction (existing parsers keep theirs).
+    pub extended: bool,
     pub parser: KagParser,
     pub revision: u64,
 }
@@ -25,6 +27,7 @@ impl Default for ParserState {
             parser: KagParser::new(),
             revision: 0,
             boundary: true,
+            extended: false,
         }
     }
 }
@@ -54,8 +57,21 @@ fn dict(rt: &mut Rt, attrs: &[Attribute]) -> Result<ObjectHandle> {
     }
     Ok(h)
 }
-fn tag(rt: &mut Rt, t: &Tag) -> Result<Variant> {
+fn tag(rt: &mut Rt, t: &Tag, extended: bool) -> Result<Variant> {
     let h = dict(rt, &t.attributes)?;
+    if extended {
+        // KAGParserEx: attribute names in written order (first occurrence).
+        let mut names: Vec<Variant> = Vec::new();
+        for a in &t.attributes {
+            if let Attribute::Named { name, .. } = a {
+                if !names.iter().any(|n| matches!(n, Variant::String(s) if s == name)) {
+                    names.push(Variant::String(name.clone()));
+                }
+            }
+        }
+        let list = rt.alloc_array_object(names);
+        rt.set_object_member(h, "taglist", Variant::Object(list));
+    }
     rt.set_object_member(h, "tagname", Variant::String(t.tagname.clone()));
     Ok(Variant::Object(h))
 }
@@ -106,12 +122,16 @@ fn operate(
     // over the outer copy; native getter/store calls do not mark a mutation.
     let nested = state(host.rt, h)?.revision != rev;
     if !nested {
-        let boundary = state(host.rt, h)?.boundary;
+        let (boundary, extended) = {
+            let s = state(host.rt, h)?;
+            (s.boundary, s.extended)
+        };
         publish_macros(host.rt, h, &p)?;
         host.rt.host_mut().parsers.insert(
             h.0,
             ParserState {
                 boundary,
+                extended,
                 parser: p,
                 revision: rev
                     .checked_add(1)
@@ -149,6 +169,37 @@ fn get(rt: &mut Rt, t: Option<ObjectHandle>, field: &str) -> Result<Variant> {
         _ => return Err(error("unknown KAG parser property")),
     })
 }
+/// KAGParserEx (wamsoft 61d5f1e): extended-format parsers plus `taglist`.
+/// The shared parser already keeps attributes written before `*`, which is the
+/// Ex rule. Multi-line tags and parameter macros are not mapped and fail.
+pub fn install_ex(rt: &mut Rt) {
+    if !matches!(rt.global_member("KAGParser"), Variant::Object(_)) {
+        install(rt);
+    }
+    rt.host_mut().kag_ex = true;
+    let c = rt.global_member("KAGParser").object_handle().expect("KAGParser");
+    rt.register_object_native_property(
+        c,
+        "multiLineTagEnabled",
+        |_, _| Ok(Variant::Integer(0)),
+        |_, _, v| {
+            if v.is_truthy() {
+                return Err(unsupported(
+                    "KAGParser.multiLineTagEnabled",
+                    "KAGParserEx multi-line tag parsing",
+                ));
+            }
+            Ok(())
+        },
+    );
+    rt.register_object_native_property(
+        c,
+        "paramMacros",
+        |_, _| Err(unsupported("KAGParser.paramMacros", "KAGParserEx parameter macros")),
+        |_, _, _| Err(unsupported("KAGParser.paramMacros", "KAGParserEx parameter macros")),
+    );
+}
+
 pub fn install(rt: &mut Rt) {
     let c = native_class(rt, "KAGParser", |rt, t, _| {
         let h = this_of(rt, t, "KAGParser")?;
@@ -158,7 +209,8 @@ pub fn install(rt: &mut Rt) {
         if !rt.host().parsers.contains_key(&h.0) {
             let m = rt.alloc_dictionary_object();
             rt.set_object_member(h, "__kag_macros", Variant::Object(m));
-            rt.host_mut().parsers.insert(h.0, ParserState::default());
+            let extended = rt.host().kag_ex;
+            rt.host_mut().parsers.insert(h.0, ParserState { extended, ..ParserState::default() });
         }
         Ok(Variant::Void)
     });
@@ -181,12 +233,10 @@ pub fn install(rt: &mut Rt) {
             ("getNextTag", |rt, t, _| {
                 operate(rt, t, |p, h| match p.next_tag_with(h)? {
                     Some(t) => {
-                        h.rt.host_mut()
-                            .parsers
-                            .get_mut(&h.owner.0)
-                            .unwrap()
-                            .boundary = false;
-                        tag(h.rt, &t).map_err(|e| h.wrap(e))
+                        let state = h.rt.host_mut().parsers.get_mut(&h.owner.0).unwrap();
+                        state.boundary = false;
+                        let extended = state.extended;
+                        tag(h.rt, &t, extended).map_err(|e| h.wrap(e))
                     }
                     None => Ok(Variant::Void),
                 })
@@ -265,13 +315,8 @@ pub fn install(rt: &mut Rt) {
             }),
             ("store", |rt, t, _| {
                 let h = this_of(rt, t, "KAGParser.store")?;
-                let s = state(rt, h)?;
-                if !s.boundary {
-                    return Err(unsupported(
-                        "KAGParser.store",
-                        "plain scenario/label save boundary",
-                    ));
-                }
+                // The original Store records storage/label (restore re-runs
+                // GoToLabel), so a store inside a label is the native contract.
                 let p = synced_parser(rt, h)?;
                 crate::kag_save::capture(rt, &p)
             }),
@@ -376,7 +421,8 @@ impl Bridge<'_> {
         result.map_err(|e| self.wrap(e))
     }
     fn process(&mut self, name: &str, t: &Tag) -> krkr_kag::Result<bool> {
-        let value = tag(self.rt, t).map_err(|e| self.wrap(e))?;
+        let extended = state(self.rt, self.owner).map(|s| s.extended).unwrap_or(false);
+        let value = tag(self.rt, t, extended).map_err(|e| self.wrap(e))?;
         Ok(self.call(name, vec![value])?.is_none_or(|v| v.is_truthy()))
     }
 }

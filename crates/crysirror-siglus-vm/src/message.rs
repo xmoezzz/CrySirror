@@ -397,6 +397,7 @@ pub fn project(ctx: &CommandContext, host: &dyn HostServices) -> Result<Vec<Laye
                 bold: false,
                 glyphs,
                 reveal: if name { None } else { ctx.ui.reveal.clone() },
+                blur: None,
             },
             transform: SpriteTransform::default(),
             order: [1, if name { 6 } else { 5 }],

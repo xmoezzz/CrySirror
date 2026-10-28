@@ -56,3 +56,10 @@ BGI shared-service integration also makes Kira CPAL explicitly opt-in through
 longer compile the default device backend just to access CPU helpers. Borrowed
 MPEG PacketRange/packet_ranges helpers from the attributed ethornell source are
 added to the shared decoder demux API; BGI and Siglus use one decoder package.
+
+## Native MP4 dependency alignment (2026-10-28)
+
+`na_mpeg2_decoder/Cargo.toml` resolves `oxideav-core` at 0.1.42 instead of
+0.1.29 so the common `crysirror-video` MP4 AVC/HEVC/AV1 decoders share one
+core API generation. The MPEG/AC-3 source and `oxideav-ac3` 0.0.10 are unchanged.
+The pin is a dependency-resolution constraint, not a vendored decoder rewrite.

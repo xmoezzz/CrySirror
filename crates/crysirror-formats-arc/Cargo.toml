@@ -16,8 +16,15 @@ image.workspace = true
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 anyhow.workspace = true
 serde_json.workspace = true
+sha2 = "0.10.9"
 encoding_rs = "0.8"
 cridecoder = { version = "=0.3.7", default-features = false }
+
+argon2 = "=0.5.3"
+blake2 = "=0.10.6"
+sha3 = "=0.10.8"
+chacha20poly1305 = "=0.10.1"
+pelite = {version="=0.10.0", default-features=false, features=["std"]}
 
 [dev-dependencies]
 blowfish = "=0.9.1"

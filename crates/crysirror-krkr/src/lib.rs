@@ -28,3 +28,26 @@ pub mod storage;
 pub use adapter::{Config, KrkrFactory, KrkrVm, register};
 
 mod image_api;
+
+mod json_plugin;
+
+mod draw_plugin;
+
+mod protect_plugin;
+
+mod text_render_plugin;
+
+mod motion_plugin;
+
+mod csv_plugin;
+mod psbfile_plugin;
+
+mod kirakira;
+
+mod surfaces;
+
+mod storage_plugins;
+
+mod transitions;
+
+mod piled_copy;

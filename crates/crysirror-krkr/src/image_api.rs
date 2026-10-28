@@ -48,6 +48,14 @@ pub fn gamma(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Va
     )
 }
 pub fn begin(rt: &mut Rt, t: Option<ObjectHandle>, effect: Value) -> Result<Variant> {
+    begin_chain(rt, t, vec![effect])
+}
+/// Submit an ordered native effect list as one shared immutable worker product.
+pub(crate) fn begin_chain(
+    rt: &mut Rt,
+    t: Option<ObjectHandle>,
+    effects: Vec<Value>,
+) -> Result<Variant> {
     let h = this_of(rt, t, "Layer image processing")?;
     if !rt.host().can_suspend {
         return Err(unsupported(
@@ -58,7 +66,7 @@ pub fn begin(rt: &mut Rt, t: Option<ObjectHandle>, effect: Value) -> Result<Vari
     if rt.host().image_job.is_some() {
         return Err(TjsError::runtime("native image operation already pending"));
     }
-    let kind = rt.object_member(h, "type").to_integer()?;
+    let kind = rt.host().layer(h)?.kind;
     if !matches!(kind, 1 | 2) {
         return Err(unsupported(
             "native image processing blend type",
@@ -66,7 +74,7 @@ pub fn begin(rt: &mut Rt, t: Option<ObjectHandle>, effect: Value) -> Result<Vari
         ));
     }
     let source = input(rt, h)?;
-    queue(rt, h, source, effect)
+    queue_chain(rt, h, source, effects)
 }
 
 pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyhow::Result<bool> {
@@ -132,7 +140,7 @@ pub fn install_raster(rt: &mut Rt) {
         }
     }
 }
-fn input(rt: &Rt, h: ObjectHandle) -> Result<ImageInput> {
+pub(crate) fn input(rt: &Rt, h: ObjectHandle) -> Result<ImageInput> {
     let l = rt.host().layer(h)?;
     if let Some(input) = &l.image_source {
         return Ok(input.clone());
@@ -149,6 +157,14 @@ fn input(rt: &Rt, h: ObjectHandle) -> Result<ImageInput> {
     ))
 }
 fn queue(rt: &mut Rt, h: ObjectHandle, input: ImageInput, effect: Value) -> Result<Variant> {
+    queue_chain(rt, h, input, vec![effect])
+}
+pub(crate) fn queue_chain(
+    rt: &mut Rt,
+    h: ObjectHandle,
+    input: ImageInput,
+    effects: Vec<Value>,
+) -> Result<Variant> {
     if !rt.host().can_suspend {
         return Err(unsupported(
             "native image operation in this callback",
@@ -158,15 +174,14 @@ fn queue(rt: &mut Rt, h: ObjectHandle, input: ImageInput, effect: Value) -> Resu
     if rt.host().image_job.is_some() {
         return Err(TjsError::runtime("native image operation already pending"));
     }
-    let flip = if effect["kind"] == "flip" {
-        [
-            effect["horizontal"].as_bool().unwrap_or(false),
-            effect["vertical"].as_bool().unwrap_or(false),
-        ]
-    } else {
-        [false; 2]
-    };
-    let data = serde_json::to_vec(&vec![effect]).map_err(|e| TjsError::runtime(e.to_string()))?;
+    let flip = effects.iter().fold([false; 2], |mut flags, e| {
+        if e["kind"] == "flip" {
+            flags[0] ^= e["horizontal"].as_bool().unwrap_or(false);
+            flags[1] ^= e["vertical"].as_bool().unwrap_or(false);
+        }
+        flags
+    });
+    let data = serde_json::to_vec(&effects).map_err(|e| TjsError::runtime(e.to_string()))?;
     let job = rt
         .host()
         .images
@@ -177,4 +192,54 @@ fn queue(rt: &mut Rt, h: ObjectHandle, input: ImageInput, effect: Value) -> Resu
     rt.host_mut().image_job = Some((h.0, job, flip));
     rt.request_suspend();
     Ok(Variant::Void)
+}
+
+/// layerExImage (wamsoft 3aff625): six Layer methods onto shared ImageEffects.
+/// The adapter has no partial clip model, so effects cover the whole image as
+/// the native does with a full clip rectangle.
+pub fn install_ex_image(rt: &mut Rt) {
+    let Some(class) = rt.global_member("Layer").object_handle() else {
+        return;
+    };
+    methods(
+        rt,
+        class,
+        &[
+            ("light", |rt, t, a| {
+                let brightness = need_int(&a, 0, "Layer.light")? as i32;
+                let contrast = need_int(&a, 1, "Layer.light")? as i32;
+                begin(rt, t, json!({"kind":"brightness_contrast","brightness":brightness,"contrast":contrast}))
+            }),
+            ("colorize", |rt, t, a| {
+                // Native parameters are BYTE hue/sat; out-of-range values wrap.
+                let hue = need_int(&a, 0, "Layer.colorize")? as u8;
+                let saturation = need_int(&a, 1, "Layer.colorize")? as u8;
+                let blend = a.get(2).ok_or_else(|| TjsError::bad_param_count())?.to_real()?;
+                begin(rt, t, json!({"kind":"colorize","hue":hue,"saturation":saturation,"blend":blend}))
+            }),
+            ("modulate", |rt, t, a| {
+                let hue = need_int(&a, 0, "Layer.modulate")? as i32;
+                let saturation = need_int(&a, 1, "Layer.modulate")? as i32;
+                let luminance = need_int(&a, 2, "Layer.modulate")? as i32;
+                begin(rt, t, json!({"kind":"hsl_modulate","hue":hue,"saturation":saturation,"luminance":luminance}))
+            }),
+            ("noise", |rt, t, a| {
+                // Native: per channel (rand/RAND_MAX - 0.5) * level.
+                let level = need_int(&a, 0, "Layer.noise")?.clamp(0, 255);
+                let seed = (rt.host().api_calls as u32).wrapping_mul(2654435761) | 1;
+                begin(rt, t, json!({"kind":"noise","seed":seed,"amplitude":level / 2,"monochrome":false}))
+            }),
+            ("generateWhiteNoise", |rt, t, _| {
+                let seed = (rt.host().api_calls as u32).wrapping_mul(2246822519) | 1;
+                begin(rt, t, json!({"kind":"white_noise","seed":seed}))
+            }),
+            ("gaussianBlur", |rt, t, a| {
+                // CxImage gen_convolve_matrix: std_dev = |0.5 * radius| + 0.25.
+                // The shared kernel is a sampled Gaussian of that deviation.
+                let radius = a.first().ok_or_else(TjsError::bad_param_count)?.to_real()?;
+                let sigma = ((0.5 * radius).abs() + 0.25).min(16.0);
+                begin(rt, t, json!({"kind":"gaussian_blur","sigma":sigma}))
+            }),
+        ],
+    );
 }

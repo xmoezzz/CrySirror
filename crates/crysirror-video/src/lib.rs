@@ -5,6 +5,7 @@
 //! presentation times. The crate never opens a window, GPU or audio device;
 //! renderers upload frames as textures and audio is handed to the mixer.
 #![forbid(unsafe_code)]
+pub mod isobmff;
 pub mod mpeg;
 use anyhow::{bail, ensure, Context, Result};
 use std::io::Cursor;
@@ -19,6 +20,7 @@ pub enum Container {
     Ogg,
     Mpeg,
     Asf,
+    Mp4,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +51,9 @@ pub trait VideoStream: Send {
 /// Identify the container from its leading bytes; unknown data fails.
 pub fn sniff(bytes: &[u8]) -> Result<Container> {
     const ASF: [u8; 16] = [0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA, 0x00, 0x62, 0xCE, 0x6C];
+    if isobmff::is_mp4(bytes) {
+        return Ok(Container::Mp4);
+    }
     if bytes.starts_with(b"OggS") {
         return Ok(Container::Ogg);
     }
@@ -75,6 +80,7 @@ pub fn open(bytes: Vec<u8>) -> Result<Box<dyn VideoStream>> {
         Container::Ogg => Box::new(TheoraStream::ogg(bytes)?),
         Container::Mpeg => Box::new(MpegStream::new(bytes)?),
         Container::Asf => Box::new(AsfStream::new(bytes)?),
+        Container::Mp4 => Box::new(isobmff::Mp4Stream::new(Cursor::new(bytes))?),
     })
 }
 

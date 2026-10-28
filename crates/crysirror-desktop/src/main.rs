@@ -157,6 +157,14 @@ enum Command {
         input_track: Option<PathBuf>,
         #[arg(long)]
         data_dir: Option<PathBuf>,
+        /// JS/TS sources run by the engine App without a renderer (repeatable).
+        #[arg(long)]
+        script: Vec<PathBuf>,
+        #[arg(long, default_value = "game")]
+        script_client: String,
+        /// Optional font for CPU text measurement during native callbacks.
+        #[arg(long)]
+        font: Option<PathBuf>,
     },
     /// Inspect source data and actually registered adapter factories.
     Inspect { project: PathBuf },
@@ -232,6 +240,7 @@ fn scripted(
     frames: u32,
     step_ms: u64,
     input: impl Fn(u32) -> InputFrame,
+    prepare_render: bool,
 ) -> Result<Runtime> {
     let mut app = start_app(rt, scripts, client)?;
     for frame in 0..frames {
@@ -243,7 +252,9 @@ fn scripted(
     for line in &app.engine()?.log {
         log::info!("script: {line}");
     }
-    app.prepare_render_offline()?;
+    if prepare_render {
+        app.prepare_render_offline()?;
+    }
     app.into_runtime()
 }
 #[cfg(feature = "scripting")]
@@ -321,6 +332,7 @@ fn scripted(
     _: u32,
     _: u64,
     _: impl Fn(u32) -> InputFrame,
+    _: bool,
 ) -> Result<Runtime> {
     anyhow::bail!("--script requires the 'scripting' feature")
 }
@@ -440,7 +452,7 @@ fn run() -> Result<()> {
                     rt.tick(if frame == 0 { 0 } else { step_ms }, input(frame))?;
                 }
             } else {
-                rt = scripted(rt, &script, &script_client, frames, step_ms, input)?;
+                rt = scripted(rt, &script, &script_client, frames, step_ms, input, true)?;
             }
             let stats = match &movie_dir {
                 Some(dir) => app::movie_on(
@@ -512,15 +524,32 @@ fn run() -> Result<()> {
             press_at,
             input_track,
             data_dir,
+            script,
+            script_client,
+            font,
         } => {
             anyhow::ensure!(step_ms <= 86400000, "step exceeds one day");
             let dir = state_dir(&project, data_dir)?;
             let mut rt = load_runtime(&project, &dir)?;
+            // Preserve the plain trace path unless font/script support was
+            // requested. Native scripts can measure text on their first tick.
+            if font.is_some() || !script.is_empty() {
+                app::load_fonts(&mut rt, font.as_deref())?;
+            }
             let track = input_track::InputTrack::load(input_track.as_deref())?;
-            for frame in 0..frames {
+            let input = |frame: u32| {
                 let mut input = track.at(frame);
                 input.buttons_pressed |= u64::from(press_at.contains(&frame));
-                rt.tick(if frame == 0 { 0 } else { step_ms }, input)?;
+                input
+            };
+            if script.is_empty() {
+                for frame in 0..frames {
+                    rt.tick(if frame == 0 { 0 } else { step_ms }, input(frame))?;
+                }
+            } else {
+                // No rendering preparation, GPU instance/device, window, or
+                // audio output device is created by this CPU execution path.
+                rt = scripted(rt, &script, &script_client, frames, step_ms, input, false)?;
             }
             println!(
                 "{}",

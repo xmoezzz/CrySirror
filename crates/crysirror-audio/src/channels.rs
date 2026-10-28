@@ -179,6 +179,7 @@ pub(super) fn prepare(
     );
     let mut tail = encoded;
     let mut loop_start = p.loop_start;
+    let mut loop_end = p.loop_end;
     if let Some(intro) = intro {
         let intro = intro;
         ensure!(
@@ -197,6 +198,9 @@ pub(super) fn prepare(
         loop_start = intro_len
             .checked_add(loop_start)
             .context("loop offset overflow")?;
+        loop_end = loop_end
+            .map(|e| intro_len.checked_add(e).context("loop offset overflow"))
+            .transpose()?;
         tail = Box::new(Joined {
             intro,
             tail,
@@ -227,12 +231,17 @@ pub(super) fn prepare(
         }
         ensure!(start < end, "empty clamped audio range");
     }
-    let loop_points = if looping && loop_start > 0 {
-        Some(LoopPoints {
-            start: loop_start,
-            end: tail
+    let loop_points = if looping && (loop_start > 0 || loop_end.is_some()) {
+        let end = match loop_end {
+            Some(end) => end,
+            None => tail
                 .frame_count()
                 .context("nonzero loop point needs a known sample count")?,
+        };
+        ensure!(loop_start < end, "audio loop end precedes loop start");
+        Some(LoopPoints {
+            start: loop_start,
+            end,
         })
     } else {
         None

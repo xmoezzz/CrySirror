@@ -28,6 +28,7 @@ pub(super) fn key(assets: &Assets, paint: &Paint) -> Result<String> {
         size,
         bold,
         glyphs,
+        blur,
         ..
     } = paint
     else {
@@ -41,9 +42,13 @@ pub(super) fn key(assets: &Assets, paint: &Paint) -> Result<String> {
         baseline: phase(g.baseline),
     };
     Ok(format!(
-        "{}:bold={bold}",
-        assets.text.glyph_cell_key(font, request)?
+        "{}:bold={bold}{}",
+        assets.text.glyph_cell_key(font, request)?,
+        blur_key(blur)
     ))
+}
+fn blur_key(blur: &Option<crysirror_scene::layer::GlyphBlur>) -> String {
+    blur.map_or(String::new(), |b| format!(":blur={},{}", b.radius, b.level))
 }
 impl Renderer {
     pub(super) fn expand_glyph_runs(
@@ -60,6 +65,7 @@ impl Renderer {
                 size,
                 bold,
                 glyphs,
+                blur,
                 ..
             } = &p.paint
             {
@@ -72,9 +78,10 @@ impl Renderer {
                         baseline: phase(g.baseline),
                     };
                     needed.insert(format!(
-                        "{}:bold={}",
+                        "{}:bold={}{}",
                         assets.text.glyph_cell_key(font, request)?,
-                        g.bold.unwrap_or(*bold)
+                        g.bold.unwrap_or(*bold),
+                        blur_key(blur)
                     ));
                 }
             }
@@ -90,6 +97,7 @@ impl Renderer {
                 color,
                 bold,
                 glyphs,
+                blur,
                 ..
             } = &p.paint
             else {
@@ -126,6 +134,7 @@ impl Renderer {
                         bold: None,
                     }],
                     reveal: None,
+                    blur: *blur,
                 };
                 let key = key(assets, &paint)?;
                 if !self.glyph_cells.contains_key(&key) {
@@ -156,15 +165,32 @@ impl Renderer {
                             }
                         }
                     }
-                    self.glyph_cells.insert(
-                        key.clone(),
-                        GlyphBitmap {
-                            origin: cell.origin,
-                            width,
-                            height: cell.height,
-                            rgba,
-                        },
-                    );
+                    let mut bitmap = GlyphBitmap {
+                        origin: cell.origin,
+                        width,
+                        height: cell.height,
+                        rgba,
+                    };
+                    if let Some(b) = blur {
+                        let coverage: Vec<u8> = bitmap.rgba.chunks_exact(4).map(|p| p[3]).collect();
+                        let (out, w, h) = crysirror_text::glyph_blur::blur_coverage(
+                            &coverage,
+                            bitmap.width as usize,
+                            bitmap.height as usize,
+                            u32::from(b.radius),
+                            i32::from(b.level),
+                        );
+                        let r = i32::from(b.radius);
+                        bytes += (w * h * 4).saturating_sub(bitmap.rgba.len());
+                        ensure!(bytes <= 64 * 1024 * 1024, "positioned glyph resource budget exceeds 64 MiB");
+                        bitmap = GlyphBitmap {
+                            origin: [bitmap.origin[0] - r, bitmap.origin[1] - r],
+                            width: w as u32,
+                            height: h as u32,
+                            rgba: out.iter().flat_map(|&a| [255, 255, 255, a]).collect(),
+                        };
+                    }
+                    self.glyph_cells.insert(key.clone(), bitmap);
                 }
                 let cell = &self.glyph_cells[&key];
                 if cell.width == 0 || cell.height == 0 {

@@ -7,7 +7,7 @@ use crate::layer::{
 use anyhow::{Context, Result, ensure};
 use crysirror_core::state::ClientId;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 /// Per-client surface budget; native layer trees keep one surface per layer.
 pub const MAX_SURFACES: usize = 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -28,7 +28,22 @@ pub enum CanvasNode {
         clip: [f32; 4],
         opacity: u8,
         nodes: Vec<CanvasNode>,
+        /// Rotation (radians) and scale applied about the group origin,
+        /// before `offset`: dest = offset + R(rotate)·S(scale)·local.
+        #[serde(default, skip_serializing_if = "is_zero")]
+        rotate: f32,
+        #[serde(default = "unit_scale", skip_serializing_if = "is_unit")]
+        scale: [f32; 2],
     },
+}
+fn is_zero(v: &f32) -> bool {
+    *v == 0.
+}
+fn unit_scale() -> [f32; 2] {
+    [1., 1.]
+}
+fn is_unit(v: &[f32; 2]) -> bool {
+    *v == [1., 1.]
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -41,6 +56,13 @@ pub enum CanvasCommand {
     Clear {
         id: u32,
         color: [u8; 4],
+    },
+    /// Change the surface size, keeping its contents anchored at the
+    /// top-left; area outside previous content stays transparent.
+    Resize {
+        id: u32,
+        width: u32,
+        height: u32,
     },
     Draw {
         id: u32,
@@ -59,6 +81,59 @@ pub enum CanvasCommand {
         opacity: u8,
         #[serde(default)]
         replace: bool,
+        /// Destination-space draw clip (krkr `Layer.setClip`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<[f32; 4]>,
+    },
+    /// Fill `rect` with a solid colour; `replace` replaces the region's pixels
+    /// (transparent colours included) instead of drawing over them.
+    ///
+    /// `keep_alpha` sets only the colour of the region's existing content and
+    /// keeps its alpha (krkr `holdAlpha` fills); `color[3]` is then ignored.
+    Fill {
+        id: u32,
+        rect: [f32; 4],
+        color: [u8; 4],
+        #[serde(default)]
+        replace: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_alpha: bool,
+    },
+    /// Multiply the alpha of `rect`'s existing content by `opacity`/255, colour
+    /// unchanged (krkr negative-opacity colorRect). The region is frozen as one
+    /// isolated snapshot so overlapping draws fade as a single composite.
+    Fade {
+        id: u32,
+        rect: [f32; 4],
+        opacity: u8,
+    },
+    /// Copy `rect` of `source` through an affine map of source-surface
+    /// coordinates (`[a, b, c, d, tx, ty]`: x' = a·x + c·y + tx,
+    /// y' = b·x + d·y + ty) without skew. `replace` replaces the covered
+    /// destination region; it requires an axis-aligned result.
+    TransformCopy {
+        source: u32,
+        destination: u32,
+        rect: [f32; 4],
+        matrix: [f32; 6],
+        #[serde(default)]
+        replace: bool,
+        /// Destination-space draw clip (krkr `Layer.setClip`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<[f32; 4]>,
+    },
+    /// Freeze a visible, static, normal-alpha Layer subtree as one snapshot draw.
+    /// The renderer rasterizes it at its original size before later effects.
+    /// `rect` is source-root-local; `position` and `clip` are destination-space.
+    /// The region is replaced, including alpha. Root placement/visibility/opacity
+    /// and inheritance from outside the subtree do not enter the snapshot.
+    CopySubtree {
+        source: u32,
+        destination: u32,
+        rect: [f32; 4],
+        position: [f32; 2],
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clip: Option<[f32; 4]>,
     },
     Present {
         id: u32,
@@ -94,6 +169,29 @@ pub struct CanvasSystem {
     presentations: BTreeMap<u32, BTreeMap<u32, Presentation>>,
     #[serde(default)]
     serial: BTreeMap<u32, u32>,
+    /// Per (client, surface) content revision, bumped by every mutation.
+    #[serde(skip)]
+    revisions: BTreeMap<(u32, u32), u64>,
+    /// Surfaces whose whole content is one copy of another surface's region.
+    #[serde(skip)]
+    provenance: BTreeMap<(u32, u32), Provenance>,
+}
+/// The last node of a surface is `region` of `source` (at `revision`) copied
+/// with `offset` over its first `base` nodes. Copying it back unchanged puts
+/// those base nodes underneath the source region: (region over base).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Provenance {
+    source: u32,
+    revision: u64,
+    region: [f32; 4],
+    offset: [f32; 2],
+    base: usize,
+}
+fn contains(outer: [f32; 4], inner: [f32; 4]) -> bool {
+    inner[0] >= outer[0]
+        && inner[1] >= outer[1]
+        && inner[0] + inner[2] <= outer[0] + outer[2]
+        && inner[1] + inner[3] <= outer[1] + outer[3]
 }
 fn spec(id: u32, rect: [f32; 4], paint: Paint) -> LayerSpec {
     LayerSpec {
@@ -127,7 +225,9 @@ impl CanvasSystem {
                     "canvas dimensions"
                 );
                 let mut count = 0;
-                validate_nodes(&s.nodes, 0, &mut count)?;
+                validate_nodes(&s.nodes, 0, &mut count).map_err(|e| {
+                    anyhow::anyhow!("{e:#} (canvas {}x{}, {} top-level nodes)", s.width, s.height, s.nodes.len())
+                })?;
             }
         }
         Ok(())
@@ -148,7 +248,10 @@ impl CanvasSystem {
         let mut next = self.clone();
         let mut next_layers = layers.clone();
         let mut changed = false;
+        let mut dirty_sources = BTreeSet::new();
+        let mut dirty_presentations = BTreeSet::new();
         for command in commands {
+            let mut provenance = None;
             match command {
                 CanvasCommand::Create { id, width, height } => {
                     ensure!(
@@ -182,6 +285,15 @@ impl CanvasSystem {
                         ),
                     }];
                 }
+                CanvasCommand::Resize { id, width, height } => {
+                    ensure!(
+                        *width > 0 && *height > 0 && *width <= 8192 && *height <= 8192,
+                        "canvas dimensions"
+                    );
+                    let s = next.get_mut(c, *id)?;
+                    s.width = *width;
+                    s.height = *height;
+                }
                 CanvasCommand::Draw { id, layer } => {
                     next.get_mut(c, *id)?.nodes.push(CanvasNode::Draw {
                         layer: layer.clone(),
@@ -192,6 +304,64 @@ impl CanvasSystem {
                         layer: layer.clone(),
                     }]
                 }
+                CanvasCommand::Fill {
+                    id,
+                    rect,
+                    color,
+                    replace,
+                    keep_alpha,
+                } => {
+                    ensure!(
+                        rect.iter().all(|v| v.is_finite() && v.abs() <= 1_000_000.),
+                        "canvas fill bounds"
+                    );
+                    ensure!(!(*replace && *keep_alpha), "canvas fill replace with keep_alpha");
+                    let s = next.get_mut(c, *id)?;
+                    let full = [0., 0., s.width as f32, s.height as f32];
+                    let Some(r) = intersect(*rect, full) else {
+                        continue;
+                    };
+                    if *keep_alpha {
+                        let nodes = std::mem::take(&mut s.nodes);
+                        let mut inside = clip_to_band(&nodes, r, true);
+                        recolor(&mut inside, [color[0], color[1], color[2]])?;
+                        s.nodes = exclude_region(nodes, full, r);
+                        s.nodes.extend(inside);
+                    } else if *replace {
+                        s.nodes = exclude_region(std::mem::take(&mut s.nodes), full, r);
+                    }
+                    if color[3] != 0 && !*keep_alpha {
+                        s.nodes.push(CanvasNode::Draw {
+                            layer: spec(0, r, Paint::Solid { color: *color }),
+                        });
+                    }
+                }
+                CanvasCommand::Fade { id, rect, opacity } => {
+                    ensure!(
+                        rect.iter().all(|v| v.is_finite() && v.abs() <= 1_000_000.),
+                        "canvas fade bounds"
+                    );
+                    let s = next.get_mut(c, *id)?;
+                    let full = [0., 0., s.width as f32, s.height as f32];
+                    let Some(r) = intersect(*rect, full) else {
+                        continue;
+                    };
+                    let nodes = std::mem::take(&mut s.nodes);
+                    let inside = clip_to_band(&nodes, r, true);
+                    s.nodes = exclude_region(nodes, full, r);
+                    if *opacity != 0 && !inside.is_empty() {
+                        let size = [s.width, s.height];
+                        let mut layers = vec![spec(1, full, Paint::Solid { color: [0; 4] })];
+                        let mut next_id = 1;
+                        snapshot_specs(&inside, 1, &mut next_id, &mut layers)?;
+                        let paint = Paint::Snapshot { size, layers };
+                        paint.validate()?;
+                        let mut draw = spec(0, r, paint);
+                        draw.uv = Some([r[0] / full[2], r[1] / full[3], (r[0] + r[2]) / full[2], (r[1] + r[3]) / full[3]]);
+                        draw.opacity = *opacity;
+                        s.nodes.push(CanvasNode::Draw { layer: draw });
+                    }
+                }
                 CanvasCommand::Copy {
                     source,
                     destination,
@@ -199,6 +369,7 @@ impl CanvasSystem {
                     position,
                     opacity,
                     replace,
+                    clip: draw_clip,
                 } => {
                     ensure!(
                         rect.iter()
@@ -212,6 +383,7 @@ impl CanvasSystem {
                         *opacity == 255,
                         "isolated canvas copy opacity requires a render-target composition API"
                     );
+                    let source_id = *source;
                     let source = next
                         .surface(c, *source)
                         .context("copy source absent")?
@@ -229,7 +401,59 @@ impl CanvasSystem {
                     else {
                         continue;
                     };
+                    // A destination draw clip narrows the copied area.
+                    let Some(clip) = (match draw_clip {
+                        Some(dc) => intersect(clip, [dc[0] - offset[0], dc[1] - offset[1], dc[2], dc[3]]),
+                        None => Some(clip),
+                    }) else {
+                        continue;
+                    };
+                    // Copying a saved region back to where it came from, while
+                    // the destination is unchanged since the save, is a no-op
+                    // (krkr save/restore of a glyph cell around each redraw).
+                    if let Some(p) = next.provenance.get(&(c.0, source_id)) {
+                        let written = [clip[0] + offset[0], clip[1] + offset[1], clip[2], clip[3]];
+                        if *replace
+                            && p.source == *destination
+                            && next.revisions.get(&(c.0, *destination)).copied().unwrap_or(0) == p.revision
+                            && offset == [-p.offset[0], -p.offset[1]]
+                            && contains(p.region, written)
+                            && source.nodes.len() == p.base + 1
+                        {
+                            let under = clip_to_band(&source.nodes[..p.base], clip, false);
+                            if under.is_empty() {
+                                continue;
+                            }
+                            let dst = next.get_mut(c, *destination)?;
+                            dst.nodes.insert(0, CanvasNode::Group {
+                                offset,
+                                clip,
+                                opacity: 255,
+                                nodes: under,
+                                rotate: 0.,
+                                scale: [1., 1.],
+                            });
+                            // Falls through to the revision bump below.
+                            dirty_sources.insert(*destination);
+                            *next.revisions.entry((c.0, *destination)).or_default() += 1;
+                            next.provenance.remove(&(c.0, *destination));
+                            changed = true;
+                            continue;
+                        }
+                    }
+                    let source_revision = next.revisions.get(&(c.0, source_id)).copied().unwrap_or(0);
+                    let dst = next.get_mut(c, *destination)?;
+                    if *destination != source_id && !*replace {
+                        provenance = Some(Provenance {
+                            source: source_id,
+                            revision: source_revision,
+                            region: clip,
+                            offset,
+                            base: dst.nodes.len(),
+                        });
+                    }
                     if *replace
+                        && draw_clip.is_none()
                         && *rect == [0., 0., source.width as f32, source.height as f32]
                         && *position == [0., 0.]
                         && dst.width == source.width
@@ -238,22 +462,138 @@ impl CanvasSystem {
                         dst.nodes = source.nodes;
                     } else {
                         if *replace {
-                            ensure!(
-                                clip[0] + offset[0] == 0.
-                                    && clip[1] + offset[1] == 0.
-                                    && clip[2] == dst.width as f32
-                                    && clip[3] == dst.height as f32,
-                                "partial replace canvas copy requires a region render-target API"
-                            );
-                            dst.nodes.clear();
+                            // Region replace: keep the previous content only
+                            // outside the destination region (as up to four
+                            // clip bands), so the region shows the source alone,
+                            // transparent pixels included.
+                            let region = [clip[0] + offset[0], clip[1] + offset[1], clip[2], clip[3]];
+                            let full = [0., 0., dst.width as f32, dst.height as f32];
+                            dst.nodes = exclude_region(std::mem::take(&mut dst.nodes), full, region);
                         }
+                        // Only source content inside the copied rect is kept.
                         dst.nodes.push(CanvasNode::Group {
                             offset,
                             clip,
                             opacity: *opacity,
-                            nodes: source.nodes,
+                            nodes: clip_to_band(&source.nodes, clip, false),
+                            rotate: 0.,
+                            scale: [1., 1.],
                         });
                     }
+                }
+                CanvasCommand::TransformCopy {
+                    source,
+                    destination,
+                    rect,
+                    matrix,
+                    replace,
+                    clip: draw_clip,
+                } => {
+                    ensure!(
+                        rect.iter().chain(matrix).all(|v| v.is_finite() && v.abs() <= 1_000_000.)
+                            && rect[2] > 0.
+                            && rect[3] > 0.,
+                        "canvas transform copy bounds"
+                    );
+                    let [ma, mb, mc, md, tx, ty] = *matrix;
+                    let sx = (ma * ma + mb * mb).sqrt();
+                    ensure!(sx > 1e-6, "degenerate canvas transform");
+                    let (cos, sin) = (ma / sx, mb / sx);
+                    let sy = -mc * sin + md * cos;
+                    ensure!(
+                        sy.abs() > 1e-6 && (mc * cos + md * sin).abs() <= 1e-4 * (1. + sy.abs()),
+                        "skewed canvas transform copy is not supported"
+                    );
+                    let rotate = mb.atan2(ma);
+                    let source = next
+                        .surface(c, *source)
+                        .context("copy source absent")?
+                        .clone();
+                    let Some(local) =
+                        intersect(*rect, [0., 0., source.width as f32, source.height as f32])
+                    else {
+                        continue;
+                    };
+                    let dst = next.get_mut(c, *destination)?;
+                    let corners = [
+                        [local[0], local[1]],
+                        [local[0] + local[2], local[1]],
+                        [local[0], local[1] + local[3]],
+                        [local[0] + local[2], local[1] + local[3]],
+                    ]
+                    .map(|[x, y]| [ma * x + mc * y + tx, mb * x + md * y + ty]);
+                    let (x0, y0) = corners.iter().fold((f32::INFINITY, f32::INFINITY), |m, p| (m.0.min(p[0]), m.1.min(p[1])));
+                    let (x1, y1) = corners.iter().fold((f32::NEG_INFINITY, f32::NEG_INFINITY), |m, p| (m.0.max(p[0]), m.1.max(p[1])));
+                    let bounds = match draw_clip {
+                        Some(dc) => intersect([x0, y0, x1 - x0, y1 - y0], *dc),
+                        None => Some([x0, y0, x1 - x0, y1 - y0]),
+                    };
+                    let Some(bounds) = bounds else {
+                        continue;
+                    };
+                    if *replace {
+                        let quarter = (rotate / std::f32::consts::FRAC_PI_2).round() * std::f32::consts::FRAC_PI_2;
+                        ensure!(
+                            (rotate - quarter).abs() <= 1e-4,
+                            "replace through a non-axis-aligned canvas transform requires a region render-target API"
+                        );
+                        let full = [0., 0., dst.width as f32, dst.height as f32];
+                        dst.nodes = exclude_region(std::mem::take(&mut dst.nodes), full, bounds);
+                    }
+                    let group = CanvasNode::Group {
+                        offset: [tx, ty],
+                        clip: local,
+                        opacity: 255,
+                        nodes: clip_to_band(&source.nodes, local, false),
+                        rotate,
+                        scale: [sx, sy],
+                    };
+                    // The draw clip is destination-space: an outer plain group.
+                    dst.nodes.push(match draw_clip {
+                        Some(_) => CanvasNode::Group {
+                            offset: [0., 0.],
+                            clip: bounds,
+                            opacity: 255,
+                            nodes: vec![group],
+                            rotate: 0.,
+                            scale: [1., 1.],
+                        },
+                        None => group,
+                    });
+                }
+                CanvasCommand::CopySubtree { source, destination, rect, position, clip } => {
+                    ensure!(rect.iter().chain(position).all(|v| v.is_finite() && v.abs() <= 1_000_000.)
+                        && rect[2] > 0. && rect[3] > 0., "subtree copy bounds");
+                    if let Some(clip) = clip {
+                        ensure!(clip.iter().all(|v| v.is_finite() && v.abs() <= 1_000_000.)
+                            && clip[2] >= 0. && clip[3] >= 0., "subtree copy clip");
+                    }
+                    // Commands are ordered: snapshot any preceding Canvas edits
+                    // through their current engine-owned Layer presentations.
+                    next.rebuild(c, &mut next_layers, &dirty_sources, &dirty_presentations)?;
+                    dirty_sources.clear(); dirty_presentations.clear();
+                    let specs = next_layers.snapshot_subtree_specs(c, *source)?;
+                    let root = specs.iter().find(|s| s.id == *source).context("snapshot root missing")?;
+                    let dst = next.surface(c, *destination).context("snapshot destination absent")?;
+                    let offset = [position[0] - rect[0], position[1] - rect[1]];
+                    let bounds = intersect(*rect, [0., 0., root.rect[2], root.rect[3]])
+                        .and_then(|r| intersect(r, [-offset[0], -offset[1], dst.width as f32, dst.height as f32]))
+                        .and_then(|r| match clip {
+                            Some(dc) => intersect(r, [dc[0] - offset[0], dc[1] - offset[1], dc[2], dc[3]]),
+                            None => Some(r),
+                        });
+                    let Some(bounds) = bounds else { continue; };
+                    let size = [root.rect[2].ceil() as u32, root.rect[3].ceil() as u32];
+                    let paint = Paint::Snapshot { size, layers: specs };
+                    paint.validate()?;
+                    let dst = next.get_mut(c, *destination)?;
+                    let region = [bounds[0] + offset[0], bounds[1] + offset[1], bounds[2], bounds[3]];
+                    let full = [0., 0., dst.width as f32, dst.height as f32];
+                    dst.nodes = exclude_region(std::mem::take(&mut dst.nodes), full, region);
+                    let mut draw = spec(0, region, paint);
+                    draw.uv = Some([bounds[0] / size[0] as f32, bounds[1] / size[1] as f32,
+                        (bounds[0] + bounds[2]) / size[0] as f32, (bounds[1] + bounds[3]) / size[1] as f32]);
+                    dst.nodes.push(CanvasNode::Draw { layer: draw });
                 }
                 CanvasCommand::Present {
                     id,
@@ -304,14 +644,47 @@ impl CanvasSystem {
                             .generated
                             .into_iter()
                             .rev()
+                            .filter(|id| next_layers.get(c, *id).is_some())
                             .map(|id| LayerCommand::Remove { id })
                             .collect::<Vec<_>>();
-                        commands.push(LayerCommand::Remove { id: *layer });
+                        if next_layers.get(c, *layer).is_some() {
+                            commands.push(LayerCommand::Remove { id: *layer });
+                        }
                         next_layers.apply_batch(c, &commands)?;
+                        // Layer removal recursively removes nested presentations.
+                        // Drop their bindings, retaining the independent canvases.
+                        next.prune_missing_parents(c, &next_layers);
                     } else {
                         continue;
                     }
                 }
+            }
+            // `continue` above means a true no-op (for example a clipped-out
+            // copy), so it must not invalidate any presentation's derived IDs.
+            let touched = match command {
+                CanvasCommand::Create { id, .. }
+                | CanvasCommand::Clear { id, .. }
+                | CanvasCommand::Resize { id, .. }
+                | CanvasCommand::Draw { id, .. }
+                | CanvasCommand::Set { id, .. }
+                | CanvasCommand::Fill { id, .. }
+                | CanvasCommand::Fade { id, .. } => Some(*id),
+                CanvasCommand::Copy { destination, .. }
+                | CanvasCommand::TransformCopy { destination, .. }
+                | CanvasCommand::CopySubtree { destination, .. } => Some(*destination),
+                CanvasCommand::Present { layer, .. } => {
+                    dirty_presentations.insert(*layer);
+                    None
+                }
+                CanvasCommand::Hide { .. } => None,
+            };
+            if let Some(id) = touched {
+                dirty_sources.insert(id);
+                *next.revisions.entry((c.0, id)).or_default() += 1;
+                match provenance {
+                    Some(p) => next.provenance.insert((c.0, id), p),
+                    None => next.provenance.remove(&(c.0, id)),
+                };
             }
             changed = true;
         }
@@ -319,13 +692,29 @@ impl CanvasSystem {
             return Ok(());
         }
         next.validate()?;
-        next.rebuild(c, &mut next_layers)?;
+        next.rebuild(c, &mut next_layers, &dirty_sources, &dirty_presentations)?;
         *self = next;
         *layers = next_layers;
         Ok(())
     }
-    fn rebuild(&mut self, c: ClientId, layers: &mut LayerSystem) -> Result<()> {
-        let entries = self.presentations.get(&c.0).cloned().unwrap_or_default();
+    fn prune_missing_parents(&mut self, c: ClientId, layers: &LayerSystem) {
+        if let Some(owner) = self.presentations.get_mut(&c.0) {
+            owner.retain(|_, p| p.parent.is_none_or(|parent| layers.get(c, parent).is_some()));
+        }
+    }
+    fn rebuild(
+        &mut self,
+        c: ClientId,
+        layers: &mut LayerSystem,
+        dirty_sources: &BTreeSet<u32>,
+        dirty_presentations: &BTreeSet<u32>,
+    ) -> Result<()> {
+        self.prune_missing_parents(c, layers);
+        let entries: Vec<_> = self.presentations.get(&c.0).into_iter()
+            .flat_map(|owner| owner.iter())
+            .filter(|(root, p)| dirty_sources.contains(&p.source) || dirty_presentations.contains(root))
+            .map(|(root, p)| (*root, p.clone()))
+            .collect();
         for (root, p) in entries {
             let s = self
                 .surface(c, p.source)
@@ -335,6 +724,10 @@ impl CanvasSystem {
                 .generated
                 .iter()
                 .rev()
+                // Derived nodes may already be gone after an explicit ancestor
+                // Remove. Keep the public Layer Remove contract strict; only
+                // this owner-managed cleanup skips absent generated IDs.
+                .filter(|id| layers.get(c, **id).is_some())
                 .map(|id| LayerCommand::Remove { id: *id })
                 .collect::<Vec<_>>();
             let mut parent = spec(
@@ -358,7 +751,27 @@ impl CanvasSystem {
                 &mut ids,
                 &mut commands,
             )?;
-            layers.apply_batch(c, &commands)?;
+            layers.apply_batch(c, &commands).with_context(|| {
+                fn stats(nodes: &[CanvasNode], depth: usize) -> (usize, usize) {
+                    nodes.iter().fold((0, depth), |(n, d), node| match node {
+                        CanvasNode::Group { nodes, .. } => {
+                            let (cn, cd) = stats(nodes, depth + 1);
+                            (n + 1 + cn, d.max(cd))
+                        }
+                        CanvasNode::Draw { .. } => (n + 1, d),
+                    })
+                }
+                let (nodes, depth) = stats(&s.nodes, 0);
+                // Developer diagnostic: the failing source surface (Debug form).
+                if let Some(path) = std::env::var_os("CRYSIRROR_CANVAS_FAILURE_DUMP") {
+                    let _ = std::fs::write(path, format!("{:#?}", s.nodes));
+                }
+                format!(
+                    "rebuild canvas presentation {root}, source {} ({nodes} nodes, {} top-level, depth {depth})",
+                    p.source,
+                    s.nodes.len()
+                )
+            })?;
             self.presentations
                 .get_mut(&c.0)
                 .unwrap()
@@ -368,6 +781,170 @@ impl CanvasSystem {
         }
         Ok(())
     }
+}
+/// Conservative surface-space bounds of a node, `None` for an invisible one.
+fn node_bounds(node: &CanvasNode) -> Option<[f32; 4]> {
+    match node {
+        CanvasNode::Draw { layer } => {
+            if matches!(layer.paint, Paint::Solid { color } if color[3] == 0) || !layer.visible || layer.opacity == 0 {
+                return None;
+            }
+            let tr = &layer.transform;
+            // Without rotation/scale/projection the rect is the drawn area.
+            let identity = tr.rotate == 0.
+                && tr.rotate_x == 0.
+                && tr.rotate_y == 0.
+                && tr.scale_x == 1.
+                && tr.scale_y == 1.
+                && !tr.camera_enabled
+                && !tr.billboard;
+            if identity {
+                Some(layer.rect)
+            } else {
+                Some([-1e6, -1e6, 2e6, 2e6])
+            }
+        }
+        CanvasNode::Group { offset, clip, rotate, scale, .. } => {
+            let (s, c) = rotate.sin_cos();
+            let map = |x: f32, y: f32| {
+                let (x, y) = (x * scale[0], y * scale[1]);
+                [offset[0] + x * c - y * s, offset[1] + x * s + y * c]
+            };
+            let pts = [
+                map(clip[0], clip[1]),
+                map(clip[0] + clip[2], clip[1]),
+                map(clip[0], clip[1] + clip[3]),
+                map(clip[0] + clip[2], clip[1] + clip[3]),
+            ];
+            let (x0, y0) = pts.iter().fold((f32::INFINITY, f32::INFINITY), |m, p| (m.0.min(p[0]), m.1.min(p[1])));
+            let (x1, y1) = pts.iter().fold((f32::NEG_INFINITY, f32::NEG_INFINITY), |m, p| (m.0.max(p[0]), m.1.max(p[1])));
+            Some([x0, y0, x1 - x0, y1 - y0])
+        }
+    }
+}
+/// Set the colour of every draw to `rgb`, keeping coverage and alpha. With
+/// source-over blending, composing uniformly coloured draws yields `rgb` with
+/// the original composite alpha; other blend modes would change the result.
+fn recolor(nodes: &mut [CanvasNode], rgb: [u8; 3]) -> Result<()> {
+    for node in nodes {
+        match node {
+            CanvasNode::Group { nodes, .. } => recolor(nodes, rgb)?,
+            CanvasNode::Draw { layer } => {
+                ensure!(
+                    matches!(layer.blend, crate::layer::Blend::Normal),
+                    "canvas colour fill over a non-normal blend draw"
+                );
+                match &mut layer.paint {
+                    Paint::Solid { color }
+                    | Paint::Text { color, .. }
+                    | Paint::GlyphRun { color, .. } => {
+                        color[..3].copy_from_slice(&rgb);
+                        continue;
+                    }
+                    _ => {}
+                }
+                let filter = layer
+                    .filter
+                    .get_or_insert_with(|| crate::layer::LayerFilter {
+                        mono: 0.,
+                        invert: 0.,
+                        bright: 0.,
+                        dark: 0.,
+                        color_rate: 0.,
+                        color: [0.; 3],
+                        add: [0.; 3],
+                        tone_curve: None,
+                        mask: None,
+                        alpha_test: false,
+                        distortion: None,
+                    });
+                filter.color_rate = 1.;
+                filter.color = rgb.map(|v| f32::from(v) / 255.);
+                filter.add = [0.; 3];
+            }
+        }
+    }
+    Ok(())
+}
+fn plain_group(node: &CanvasNode) -> bool {
+    matches!(node, CanvasNode::Group { offset, opacity, rotate, scale, .. }
+        if *offset == [0., 0.] && *opacity == 255 && *rotate == 0. && *scale == [1., 1.])
+}
+/// Restrict `nodes` to `band`: invisible and non-intersecting nodes are
+/// dropped, plain clip groups are re-clipped in place (no extra nesting),
+/// and the remaining nodes share one clip group for the band.
+/// `wrap`: whether loose nodes need a band clip group (false inside a group
+/// that already clips to the band).
+fn clip_to_band(nodes: &[CanvasNode], band: [f32; 4], wrap_loose: bool) -> Vec<CanvasNode> {
+    let wrap = |loose: Vec<CanvasNode>| CanvasNode::Group {
+        offset: [0., 0.],
+        clip: band,
+        opacity: 255,
+        nodes: loose,
+        rotate: 0.,
+        scale: [1., 1.],
+    };
+    let mut out = Vec::new();
+    let mut loose = Vec::new();
+    for node in nodes {
+        let Some(bounds) = node_bounds(node) else { continue };
+        if intersect(bounds, band).is_none() {
+            continue;
+        }
+        if let (true, CanvasNode::Group { clip, nodes: inner, .. }) = (plain_group(node), node) {
+            let Some(clip) = intersect(*clip, band) else { continue };
+            let inner = clip_to_band(inner, clip, false);
+            if inner.is_empty() {
+                continue;
+            }
+            // Painter order: earlier loose nodes are flushed first.
+            if !loose.is_empty() {
+                let l = std::mem::take(&mut loose);
+                if wrap_loose { out.push(wrap(l)) } else { out.extend(l) }
+            }
+            out.push(CanvasNode::Group {
+                offset: [0., 0.],
+                clip,
+                opacity: 255,
+                nodes: inner,
+                rotate: 0.,
+                scale: [1., 1.],
+            });
+        } else {
+            loose.push(node.clone());
+        }
+    }
+    if !loose.is_empty() {
+        if wrap_loose { out.push(wrap(loose)) } else { out.extend(loose) }
+    }
+    out
+}
+/// Previous content outside `region`, so a following draw replaces it.
+fn exclude_region(nodes: Vec<CanvasNode>, full: [f32; 4], region: [f32; 4]) -> Vec<CanvasNode> {
+    subtract_rect(full, region)
+        .into_iter()
+        .flat_map(|band| clip_to_band(&nodes, band, true))
+        .collect()
+}
+/// `full` minus `region` as at most four disjoint rectangles (x, y, w, h):
+/// top band, bottom band, then left and right of the region's row span.
+pub fn subtract_rect(full: [f32; 4], region: [f32; 4]) -> Vec<[f32; 4]> {
+    let Some(r) = intersect(full, region) else {
+        return vec![full];
+    };
+    let (fx0, fy0, fx1, fy1) = (full[0], full[1], full[0] + full[2], full[1] + full[3]);
+    let (rx0, ry0, rx1, ry1) = (r[0], r[1], r[0] + r[2], r[1] + r[3]);
+    let mut out = Vec::new();
+    let mut push = |x0: f32, y0: f32, x1: f32, y1: f32| {
+        if x1 > x0 && y1 > y0 {
+            out.push([x0, y0, x1 - x0, y1 - y0]);
+        }
+    };
+    push(fx0, fy0, fx1, ry0);
+    push(fx0, ry1, fx1, fy1);
+    push(fx0, ry0, rx0, ry1);
+    push(rx1, ry0, fx1, ry1);
+    out
 }
 fn validate_nodes(nodes: &[CanvasNode], depth: usize, count: &mut usize) -> Result<()> {
     ensure!(depth < 32, "canvas snapshot depth");
@@ -400,7 +977,13 @@ fn validate_nodes(nodes: &[CanvasNode], depth: usize, count: &mut usize) -> Resu
                 clip,
                 opacity,
                 nodes,
+                rotate,
+                scale,
             } => {
+                ensure!(
+                    rotate.is_finite() && scale.iter().all(|s| s.is_finite() && s.abs() > 1e-6),
+                    "canvas group transform"
+                );
                 ensure!(
                     offset.iter().chain(clip).all(|v| v.is_finite())
                         && clip[2] > 0.
@@ -413,6 +996,34 @@ fn validate_nodes(nodes: &[CanvasNode], depth: usize, count: &mut usize) -> Resu
                 );
                 validate_nodes(nodes, depth + 1, count)?;
             }
+        }
+    }
+    Ok(())
+}
+/// Canvas nodes as snapshot-local LayerSpecs under `parent` (ids from 2).
+fn snapshot_specs(nodes: &[CanvasNode], parent: u32, next_id: &mut u32, out: &mut Vec<LayerSpec>) -> Result<()> {
+    for (i, node) in nodes.iter().enumerate() {
+        *next_id += 1;
+        ensure!(*next_id <= 4096, "canvas snapshot node budget");
+        let id = *next_id;
+        let mut s = match node {
+            CanvasNode::Draw { layer } => layer.clone(),
+            CanvasNode::Group { offset, clip, opacity, rotate, scale, .. } => {
+                let mut x = spec(id, [offset[0], offset[1], 1., 1.], Paint::Solid { color: [0; 4] });
+                x.clip = Some(*clip);
+                x.opacity = *opacity;
+                x.transform.rotate = *rotate;
+                x.transform.scale_x = scale[0];
+                x.transform.scale_y = scale[1];
+                x
+            }
+        };
+        s.id = id;
+        s.parent = Some(parent);
+        s.order = [0, i as i32];
+        out.push(s);
+        if let CanvasNode::Group { nodes, .. } = node {
+            snapshot_specs(nodes, id, next_id, out)?;
         }
     }
     Ok(())
@@ -438,6 +1049,8 @@ fn emit(
                 offset,
                 clip,
                 opacity,
+                rotate,
+                scale,
                 ..
             } => {
                 let mut x = spec(
@@ -447,6 +1060,9 @@ fn emit(
                 );
                 x.clip = Some(*clip);
                 x.opacity = *opacity;
+                x.transform.rotate = *rotate;
+                x.transform.scale_x = scale[0];
+                x.transform.scale_y = scale[1];
                 x
             }
         };
@@ -459,4 +1075,19 @@ fn emit(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod subtract_tests {
+    use super::subtract_rect;
+    #[test]
+    fn complement_bands_cover_the_rest_exactly() {
+        let full = [0., 0., 10., 10.];
+        let bands = subtract_rect(full, [2., 3., 4., 5.]);
+        let area: f32 = bands.iter().map(|b| b[2] * b[3]).sum();
+        assert_eq!(area, 100. - 20.);
+        assert_eq!(bands.len(), 4);
+        assert_eq!(subtract_rect(full, [0., 0., 10., 10.]).len(), 0);
+        assert_eq!(subtract_rect(full, [20., 20., 1., 1.]), vec![full]);
+    }
 }

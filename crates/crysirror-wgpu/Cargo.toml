@@ -16,6 +16,7 @@ crysirror-runtime.workspace = true
 wgpu.workspace = true
 anyhow.workspace = true
 bytemuck.workspace = true
+blake3.workspace = true
 glam.workspace = true
 crysirror-text.workspace = true
 image.workspace = true

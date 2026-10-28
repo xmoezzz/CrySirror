@@ -301,3 +301,44 @@ fn shared_buffers_retain_budget_without_copying_and_release_on_last_reader() {
     drop(retained);
     assert_eq!(context.resident_bytes(), 0);
 }
+
+#[test]
+fn hashed_archive_lookup_keeps_canonical_mount_paths_and_regular_reads() {
+    struct Hashed(Vec<ArchiveEntry>);
+    impl Archive for Hashed {
+        fn entries(&self) -> &[ArchiveEntry] {
+            &self.0
+        }
+        fn resolve(&self, path: &str) -> Option<u32> {
+            (path == "system/hidden.json").then_some(0)
+        }
+        fn open(&self, id: u32, context: &DecodeContext) -> anyhow::Result<Arc<dyn AssetReader>> {
+            anyhow::ensure!(id == 0, "bad id");
+            context.memory(b"{}".to_vec())
+        }
+    }
+    let mount = ArchiveMount::new(
+        Box::new(Hashed(vec![ArchiveEntry {
+            id: 0,
+            path: "hash-token".into(),
+            size: 2,
+            stored_size: 2,
+            metadata: json!(null),
+        }])),
+        context(),
+    )
+    .unwrap();
+    assert_eq!(mount.list().unwrap(), vec!["hash-token"]);
+    assert_eq!(mount.list_dir("").unwrap(), vec!["hash-token"]);
+    assert!(mount.list_dir("hash-token").unwrap().is_empty());
+    assert!(mount.list_dir("../escape").is_err());
+    assert!(mount.exists("system/hidden.json"));
+    assert!(!mount.exists("../system/hidden.json"));
+    assert!(!mount.exists("/system/hidden.json"));
+    assert_eq!(mount.read("system/hidden.json").unwrap(), b"{}");
+    assert_eq!(
+        read_all(mount.open_entry("system/hidden.json").unwrap().as_ref(), 2).unwrap(),
+        b"{}"
+    );
+    assert!(mount.open_entry("absent.json").is_err());
+}

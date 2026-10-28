@@ -11,8 +11,10 @@ use crysirror_core::{
 use std::{collections::BTreeMap, sync::Arc};
 
 pub mod glyph;
+pub mod glyph_blur;
 pub mod grid;
 pub mod layout;
+pub mod markup;
 pub mod raster;
 pub mod reveal;
 pub mod rich;

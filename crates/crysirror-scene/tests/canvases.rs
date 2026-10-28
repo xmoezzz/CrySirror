@@ -27,6 +27,7 @@ fn copy(rect: [f32; 4], position: [f32; 2], replace: bool) -> C {
         position,
         opacity: 255,
         replace,
+        clip: None,
     }
 }
 fn setup() -> (CanvasSystem, LayerSystem) {
@@ -179,6 +180,7 @@ fn errors_roll_back_canvas_and_generated_layers_atomically() {
             position: [0., 0.],
             opacity: 255,
             replace: false,
+            clip: None,
         },
         C::Copy {
             source: 1,
@@ -187,8 +189,8 @@ fn errors_roll_back_canvas_and_generated_layers_atomically() {
             position: [0., 0.],
             opacity: 128,
             replace: false,
+            clip: None,
         },
-        copy([-2., 0., 10., 10.], [0., 0.], true),
     ] {
         assert!(
             c.apply_batch(
@@ -281,4 +283,247 @@ fn presentation_attaches_under_parent_layer_and_follows_it() {
             &mut l,
         )
         .is_err());
+}
+
+#[test]
+fn partial_replace_keeps_old_content_only_outside_the_region() {
+    let (mut c, mut l) = setup();
+    // Source cell (2,3)-(6,8) replaces the same region of the destination.
+    c.apply_batch(ClientId(1), &[copy([2., 3., 4., 5.], [2., 3.], true)], &mut l)
+        .unwrap();
+    let s = c.surface(ClientId(1), 2).unwrap();
+    let bands: Vec<[f32; 4]> = s
+        .nodes
+        .iter()
+        .filter_map(|n| match n {
+            crysirror_scene::canvas::CanvasNode::Group { clip, offset, .. }
+                if *offset == [0., 0.] && *clip != [2., 3., 4., 5.] =>
+            {
+                Some(*clip)
+            }
+            _ => None,
+        })
+        .collect();
+    let area: f32 = bands.iter().map(|b| b[2] * b[3]).sum();
+    let full = s.width as f32 * s.height as f32;
+    assert_eq!(area, full - 20.);
+    assert!(matches!(
+        s.nodes.last(),
+        Some(crysirror_scene::canvas::CanvasNode::Group { clip, .. }) if *clip == [2., 3., 4., 5.]
+    ));
+}
+
+#[test]
+fn transform_copy_rotates_and_scales_onto_exact_bounds() {
+    let (mut c, mut l) = setup();
+    // Source cell 0,0 4x2 rotated 90°: (x, y) -> (-y + 2, x), then placed at (3, 1).
+    c.apply_batch(
+        ClientId(1),
+        &[C::TransformCopy {
+            source: 1,
+            destination: 2,
+            rect: [0., 0., 4., 2.],
+            matrix: [0., 1., -1., 0., 5., 1.],
+            replace: true,
+            clip: None,
+        }],
+        &mut l,
+    )
+    .unwrap();
+    let frame = l.frame([10, 10]).unwrap();
+    let green = frame
+        .iter()
+        .filter(|p| matches!(p.paint, crysirror_scene::layer::Paint::Solid { color } if color == [0, 255, 0, 255]))
+        .last()
+        .unwrap();
+    let clip = green.clip.unwrap();
+    // Rotated cell occupies x 3..5, y 1..5.
+    assert!((clip[0] - 3.).abs() < 1e-4 && (clip[1] - 1.).abs() < 1e-4, "{clip:?}");
+    assert!((clip[2] - 2.).abs() < 1e-4 && (clip[3] - 4.).abs() < 1e-4, "{clip:?}");
+    // A skewed map fails visibly instead of drawing something else.
+    assert!(c
+        .apply_batch(
+            ClientId(1),
+            &[C::TransformCopy {
+                source: 1,
+                destination: 2,
+                rect: [0., 0., 4., 2.],
+                matrix: [1., 0., 0.5, 1., 0., 0.],
+                replace: false,
+                clip: None,
+            }],
+            &mut l,
+        )
+        .is_err());
+    // Stretch: 2x horizontally.
+    c.apply_batch(
+        ClientId(1),
+        &[C::TransformCopy {
+            source: 1,
+            destination: 2,
+            rect: [0., 0., 2., 2.],
+            matrix: [2., 0., 0., 1., 0., 6.],
+            replace: true,
+            clip: None,
+        }],
+        &mut l,
+    )
+    .unwrap();
+}
+
+#[test]
+fn many_partial_replaces_stay_within_the_node_budget() {
+    let mut c = CanvasSystem::default();
+    let mut l = LayerSystem::default();
+    let big = |id| C::Create { id, width: 100, height: 100 };
+    c.apply_batch(
+        ClientId(1),
+        &[
+            big(1),
+            big(2),
+            C::Clear { id: 1, color: [0, 0, 0, 0] },
+            C::Draw { id: 1, layer: draw([0, 255, 0, 255]) },
+            C::Clear { id: 2, color: [255, 255, 255, 0] },
+        ],
+        &mut l,
+    )
+    .unwrap();
+    // Cut a 20x20 grid of 5x5 cells, each a partial replace.
+    for i in 0..400 {
+        let (x, y) = ((i % 20) as f32 * 5., (i / 20) as f32 * 5.);
+        c.apply_batch(
+            ClientId(1),
+            &[C::Copy {
+                source: 1,
+                destination: 2,
+                rect: [x, y, 5., 5.],
+                position: [x, y],
+                opacity: 255,
+                replace: true,
+                clip: None,
+            }],
+            &mut l,
+        )
+        .unwrap();
+    }
+    c.validate().unwrap();
+}
+
+#[test]
+fn draw_clip_and_replace_fill() {
+    let (mut c, mut l) = setup();
+    // Clipped copy only covers the clip intersection.
+    c.apply_batch(
+        ClientId(1),
+        &[C::Copy {
+            source: 1,
+            destination: 2,
+            rect: [0., 0., 10., 10.],
+            position: [0., 0.],
+            opacity: 255,
+            replace: true,
+            clip: Some([2., 2., 3., 3.]),
+        }],
+        &mut l,
+    )
+    .unwrap();
+    let s = c.surface(ClientId(1), 2).unwrap();
+    assert!(matches!(s.nodes.last(), Some(CanvasNode::Group { clip, .. }) if *clip == [2., 2., 3., 3.]));
+    // Translucent replace-fill keeps only outside content plus the fill.
+    c.apply_batch(
+        ClientId(1),
+        &[C::Fill { id: 2, rect: [0., 0., 4., 4.], color: [1, 2, 3, 128], replace: true, keep_alpha: false }],
+        &mut l,
+    )
+    .unwrap();
+    let s = c.surface(ClientId(1), 2).unwrap();
+    assert!(matches!(s.nodes.last(), Some(CanvasNode::Draw { layer }) if layer.rect == [0., 0., 4., 4.]));
+}
+
+#[test]
+fn keep_alpha_fill_recolors_region_only() {
+    let (mut c, mut l) = setup();
+    c.apply_batch(
+        ClientId(1),
+        &[C::Fill { id: 2, rect: [0., 0., 8., 8.], color: [9, 9, 9, 100], replace: true, keep_alpha: false }],
+        &mut l,
+    )
+    .unwrap();
+    c.apply_batch(
+        ClientId(1),
+        &[C::Fill { id: 2, rect: [0., 0., 4., 8.], color: [200, 10, 20, 0], replace: false, keep_alpha: true }],
+        &mut l,
+    )
+    .unwrap();
+    fn solids(nodes: &[CanvasNode], out: &mut Vec<[u8; 4]>) {
+        for n in nodes {
+            match n {
+                CanvasNode::Group { nodes, .. } => solids(nodes, out),
+                CanvasNode::Draw { layer } => {
+                    if let crysirror_scene::layer::Paint::Solid { color } = layer.paint {
+                        out.push(color)
+                    }
+                }
+            }
+        }
+    }
+    let mut colors = vec![];
+    solids(&c.surface(ClientId(1), 2).unwrap().nodes, &mut colors);
+    // The left half is recoloured with its alpha kept; the right half is untouched.
+    assert!(colors.contains(&[200, 10, 20, 100]));
+    assert!(colors.contains(&[9, 9, 9, 100]));
+}
+
+#[test]
+fn fade_freezes_region_into_one_isolated_snapshot() {
+    let (mut c, mut l) = setup();
+    c.apply_batch(
+        ClientId(1),
+        &[
+            C::Fill { id: 2, rect: [0., 0., 6., 6.], color: [9, 9, 9, 200], replace: true, keep_alpha: false },
+            C::Fill { id: 2, rect: [2., 2., 6., 6.], color: [1, 2, 3, 100], replace: false, keep_alpha: false },
+            C::Fade { id: 2, rect: [0., 0., 4., 4.], opacity: 128 },
+        ],
+        &mut l,
+    )
+    .unwrap();
+    let s = c.surface(ClientId(1), 2).unwrap();
+    let Some(CanvasNode::Draw { layer }) = s.nodes.last() else { panic!("{:?}", s.nodes) };
+    assert_eq!(layer.rect, [0., 0., 4., 4.]);
+    assert_eq!(layer.opacity, 128);
+    let crysirror_scene::layer::Paint::Snapshot { layers, .. } = &layer.paint else { panic!() };
+    // Both overlapping fills are inside the one frozen composite.
+    assert!(layers.len() >= 3);
+    c.validate().unwrap();
+}
+
+#[test]
+fn restoring_an_unchanged_saved_region_is_a_no_op() {
+    let (mut c, mut l) = setup();
+    let count = |c: &CanvasSystem| {
+        fn n(ns: &[CanvasNode]) -> usize {
+            ns.iter().map(|x| match x { CanvasNode::Group { nodes, .. } => 1 + n(nodes), _ => 1 }).sum()
+        }
+        n(&c.surface(ClientId(1), 1).unwrap().nodes)
+    };
+    c.apply_batch(ClientId(1), &[create(9)], &mut l).unwrap();
+    let mut sizes = vec![];
+    for _ in 0..20 {
+        c.apply_batch(
+            ClientId(1),
+            &[
+                // Save the cell into a cleared scratch surface, restore it, redraw.
+                C::Fill { id: 9, rect: [0., 0., 10., 10.], color: [0; 4], replace: true, keep_alpha: false },
+                C::Copy { source: 1, destination: 9, rect: [2., 2., 4., 4.], position: [0., 0.], opacity: 255, replace: false, clip: None },
+                C::Copy { source: 9, destination: 1, rect: [0., 0., 4., 4.], position: [2., 2.], opacity: 255, replace: true, clip: None },
+                C::Fill { id: 1, rect: [2., 2., 4., 4.], color: [9, 9, 9, 40], replace: false, keep_alpha: false },
+            ],
+            &mut l,
+        )
+        .unwrap();
+        sizes.push(count(&c));
+    }
+    // Linear in redraws, not quadratic: each round adds one translucent fill.
+    assert_eq!(sizes[19] - sizes[18], sizes[1] - sizes[0]);
+    c.validate().unwrap();
 }

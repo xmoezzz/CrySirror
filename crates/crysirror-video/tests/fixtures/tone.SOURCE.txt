@@ -1,0 +1,5 @@
+Self-generated test signal, no user or third-party game content.
+Created 2026-10-28 with local FFmpeg (fixture encoder only):
+ffmpeg -f lavfi -i sine=frequency=440:sample_rate=48000:duration=0.16 -c:a ac3 -ac 2 -b:a 192k tone.ac3
+Five 1536-sample stereo AC-3 frames. The regression tests use native Rust
+oxideav-ac3 via the pre-existing shared MPEG helper; FFmpeg is not invoked.

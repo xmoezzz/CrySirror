@@ -29,7 +29,8 @@ oxideav-ac3 = "0.0.10"
 # oxideav-ac3 0.0.10 uses oxideav_core::register!, which is unavailable in
 # the old oxideav-core 0.1.7 retained by this workspace lockfile. Pin the
 # compatible core generation explicitly so Cargo cannot keep resolving 0.1.7.
-oxideav-core = "=0.1.29"
+# 0.1.42 also serves the shared native MP4 codec suite; AC-3 stays at 0.0.10.
+oxideav-core = "=0.1.42"
 
 crossbeam-channel = { version = "0.5", optional = true }
 pollster = { version = "0.3", optional = true }

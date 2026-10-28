@@ -124,3 +124,7 @@ moves to `done` only with recorded behavior evidence.
 | [0088](0088-kag3-semantic-adapter-and-shared-prerequisites.md) | Original KAG3 facade over shared text, dispatch, regions, audio and atomic writes | bounded native profile; full games/saves/media/effects remain open |
 | [0089](0089-shared-opna-and-pmd-sources.md) | Shared YM2608 register-score and bounded PMD-M audio sources | implemented profile; full chip/PMD and UK2 VM remain open |
 | [0090](0090-shared-worker-image-resources.md) | Shared worker image resources, vector/perspective/transitions and native effect facades | implemented CPU profile; composed Canvas readback and complete plugin compatibility remain open |
+| [0091](0091-authenticated-hxv4-resources-and-bootstrap.md) | Shared authenticated HXV4, scoped static bootstrap resources and indexed VFS reads | bounded static profile; full native startup and every protection family remain open |
+| [0092](0092-shared-documents-and-native-json-facade.md) | Shared bounded documents and native JSON facade | explicit grammar/encoding profile; synchronous in-memory/read boundaries remain |
+| [0093](0093-shared-vector-and-native-draw-facade.md) | Shared vector authoring/bounds and solid-fill native LayerExDraw | bounded linear/rectangle profile; full GDI/text/pen/gradient compatibility remains open |
+| [0094](0094-isolated-layer-subtree-crossfades.md) | Engine-owned isolated subtree crossfades and thin native exchange semantics | bounded profile; see STATUS for validation |

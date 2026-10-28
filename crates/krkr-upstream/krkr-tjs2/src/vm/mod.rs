@@ -944,6 +944,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 frame.set(inst.operands[0], value)?;
             }
             99 | 102 => {
+                self.runtime.native_caller_this = frame.this_obj;
                 let callee = frame.get(inst.operands[1])?;
                 let args = self.materialize_call_args(frame, object, inst.call_args.as_ref())?;
                 let continuation = Continuation::CallerRegister {
@@ -979,6 +980,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 }
             }
             100 => {
+                self.runtime.native_caller_this = frame.this_obj;
                 let object_value = frame.get(inst.operands[1])?;
                 let name = self.data_slot_string(object, inst.operands[2])?;
                 let args = self.materialize_call_args(frame, object, inst.call_args.as_ref())?;
@@ -1015,6 +1017,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 }
             }
             101 => {
+                self.runtime.native_caller_this = frame.this_obj;
                 let object_value = frame.get(inst.operands[1])?;
                 let name = self.key_from_variant(&frame.get(inst.operands[2])?)?;
                 let args = self.materialize_call_args(frame, object, inst.call_args.as_ref())?;

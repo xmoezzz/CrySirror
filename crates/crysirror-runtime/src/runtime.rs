@@ -383,6 +383,7 @@ impl HostServices for SharedHost {
             return Err(Error::NotFound);
         }
         let result = match query {
+            Q::LayerCrossfade(id) => serde_json::to_value(self.engine.layers.crossfade(client, id)),
             Q::Layer(id) => serde_json::to_value(self.engine.layers.get(client, id)),
             Q::Canvas(id) => serde_json::to_value(self.engine.canvases.surface(client, id)),
             Q::UiWidget(id) => serde_json::to_value(self.engine.ui.get(client.0, id)),
@@ -634,7 +635,7 @@ impl HostServices for SharedHost {
             serde_json::from_slice(data).map_err(|e| Error::Io(e.to_string()))?;
         self.engine
             .submit(client, &batch)
-            .map_err(|e| Error::Io(e.to_string()))
+            .map_err(|e| Error::Io(format!("{e:#}")))
     }
     fn upload_rgba(
         &mut self,
@@ -676,6 +677,28 @@ impl HostServices for SharedHost {
         self.generated.push((client, path.clone(), bytes));
         VfsPath::new(crysirror_core::path::Mount::Asset, &path)
     }
+    fn upload_encoded_image(
+        &mut self,
+        client: ClientId,
+        id: u32,
+        name: &str,
+        bytes: &[u8],
+    ) -> crysirror_core::Result<crysirror_core::service::UploadedImage> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        let surface = self
+            .decoders
+            .decode_with(name, bytes, None, None, None)
+            .map_err(|e| Error::Io(format!("decode `{name}`: {e:#}")))?;
+        let opaque = surface.rgba.chunks_exact(4).all(|p| p[3] == 255);
+        let path = self.upload_rgba(client, id, surface.width, surface.height, &surface.rgba)?;
+        Ok(crysirror_core::service::UploadedImage {
+            path,
+            size: [surface.width, surface.height],
+            opaque,
+        })
+    }
     fn image_metadata(
         &mut self,
         client: ClientId,
@@ -707,6 +730,16 @@ impl HostServices for SharedHost {
             return Err(Error::NotFound);
         }
         self.fs.storage(client)
+    }
+    fn present_puppet_frame(&mut self, client: ClientId, layer: u32, data: &[u8]) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) { return Err(Error::NotFound); }
+        if data.len() > 64 * 1024 * 1024 { return Err(Error::Limit("puppet frame payload")); }
+        let frame: crysirror_puppet::PuppetFrame = serde_json::from_slice(data).map_err(|e| Error::Io(e.to_string()))?;
+        frame.validate().map_err(|e| Error::Io(e.to_string()))?;
+        for texture in &frame.textures {
+            VfsPath::new(crysirror_core::path::Mount::Asset, texture)?;
+        }
+        self.engine.layers.set_dynamic_puppet(client.0, layer, Arc::new(frame)).map_err(|e| Error::Io(e.to_string()))
     }
     fn present_surface(
         &mut self,
@@ -766,6 +799,15 @@ impl HostServices for RestoreResources<'_> {
         b: &[u8],
     ) -> crysirror_core::Result<VfsPath> {
         self.0.upload_rgba(c, id, w, h, b)
+    }
+    fn upload_encoded_image(
+        &mut self,
+        c: ClientId,
+        id: u32,
+        name: &str,
+        b: &[u8],
+    ) -> crysirror_core::Result<crysirror_core::service::UploadedImage> {
+        self.0.upload_encoded_image(c, id, name, b)
     }
 }
 struct Session {

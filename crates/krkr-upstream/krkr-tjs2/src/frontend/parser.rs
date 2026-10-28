@@ -834,6 +834,29 @@ impl Parser {
             let start = self.advance().span.start;
             let expr = self.parse_unary()?;
             let span = Span::new(start, expr.span.end);
+            // CrySirror patch: krkrz codegen passes the `&` (ignore-property)
+            // context to the left operand of `incontextof`
+            // (tjsInterCodeGen.cpp T_INCONTEXTOF/T_IGNOREPROP), so
+            // `&a.p incontextof t` reads the property object, not its value.
+            if op == UnaryOp::IgnoreProp {
+                if let ExprKind::Binary {
+                    op: BinaryOp::InContextOf,
+                    lhs,
+                    rhs,
+                } = expr.kind
+                {
+                    let lhs_span = Span::new(start, lhs.span.end);
+                    let lhs = Expr::new(ExprKind::Unary { op, expr: lhs }, lhs_span);
+                    return Ok(Expr::new(
+                        ExprKind::Binary {
+                            op: BinaryOp::InContextOf,
+                            lhs: Box::new(lhs),
+                            rhs,
+                        },
+                        span,
+                    ));
+                }
+            }
             return Ok(Expr::new(
                 ExprKind::Unary {
                     op,

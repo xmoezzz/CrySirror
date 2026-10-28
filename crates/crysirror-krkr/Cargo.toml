@@ -10,7 +10,13 @@ description = "Optional KiriKiri (TJS2/KAG) VM adapter onto CrySirror engine API
 [dependencies]
 crysirror-core.workspace = true
 crysirror-runtime.workspace = true
+crysirror-audio.workspace = true
+crysirror-resource.workspace = true
+crysirror-text.workspace = true
+eluna = { package = "eluna_rs", path = "../siglus-upstream/eluna_rs" }
 crysirror-scene.workspace = true
+crysirror-puppet.workspace = true
+crysirror-puppet-eluna.workspace = true
 krkr-tjs2.workspace = true
 krkr-kag.workspace = true
 anyhow.workspace = true

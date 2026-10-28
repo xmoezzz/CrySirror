@@ -23,11 +23,13 @@ crysirror-image.workspace = true
 crysirror-resource.workspace = true
 crysirror-formats-arc = { workspace = true, optional = true }
 crysirror-text.workspace = true
+encoding_rs = "0.8"
 crysirror-video = { path = "../crysirror-video" }
 siglus_scene_vm = { path = "../siglus-upstream/siglus_scene_vm", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+toml_edit = { version = "=0.25.17", default-features = false, features = ["parse"] }
 blake3.workspace = true
 cap-std.workspace = true
 

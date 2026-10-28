@@ -2219,7 +2219,11 @@
       "status": "partial",
       "implementation": [
         "src/xp3.rs",
-        "src/common.rs"
+        "src/common.rs",
+        "src/xp3/hxv4/mod.rs",
+        "src/xp3/hxv4/index.rs",
+        "src/xp3/hxv4/bootstrap.rs",
+        "src/xp3/hxv4/native.rs"
       ],
       "variants": [
         "Version 1 and version 2",
@@ -2227,13 +2231,17 @@
         "Multiple raw/zlib segments",
         "hnfn/eliF filename maps",
         "Optional time and reordered chunks",
-        "Explicit caller-provided entry transform pipeline"
+        "Explicit caller-provided entry transform pipeline",
+        "Authenticated HXV4 Special object table, hashed path lookup and reconstructed content stream filter",
+        "Explicit scoped executable companion for static bootstrap/KDF analysis; optional derived RCDATA startup resource"
       ],
       "limits": [
-        "Chained indexes and unknown chunk layouts/flags explicitly unsupported",
-        "No embedded title keys, XP3 game-specific decryptors or cxdec machine-code generation",
-        "Encrypted entries require an explicit client-scoped transform profile",
-        "adlr value is passed as metadata/key input; checksum integrity is not validated"
+        "Chained indexes and other unknown chunk layouts/flags explicitly unsupported",
+        "No embedded title keys, native executable execution or cxdec machine-code generation",
+        "Ordinary encrypted entries still need explicit client-scoped transform profiles; HXV4 uses its authenticated Special/native filter state",
+        "Ordinary adlr metadata is not validated; HXV4 protected entries require complete incremental checksum validation before returning a reader",
+        "HXV4 byte/shape/candidate limits and static family only; packed executables and multi-archive lookup slots remain unsupported",
+        "Hashed names resolve on request; enumeration preserves opaque stored names, not an invented complete plaintext dictionary"
       ],
       "id": "kirikiri/xp3",
       "kind": "archive",
@@ -2241,12 +2249,14 @@
       "entrypoint": "Xp3",
       "evidence": {
         "ordinary_tests": [
-          "tests/archives.rs"
+          "tests/archives.rs",
+          "tests/hxv4.rs"
         ],
         "external_corpus_tests": [
-          "tests/upstream_corpus.rs::original_cpp_declared_fixture_outputs_match_the_rust_archive_plugins"
+          "tests/upstream_corpus.rs::original_cpp_declared_fixture_outputs_match_the_rust_archive_plugins",
+          "tests/hxv4.rs::actual_hxv4_authenticates_index_and_decodes_startup_and_samples"
         ],
-        "behavior_scope": "Self-authored fixtures and explicitly invoked upstream fixture comparisons; no complete-game claim"
+        "behavior_scope": "Self-authored tests, explicit upstream corpus comparisons and explicitly supplied local HXV4 index/startup/32-sample validation; not complete-game support"
       }
     },
     {

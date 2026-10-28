@@ -1,0 +1,73 @@
+{
+  "purpose": "Common engine software MP4 video codecs",
+  "integration": "Dependencies only; no FFmpeg C code or process in production",
+  "packages": [
+    {
+      "crate": "oxideav-core",
+      "version": "0.1.42",
+      "repository": "https://github.com/OxideAV/oxideav-core",
+      "commit": "07a9bb313306e143616cf55f0bf55aeea46e8181",
+      "license": "MIT",
+      "license_sha256": "4ecae6b086e0d2663c8629e7d3d7ab7d8b39958e8853f9e1371159499a0c3bf2",
+      "source": "crates.io release; commit from packaged .cargo_vcs_info.json",
+      "inspection": "Pinned-source API, decoder adapter, packet/flush/reset/output metadata, MP4 sample and edit handling, decoder limits; full released source available in Cargo registry. No upstream engine copied or hosted.",
+      "upstream_author": "Mark Karpeles (see upstream MIT LICENSE)"
+    },
+    {
+      "crate": "oxideav-mp4",
+      "version": "0.0.10",
+      "repository": "https://github.com/OxideAV/oxideav-mp4",
+      "commit": "660c9ce320a5b4b465f22087c1c147c6614832b3",
+      "license": "MIT",
+      "license_sha256": "4ecae6b086e0d2663c8629e7d3d7ab7d8b39958e8853f9e1371159499a0c3bf2",
+      "source": "crates.io release; commit from packaged .cargo_vcs_info.json",
+      "inspection": "Pinned-source API, decoder adapter, packet/flush/reset/output metadata, MP4 sample and edit handling, decoder limits; full released source available in Cargo registry. No upstream engine copied or hosted.",
+      "upstream_author": "Mark Karpeles (see upstream MIT LICENSE)"
+    },
+    {
+      "crate": "oxideav-h264",
+      "version": "0.1.10",
+      "repository": "https://github.com/OxideAV/oxideav-h264",
+      "commit": "f8404d8edfa5a4f4dff500704458da52695c24aa",
+      "license": "MIT",
+      "license_sha256": "4ecae6b086e0d2663c8629e7d3d7ab7d8b39958e8853f9e1371159499a0c3bf2",
+      "source": "Pinned Git dependency: published release at the same version omitted Decoder::output_params; this commit exposes decoded frame shape and pixel format.",
+      "inspection": "Pinned-source API, decoder adapter, packet/flush/reset/output metadata, MP4 sample and edit handling, decoder limits; full released source available in Cargo registry. No upstream engine copied or hosted.",
+      "upstream_author": "Mark Karpeles (see upstream MIT LICENSE)"
+    },
+    {
+      "crate": "oxideav-h265",
+      "version": "0.0.16",
+      "repository": "https://github.com/OxideAV/oxideav-h265",
+      "commit": "276406e4288e5333c6d6d184f2a6d36e72010ba5",
+      "license": "MIT",
+      "license_sha256": "4ecae6b086e0d2663c8629e7d3d7ab7d8b39958e8853f9e1371159499a0c3bf2",
+      "source": "Pinned Git dependency: published release at the same version omitted Decoder::output_params; this commit exposes decoded frame shape and pixel format.",
+      "inspection": "Pinned-source API, decoder adapter, packet/flush/reset/output metadata, MP4 sample and edit handling, decoder limits; full released source available in Cargo registry. No upstream engine copied or hosted.",
+      "upstream_author": "Mark Karpeles (see upstream MIT LICENSE)"
+    },
+    {
+      "crate": "oxideav-av1",
+      "version": "0.1.21",
+      "repository": "https://github.com/OxideAV/oxideav-av1",
+      "commit": "b3c95abe071037bb8ecf06dfc6ec17f1424a380d",
+      "license": "MIT",
+      "license_sha256": "4ecae6b086e0d2663c8629e7d3d7ab7d8b39958e8853f9e1371159499a0c3bf2",
+      "source": "Pinned Git dependency: published release at the same version omitted Decoder::output_params; this commit exposes decoded frame shape and pixel format.",
+      "inspection": "Pinned-source API, decoder adapter, packet/flush/reset/output metadata, MP4 sample and edit handling, decoder limits; full released source available in Cargo registry. No upstream engine copied or hosted.",
+      "upstream_author": "Mark Karpeles (see upstream MIT LICENSE)"
+    },
+    {
+      "crate": "oxideav-pixfmt",
+      "version": "0.1.11",
+      "repository": "https://github.com/OxideAV/oxideav-pixfmt",
+      "commit": "4170d13b5987aae95f0037af4fd35a8b95634b19",
+      "license": "MIT",
+      "license_sha256": "4ecae6b086e0d2663c8629e7d3d7ab7d8b39958e8853f9e1371159499a0c3bf2",
+      "source": "crates.io release; commit from packaged .cargo_vcs_info.json",
+      "inspection": "Pinned-source API, decoder adapter, packet/flush/reset/output metadata, MP4 sample and edit handling, decoder limits; full released source available in Cargo registry. No upstream engine copied or hosted.",
+      "upstream_author": "Mark Karpeles (see upstream MIT LICENSE)"
+    }
+  ],
+  "minimum_rust_version": "1.95"
+}

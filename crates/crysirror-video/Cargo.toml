@@ -3,8 +3,8 @@ name = "crysirror-video"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-rust-version.workspace = true
-description = "Device-free video decoding service over the vendored Siglus decoders (OMV/Theora, MPEG-1/2, WMV/VC-1)"
+rust-version = "1.95"
+description = "Device-free video decoding: OMV/Theora, MPEG-1/2, WMV/VC-1 and MP4 AVC/HEVC/AV1"
 
 [dependencies]
 anyhow.workspace = true
@@ -13,3 +13,11 @@ siglus_assets = { path = "../siglus-upstream/siglus_assets" }
 siglus_scene_vm = { path = "../siglus-upstream/siglus_scene_vm", default-features = false }
 na_mpeg2_decoder = { path = "../siglus-upstream/na_mpeg2_decoder" }
 wmv-decoder = { path = "../siglus-upstream/na_wmv_player", default-features = false }
+
+# Native Rust codecs; exact versions keep the source audit reproducible.
+oxideav-core = "=0.1.42"
+oxideav-mp4 = "=0.0.10"
+oxideav-h264 = { git = "https://github.com/OxideAV/oxideav-h264", rev = "f8404d8edfa5a4f4dff500704458da52695c24aa" }
+oxideav-h265 = { git = "https://github.com/OxideAV/oxideav-h265", rev = "276406e4288e5333c6d6d184f2a6d36e72010ba5" }
+oxideav-av1 = { git = "https://github.com/OxideAV/oxideav-av1", rev = "b3c95abe071037bb8ecf06dfc6ec17f1424a380d" }
+oxideav-pixfmt = "=0.1.11"

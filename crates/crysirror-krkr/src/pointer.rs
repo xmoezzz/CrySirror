@@ -73,8 +73,15 @@ pub fn install(rt: &mut Rt) {
             },
             |rt, t, v| {
                 let h = this_of(rt, t, "cursor")?;
+                // Standard krkr cursor constants (crDefault..crHandPoint) are
+                // kept per layer; the host does not yet switch its cursor
+                // shape on hover. Cursor resources (strings) need a shared
+                // cursor-image service and fail visibly.
+                if matches!(v, Variant::String(_)) {
+                    return Err(unsupported("cursor resource", "shared custom cursor image mapping"));
+                }
                 let v = v.to_integer()?;
-                if !matches!(v, -2 | -1 | 0) {
+                if !(-22..=0).contains(&v) {
                     return Err(unsupported(
                         "cursor shape",
                         "shared custom cursor shape/resource mapping",

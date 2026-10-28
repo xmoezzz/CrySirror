@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-28",
+  "repository": "https://github.com/xmoezzz/xp3-brute",
+  "commit": "c82cb14302138125640478556723705aa720007b",
+  "files": [
+    {
+      "path": "src/hxv4.rs",
+      "bytes": 64557,
+      "sha256": "20f2bd5d7850de13d0fb041a25551e8365db71aa1b79f1e17a984c091e28f167",
+      "review": "Complete Special authentication/decompression/object parsing and name-hash functions; no recovery solver, GPU, filesystem dictionary or name-mining pipeline imported.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/hxv4_native.rs",
+      "bytes": 24796,
+      "sha256": "bd81a4c9436dbe0c2a5846a38c2aec38fc69ac37596c619849db47163c3dc9f8",
+      "review": "Complete safe FilterManager interpreter/generator and offset XOR functions; original title-derived test PARAMS excluded, synthetic tests authored.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/krkr_exe.rs",
+      "bytes": 44071,
+      "sha256": "aa29da8749a1a2e1a2deb7f8bdedac83a7291c02e3bada37a0fba7131fbe307e",
+      "review": "Complete selected byte-analysis, PE resource decryption, KDF, archive-seed, constant-pool and synthetic vector functions; ambient filesystem/executable discovery/normalization/emulation excluded.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/xp3.rs",
+      "bytes": 78695,
+      "sha256": "b3d559f9715be017455e410e35cf0700c917a01c8e774d5342e326b4c50f9303",
+      "review": "Complete descriptor recognition, fake-id/name and protected-warning pruning functions reviewed; not copied as a second archive subsystem.",
+      "new_code_copied": false
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 1635,
+      "sha256": "4ae42007db2d0c95cf1b0e65f146f3bfb31aaeb0496ab0a838f6f7895de23c29",
+      "review": "Complete manifest inspected; license MIT. The whole upstream crate is not a dependency.",
+      "new_code_copied": false
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 291,
+      "sha256": "09ea419c7b107db06a93edc0ffb040b855616f3bd7c310a50d007de1954803a2",
+      "review": "Complete notice inspected. Its Win32/retrowin32 code is excluded.",
+      "new_code_copied": false
+    }
+  ],
+  "license_notice": "crates/crysirror-formats-arc/src/xp3/hxv4/NOTICE-MIT",
+  "ownership": "Existing shared Xp3 ArchiveFormat, scoped DecodeContext companion access, shared workers and VFS mounts. No upstream CLI or native engine runtime.",
+  "exclusions": [
+    "No game exe/DLL/TJS/fonts/ROM/key material or generated captures shipped",
+    "No Unicorn/retrowin32/Win32 host, GPU solver, native executable execution or whole xp3-brute dependency",
+    "No full game/plugin or every XP3 variant compatibility claim"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-28",
+  "repository": "https://github.com/wtnbgo/layerExDraw",
+  "commit": "f665a153fa774e47069f53e303329be15975d1e0",
+  "files": [
+    {
+      "path": "LayerExDraw.cpp",
+      "bytes": 61962,
+      "sha256": "cacb4aea77363f8293381067cbf08d34b124e55237208f991f46dd77bba28f3c",
+      "review": "Complete Appearance constructor/clear/addBrush, scalar SolidBrush branch; complete context reset/updateTransform/updateViewTransform/set/reset/rotate/scale/translate/clear, getPathExtents, draw/fill/_drawPath and drawPath/Rectangle/Polygon/Line(s) functions. Unsupported brush/pen/text/metafile algorithms not imported."
+    },
+    {
+      "path": "Path.cpp",
+      "bytes": 4838,
+      "sha256": "4443d313ede0dfca832490fff8323cef986506bb56a5dd3965ebd419e1a1b1da",
+      "review": "Complete file inspected, including unsupported curve/arc/ellipse functions; only rectangle/polygon/connected line and figure controls mapped."
+    },
+    {
+      "path": "main.cpp",
+      "bytes": 27667,
+      "sha256": "665fa1207524015afe30778800322ae3b48bf45dbb4be25027eeca4bbe0283e9",
+      "review": "Complete selected PointF/RectF and Matrix converter/subclass blocks; Appearance/Path and LayerExDraw attach tables. No ncbind/GDI object implementation copied."
+    },
+    {
+      "path": "LayerExDraw.hpp",
+      "bytes": 20374,
+      "sha256": "2eccc65ef1ed1d03e8ad4c0c9f350021331123cc8677f98c612927855e8e7ad7",
+      "review": "Complete selected Appearance/Path/draw/transform declarations and argument signatures inspected; no native pointers/types imported."
+    },
+    {
+      "path": "readme.txt",
+      "bytes": 881,
+      "sha256": "786e55646953c581884b9d76280fb4b99f8d74ca25c36a2943affc8ab480f022",
+      "review": "Complete project/license context inspected; reference only."
+    }
+  ],
+  "new_upstream_code_copied": false,
+  "scope": "Native semantic reference only. Pure geometry/bounds and raster live in CrySirror shared image; no GDI+, C++ DLL, Kirakira engine/rasterizer or game assets imported."
+}

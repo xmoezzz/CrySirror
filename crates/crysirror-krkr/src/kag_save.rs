@@ -1,8 +1,8 @@
 // Copyright (c) 2026 CrySirror contributors.
 // Distributed under the GNU Affero General Public License, version 3 or
 // (at your option) any later version, https://www.gnu.org/licenses/agpl-3.0.html.
-//! Original KAGParser dictionary names/layout for plain scenario/label boundaries.
-//! Active macro/call frames are refused, never replaced by a private save blob.
+//! Original KAGParser dictionary names/layout. Store maps active call frames and
+//! macro arguments; restoring active frames is refused, never faked.
 use crate::natives::*;
 use krkr_kag::{KagParser, Krkr2ConditionState, ParserSnapshot};
 use krkr_tjs2::{
@@ -38,23 +38,60 @@ fn conditions(rt: &mut Rt, h: ObjectHandle, c: &Krkr2ConditionState) {
         ),
     );
 }
+/// Native `tTJSNI_KAGParser::Store` layout (KAGParser c2269b2, KAGParser.cpp
+/// 491-683): call frames record storage, nearest label and the line offset
+/// from it (restore re-runs GoToLabel per frame).
 pub fn capture(rt: &mut Rt, p: &KagParser) -> Result<Variant> {
-    if p.call_stack_depth() != 0 || !p.macro_params().is_empty() {
-        return Err(unsupported(
-            "KAGParser.store",
-            "native active call/macro save mapping",
-        ));
-    }
     let h = rt.alloc_dictionary_object();
     let macros = rt.alloc_dictionary_object();
     for (n, s) in p.macro_definitions() {
         put(rt, macros, n, Variant::String(s.into()));
     }
     put(rt, h, "macros", Variant::Object(macros));
-    for name in ["macroArgs", "callStack"] {
-        let a = rt.alloc_array_object(vec![]);
-        put(rt, h, name, Variant::Object(a));
+    // Macro arguments of the expansion in progress (one native stack level).
+    let mut args = Vec::new();
+    if !p.macro_params().is_empty() {
+        let d = rt.alloc_dictionary_object();
+        for a in p.macro_params() {
+            if let krkr_kag::Attribute::Named { name, value } = a {
+                let v = match value {
+                    krkr_kag::AttributeValue::Literal(s) => Variant::String(s.clone()),
+                    krkr_kag::AttributeValue::Void => Variant::Void,
+                    _ => return Err(TjsError::runtime("unresolved KAG macro argument")),
+                };
+                put(rt, d, name, v);
+            }
+        }
+        args.push(Variant::Object(d));
     }
+    let depth = args.len() as i64;
+    let a = rt.alloc_array_object(args);
+    put(rt, h, "macroArgs", Variant::Object(a));
+    let mut frames = Vec::new();
+    for f in p.call_stack() {
+        let d = rt.alloc_dictionary_object();
+        let storage = f.storage().to_owned();
+        let label = f.current_label().unwrap_or("").to_owned();
+        let (line, pos) = p.line_pos_for_offset(&storage, f.offset()).unwrap_or((0, 0));
+        let base = if label.is_empty() {
+            0
+        } else {
+            p.label_line(&storage, &label).unwrap_or(0)
+        };
+        put(rt, d, "storage", Variant::String(storage));
+        put(rt, d, "label", Variant::String(label));
+        put(rt, d, "offset", Variant::Integer(line.saturating_sub(base) as i64));
+        put(rt, d, "orgLineStr", Variant::String(f.line_text().into()));
+        put(rt, d, "lineBuffer", Variant::String(String::new()));
+        put(rt, d, "pos", Variant::Integer(pos as i64));
+        for n in ["lineBufferUsing", "macroArgStackBase", "macroArgStackDepth"] {
+            put(rt, d, n, Variant::Integer(0));
+        }
+        conditions(rt, d, &f.krkr2_condition_state());
+        frames.push(Variant::Object(d));
+    }
+    let a = rt.alloc_array_object(frames);
+    put(rt, h, "callStack", Variant::Object(a));
     let storage = p.cur_storage().unwrap_or("");
     put(rt, h, "storageName", Variant::String(storage.into()));
     put(
@@ -88,9 +125,9 @@ pub fn capture(rt: &mut Rt, p: &KagParser) -> Result<Variant> {
         Variant::Integer(p.cur_pos().unwrap_or(0) as i64),
     );
     put(rt, h, "lineBuffer", Variant::String(String::new()));
-    for n in ["lineBufferUsing", "macroArgStackBase", "macroArgStackDepth"] {
-        put(rt, h, n, Variant::Integer(0));
-    }
+    put(rt, h, "lineBufferUsing", Variant::Integer(0));
+    put(rt, h, "macroArgStackBase", Variant::Integer(0));
+    put(rt, h, "macroArgStackDepth", Variant::Integer(depth));
     conditions(rt, h, &p.store().krkr2_condition_state());
     Ok(Variant::Object(h))
 }

@@ -221,6 +221,7 @@ struct Source {
     owner: std::thread::ThreadId,
 }
 impl crysirror_resource::Archive for Source {
+    fn resolve(&self,path:&str)->Option<u32>{(path=="hashed-alias.png").then_some(0)}
     fn entries(&self) -> &[crysirror_resource::ArchiveEntry] {
         &self.entries
     }
@@ -601,4 +602,107 @@ fn image_ready_results_obey_profile_residency_and_ui_events_stay_client_scoped()
     let retained = cx.call(ui, "drainEvents", &[]).unwrap().to_json();
     assert_eq!(retained.as_array().unwrap().len(), 1);
     assert_eq!(retained[0]["widget"]["owner"], owner.0);
+}
+
+#[test]
+fn worker_archive_publication_preserves_hashed_lookup_and_container_origin() {
+    struct Format {
+        bytes: Vec<u8>,
+        owner: std::thread::ThreadId,
+    }
+    impl crysirror_resource::ArchiveFormat for Format {
+        fn id(&self) -> &'static str {
+            "test/hashed"
+        }
+        fn probe(
+            &self,
+            _: &dyn crysirror_core::service::AssetReader,
+        ) -> Result<crysirror_resource::Probe> {
+            Ok(crysirror_resource::Probe::YES)
+        }
+        fn open(
+            &self,
+            _: Arc<dyn crysirror_core::service::AssetReader>,
+            _: &crysirror_resource::DecodeContext,
+        ) -> Result<Box<dyn crysirror_resource::Archive>> {
+            Ok(Box::new(Source {
+                entries: vec![crysirror_resource::ArchiveEntry {
+                    id: 0,
+                    path: "opaque-name".into(),
+                    size: self.bytes.len() as u64,
+                    stored_size: self.bytes.len() as u64,
+                    metadata: Json::Null,
+                }],
+                bytes: self.bytes.clone(),
+                opens: Arc::new(AtomicUsize::new(0)),
+                owner: self.owner,
+            }))
+        }
+    }
+    let (dir, mut app) = app();
+    let client = app.engine().unwrap().client;
+    let image = crysirror_image::ImageSurface::filled(2, 2, [13, 37, 71, 255]).unwrap();
+    let bytes = crysirror_image::encode_png_uncompressed(&image).unwrap();
+    std::fs::write(dir.path().join("assets/a/hashed.arc"), b"synthetic").unwrap();
+    app.context()
+        .state()
+        .unwrap()
+        .resources
+        .formats
+        .register(Arc::new(Format {
+            bytes,
+            owner: std::thread::current().id(),
+        }))
+        .unwrap();
+    let ticket = call(
+        &mut app,
+        "Resources",
+        "beginDecode",
+        json!(["hashed.arc","archive",{"format":"test/hashed"}]),
+    )
+    .unwrap()
+    .as_u64()
+    .unwrap();
+    assert_eq!(
+        ready(&mut app, "Resources", "decodeStatus", ticket)["state"],
+        "ready"
+    );
+    call(
+        &mut app,
+        "Resources",
+        "mountDecode",
+        json!([ticket, "pack"]),
+    )
+    .unwrap();
+    use crysirror_core::service::HostServices;
+    let storage = app.runtime_mut().unwrap().host.storage(client).unwrap();
+    assert_eq!(
+        storage.container_mount("hashed.arc").unwrap(),
+        Some("pack".into())
+    );
+    assert!(storage.container_mount("../hashed.arc").is_err());
+    let ticket = call(
+        &mut app,
+        "Resources",
+        "beginImage",
+        json!(["pack/hashed-alias.png"]),
+    )
+    .unwrap()
+    .as_u64()
+    .unwrap();
+    assert_eq!(
+        ready(&mut app, "Resources", "decodeStatus", ticket)["state"],
+        "ready"
+    );
+    call(&mut app, "Resources", "publishImage", json!([ticket, 17])).unwrap();
+    assert_eq!(
+        &*app
+            .runtime()
+            .unwrap()
+            .assets
+            .surface(client, "__surface/17")
+            .unwrap()
+            .rgba,
+        &image.rgba
+    );
 }

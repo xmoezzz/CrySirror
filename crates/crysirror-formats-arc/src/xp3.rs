@@ -8,6 +8,7 @@ use crysirror_resource::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 const MAGIC: &[u8] = b"XP3\r\n \n\x1a\x8bg\x01";
+mod hxv4;
 pub struct Xp3;
 impl ArchiveFormat for Xp3 {
     fn id(&self) -> &'static str {
@@ -85,11 +86,15 @@ impl ArchiveFormat for Xp3 {
         let mut names = BTreeMap::new();
         let mut entries = Vec::new();
         let mut plans = Vec::new();
+        let mut hxv4 = None;
         while c.left() > 0 {
             let tag = c.take(4)?;
             let size = usize::try_from(c.le64()?).context("XP3 chunk size overflow")?;
             let body = c.take(size)?;
-            if tag == b"hnfn" || tag == b"eliF" {
+            if tag == b"Hxv4" {
+                ensure!(hxv4.is_none(), "duplicate HXV4 descriptor");
+                hxv4 = Some(hxv4::descriptor(body, length(source.as_ref())?)?);
+            } else if tag == b"hnfn" || tag == b"eliF" {
                 let mut b = Cursor::new(body);
                 let hash = b.le32()?;
                 let chars = usize::from(b.le16()?);
@@ -110,12 +115,17 @@ impl ArchiveFormat for Xp3 {
                 anyhow::bail!("unsupported XP3 index record {:?}", tag);
             }
         }
-        Ok(Box::new(ParsedArchive {
+        let archive = ParsedArchive {
             format: self.id(),
             source,
             entries,
             plans,
-        }))
+        };
+        if let Some(d) = hxv4 {
+            hxv4::open(archive, d, context)
+        } else {
+            Ok(Box::new(archive))
+        }
     }
 }
 fn file_entry(

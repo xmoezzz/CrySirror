@@ -54,6 +54,7 @@ pub trait ImageDecoder: Send + Sync {
 pub mod associated;
 pub mod bitmap;
 pub mod effects;
+pub mod cximage;
 pub mod vector;
 pub mod warp;
 pub mod transition;
@@ -208,3 +209,5 @@ pub mod surface;
 pub mod pdt;
 
 pub mod cbg;
+
+pub mod vector_geometry;

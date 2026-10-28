@@ -42,9 +42,9 @@
   "krkr-tjs2/src/frontend/date.rs": "536abe095c99188523d6917ea32c9a0215576bfdb2eff02e156dab8d424c0c38",
   "krkr-tjs2/src/frontend/diagnostic.rs": "77a8857b926b1009019c7cd8e38cf869d68137586fe91960612dca747babe97a",
   "krkr-tjs2/src/frontend/hir.rs": "de9997250fa9c5c3018ff1a028e880e8eaa8a86c2cf88efbc7f089abe17ccddb",
-  "krkr-tjs2/src/frontend/lexer.rs": "500be97ad4203cdc19b7c1f6d26b99fa6e083dfe43506d9f04ac7acc7ce6c940",
+  "krkr-tjs2/src/frontend/lexer.rs": "f6eda99d5a26866b12b56f16baa6b3d1c29a06b43f9854c1d32fc241432a3fb8",
   "krkr-tjs2/src/frontend/mod.rs": "d5506c1a2124870649032f82e5f3c41788d44d7aec470e5e6034d0563fd2ddd2",
-  "krkr-tjs2/src/frontend/parser.rs": "0742c833dbb8c609b6d062a3856f470441add76f8fb79df75338687aef1943dd",
+  "krkr-tjs2/src/frontend/parser.rs": "66a3e3240ef5e8c93f0222340fa1c96bc616dc2d4967a8dc586b6ac989700021",
   "krkr-tjs2/src/frontend/pp.rs": "93986925b339a00960cc20d5a76f9e38cc8b6e829e50b980a0e2fb6681d27885",
   "krkr-tjs2/src/frontend/printer.rs": "670dae2a159a874a852dbfd83a50d519055705187490b411aa6d4e5305044b0e",
   "krkr-tjs2/src/frontend/snapshot.rs": "fd66b1742ccd0fbbf3a4293400ef8dec0f9bb1b181142b05a44d93ec24321523",
@@ -53,10 +53,10 @@
   "krkr-tjs2/src/frontend/token.rs": "5b54d172f705ba4fbb1249f05a8689809f3c65cd16464aac1cc7ea9b585ad8d7",
   "krkr-tjs2/src/lib.rs": "284e319078428ef1a8709fcbcec8fdedd429e4c894f7fd399685869f4711de77",
   "krkr-tjs2/src/runtime/array_tests.rs": "21bfe3a5baa73445a78b58bc67f76b888dcf585f12b7b65f8511de1454d19060",
-  "krkr-tjs2/src/runtime/builtins.rs": "17326bcdf7c47241d05e3ea99bd170cf52684d4f9beb4ef144db3536f34c4d24",
+  "krkr-tjs2/src/runtime/builtins.rs": "df142b3251eac0e282598ef69a69662c574db8e42754f5978a37f7ee4172466b",
   "krkr-tjs2/src/runtime/class_tests.rs": "0d1d88f0cf272f1d1c065f2a7c3c39272697606d74f34dc6298fd6cb2e562c5e",
   "krkr-tjs2/src/runtime/dictionary_tests.rs": "d8d27eb7cd748f8c729911e41099ef7e308d6962b16c4d0d92ae25e0f8462208",
-  "krkr-tjs2/src/runtime/mod.rs": "70fa5adab9680b35e77e9a0eb89f89e2a738619f5f89f1e991764b2a057f7d64",
+  "krkr-tjs2/src/runtime/mod.rs": "2cda5135c8b815a384f8fb71037ab9b815e8b1a35eb9107b8948ec05de641cd9",
   "krkr-tjs2/src/runtime/object.rs": "42488bdf0a66f39daac0077b319366c45316471c00029fdf3c6dc3f9f8c04723",
   "krkr-tjs2/src/runtime/symbol_table.rs": "99087dc7270cad345d42f06400cdd9bb88e9208b7f81ee1f79e97098a68262b2",
   "krkr-tjs2/src/runtime/tjs_ns0.rs": "d0b534db60e86774043bc4645053a78837957dd87e68689860d0ff39116719ba",
@@ -64,12 +64,38 @@
   "krkr-tjs2/src/vm/closure_tests.rs": "200a5b3c60a60364036c4bdd27c8ba7136b8c587a071334d2a557b9cde07b9a3",
   "krkr-tjs2/src/vm/dispatch.rs": "3b1927cf26b38aabddadbb5ed115ac6628bbdbecb810f734e6f2e3d2332610fd",
   "krkr-tjs2/src/vm/frame.rs": "c02590123fb928cb6c76995825db4a6cadbda940bc74c91ae9bc00350e50d044",
-  "krkr-tjs2/src/vm/mod.rs": "e06780cda65058d4af0d138bdf61b958a930861d03ec9844b8c44ece71959956",
+  "krkr-tjs2/src/vm/mod.rs": "fba0824efef8867a5128b94020c2d0ab42b17d31d81d8c507f23d93ab2f75ab9",
   "krkr-tjs2/src/vm/opcode.rs": "9774ab31241e2e767fd3b18b5c62b2652f423ba202d121175be05fa65bb3e694",
   "krkr-kag/src/error.rs": "d0d07711d51fbe53df0f32a05f08e64a0de36ec345f9b09a814e3a6982ed0458",
   "krkr-kag/src/lib.rs": "7f713335c5dffe5163110d0b7319a01c637434e981507fcd76f10dc7ad8d3b0d",
   "krkr-kag/src/parser.rs": "1d1693b8268ad772b2f433d87b2ad3c9a63baff741343dd23832d3360341c5bd",
   "krkr-kag/src/source.rs": "0617e974e05a730d2cf531eee6d2f3a82f70843d2e6e231ebe71a845a0af775f",
   "krkr-kag/src/tag.rs": "1dbae9be5d9bf2ab499313d4f14bffc45df976ca54ab8b58f4987e3d952ab45a"
+ },
+ "patched": {
+  "krkr-tjs2/src/frontend/lexer.rs": {
+   "upstream_sha256": "500be97ad4203cdc19b7c1f6d26b99fa6e083dfe43506d9f04ac7acc7ce6c940",
+   "reason": "skipped @if blocks: regexp-literal scan stops at a line break (division followed by // comments swallowed @endif)"
+  },
+  "krkr-tjs2/src/frontend/parser.rs": {
+   "upstream_sha256": "0742c833dbb8c609b6d062a3856f470441add76f8fb79df75338687aef1943dd",
+   "reason": "`&a.p incontextof t` passes the ignore-property context to the incontextof left operand, as krkrz tjsInterCodeGen.cpp does"
+  },
+  "krkr-tjs2/src/runtime/mod.rs": {
+   "upstream_sha256": "70fa5adab9680b35e77e9a0eb89f89e2a738619f5f89f1e991764b2a057f7d64",
+   "reason": "expose the calling script frame this to natives (static native member objthis); native Array extension registration updates existing instances and every VM array allocation path"
+  },
+  "krkr-tjs2/src/vm/mod.rs": {
+   "upstream_sha256": "e06780cda65058d4af0d138bdf61b958a930861d03ec9844b8c44ece71959956",
+   "reason": "record the calling frame this before call opcodes (see Runtime::native_caller_this)"
+  },
+  "krkr-tjs2/src/runtime/builtins.rs": {
+   "upstream_sha256": "17326bcdf7c47241d05e3ea99bd170cf52684d4f9beb4ef144db3536f34c4d24",
+   "reason": "native Array extension registration updates existing instances and every VM array allocation path"
+  },
+  "krkr-kag/src/parser.rs": {
+   "upstream_sha256": "1d1693b8268ad772b2f433d87b2ad3c9a63baff741343dd23832d3360341c5bd",
+   "reason": "`%name|default` macro arguments resolve (default included) whenever a macro argument frame is active, also for a macro invoked without arguments (KAG3 MacroArgStackDepth)"
+  }
  }
 }

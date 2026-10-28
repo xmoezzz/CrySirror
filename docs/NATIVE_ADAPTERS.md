@@ -428,3 +428,43 @@ self-copy remain unsupported. The modern vector/perspective/transition APIs are
 available independently; this phase does not advertise arbitrary third-party
 DLLs, complete layerExDraw/GDI or KaichoTrans compatibility. Native errors and
 remaining save/media/clip limitations from ADR 0088 still apply.
+
+## HXV4, JSON and bounded LayerExDraw (2026-10-28)
+
+ADR 0091 adds shared authenticated HXV4 resource parsing/filtering and optional
+labelled PE RCDATA startup resources. ArchiveMount owns requested-name hash lookup;
+KiriKiri storage adds only a scoped naming fallback. No binary plugin or second
+engine is executed. An archive's corruption-sentinel startup remains distinct
+from its executable's actual startup. tools/probe_krkr.py reproduces the offline
+resource/native probe without editing original game files. Native bootstrap/bres
+operations remain real compatibility requirements and cannot be skipped.
+
+ADR 0092 maps json.dll Scripts methods through shared bounded document values,
+read streams and atomic writes. ADR 0093 maps a solid-brush linear/rectangular
+LayerExDraw profile through shared vector geometry/bounds and image workers.
+Appearance/Path/transform state is native semantic data; the adapter has no private
+rasterizer. Pen/gradient/font/metafile and unsupported blending/AA semantics fail.
+The local 39-DLL inventory is not an executed dependency list or a claim that
+those DLLs are all implemented; see docs/krkr-plugin-audit.md.
+
+## game-kr continuation profiles (2026-10-28)
+
+The KiriKiri Motion ResourceManager/Player/LayerAdaptor profile maps `.mtn`
+resources to shared `crysirror-puppet-eluna` decoding, clocks and worker sampling.
+Immutable textures and validated PuppetFrames are published to engine-owned
+layers and drawn by the existing PuppetRenderer. Rectangle mesh clipping and
+UV/color interpolation are public puppet capabilities. Complex masks, action
+tags, feedback, timeline mixing and physics remain unsupported.
+
+`Array.save2` uses shared text-line encoding and asynchronous atomic writes;
+`fstat` read/query methods use scoped VFS metadata. Missing archive timestamps
+are absent rather than invented; unimplemented filesystem mutations throw.
+Native `crossfade` with children uses the engine isolated-subtree API (ADR 0094),
+then performs original-object exchange and one synchronous completion callback.
+Unsupported transition handlers and clocks fail explicitly. Engine GPU tests and
+headless native tests are recorded separately in STATUS.md; neither establishes
+that a complete game or every DLL works.
+
+Shared MP4 AVC/HEVC/AV1 video decoding is independent of this native VM and uses
+existing Media workers. It does not imply complete krmovie protocol or MP4 audio
+support. Codec versions, profile boundaries and sources are in crysirror-video.

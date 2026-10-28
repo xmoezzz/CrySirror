@@ -147,19 +147,23 @@ fn unsupported_natives_fail_visibly() {
     let (_t, mut r) = fixture(
         r#"var win = new Window(); var base = new Layer(win, null);
            var l = new Layer(win, base); l.loadImages("image/chara");
-           l.fillRect(1, 1, 4, 4, 0x80ffffff);"#,
+           l.fillRect(1, 1, 4, 4, 0x80ffffff); l.getMainPixel(0, 0);"#,
         &[],
     );
+    // Partial translucent fillRect is a shared canvas replace-fill now; a
+    // still-unmapped native fails visibly after it.
     let e = failure(&mut r);
-    assert!(e.contains("partial translucent Layer.fillRect"), "{e}");
+    assert!(e.contains("Layer.getMainPixel"), "{e}");
 
-    let (_t, mut r) = fixture(r#"Plugins.link("extrans.dll");"#, &[]);
+    let (_t, mut r) = fixture(r#"Plugins.link("nosuchplugin.dll");"#, &[]);
     let e = failure(&mut r);
     assert!(e.contains("native DLLs are never loaded"), "{e}");
 
-    let (_t, mut r) = fixture(r#"var w = new Window(); w.setInnerSize(800, 600);"#, &[]);
+    // A uniform zoom of the canvas is a valid display size; another aspect
+    // ratio needs letterboxing, which is not mapped.
+    let (_t, mut r) = fixture(r#"var w = new Window(); w.setInnerSize(800, 500);"#, &[]);
     let e = failure(&mut r);
-    assert!(e.contains("project canvas"), "{e}");
+    assert!(e.contains("project canvas aspect ratio"), "{e}");
 }
 
 #[test]
@@ -367,7 +371,7 @@ fn kag_nested_load_callback_keeps_its_label_change_and_unknown_saves_fail_visibl
  class P extends KAGParser {function P(){super.KAGParser();ignoreCR=true;} function onScenarioLoaded(name){goToLabel('*chosen');}}
  var p=new P();p.loadScenario('first.ks');
  if(p.getNextTag().value!='chosen')throw new Exception('nested label lost');
- var bad=false;try{p.store();}catch(e){bad=true;}if(!bad)throw new Exception('unmapped save succeeded');
+ var d=p.store();if(d.callStack.count!=0||d.macroArgs.count!=0||d.curLabel=='')throw new Exception('native store layout');
  Debug.message('kag-reentry-ok');
  "#,
         &[(
@@ -601,7 +605,7 @@ fn native_hit_filter_uses_super_work_flag_and_disabled_hit_blocks_fallthrough() 
     let (_d, mut r) = fixture(
         r#"
     global.block=false;global.presses=0;
-    class W extends Window { function W(){super.Window();} function onKeyDown(k,s){block=true;top.enabled=false;} }
+    class W extends Window { function W(){super.Window();} function onKeyDown(k,s){block=true;global.top.enabled=false;} }
     class Button extends Layer {function Button(w,p){super.Layer(w,p);}function onMouseDown(x,y,b,s){presses++;Debug.message('background-press',presses);} }
     class Filter extends Layer {function Filter(w,p){super.Layer(w,p);}function onHitTest(x,y,b){super.onHitTest(x,y,block);return !block;} }
     var w=new W();var root=new Layer(w,null);root.visible=true;
@@ -786,4 +790,184 @@ fn layer_ex_raster_plugin_routes_real_copy_to_shared_image_worker() {
     );
     assert_eq!(image.rgba[19], 0);
     assert_eq!(image.rgba[23], 0);
+}
+
+#[test]
+fn native_default_directory_changes_scoped_resolution_and_rejects_unknown_media() {
+    let (d, mut r) = fixture(
+        r#"
+    Storages.setDefaultPath('system/');
+    if(Storages.getFullPath('local.tjs')!='file://./system/local.tjs')throw new Exception('default path');
+    Scripts.execStorage('local.tjs');
+    var bad=false;try{Storages.setDefaultPath('missing-delimiter');}catch(e){bad=true;}if(!bad)throw new Exception('delimiter');
+    bad=false;try{Storages.setDefaultPath('bres://./');}catch(e){bad=true;}if(!bad)throw new Exception('unknown media');
+    if(Storages.getFullPath('local.tjs')!='file://./system/local.tjs')throw new Exception('failed mutation');
+    Storages.setDefaultPath('file://./');
+    if(Storages.getFullPath('local.tjs')!='file://./local.tjs')throw new Exception('root reset');
+    Debug.message('scoped-directory-done');
+    "#,
+        &[],
+    );
+    std::fs::create_dir_all(d.path().join("assets/game/system")).unwrap();
+    std::fs::write(
+        d.path().join("assets/game/system/local.tjs"),
+        "Debug.message('relative-script-loaded');",
+    )
+    .unwrap();
+    r.tick(0, InputFrame::default()).unwrap();
+    let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log.contains("relative-script-loaded") && log.contains("scoped-directory-done"));
+}
+
+#[test]
+fn native_archive_uris_resolve_only_previously_mounted_client_containers() {
+    use crysirror_core::vfs::{MemoryProvider, VfsProvider};
+    use std::sync::Arc;
+    struct Container(MemoryProvider);
+    impl VfsProvider for Container {
+        fn kind(&self) -> &'static str {
+            "synthetic-container"
+        }
+        fn container_source(&self) -> Option<&str> {
+            Some("game/data.xp3")
+        }
+        fn read(&self, p: &str) -> crysirror_core::Result<Vec<u8>> {
+            self.0.read(p)
+        }
+        fn exists(&self, p: &str) -> bool {
+            self.0.exists(p)
+        }
+        fn list(&self) -> crysirror_core::Result<Vec<String>> {
+            self.0.list()
+        }
+    }
+    let (_d, mut r) = fixture(
+        r#"
+      Storages.setDefaultPath('data.xp3>');
+      if(Storages.getFullPath('next.tjs')!='file://./data.xp3>next.tjs')throw new Exception('archive uri');
+      Scripts.execStorage('next.tjs');
+      var bad=false;try{Storages.setDefaultPath('file://./absent.xp3>');}catch(e){bad=true;}
+      if(!bad)throw new Exception('unmounted archive admitted');
+      Storages.setDefaultPath('file://./');Storages.addAutoPath('data.xp3>');Scripts.execStorage('next.tjs');
+      Storages.removeAutoPath('data.xp3>');
+      Debug.message('container-uris-done');
+    "#,
+        &[],
+    );
+    let mut provider = MemoryProvider::new();
+    provider
+        .insert("next.tjs", b"Debug.message('container-loaded');".to_vec())
+        .unwrap();
+    r.mount_provider(ClientId(1), "game/container", Arc::new(Container(provider)))
+        .unwrap();
+    r.tick(0, InputFrame::default()).unwrap();
+    let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log.contains("container-uris-done"));
+    assert_eq!(log.matches("container-loaded").count(), 2);
+}
+
+#[test]
+fn storage_string_arguments_coerce_explicit_void_but_require_an_argument() {
+    let (_t, mut r) = fixture(r#"
+        if (Storages.chopStorageExt(void) !== "") throw "void extension";
+        if (Storages.extractStorageExt(void) !== "") throw "void ext";
+        if (Storages.extractStorageName(void) !== "") throw "void name";
+        if (Storages.extractStoragePath(void) !== "") throw "void path";
+        if (Storages.chopStorageExt("dir.ext/a.png") !== "dir.ext/a") throw "path";
+        var rejected = false;
+        try { Storages.chopStorageExt(); } catch (e) { rejected = true; }
+        if (!rejected) throw "missing argument accepted";
+        Debug.message("storage coercion passed");
+    "#, &[]);
+    r.tick(0, InputFrame::default()).unwrap();
+    assert!(r.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("storage coercion passed"));
+}
+
+#[test]
+fn windowex_cursor_uses_engine_input_in_virtual_client_coordinates() {
+    let (_t, mut r) = fixture(r#"
+        Plugins.link("windowEx.dll");
+        class TestWindow extends Window {
+            function TestWindow() { super.Window(); setInnerSize(320, 240); visible = true; }
+            function onMouseMove(x, y, shift) {
+                if (x == 0 && y == 0) return;
+                var p = System.getCursorPos();
+                var rect = getClientRect();
+                if (p.x !== 100 || p.y !== 60) throw "cursor scale";
+                if (rect.x !== 0 || rect.y !== 0 || rect.w !== 320 || rect.h !== 240) throw "client geometry";
+                Debug.message("cursor snapshot passed");
+            }
+        }
+        var w = new TestWindow();
+    "#, &[]);
+    r.tick(0, InputFrame::default()).unwrap();
+    r.tick(16, InputFrame { pointer_x: 200, pointer_y: 120, ..Default::default() }).unwrap();
+    assert!(r.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("cursor snapshot passed"));
+}
+
+#[test]
+fn native_order_modes_preserve_siblings_and_publish_engine_order() {
+    let (_t, mut r) = fixture(r#"
+        var w = new Window(); w.visible = true;
+        var base = new Layer(w, null); base.visible = true;
+        var a = new Layer(w, base); a.visible = true;
+        var b = new Layer(w, base); b.visible = true;
+        var c = new Layer(w, base); c.visible = true;
+        if (base.absoluteOrderMode || a.absolute != 0 || b.absolute != 1 || c.absolute != 2) throw "initial order";
+        a.absolute = 20;
+        if (!base.absoluteOrderMode || a.order != 2 || b.order != 0) throw "absolute order";
+        c.absolute = 1;
+        if (c.order != 0 || b.order != 1) throw "equal indices insert before";
+        base.absoluteOrderMode = false;
+        if (a.absolute != 2 || c.absolute != 0) throw "relative indices";
+        a.order = 0;
+        if (a.order != 0 || c.order != 1 || b.order != 2) throw "relative move";
+        c.absolute = -10;
+        if (!base.absoluteOrderMode || c.order != 0 || a.order != 1 || b.order != 2) throw "reenable absolute";
+        Debug.message("order modes passed");
+    "#, &[]);
+    r.tick(0, InputFrame::default()).unwrap();
+    let l = &r.host.engine.layers;
+    assert!(l.get(ClientId(1), 8).unwrap().order < l.get(ClientId(1), 4).unwrap().order);
+    assert!(l.get(ClientId(1), 4).unwrap().order < l.get(ClientId(1), 6).unwrap().order);
+}
+
+
+#[test]
+fn native_crossfade_uses_engine_clock_and_exchanges_once() {
+    let (_t, mut r) = fixture(r#"
+        var w = new Window(); w.visible = true;
+        var base = new Layer(w, null); base.visible = true;
+        var count = 0;
+        class Front extends Layer {
+            function Front(w,p) { super.Layer(w,p); }
+            function onTransitionCompleted(dest,src) {
+                count++;
+                if (count != 1) throw "completion count";
+                if (dest !== a) throw "completion dest identity";
+                if (src !== b) throw "completion src identity";
+                if (a.inTransition || a.visible || !b.visible || a.order != 1 || b.order != 0) throw "exchange state";
+                Debug.message("crossfade complete");
+            }
+        }
+        var a = new Front(w,base); a.visible = true;
+        var b = new Layer(w,base); b.visible = false;
+        a.stopTransition();
+        var rejected=false;
+        try { a.beginTransition("unknown",true,b,%[time:100]); } catch(e) { rejected=true; }
+        if (!rejected || a.inTransition) throw "unsupported mutated state";
+        a.beginTransition("crossfade",true,b,%[time:100]);
+        if (!a.inTransition) throw "transition did not start";
+    "#, &[]);
+    r.tick(0,InputFrame::default()).unwrap();
+    assert_eq!(r.host.engine.layers.crossfade(ClientId(1),4).unwrap().elapsed_ms,0);
+    r.tick(50,InputFrame::default()).unwrap();
+    assert!(r.host.engine.layers.frame([640,480]).unwrap().iter().any(|p| p.composite.is_some()));
+    r.tick(100,InputFrame::default()).unwrap();
+    // Engine service clocks advance before the next VM owner poll.
+    r.tick(101,InputFrame::default()).unwrap();
+    r.tick(200,InputFrame::default()).unwrap();
+    assert!(r.host.engine.layers.crossfade(ClientId(1),4).is_none());
+    let log=r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert_eq!(log.matches("crossfade complete").count(),1,"{log}");
 }

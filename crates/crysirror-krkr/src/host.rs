@@ -26,6 +26,9 @@ const MAX_LOG: usize = 4096;
 
 #[derive(Clone, Debug)]
 pub struct LayerState {
+    pub kind: i64,
+    /// Drawing clip (krkr setClip) in image pixels; `None` is the whole image.
+    pub draw_clip: Option<[i64; 4]>,
     pub image_source: Option<crysirror_core::image_processing::ImageInput>,
     pub regions: crysirror_core::region_map::RegionMap,
     pub slot: u32,
@@ -43,6 +46,7 @@ pub struct LayerState {
     pub visible: bool,
     pub opacity: i64,
     pub absolute: i64,
+    pub absolute_order_mode: bool,
     /// Nothing has been drawn since the surface was cleared to transparency,
     /// so source-over and replace are the same operation.
     pub full_alpha: Option<u8>,
@@ -90,6 +94,17 @@ pub enum Batch {
 }
 
 pub struct KrkrHost {
+    pub(crate) transitions: crate::transitions::State,
+    pub(crate) protect: crate::protect_plugin::State,
+    /// Companion executable name reported as `System.exeName`.
+    pub executable: Option<String>,
+    /// KAGParserEx linked: new parsers use the extended format.
+    pub kag_ex: bool,
+    pub(crate) text_render: crate::text_render_plugin::State,
+    pub(crate) motion: crate::motion_plugin::State,
+    pub(crate) csv: crate::csv_plugin::State,
+    pub(crate) psbfile: crate::psbfile_plugin::State,
+    pub(crate) draws: crate::draw_plugin::State,
     pub image_job: Option<(usize, crysirror_core::image_processing::ImageJob, [bool; 2])>,
     pub io_barrier: bool,
     pub writes: std::collections::VecDeque<Box<dyn crysirror_core::service::StorageWrite>>,
@@ -124,7 +139,16 @@ pub struct KrkrHost {
 impl KrkrHost {
     pub fn new(canvas: [u32; 2], font: String) -> Self {
         Self {
+            protect: Default::default(),
+            executable: None,
+            kag_ex: false,
+            text_render: Default::default(),
+            motion: Default::default(),
+            transitions: Default::default(),
+            csv: Default::default(),
+            psbfile: Default::default(),
             image_job: None,
+            draws:Default::default(),
             io_barrier: false,
             writes: Default::default(),
             can_suspend: true,
@@ -174,6 +198,13 @@ impl KrkrHost {
         Ok(())
     }
     pub fn push_log(&mut self, line: String) {
+        // Developer diagnostic: append every VM log line to a local file.
+        if let Some(path) = std::env::var_os("CRYSIRROR_KRKR_LOG_FILE") {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(f, "{line}");
+            }
+        }
         if self.log.len() >= MAX_LOG {
             self.log.remove(0);
         }
@@ -274,6 +305,7 @@ impl KrkrHost {
         let primary = parent.is_none();
         let size = DEFAULT_LAYER_SIZE as i64;
         let state = LayerState {
+            kind: if primary { 1 } else { 2 },
             image_source: None,
             regions: crysirror_core::region_map::RegionMap::new(
                 self.client,
@@ -295,6 +327,7 @@ impl KrkrHost {
             visible: primary,
             opacity: 255,
             absolute: 0,
+            absolute_order_mode: false,
             full_alpha: Some(0),
             image_modified: true,
             has_image: true,
@@ -303,6 +336,7 @@ impl KrkrHost {
             major: 0,
             dirty: true,
             presented: None,
+            draw_clip: None,
         };
         let mut parent_container = None;
         if let Some(p) = parent {
@@ -334,6 +368,32 @@ impl KrkrHost {
 
     /// Resize a layer's image, discarding its contents (KiriKiri semantics of
     /// `setImageSize` with a fresh transparent bitmap).
+    /// krkr image resize: contents stay anchored at the top-left.
+    pub fn resize_surface(&mut self, h: ObjectHandle, w: i64, height: i64) -> TjsResult<()> {
+        if !(1..=8192).contains(&w) || !(1..=8192).contains(&height) {
+            return Err(TjsError::runtime(format!(
+                "invalid layer image size {w}x{height}"
+            )));
+        }
+        let regions =
+            crysirror_core::region_map::RegionMap::new(self.client, [w as u32, height as u32])
+                .map_err(|e| TjsError::runtime(e.to_string()))?;
+        let slot = {
+            let l = self.layer_mut(h)?;
+            l.regions = regions;
+            l.full_alpha = None;
+            l.image_modified = true;
+            l.image_source = None;
+            l.image_width = w;
+            l.image_height = height;
+            l.draw_clip = None;
+            l.dirty = true;
+            l.slot
+        };
+        self.canvas_op(json!({"op":"resize","id":slot,"width":w,"height":height}));
+        self.layer_mut(h)?.presented = None;
+        Ok(())
+    }
     pub fn reset_surface(
         &mut self,
         h: ObjectHandle,
@@ -357,6 +417,7 @@ impl KrkrHost {
             l.image_modified = true;
             l.image_width = w;
             l.image_height = height;
+            l.draw_clip = None;
             l.blank = fill[3] == 0;
             l.dirty = true;
             l.slot
@@ -370,6 +431,24 @@ impl KrkrHost {
 
     /// Remove the engine nodes of a layer subtree (children first).
     pub fn detach_subtree(&mut self, h: usize) {
+        let cancelled: Vec<_> = self.transitions.0.iter()
+            .filter(|(dest, source)| **dest == h || **source == h)
+            .map(|(&dest, _)| dest).collect();
+        for dest in cancelled {
+            self.transitions.0.remove(&dest);
+            let surface_only = self.transitions.1.remove(&dest);
+            if let Some(layer) = self.layers.get(&dest) {
+                let (id, temp) = (
+                    if surface_only { layer.presentation() } else { layer.container() },
+                    crate::transitions::temp_presentation(layer.slot),
+                );
+                self.layer_op(json!({"op":"end_crossfade", "id":id}));
+                if surface_only {
+                    self.canvas_op(json!({"op":"hide","layer":temp}));
+                }
+            }
+        }
+
         let children = self
             .layers
             .get(&h)
@@ -410,13 +489,34 @@ impl KrkrHost {
         }
     }
 
-    /// Children in painter order: stable by `absolute`, then insertion order.
+    /// Switching modes preserves painter order; entering absolute mode seeds
+    /// the native absolute indices from the current sibling indices.
+    pub fn set_order_mode(&mut self, h: ObjectHandle, absolute: bool) -> TjsResult<()> {
+        if self.layer(h)?.absolute_order_mode == absolute {
+            return Ok(());
+        }
+        let children = self.sorted_children(h.0);
+        if absolute {
+            for (index, child) in children.iter().enumerate() {
+                self.layers.get_mut(child).unwrap().absolute = index as i64;
+            }
+        }
+        let layer = self.layer_mut(h)?;
+        layer.children = children;
+        layer.absolute_order_mode = absolute;
+        layer.dirty = true;
+        Ok(())
+    }
+
+    /// Native sibling order, translated by sync into engine Layer order keys.
     pub fn sorted_children(&self, h: usize) -> Vec<usize> {
         let Some(l) = self.layers.get(&h) else {
             return vec![];
         };
         let mut children = l.children.clone();
-        children.sort_by_key(|c| self.layers.get(c).map_or(0, |c| c.absolute));
+        if l.absolute_order_mode {
+            children.sort_by_key(|c| self.layers.get(c).map_or(0, |c| c.absolute));
+        }
         children
     }
 
@@ -530,7 +630,9 @@ pub fn container_spec(l: &LayerState, major: i32, parent: Option<u32>, shown: bo
 
 impl TjsHost for KrkrHost {
     fn invalidate_object(&mut self, handle: ObjectHandle) {
+        self.motion.invalidate(handle.0);
         self.sounds.invalidate(handle.0);
+        self.draws.invalidate(handle.0);
         self.timers.remove(&handle.0);
         self.parsers.remove(&handle.0);
         for kind in 0..4 {

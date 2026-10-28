@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `4fa7e1d7f355d61a`
+API fingerprint: `94359a5460ac7b99`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -191,7 +191,7 @@ Script global: `canvases`.
 | `apply(commands: Record<string, any>[])` | `void` | Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs. |
 | `get(id: number)` | `Record<string, any> \| null` | Inspect this client's canvas dimensions and logical draw nodes, or null when absent. No flattened native frame is returned. |
 
-Commands issued: `apply` → `canvas.create`, `apply` → `canvas.clear`, `apply` → `canvas.draw`, `apply` → `canvas.set`, `apply` → `canvas.copy`, `apply` → `canvas.present`, `apply` → `canvas.hide`.
+Commands issued: `apply` → `canvas.create`, `apply` → `canvas.clear`, `apply` → `canvas.draw`, `apply` → `canvas.set`, `apply` → `canvas.copy`, `apply` → `canvas.resize`, `apply` → `canvas.fill`, `apply` → `canvas.transform_copy`, `apply` → `canvas.copy_subtree`, `apply` → `canvas.fade`, `apply` → `canvas.present`, `apply` → `canvas.hide`.
 
 ## Class Client
 
@@ -388,9 +388,12 @@ Script global: `layers`.
 | `setClip(id: number, clip: number[] \| null)` | `void` | Clip rectangle [x,y,w,h] or null. |
 | `setFilter(id: number, filter: Record<string, any> \| null)` | `void` | Siglus-style 2D filter {mono, invert, bright, dark, color_rate, color, add, tone_curve?:{asset,row,saturation}, mask?:{asset,gray_alpha}, alpha_test, distortion?:{kind:'mosaic'\|'raster'\|'radial_blur'\|'threshold_fade',...}} or null. |
 | `transition(transition: Record<string, any>)` | `void` | Screen transition from the last presented frame: {effect:{kind:'crossfade'\|'mask'{asset,fade}\|'slide'{direction}\|'mosaic'{size}\|'ordered_dither'{cell:[x,y],diagonal?,steps}\|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'\|'ease_in'\|'ease_out'\|'smooth'}. |
+| `crossfadeStatus(id: number)` | `Record<string, any> \| null` | Owned subtree transition {source, duration_ms, elapsed_ms}, or null. |
+| `beginCrossfade(id: number, source: number, durationMs: number)` | `void` | Crossfade two isolated sibling subtrees using the engine clock. |
+| `endCrossfade(id: number)` | `void` | Release a subtree crossfade; leaves original nodes intact. |
 | `endTransition(—)` | `void` | Finish this client's transition now (skip). |
 
-Commands issued: `put` → `layer.put`, `remove` → `layer.remove`, `setTransform` → `layer.set_transform`, `setVisible` → `layer.set_visible`, `completeReveal` → `layer.complete_reveal`, `setOpacity` → `layer.set_opacity`, `setOrder` → `layer.set_order`, `setClip` → `layer.set_clip`, `setFilter` → `layer.set_filter`, `transition` → `layer.transition`, `endTransition` → `layer.end_transition`.
+Commands issued: `put` → `layer.put`, `remove` → `layer.remove`, `setTransform` → `layer.set_transform`, `setVisible` → `layer.set_visible`, `completeReveal` → `layer.complete_reveal`, `setOpacity` → `layer.set_opacity`, `setOrder` → `layer.set_order`, `setClip` → `layer.set_clip`, `setFilter` → `layer.set_filter`, `transition` → `layer.transition`, `endTransition` → `layer.end_transition`, `beginCrossfade` → `layer.begin_crossfade`, `endCrossfade` → `layer.end_crossfade`.
 
 ## Class Localization
 
@@ -722,12 +725,19 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | layer | `set_filter` | `Layers.setFilter` |
 | layer | `transition` | `Layers.transition` |
 | layer | `end_transition` | `Layers.endTransition` |
+| layer | `begin_crossfade` | `Layers.beginCrossfade` |
+| layer | `end_crossfade` | `Layers.endCrossfade` |
 | layer | `puppet` | `Puppets.setParameter` |
 | canvas | `create` | `Canvases.apply` |
 | canvas | `clear` | `Canvases.apply` |
 | canvas | `draw` | `Canvases.apply` |
 | canvas | `set` | `Canvases.apply` |
 | canvas | `copy` | `Canvases.apply` |
+| canvas | `resize` | `Canvases.apply` |
+| canvas | `fill` | `Canvases.apply` |
+| canvas | `transform_copy` | `Canvases.apply` |
+| canvas | `copy_subtree` | `Canvases.apply` |
+| canvas | `fade` | `Canvases.apply` |
 | canvas | `present` | `Canvases.apply` |
 | canvas | `hide` | `Canvases.apply` |
 | ui | `set_menu` | `Ui.setMenu` |
@@ -774,6 +784,10 @@ Reusable image operations. All channels are straight RGBA bytes; RGB-only transf
 | `perspective` | `quad: [[f32; 2]; 4]` | Map the whole source into a convex quad, keeping canvas dimensions. |
 | `gamma` | `gamma: [f32; 3], floor: [i32; 3], ceiling: [i32; 3]` | Per-channel pow(value/255,1/gamma), floor/ceiling in byte units. Fully transparent pixels keep hidden RGB, matching the Krkr gamma profile. |
 | `grayscale` | — | Integer luminance: (54R+183G+19B)/256, truncated. |
+| `brightness_contrast` | `brightness: i32, contrast: i32` | CxImage brightness/contrast LUT (brightness -255..255, contrast -100..100). |
+| `colorize` | `hue: u8, saturation: u8, blend: f64` | CxImage HSL colorize: replace hue/saturation (0..255), keep lightness. |
+| `hsl_modulate` | `hue: i32, saturation: i32, luminance: i32` | HSL modulate: hue degrees, saturation/luminance percent (-100..100). |
+| `white_noise` | `seed: u32` | Grey white noise replacing RGB; alpha is unchanged. |
 | `invert` | — | — |
 | `gaussian_blur` | `sigma: f32` | Separable Gaussian on premultiplied floating RGBA, clamped image edges. |
 | `noise` | `seed: u32, amplitude: u8, monochrome: bool` | Deterministic signed uniform RGB noise. Alpha is unchanged. |
@@ -1300,6 +1314,7 @@ Used by: Rust HostServices/ChannelAudio playback parameters.
 | `pan` | `f32` | — | Stereo balance 0..1, with 0.5 centered. |
 | `looping` | `bool` | — | Repeat source input, default false. |
 | `loop_start` | `u64` | — | Decoded-source frame to repeat from, default zero. |
+| `loop_end` | `Option<u64>` | — | Decoded-source frame at which a loop jumps back to `loop_start`; None loops at the end of the source. |
 | `start_ms` | `u64` | — | Startup position in source milliseconds unless start_frame is set. |
 | `start_frame` | `Option<u64>` | — | Exact decoded-source frame; when present this overrides start_ms. |
 | `clamp_range` | `bool` | — | Clamp authored source/loop positions to the prepared source boundary. |
@@ -1878,6 +1893,10 @@ Used by: Bitmap.blit and Bitmap.stretch mode.
 | `copy_rgb` | — | Copy/opacity-lerp RGB only, retaining destination alpha. |
 | `copy_non_transparent` | — | Copy all four channels only when the source alpha is nonzero. Alpha selects coverage; it does not become an additional blend weight. |
 | `source_over` | — | Conventional straight RGBA source-over, including destination alpha. |
+| `opaque_scalar256` | — | Encoded-byte scalar interpolation /256; full opacity copies RGBA, otherwise alpha is zero. No color-space conversion is performed. |
+| `mask_scalar256` | — | Scalar source-alpha /256 interpolation into an opaque bitmap. Writes alpha zero even at source alpha zero; opacity zero skips the whole draw. |
+| `opaque_on_alpha_scalar256` | — | Encoded-byte scalar opaque-source blend onto straight alpha. Full opacity copies RGB and writes alpha 255; partial opacity uses the scalar opacity-on-opacity lookup table, ignoring source alpha. |
+| `alpha_on_alpha_scalar256` | — | Encoded-byte scalar straight-alpha blend using the scalar lookup table. This deliberately preserves the scalar transparent-pixel quirks; it is not the SIMD or conventional /255 source-over profile. |
 | `mask255` | — | Straight mask blend: truncate opacity*source_alpha/255, rounded RGB, alpha = dst_alpha + floor((255-dst_alpha)*effective_alpha/255). |
 | `premultiplied_mask256` | — | Premultiplied RGB + byte mask: src + floor((256-mask)*dst/256), saturating; mask zero skips, destination alpha is retained. Only opacity=255 is supported; native fade parameters need a separate operation. |
 
@@ -2995,7 +3014,8 @@ Variants are tagged by `"kind"`.
 | `solid` | `color: [u8; 4]` | Solid RGBA8 fill. |
 | `image` | `asset: String, tint: [u8; 4]` | Image asset with an RGBA8 tint. |
 | `text` | `text: String, font: String, size: u16, color: [u8; 4], layout: String` | Text with an explicit project font alias, pixel size, color and layout. |
-| `glyph_run` | `font: String, size: f32, color: [u8; 4], bold: bool, glyphs: Vec<PositionedGlyph>, reveal: Option<GlyphReveal>` | Retained explicit glyph positions, rendered as independent cached glyph quads. No VM renderer or flattened text/screen image is involved. |
+| `glyph_run` | `font: String, size: f32, color: [u8; 4], bold: bool, glyphs: Vec<PositionedGlyph>, reveal: Option<GlyphReveal>, blur: Option<GlyphBlur>` | Retained explicit glyph positions, rendered as independent cached glyph quads. No VM renderer or flattened text/screen image is involved. |
+| `snapshot` | `size: [u32; 2], layers: Vec<LayerSpec>` | Frozen, source-local static scene, rasterized once at `size` before the outer Layer's transform, opacity, UV crop and filter are applied. Inputs contain no nested snapshots, external parents or dynamic state. |
 | `puppet` | `asset: String, tint: [u8; 4]` | 2D deformable puppet (ADR 0029): an engine puppet rig JSON asset, fitted into the layer rect (aspect preserved). |
 
 ### PositionedGlyph
@@ -3066,7 +3086,7 @@ Variants are tagged by `"kind"`.
 | Variant | Fields | Description |
 |---|---|---|
 | `draw` | `layer: LayerSpec` | — |
-| `group` | `offset: [f32; 2], clip: [f32; 4], opacity: u8, nodes: Vec<CanvasNode>` | — |
+| `group` | `offset: [f32; 2], clip: [f32; 4], opacity: u8, nodes: Vec<CanvasNode>, rotate: f32, scale: [f32; 2]` | — |
 
 ### CanvasCommand
 
@@ -3078,9 +3098,14 @@ Variants are tagged by `"op"`.
 |---|---|---|
 | `create` | `id: u32, width: u32, height: u32` | Issued by `Canvases.apply`. |
 | `clear` | `id: u32, color: [u8; 4]` | Issued by `Canvases.apply`. |
+| `resize` | `id: u32, width: u32, height: u32` | Change the surface size, keeping its contents anchored at the top-left; area outside previous content stays transparent. |
 | `draw` | `id: u32, layer: LayerSpec` | Issued by `Canvases.apply`. |
 | `set` | `id: u32, layer: LayerSpec` | Atomically replace this surface's contents with one logical resource draw. |
-| `copy` | `source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool` | Issued by `Canvases.apply`. |
+| `copy` | `source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool, clip: Option<[f32; 4]>` | Issued by `Canvases.apply`. |
+| `fill` | `id: u32, rect: [f32; 4], color: [u8; 4], replace: bool, keep_alpha: bool` | Fill `rect` with a solid colour; `replace` replaces the region's pixels (transparent colours included) instead of drawing over them.  `keep_alpha` sets only the colour of the region's existing content and keeps its alpha (krkr `holdAlpha` fills); `color[3]` is then ignored. |
+| `fade` | `id: u32, rect: [f32; 4], opacity: u8` | Multiply the alpha of `rect`'s existing content by `opacity`/255, colour unchanged (krkr negative-opacity colorRect). The region is frozen as one isolated snapshot so overlapping draws fade as a single composite. |
+| `transform_copy` | `source: u32, destination: u32, rect: [f32; 4], matrix: [f32; 6], replace: bool, clip: Option<[f32; 4]>` | Copy `rect` of `source` through an affine map of source-surface coordinates (`[a, b, c, d, tx, ty]`: x' = a·x + c·y + tx, y' = b·x + d·y + ty) without skew. `replace` replaces the covered destination region; it requires an axis-aligned result. |
+| `copy_subtree` | `source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], clip: Option<[f32; 4]>` | Freeze a visible, static, normal-alpha Layer subtree as one snapshot draw. The renderer rasterizes it at its original size before later effects. `rect` is source-root-local; `position` and `clip` are destination-space. The region is replaced, including alpha. Root placement/visibility/opacity and inheritance from outside the subtree do not enter the snapshot. |
 | `present` | `id: u32, layer: u32, order: i32, parent: Option<u32>, position: [f32; 2]` | Issued by `Canvases.apply`. |
 | `hide` | `layer: u32` | Issued by `Canvases.apply`. |
 
@@ -3624,6 +3649,8 @@ Variants are tagged by `"op"`.
 | `set_filter` | `id: u32, filter: Option<LayerFilter>` | Issued by `Layers.setFilter`. |
 | `puppet` | `id: u32, command: PuppetCommand` | Drive a puppet layer (ADR 0029). |
 | `transition` | `transition: TransitionSpec` | Start a screen transition owned by this client. |
+| `begin_crossfade` | `id: u32, source: u32, duration_ms: u64` | Crossfade two equally sized sibling subtrees using isolated engine targets. |
+| `end_crossfade` | `id: u32` | Release a subtree transition after observing completion or cancellation. |
 | `end_transition` | — | Finish this client's transition immediately (skip). |
 
 ### UiCommand
@@ -3688,6 +3715,7 @@ One logical menu item; children and radio groups are engine-owned.
 | `radio` | `bool` | `false` | Selecting this item clears radio siblings in the same group. |
 | `group` | `u32` | `0` | Sibling radio group identity. |
 | `separator` | `bool` | `false` | Render a noninteractive separator row. |
+| `shortcut` | `String` | `""` | Accelerator text shown beside the label (e.g. `Ctrl+F12`). Displayed only: keyboard activation is not yet bound by the menu service. |
 | `children` | `Vec<MenuItemSpec>` | `[]` | Nested menu items, at most sixteen levels. |
 
 ### OperationStatus
@@ -3767,6 +3795,8 @@ Used by: UiEvent.widget client/local identity.
 | `font_alias` | `String` | Project font alias used for every KiriKiri font face. |
 | `canvas` | `[u32; 2]` | Logical canvas size; must equal the project canvas. |
 | `plugin_shells` | `Vec<String>` | Explicit registration-only native modules, with no callable exports. Loading a shell does not establish implementation of that plugin. |
+| `executable` | `Option<String>` | Companion executable basename reported by `System.exeName`. |
+| `bootstrap_profile` | `Option<String>` | Engine-published protected-bootstrap profile (`hxv4_bootstrap_profile`) that `Plugins.linkZ` must match before installing its facade. |
 
 ### `reallive`
 

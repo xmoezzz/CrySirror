@@ -38,6 +38,27 @@ pub enum ImageEffect {
     },
     /// Integer luminance: (54R+183G+19B)/256, truncated.
     Grayscale,
+    /// CxImage brightness/contrast LUT (brightness -255..255, contrast -100..100).
+    BrightnessContrast {
+        brightness: i32,
+        contrast: i32,
+    },
+    /// CxImage HSL colorize: replace hue/saturation (0..255), keep lightness.
+    Colorize {
+        hue: u8,
+        saturation: u8,
+        blend: f64,
+    },
+    /// HSL modulate: hue degrees, saturation/luminance percent (-100..100).
+    HslModulate {
+        hue: i32,
+        saturation: i32,
+        luminance: i32,
+    },
+    /// Grey white noise replacing RGB; alpha is unchanged.
+    WhiteNoise {
+        seed: u32,
+    },
     Invert,
     /// Separable Gaussian on premultiplied floating RGBA, clamped image edges.
     GaussianBlur {
@@ -87,6 +108,24 @@ impl ImageEffect {
                     "gamma ramp bounds"
                 );
             }
+            Self::BrightnessContrast {
+                brightness,
+                contrast,
+            } => ensure!(
+                (-65535..=65535).contains(brightness) && (-65535..=65535).contains(contrast),
+                "brightness/contrast bounds"
+            ),
+            Self::Colorize { blend, .. } => ensure!(blend.is_finite(), "colorize blend"),
+            Self::HslModulate {
+                hue,
+                saturation,
+                luminance,
+            } => ensure!(
+                [hue, saturation, luminance]
+                    .iter()
+                    .all(|v| (-65535..=65535).contains(*v)),
+                "modulate bounds"
+            ),
             Self::GaussianBlur { sigma } => ensure!(
                 sigma.is_finite() && (0.0..=16.).contains(sigma),
                 "blur sigma must be 0..16"
@@ -143,7 +182,7 @@ impl ImageSurface {
         let w = self.width as usize;
         let h = self.height as usize;
         let mut seed = match effect {
-            ImageEffect::Noise { seed, .. } => *seed,
+            ImageEffect::Noise { seed, .. } | ImageEffect::WhiteNoise { seed } => *seed,
             _ => 0,
         };
         if seed == 0 {
@@ -156,6 +195,14 @@ impl ImageSurface {
             seed
         };
         let mut lut = [[0u8; 256]; 3];
+        if let ImageEffect::BrightnessContrast {
+            brightness,
+            contrast,
+        } = effect
+        {
+            lut = [crate::cximage::brightness_contrast_lut(*brightness, *contrast); 3];
+        }
+
         if let ImageEffect::Gamma {
             gamma,
             floor,
@@ -185,6 +232,32 @@ impl ImageSurface {
                                 out.rgba[at + c] = lut[c][p[c] as usize];
                             }
                         }
+                    }
+                    // Native operates on BGRA without consulting alpha.
+                    ImageEffect::BrightnessContrast { .. } => {
+                        for c in 0..3 {
+                            out.rgba[at + c] = lut[c][p[c] as usize];
+                        }
+                    }
+                    ImageEffect::Colorize {
+                        hue,
+                        saturation,
+                        blend,
+                    } => {
+                        let v = crate::cximage::colorize([p[0], p[1], p[2]], *hue, *saturation, *blend);
+                        out.rgba[at..at + 3].copy_from_slice(&v);
+                    }
+                    ImageEffect::HslModulate {
+                        hue,
+                        saturation,
+                        luminance,
+                    } => {
+                        let v = crate::cximage::modulate([p[0], p[1], p[2]], *hue, *saturation, *luminance);
+                        out.rgba[at..at + 3].copy_from_slice(&v);
+                    }
+                    ImageEffect::WhiteNoise { .. } => {
+                        let n = (random() % 256) as u8;
+                        out.rgba[at..at + 3].fill(n);
                     }
                     ImageEffect::Grayscale => {
                         let v =

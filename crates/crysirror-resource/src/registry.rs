@@ -119,6 +119,7 @@ pub struct ArchiveMount {
     archive: Box<dyn Archive>,
     context: DecodeContext,
     paths: BTreeMap<String, u32>,
+    directories: BTreeMap<String, Vec<String>>,
 }
 impl ArchiveMount {
     pub fn new(archive: Box<dyn Archive>, context: DecodeContext) -> Result<Self> {
@@ -126,7 +127,7 @@ impl ArchiveMount {
             archive.entries().len() <= context.limits.max_entries,
             "archive entry limit"
         );
-        let mut paths = BTreeMap::new();
+        let mut paths: BTreeMap<String, u32> = BTreeMap::new();
         let mut ids = std::collections::BTreeSet::new();
         for entry in archive.entries() {
             let native = entry.path.replace('\\', "/");
@@ -137,26 +138,74 @@ impl ArchiveMount {
                 "duplicate archive path or id"
             );
         }
+        let mut directories: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+        let mut directory_bytes = 0usize;
+        for path in paths.keys() {
+            let mut parent = String::new();
+            for part in path.split('/') {
+                if !directories.contains_key(&parent) {
+                    directory_bytes = directory_bytes
+                        .checked_add(parent.len() + 64)
+                        .context("directory index size overflow")?;
+                    ensure!(
+                        directory_bytes <= 16 * 1024 * 1024,
+                        "archive directory index byte limit"
+                    );
+                }
+                let children = directories.entry(parent.clone()).or_default();
+                if !children.contains(part) {
+                    directory_bytes = directory_bytes
+                        .checked_add(part.len() + 64)
+                        .context("directory index size overflow")?;
+                    ensure!(
+                        directory_bytes <= 16 * 1024 * 1024,
+                        "archive directory index byte limit"
+                    );
+                    children.insert(part.into());
+                }
+                if !parent.is_empty() {
+                    parent.push('/')
+                }
+                parent.push_str(part);
+            }
+        }
         Ok(Self {
             archive,
             context,
             paths,
+            directories: directories
+                .into_iter()
+                .map(|(k, v)| (k, v.into_iter().collect()))
+                .collect(),
         })
     }
     pub fn entries(&self) -> &[ArchiveEntry] {
         self.archive.entries()
     }
+    fn entry_id(&self, path: &str) -> Option<u32> {
+        let checked = VfsPath::new(Mount::Asset, path).ok()?;
+        if checked.relative() != path {
+            return None;
+        }
+        self.paths
+            .get(path)
+            .copied()
+            .or_else(|| self.archive.resolve(path))
+    }
     pub fn open_entry(&self, path: &str) -> Result<Arc<dyn AssetReader>> {
-        let id = *self.paths.get(path).context("archive entry not found")?;
+        let id = self.entry_id(path).context("archive entry not found")?;
         self.archive.open(id, &self.context)
     }
 }
 impl VfsProvider for ArchiveMount {
+    fn container_source(&self) -> Option<&str> {
+        self.context.source_name.as_deref()
+    }
     fn kind(&self) -> &'static str {
         "archive"
     }
     fn read(&self, path: &str) -> crysirror_core::Result<Vec<u8>> {
-        let Some(&id) = self.paths.get(path) else {
+        let Some(id) = self.entry_id(path) else {
             return Err(crysirror_core::Error::NotFound);
         };
         let source = self
@@ -167,13 +216,19 @@ impl VfsProvider for ArchiveMount {
             .map_err(|e| crysirror_core::Error::Io(format!("{e:#}")))
     }
     fn exists(&self, path: &str) -> bool {
-        self.paths.contains_key(path)
+        self.entry_id(path).is_some()
+    }
+    fn list_dir(&self, dir: &str) -> crysirror_core::Result<Vec<String>> {
+        if !dir.is_empty() && VfsPath::new(Mount::Asset, dir)?.relative() != dir {
+            return Err(crysirror_core::Error::Invalid("archive directory path"));
+        }
+        Ok(self.directories.get(dir).cloned().unwrap_or_default())
     }
     fn list(&self) -> crysirror_core::Result<Vec<String>> {
         Ok(self.paths.keys().cloned().collect())
     }
     fn open(&self, path: &str) -> crysirror_core::Result<Arc<dyn AssetReader>> {
-        let Some(&id) = self.paths.get(path) else {
+        let Some(id) = self.entry_id(path) else {
             return Err(crysirror_core::Error::NotFound);
         };
         self.archive

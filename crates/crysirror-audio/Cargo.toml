@@ -27,3 +27,4 @@ rodio = { version = "0.17.3", optional = true, default-features = false, feature
 
 # Device-free native resource codecs, not the original engine runtime.
 siglus_assets = { path = "../siglus-upstream/siglus_assets" }
+opus-decoder = "=0.1.1"

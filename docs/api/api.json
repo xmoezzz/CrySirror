@@ -102,6 +102,16 @@
           "doc": "Explicit registration-only native modules, with no callable exports. Loading a shell does not establish implementation of that plugin.",
           "name": "plugin_shells",
           "rust_type": "Vec<String>"
+        },
+        {
+          "doc": "Companion executable basename reported by `System.exeName`.",
+          "name": "executable",
+          "rust_type": "Option<String>"
+        },
+        {
+          "doc": "Engine-published protected-bootstrap profile (`hxv4_bootstrap_profile`) that `Plugins.linkZ` must match before installing its facade.",
+          "name": "bootstrap_profile",
+          "rust_type": "Option<String>"
         }
       ]
     },
@@ -3348,6 +3358,47 @@
           "returns": "void"
         },
         {
+          "doc": "Owned subtree transition {source, duration_ms, elapsed_ms}, or null.",
+          "name": "crossfadeStatus",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Crossfade two isolated sibling subtrees using the engine clock.",
+          "name": "beginCrossfade",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "source",
+              "type": "number"
+            },
+            {
+              "name": "durationMs",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Release a subtree crossfade; leaves original nodes intact.",
+          "name": "endCrossfade",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Finish this client's transition now (skip).",
           "name": "endTransition",
           "params": [],
@@ -5454,6 +5505,16 @@
       "system": "layer"
     },
     {
+      "api": "Layers.beginCrossfade",
+      "op": "begin_crossfade",
+      "system": "layer"
+    },
+    {
+      "api": "Layers.endCrossfade",
+      "op": "end_crossfade",
+      "system": "layer"
+    },
+    {
       "api": "Puppets.setParameter",
       "op": "puppet",
       "system": "layer"
@@ -5481,6 +5542,31 @@
     {
       "api": "Canvases.apply",
       "op": "copy",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "resize",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "fill",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "transform_copy",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "copy_subtree",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "fade",
       "system": "canvas"
     },
     {
@@ -5658,6 +5744,30 @@
           "doc": "Integer luminance: (54R+183G+19B)/256, truncated.",
           "name": "grayscale",
           "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "CxImage brightness/contrast LUT (brightness -255..255, contrast -100..100).",
+          "name": "brightness_contrast",
+          "rust_type": "brightness: i32, contrast: i32"
+        },
+        {
+          "default": null,
+          "doc": "CxImage HSL colorize: replace hue/saturation (0..255), keep lightness.",
+          "name": "colorize",
+          "rust_type": "hue: u8, saturation: u8, blend: f64"
+        },
+        {
+          "default": null,
+          "doc": "HSL modulate: hue degrees, saturation/luminance percent (-100..100).",
+          "name": "hsl_modulate",
+          "rust_type": "hue: i32, saturation: i32, luminance: i32"
+        },
+        {
+          "default": null,
+          "doc": "Grey white noise replacing RGB; alpha is unchanged.",
+          "name": "white_noise",
+          "rust_type": "seed: u32"
         },
         {
           "default": null,
@@ -7025,6 +7135,12 @@
           "doc": "Decoded-source frame to repeat from, default zero.",
           "name": "loop_start",
           "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Decoded-source frame at which a loop jumps back to `loop_start`; None loops at the end of the source.",
+          "name": "loop_end",
+          "rust_type": "Option<u64>"
         },
         {
           "default": null,
@@ -8762,6 +8878,30 @@
           "default": null,
           "doc": "Conventional straight RGBA source-over, including destination alpha.",
           "name": "source_over",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Encoded-byte scalar interpolation /256; full opacity copies RGBA, otherwise alpha is zero. No color-space conversion is performed.",
+          "name": "opaque_scalar256",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Scalar source-alpha /256 interpolation into an opaque bitmap. Writes alpha zero even at source alpha zero; opacity zero skips the whole draw.",
+          "name": "mask_scalar256",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Encoded-byte scalar opaque-source blend onto straight alpha. Full opacity copies RGB and writes alpha 255; partial opacity uses the scalar opacity-on-opacity lookup table, ignoring source alpha.",
+          "name": "opaque_on_alpha_scalar256",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Encoded-byte scalar straight-alpha blend using the scalar lookup table. This deliberately preserves the scalar transparent-pixel quirks; it is not the SIMD or conventional /255 source-over profile.",
+          "name": "alpha_on_alpha_scalar256",
           "rust_type": ""
         },
         {
@@ -12399,7 +12539,13 @@
           "default": null,
           "doc": "Retained explicit glyph positions, rendered as independent cached glyph quads. No VM renderer or flattened text/screen image is involved.",
           "name": "glyph_run",
-          "rust_type": "font: String, size: f32, color: [u8; 4], bold: bool, glyphs: Vec<PositionedGlyph>, reveal: Option<GlyphReveal>"
+          "rust_type": "font: String, size: f32, color: [u8; 4], bold: bool, glyphs: Vec<PositionedGlyph>, reveal: Option<GlyphReveal>, blur: Option<GlyphBlur>"
+        },
+        {
+          "default": null,
+          "doc": "Frozen, source-local static scene, rasterized once at `size` before the outer Layer's transform, opacity, UV crop and filter are applied. Inputs contain no nested snapshots, external parents or dynamic state.",
+          "name": "snapshot",
+          "rust_type": "size: [u32; 2], layers: Vec<LayerSpec>"
         },
         {
           "default": null,
@@ -12570,7 +12716,7 @@
           "default": null,
           "doc": "",
           "name": "group",
-          "rust_type": "offset: [f32; 2], clip: [f32; 4], opacity: u8, nodes: Vec<CanvasNode>"
+          "rust_type": "offset: [f32; 2], clip: [f32; 4], opacity: u8, nodes: Vec<CanvasNode>, rotate: f32, scale: [f32; 2]"
         }
       ],
       "name": "CanvasNode",
@@ -12593,6 +12739,12 @@
         },
         {
           "default": null,
+          "doc": "Change the surface size, keeping its contents anchored at the top-left; area outside previous content stays transparent.",
+          "name": "resize",
+          "rust_type": "id: u32, width: u32, height: u32"
+        },
+        {
+          "default": null,
           "doc": "",
           "name": "draw",
           "rust_type": "id: u32, layer: LayerSpec"
@@ -12607,7 +12759,31 @@
           "default": null,
           "doc": "",
           "name": "copy",
-          "rust_type": "source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool"
+          "rust_type": "source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool, clip: Option<[f32; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "Fill `rect` with a solid colour; `replace` replaces the region's pixels (transparent colours included) instead of drawing over them.  `keep_alpha` sets only the colour of the region's existing content and keeps its alpha (krkr `holdAlpha` fills); `color[3]` is then ignored.",
+          "name": "fill",
+          "rust_type": "id: u32, rect: [f32; 4], color: [u8; 4], replace: bool, keep_alpha: bool"
+        },
+        {
+          "default": null,
+          "doc": "Multiply the alpha of `rect`'s existing content by `opacity`/255, colour unchanged (krkr negative-opacity colorRect). The region is frozen as one isolated snapshot so overlapping draws fade as a single composite.",
+          "name": "fade",
+          "rust_type": "id: u32, rect: [f32; 4], opacity: u8"
+        },
+        {
+          "default": null,
+          "doc": "Copy `rect` of `source` through an affine map of source-surface coordinates (`[a, b, c, d, tx, ty]`: x' = a·x + c·y + tx, y' = b·x + d·y + ty) without skew. `replace` replaces the covered destination region; it requires an axis-aligned result.",
+          "name": "transform_copy",
+          "rust_type": "source: u32, destination: u32, rect: [f32; 4], matrix: [f32; 6], replace: bool, clip: Option<[f32; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "Freeze a visible, static, normal-alpha Layer subtree as one snapshot draw. The renderer rasterizes it at its original size before later effects. `rect` is source-root-local; `position` and `clip` are destination-space. The region is replaced, including alpha. Root placement/visibility/opacity and inheritance from outside the subtree do not enter the snapshot.",
+          "name": "copy_subtree",
+          "rust_type": "source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], clip: Option<[f32; 4]>"
         },
         {
           "default": null,
@@ -14330,6 +14506,18 @@
         },
         {
           "default": null,
+          "doc": "Crossfade two equally sized sibling subtrees using isolated engine targets.",
+          "name": "begin_crossfade",
+          "rust_type": "id: u32, source: u32, duration_ms: u64"
+        },
+        {
+          "default": null,
+          "doc": "Release a subtree transition after observing completion or cancellation.",
+          "name": "end_crossfade",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
           "doc": "Finish this client's transition immediately (skip).",
           "name": "end_transition",
           "rust_type": ""
@@ -14577,6 +14765,12 @@
           "rust_type": "bool"
         },
         {
+          "default": "",
+          "doc": "Accelerator text shown beside the label (e.g. `Ctrl+F12`). Displayed only: keyboard activation is not yet bound by the menu service.",
+          "name": "shortcut",
+          "rust_type": "String"
+        },
+        {
           "default": [],
           "doc": "Nested menu items, at most sixteen levels.",
           "name": "children",
@@ -14693,7 +14887,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "4fa7e1d7f355d61a",
+  "fingerprint": "94359a5460ac7b99",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

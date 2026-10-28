@@ -1,0 +1,23 @@
+{
+  "schema": 2,
+  "name": "Self-authored native vector API proof",
+  "content_revision": "1",
+  "assets": "assets",
+  "canvas": [
+    640,
+    420
+  ],
+  "clients": [
+    {
+      "name": "native",
+      "adapter": "krkr",
+      "game": "self-authored-vector",
+      "config": {
+        "canvas": [
+          640,
+          420
+        ]
+      }
+    }
+  ]
+}

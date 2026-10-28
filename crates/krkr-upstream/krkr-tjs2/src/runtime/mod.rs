@@ -285,6 +285,7 @@ impl NativeCallTrace {
 
 pub struct Runtime<H: TjsHost = NoHost> {
     pub(crate) heap: Vec<Object>,
+    pub(crate) array_extensions: BTreeMap<String, Variant>,
     pub(crate) global: ObjectHandle,
     pub(crate) script_files: Vec<ScriptFile>,
     pub(crate) native_functions: Vec<Arc<dyn NativeFunction<H>>>,
@@ -294,6 +295,9 @@ pub struct Runtime<H: TjsHost = NoHost> {
     pub(crate) call_depth: usize,
     pub(crate) max_call_depth: usize,
     pub(crate) suspend_requested: bool,
+    /// `this` of the script frame that issued the current call (krkr passes
+    /// it as objthis to static native members such as scriptsEx functions).
+    pub(crate) native_caller_this: Option<ObjectHandle>,
     pub(crate) suspended_call: Option<SuspendedCallStack>,
     pub(crate) debugger: Option<Debugger>,
     pub(crate) debug_ui: Option<Box<dyn DebugUi<H>>>,
@@ -338,6 +342,7 @@ impl<H: TjsHost + 'static> Runtime<H> {
     pub fn with_host(host: H) -> Self {
         let mut runtime = Self {
             heap: vec![Object::default()],
+            array_extensions: BTreeMap::new(),
             global: ObjectHandle(0),
             script_files: Vec::new(),
             native_functions: Vec::new(),
@@ -347,6 +352,7 @@ impl<H: TjsHost + 'static> Runtime<H> {
             call_depth: 0,
             max_call_depth: 1024,
             suspend_requested: false,
+            native_caller_this: None,
             suspended_call: None,
             debugger: None,
             debug_ui: None,
@@ -388,6 +394,18 @@ impl<H: TjsHost + 'static> Runtime<H> {
 
     pub fn alloc_ordinary_object(&mut self) -> ObjectHandle {
         self.alloc_object(Object::default())
+    }
+
+    /// Register a non-static native Array member for existing and future arrays.
+    /// Keeps VM allocation paths (literals, split, host results) equivalent to
+    /// constructor-created instances when a plugin extends the native class.
+    pub fn register_array_extension(&mut self, name: &str, value: Variant) {
+        self.array_extensions.insert(name.to_owned(), value.clone());
+        for object in &mut self.heap {
+            if object.array_elements().is_some() {
+                object.set(name, value.clone());
+            }
+        }
     }
 
     pub fn alloc_array_object(&mut self, elements: Vec<Variant>) -> ObjectHandle {
@@ -1064,6 +1082,11 @@ impl<H: TjsHost + 'static> Runtime<H> {
         let file_id = self.install_script_file(Arc::new(file.clone()));
         let mut vm = Vm::new(file_id, self)?;
         vm.execute_top_level_with_this(this_obj)
+    }
+
+    /// `this` of the script frame whose call reached the running native.
+    pub fn native_caller_this(&self) -> Option<ObjectHandle> {
+        self.native_caller_this
     }
 
     pub fn request_suspend(&mut self) {

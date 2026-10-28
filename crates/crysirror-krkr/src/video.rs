@@ -8,7 +8,18 @@ use krkr_tjs2::runtime::Variant;
 pub fn install(rt: &mut Rt) {
     let c = native_class(rt, "VideoOverlay", |rt, t, _| {
         let h = this_of(rt, t, "VideoOverlay")?;
-        for (n, v) in [("mode", 0), ("visible", 0), ("loop", 0), ("frame", 0)] {
+        for (n, v) in [
+            ("mode", 0),
+            ("visible", 0),
+            ("loop", 0),
+            ("frame", 0),
+            ("left", 0),
+            ("top", 0),
+            ("width", 0),
+            ("height", 0),
+            ("volume", 100000),
+            ("pan", 0),
+        ] {
             rt.set_object_member(h, n, Variant::Integer(v));
         }
         Ok(Variant::Void)
@@ -30,11 +41,47 @@ pub fn install(rt: &mut Rt) {
                     "native media continuation mapping",
                 ))
             }),
-            ("stop", |_, _, _| {
-                Err(unsupported(
-                    "VideoOverlay.stop",
-                    "native media continuation mapping",
-                ))
+            // open always fails visibly, so no overlay is ever playing;
+            // krkrz Stop without an opened video is a no-op.
+            ("stop", |_, _, _| Ok(Variant::Void)),
+        ],
+    );
+    // Geometry/mixing state is recorded; it takes effect once playback maps
+    // onto the shared video service (open/play still fail visibly).
+    methods(
+        rt,
+        c,
+        &[
+            ("setPos", |rt, t, a| {
+                let h = this_of(rt, t, "VideoOverlay.setPos")?;
+                for (i, k) in ["left", "top"].iter().enumerate() {
+                    rt.set_object_member(h, *k, Variant::Integer(int(&a, i, 0)?));
+                }
+                Ok(Variant::Void)
+            }),
+            ("setSize", |rt, t, a| {
+                let h = this_of(rt, t, "VideoOverlay.setSize")?;
+                for (i, k) in ["width", "height"].iter().enumerate() {
+                    rt.set_object_member(h, *k, Variant::Integer(int(&a, i, 0)?));
+                }
+                Ok(Variant::Void)
+            }),
+            ("setBounds", |rt, t, a| {
+                let h = this_of(rt, t, "VideoOverlay.setBounds")?;
+                for (i, k) in ["left", "top", "width", "height"].iter().enumerate() {
+                    rt.set_object_member(h, *k, Variant::Integer(int(&a, i, 0)?));
+                }
+                Ok(Variant::Void)
+            }),
+            ("close", |_, _, _| Ok(Variant::Void)),
+            ("pause", |_, _, _| {
+                Err(unsupported("VideoOverlay.pause", "native media continuation mapping"))
+            }),
+            ("rewind", |_, _, _| {
+                Err(unsupported("VideoOverlay.rewind", "native media continuation mapping"))
+            }),
+            ("prepare", |_, _, _| {
+                Err(unsupported("VideoOverlay.prepare", "shared prepared media resources"))
             }),
         ],
     );

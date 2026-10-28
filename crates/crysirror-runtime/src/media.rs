@@ -8,7 +8,10 @@ use crysirror_core::{
     service::{AssetReader, AudioParameters, AudioRequest, ClientStorage, PcmAudio, PcmBus},
     state::ClientId,
 };
-use crysirror_video::mpeg::{self, VideoFrame};
+use crysirror_video::{
+    isobmff,
+    mpeg::{self, VideoFrame},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -233,6 +236,16 @@ fn protected(journal: &Mutex<Journal>, work: impl FnOnce() -> Result<()>) {
         }
     }
 }
+/// Probe without consuming the capability-backed reader's cursor.
+fn mp4_input(reader: &mut (impl Read + Seek)) -> Result<bool> {
+    let start = reader.stream_position()?;
+    let mut head = [0u8; 8];
+    let result = reader.read_exact(&mut head);
+    reader.seek(SeekFrom::Start(start))?;
+    result.context("media container header")?;
+    Ok(isobmff::is_mp4(&head))
+}
+
 struct Workers {
     video: Receiver<QueuedFrame>,
     audio: Option<Receiver<Option<AudioTrack>>>,
@@ -288,27 +301,40 @@ impl Workers {
                         return Ok(());
                     }
                     let mut video_reader = AssetCursor::new(video_input.reader()?)?;
-                    if let Some(info) = mpeg::sequence_info(&mut video_reader)? {
-                        frame_duration
-                            .store(info.frame_ms.round().max(1.) as u64, Ordering::Release);
-                    }
-                    mpeg::decode_video(
-                        video_reader,
-                        || stop.load(Ordering::Acquire),
-                        |frame| {
-                            if stop.load(Ordering::Acquire) {
-                                return Ok(false);
+                    let mp4 = mp4_input(&mut video_reader)?;
+                    let publish = |frame: VideoFrame| -> Result<bool> {
+                        if stop.load(Ordering::Acquire) {
+                            return Ok(false);
+                        }
+                        let reservation = video_budget.reserve(frame.rgba.len())?;
+                        counter.fetch_add(1, Ordering::Relaxed);
+                        Ok(video_tx
+                            .send(QueuedFrame {
+                                frame,
+                                _reservation: reservation,
+                            })
+                            .is_ok())
+                    };
+                    if mp4 {
+                        let mut decoder = isobmff::Mp4Stream::new(video_reader)?;
+                        if let Some(fps) = decoder.info().fps {
+                            frame_duration
+                                .store((1000. / fps).round().max(1.) as u64, Ordering::Release);
+                        }
+                        while let Some(frame) =
+                            decoder.next_frame(|| stop.load(Ordering::Acquire))?
+                        {
+                            if !publish(frame)? {
+                                break;
                             }
-                            let reservation = video_budget.reserve(frame.rgba.len())?;
-                            counter.fetch_add(1, Ordering::Relaxed);
-                            Ok(video_tx
-                                .send(QueuedFrame {
-                                    frame,
-                                    _reservation: reservation,
-                                })
-                                .is_ok())
-                        },
-                    )?;
+                        }
+                    } else {
+                        if let Some(info) = mpeg::sequence_info(&mut video_reader)? {
+                            frame_duration
+                                .store(info.frame_ms.round().max(1.) as u64, Ordering::Release);
+                        }
+                        mpeg::decode_video(video_reader, || stop.load(Ordering::Acquire), publish)?;
+                    }
                     Ok(())
                 });
             })
@@ -334,7 +360,14 @@ impl Workers {
                         if stop.load(Ordering::Acquire) {
                             return Ok(());
                         }
-                        let reader = AssetCursor::new(source.reader()?)?;
+                        let mut reader = AssetCursor::new(source.reader()?)?;
+                        if mp4_input(&mut reader)? {
+                            let decoder = isobmff::Mp4Stream::new(reader)?;
+                            ensure!(!decoder.has_audio(),
+                                "MP4 audio tracks are not supported by Media yet; explicitly disable audio for video-only playback");
+                            let _ = tx.send(None);
+                            return Ok(());
+                        }
                         let mut builder = None;
                         let mut input_samples = 0usize;
                         let mut reservation = audio_budget.reserve(0)?;
@@ -810,6 +843,78 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+    #[test]
+    fn native_mp4_codecs_publish_through_shared_media_workers() {
+        for bytes in [
+            include_bytes!("../../crysirror-video/tests/fixtures/h264_main.mp4").as_slice(),
+            include_bytes!("../../crysirror-video/tests/fixtures/h265_10.mp4").as_slice(),
+            include_bytes!("../../crysirror-video/tests/fixtures/av1_10.mp4").as_slice(),
+        ] {
+            let mut manager = MediaManager::default();
+            let storage = Arc::new(Storage(bytes.to_vec()));
+            // The storage name remains movie.mpg deliberately: dispatch is by
+            // bytes and shares the same client capability and worker API.
+            manager
+                .play(ClientId(4), 9, storage, &path(), MediaOptions::default(), 0)
+                .unwrap();
+            wait(&mut manager, |m| {
+                m.status(ClientId(4), 9).unwrap().state == MediaState::Playing
+            });
+            let mut now = 0;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut published = 0;
+            while manager.status(ClientId(4), 9).unwrap().state != MediaState::Ended {
+                now += 100;
+                for update in manager.tick(now).unwrap().frames {
+                    assert_eq!((update.client, update.id), (ClientId(4), 9));
+                    assert_eq!((update.frame.width, update.frame.height), (64, 64));
+                    published += 1;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "MP4 worker did not reach EOF: {:?}",
+                    manager.status(ClientId(4), 9)
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(published > 0);
+            assert_eq!(manager.status(ClientId(4), 9).unwrap().decoded_frames, 5);
+            assert!(manager.take_audio().is_empty());
+        }
+    }
+
+    #[test]
+    fn mp4_audio_is_explicitly_unsupported_instead_of_silently_discarded() {
+        let mut manager = MediaManager::default();
+        let storage = Arc::new(Storage(
+            include_bytes!("../../crysirror-video/tests/fixtures/h264_aac.mp4").to_vec(),
+        ));
+        manager
+            .play(ClientId(4), 9, storage, &path(), MediaOptions::default(), 0)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Err(error) = manager.tick(0) {
+                assert!(error.to_string().contains("MP4 audio tracks"));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "MP4 audio error was not delivered"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            manager
+                .status(ClientId(4), 9)
+                .unwrap()
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("MP4 audio tracks")
+        );
+    }
+
     #[test]
     fn media_is_a_client_scoped_resource_with_bounded_queue_and_cancellable_stop() {
         let mut manager = MediaManager::default();

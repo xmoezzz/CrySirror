@@ -523,3 +523,30 @@ Asset content fingerprints keep worker mutations tied to the image observed by a
 native load. These are CPU resource operations; GPU shader equivalents and
 arbitrary Canvas readback remain separate work. Source/provenance and supported
 native profiles are recorded in `docs/synth-image-source-audit.json` and ADR 0090.
+
+## Authenticated resource containers and native plugin authoring (ADR 0091–0093)
+
+The existing shared XP3 format now owns a bounded HXV4 Special/index/bootstrap
+profile over scoped companion readers. Authenticated hash lookup stays in the
+archive provider; KiriKiri only resolves native names through its normal VFS.
+Original/decoded entry checksums are verified incrementally, then read-at filters
+retain random-access semantics without a second complete file buffer. Optional
+PE RCDATA startup bytes are a labelled derived resource, never a replacement for
+an archive's own startup. This static path executes no EXE/DLL.
+
+Shared JSON document parsing/writing lives in Runtime; vector shape construction,
+affine Append math and bounds live in Image and its Runtime facade. json.dll and
+the solid-fill profile of layerExDraw.dll translate native values/lifetimes onto
+those APIs and shared image/atomic-write workers. Their presence does not mean
+all shipped native DLLs or every JSON/GDI convention is supported. Source pins,
+bounded native profiles and actual validation are recorded by ADR 0092/0093 and
+docs/krkr-plugin-audit.md. Core read-only streams and provider directory queries
+are independent of VM, window and GPU dependencies.
+
+The game-kr continuation adds engine-owned isolated subtree transitions
+(ADR 0094), reusable M2 motion resources/worker sampling, validated dynamic puppet
+frames and mesh clipping. VM-specific layer exchange, plugin names and callbacks
+stay in the adapter. Storage line encoding and capability metadata are shared
+Runtime/Core contracts. MP4 AVC/HEVC/AV1 CPU decoding belongs to crysirror-video
+and the existing bounded Media workers; the unused crysirror-mp4 prototype was
+retired. MP4 audio and hardware video decoding are not part of this profile.

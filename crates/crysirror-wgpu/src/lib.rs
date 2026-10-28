@@ -16,6 +16,7 @@ pub mod rt_capabilities;
 mod rt_pbr;
 pub mod text;
 mod transition;
+mod composite;
 pub mod vfx_gpu;
 pub mod vfx_render;
 pub mod vsm;
@@ -241,6 +242,8 @@ pub struct Renderer {
     gpu_timings: profile::GpuTimings,
     pub gpu: Arc<Gpu>,
     pub format: wgpu::TextureFormat,
+    compositor: Option<composite::Compositor>,
+    snapshot_rasterizations: u64,
     quad_pipelines: Vec<wgpu::RenderPipeline>,
     filtered_pipelines: Vec<wgpu::RenderPipeline>,
     filter_layout: wgpu::BindGroupLayout,
@@ -538,6 +541,8 @@ impl Renderer {
             profile_frame: 0,
             puppets,
             format,
+            compositor: None,
+            snapshot_rasterizations: 0,
             quad_pipelines,
             filtered_pipelines,
             filter_layout,
@@ -651,7 +656,7 @@ impl Renderer {
     pub fn profile_report(&mut self) -> Result<serde_json::Value> {
         self.gpu_timings.poll(&self.gpu)?;
         Ok(
-            serde_json::json!({"timings":self.profiler.snapshot(),"cpu_trace":self.profiler.chrome_trace(),"gpu_timestamps_enabled":self.gpu_timings.enabled(),"gpu_samples_pending":self.gpu_timings.pending(),"gpu_samples_dropped":self.gpu_timings.dropped,"gpu_samples_failed":self.gpu_timings.failures}),
+            serde_json::json!({"timings":self.profiler.snapshot(),"cpu_trace":self.profiler.chrome_trace(),"gpu_timestamps_enabled":self.gpu_timings.enabled(),"gpu_samples_pending":self.gpu_timings.pending(),"gpu_samples_dropped":self.gpu_timings.dropped,"gpu_samples_failed":self.gpu_timings.failures,"snapshot_rasterizations":self.snapshot_rasterizations}),
         )
     }
     /// Explicit capture/shutdown completion; interactive frames use profile_report.
@@ -936,6 +941,14 @@ impl Renderer {
                 [node.z, 0],
             ));
         }
+        // Dynamic puppet frames use the same mesh renderer as rig-driven frames.
+        // Their source layer keeps its retained transform/opacity/order and does
+        // not need a fictional rig asset merely to publish a worker result.
+        for primitive in &mut frame {
+            if primitive.puppet.is_some() && !matches!(primitive.paint, Paint::Puppet { .. }) {
+                primitive.paint = Paint::Puppet { asset: String::new(), tint: [255; 4] };
+            }
+        }
         frame.sort_by_key(|p| (p.order, p.owner, p.id, p.sub));
         // Retained runs remain logical engine state; only extraction expands
         // them to independent reusable glyph resources and transformed quads.
@@ -970,6 +983,7 @@ impl Renderer {
             .iter()
             .map(|p| match &p.paint {
                 Paint::Solid { .. } => Ok("solid:white".to_string()),
+                Paint::Snapshot { size, layers } => Self::snapshot_key(assets, p.owner, *size, layers),
                 Paint::Image { asset, .. } => match assets.surface(ClientId(p.owner), asset) {
                     // Dynamic surfaces re-upload when their revision changes.
                     Some(s) => Ok(format!(
@@ -1073,6 +1087,11 @@ impl Renderer {
                         self.upload(key.clone(), 1, 1, &[255; 4])?;
                     }
                     *color
+                }
+                Paint::Snapshot { .. } => {
+                    // A pending immutable dependency has not published a texture.
+                    if !self.textures.contains_key(&key) { continue; }
+                    [255; 4]
                 }
                 Paint::Image { asset, tint } => {
                     if !self.ensure_image(assets, p.owner, asset, &key)? {
@@ -1248,6 +1267,8 @@ impl Renderer {
                 .all(|n| *n <= self.gpu.device.limits().max_texture_dimension_2d),
             "render target too large"
         );
+        self.prepare_snapshots(assets)?;
+        self.prepare_composites(assets, canvas)?;
         let (vertices, draws) = self.prepare(scene, assets, canvas)?;
         self.sync_transition_mask(assets)?;
         self.depth(target.size);

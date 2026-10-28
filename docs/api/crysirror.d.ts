@@ -497,6 +497,12 @@ declare class Layers {
   setFilter(id: number, filter: Record<string, any> | null): void;
   /** Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'ordered_dither'{cell:[x,y],diagonal?,steps}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}. */
   transition(transition: Record<string, any>): void;
+  /** Owned subtree transition {source, duration_ms, elapsed_ms}, or null. */
+  crossfadeStatus(id: number): Record<string, any> | null;
+  /** Crossfade two isolated sibling subtrees using the engine clock. */
+  beginCrossfade(id: number, source: number, durationMs: number): void;
+  /** Release a subtree crossfade; leaves original nodes intact. */
+  endCrossfade(id: number): void;
   /** Finish this client's transition now (skip). */
   endTransition(): void;
 }

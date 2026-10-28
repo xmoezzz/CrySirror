@@ -4,13 +4,20 @@
 //! host path or another client's identity. Native engines (Siglus, RFVP) keep
 //! their own archive/name semantics by supplying a provider or by decoding
 //! through these reads; the host never reinterprets their formats.
-use crate::{path::VfsPath, Error, Result};
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use crate::service::{AssetReader, MemoryAssetReader};
+use crate::{path::VfsPath, Error, Result};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::String,
+    sync::Arc,
+    vec::Vec,
+};
 
 pub trait VfsProvider: Send + Sync {
     /// Short diagnostic kind, e.g. "memory" or "siglus-pack".
     fn kind(&self) -> &'static str;
+    /// Logical input that originated this container; never an OS filename.
+    fn container_source(&self) -> Option<&str> { None }
     /// `relative` is canonical (validated by [`VfsPath`]) and mount-relative.
     fn read(&self, relative: &str) -> Result<Vec<u8>>;
     /// Open random-access data without materializing an entire archive entry.
@@ -24,6 +31,22 @@ pub trait VfsProvider: Send + Sync {
     }
     fn exists(&self, relative: &str) -> bool {
         self.read(relative).is_ok()
+    }
+    /// Direct children of a canonical directory (empty means mount root).
+    /// Providers with directory indices override this to avoid rescanning a pack.
+    fn list_dir(&self, dir: &str) -> Result<Vec<String>> {
+        if !dir.is_empty() && VfsPath::new(crate::path::Mount::Asset, dir)?.relative() != dir {
+            return Err(Error::Invalid("provider directory path"));
+        }
+        let mut names = BTreeSet::new();
+        for file in self.list()? {
+            if let Some(rest) = strip_mount(dir, &file) {
+                if let Some(name) = rest.split('/').next().filter(|v| !v.is_empty()) {
+                    names.insert(name.into());
+                }
+            }
+        }
+        Ok(names.into_iter().collect())
     }
     /// Bounded listing for inspection tools; `Unsupported` when unknowable.
     fn list(&self) -> Result<Vec<String>> {

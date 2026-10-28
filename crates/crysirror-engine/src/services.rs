@@ -64,12 +64,19 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("layer", "set_filter", "Layers.setFilter"),
     ("layer", "transition", "Layers.transition"),
     ("layer", "end_transition", "Layers.endTransition"),
+    ("layer", "begin_crossfade", "Layers.beginCrossfade"),
+    ("layer", "end_crossfade", "Layers.endCrossfade"),
     ("layer", "puppet", "Puppets.setParameter"),
     ("canvas", "create", "Canvases.apply"),
     ("canvas", "clear", "Canvases.apply"),
     ("canvas", "draw", "Canvases.apply"),
     ("canvas", "set", "Canvases.apply"),
     ("canvas", "copy", "Canvases.apply"),
+    ("canvas", "resize", "Canvases.apply"),
+    ("canvas", "fill", "Canvases.apply"),
+    ("canvas", "transform_copy", "Canvases.apply"),
+    ("canvas", "copy_subtree", "Canvases.apply"),
+    ("canvas", "fade", "Canvases.apply"),
     ("canvas", "present", "Canvases.apply"),
     ("canvas", "hide", "Canvases.apply"),
     ("ui", "set_menu", "Ui.setMenu"),
@@ -167,6 +174,9 @@ fn layers_info() -> &'static ClassInfo {
                 "Siglus-style 2D filter {mono, invert, bright, dark, color_rate, color, add, tone_curve?:{asset,row,saturation}, mask?:{asset,gray_alpha}, alpha_test, distortion?:{kind:'mosaic'|'raster'|'radial_blur'|'threshold_fade',...}} or null."),
             m("transition", vec![("transition", T::Map)], T::Void,
                 "Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'ordered_dither'{cell:[x,y],diagonal?,steps}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}."),
+            m("crossfadeStatus", vec![("id", T::Int)], T::Optional(Box::new(T::Map)), "Owned subtree transition {source, duration_ms, elapsed_ms}, or null."),
+            m("beginCrossfade", vec![("id", T::Int), ("source", T::Int), ("durationMs", T::Int)], T::Void, "Crossfade two isolated sibling subtrees using the engine clock."),
+            m("endCrossfade", vec![("id", T::Int)], T::Void, "Release a subtree crossfade; leaves original nodes intact."),
             m("endTransition", vec![], T::Void, "Finish this client's transition now (skip)."),
         ],
     })
@@ -206,6 +216,13 @@ impl Class for LayersClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if method == "crossfadeStatus" {
+            let id = id(args)?;
+            let state = cx.state()?;
+            return Ok(Value::from_json(serde_json::to_value(
+                state.runtime.host.engine.layers.crossfade(state.client, id)
+            )?));
+        }
         if method == "revealStatus" {
             let id = id(args)?;
             let state = cx.state()?;
@@ -254,6 +271,8 @@ impl Class for LayersClass {
                 transition: json(arg(args, 0, "transition")?, "transition")?,
             },
             "endTransition" => LayerCommand::EndTransition,
+            "beginCrossfade" => LayerCommand::BeginCrossfade { id: id(args)?, source: u32::try_from(arg(args, 1, "source")?.as_i64()?)?, duration_ms: u64::try_from(arg(args, 2, "durationMs")?.as_i64()?)?, rule: None },
+            "endCrossfade" => LayerCommand::EndCrossfade { id: id(args)? },
             _ => unreachable!(),
         };
         submit(

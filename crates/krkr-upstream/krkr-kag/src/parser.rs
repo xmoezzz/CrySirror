@@ -2064,7 +2064,12 @@ impl KagParser {
     }
 
     fn apply_macro_arguments(&self, tag: &mut Tag) {
-        if self.macro_params.is_empty() {
+        // KAG3 resolves `%name|default` whenever a macro argument frame is
+        // active (MacroArgStackDepth), even when that macro got no arguments;
+        // only outside any macro is the text kept literally.
+        let in_macro = !self.macro_params.is_empty()
+            || self.macro_stack.iter().any(|f| f.previous_params.is_some());
+        if !in_macro {
             let mut attributes = Vec::new();
             for attribute in std::mem::take(&mut tag.attributes) {
                 match attribute {
@@ -3076,6 +3081,20 @@ mod tests {
         assert_eq!(next(&mut parser).tagname, "p");
         assert_eq!(lit(&next(&mut parser), "text"), Some("C"));
         assert_eq!(parser.next_tag().unwrap(), None);
+    }
+
+    #[test]
+    fn valueless_macro_argument_is_true_and_default_applies() {
+        let mut parser = KagParser::new();
+        parser
+            .load_scenario_text(
+                "first.ks",
+                "[macro name=m][x c=%msgmode|false][endmacro][macro name=outer][m *][endmacro][m msgmode][m][outer msgmode]",
+            )
+            .unwrap();
+        assert_eq!(lit(&next(&mut parser), "c"), Some("true"));
+        assert_eq!(lit(&next(&mut parser), "c"), Some("false"));
+        assert_eq!(lit(&next(&mut parser), "c"), Some("true"));
     }
 
     #[test]

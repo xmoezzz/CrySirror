@@ -5,6 +5,9 @@ mod context;
 mod crypto;
 mod jobs;
 mod wave;
+pub mod signature;
+pub mod compound;
+pub mod text_stream;
 pub use jobs::{ResourceResult, ResourceTasks, MAX_RESOURCE_JOBS, MAX_RESOURCE_JOBS_PER_CLIENT};
 mod file;
 pub mod io;
@@ -45,6 +48,11 @@ pub struct ArchiveEntry {
 }
 pub trait Archive: Send + Sync {
     fn entries(&self) -> &[ArchiveEntry];
+    /// Optional authenticated lookup for formats whose directory stores hashes.
+    /// Returning an ID never bypasses the mount capability or decode limits.
+    fn resolve(&self, _path: &str) -> Option<u32> {
+        None
+    }
     fn open(&self, entry_id: u32, context: &DecodeContext) -> Result<Arc<dyn AssetReader>>;
 }
 pub trait ArchiveFormat: Send + Sync {

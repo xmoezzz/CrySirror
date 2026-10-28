@@ -538,3 +538,49 @@ describe exact output-frame events. `cargo run --release -p crysirror-audio
 --example chiptune -- /tmp/crysirror-chiptune` generates its own register asset and
 renders two seconds through the shared worker mixer. No ROM/sample bank is
 included. Unsupported chip/driver modes and bounded seek rules are in ADR 0089.
+
+
+## Authenticated container resources
+
+ADR 0091 documents the optional HXV4 profile in `kirikiri/xp3`, with an explicitly
+scoped `hxv4_executable` companion and optional `hxv4_startup_target`. Live callers
+use `beginDecode(...,"archive",options)`, poll readiness and then `mountDecode`;
+requested-name hash lookup survives that worker publication. Cipher state and
+keys are not serialized into project/save JSON. Native archive URI handling only
+refers to already installed client mounts.
+
+`tools/probe_krkr.py` is an offline diagnostic over the same Resources API, using
+a temporary project and explicit local inputs. It preserves normal asset-root
+containment and records native failures. A zero renderer exit, blank frame or
+plugin file inventory is not a whole-game result. JSON document grammar and
+solid vector geometry also have public Rust entry points in Runtime, independent
+of the optional native VM; their bounded native facades are in ADR 0092/0093.
+
+## Isolated layer transitions and native video
+
+`Layers.beginCrossfade(id, source, durationMs)` isolates two equally sized sibling
+subtrees, including their ordinary image/text/canvas/puppet draws.
+`crossfadeStatus(id)` reports `{source,duration_ms,elapsed_ms}` through the engine
+clock; `endCrossfade(id)` releases the effect without exchanging the source data.
+See ADR 0094 for validation and the native adapter's separate exchange policy.
+
+Rust callers can decode MP4 through `crysirror_video::isobmff::Mp4Stream`; the
+existing Media API routes AVC, HEVC and AV1 to the same bounded video worker.
+This is CPU software video decode. MP4 audio tracks require audio to be disabled
+until an audio decoder is connected; no HDR tone mapping or hardware video decode
+is claimed. Exact dependencies, supported sample profiles and reference-pixel
+verification are recorded in `crates/crysirror-video/README.md` and SOURCE.json.
+
+Additional shared Rust APIs include `runtime::text_storage::encode_lines`,
+`ClientStorage::metadata`, `puppet_eluna::motion` model/clock/worker interfaces,
+validated `PuppetFrame` publication and `LayerSystem::set_dynamic_puppet`.
+Native plugins translate their arguments and completion semantics to these
+services; they do not own a second general-purpose renderer.
+
+`Canvases.apply([{op:"copy_subtree", source, destination, rect, position, clip}])`
+freezes a static layer subtree as one `Paint::Snapshot {size,layers}` draw. The
+renderer caches an offscreen product at the source resolution, so outer opacity
+and scaling affect the whole snapshot. This first profile admits solid drawing
+and verified immutable engine PNG resources, and explicitly rejects uncaptured
+fonts, dynamic content and nested snapshots. See ADR 0094 for resource readiness
+and lifetime requirements; it is not a general CPU pixel-readback service.

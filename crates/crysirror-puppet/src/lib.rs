@@ -399,3 +399,81 @@ pub struct PuppetFrame {
     #[serde(default)]
     pub textures: Vec<String>,
 }
+
+impl PuppetFrame {
+    /// Validate a worker-produced frame before owner publication or rendering.
+    pub fn validate(&self) -> Result<()> {
+        ensure!(self.size.iter().all(|v| v.is_finite() && *v > 0. && *v <= 16384.), "invalid puppet frame size");
+        ensure!(self.parts.len() <= MAX_PARTS && self.textures.len() <= MAX_PARTS, "puppet frame part/texture limit");
+        ensure!(self.textures.iter().all(|p| !p.is_empty() && p.len() <= 4096), "invalid puppet texture path");
+        let mut vertices = 0usize;
+        let mut indices = 0usize;
+        let mut masks = 0usize;
+        for (index, part) in self.parts.iter().enumerate() {
+            ensure!(part.id.len() <= 4096, "puppet part identifier limit");
+            vertices = vertices.checked_add(part.positions.len()).context("puppet vertex overflow")?;
+            indices = indices.checked_add(part.indices.len()).context("puppet index overflow")?;
+            masks = masks.checked_add(part.masks.len()).context("puppet mask overflow")?;
+            ensure!(indices <= MAX_VERTICES * 6 && masks <= MAX_PARTS * 16, "puppet index/mask budget");
+            ensure!(vertices <= MAX_VERTICES, "puppet frame vertex limit");
+            ensure!((part.texture as usize) < self.textures.len(), "puppet texture index");
+            ensure!(part.positions.len() == part.uvs.len() && part.positions.len() == part.colors.len(), "puppet attribute lengths");
+            ensure!(part.indices.len() <= MAX_VERTICES * 6 && part.indices.len() % 3 == 0, "puppet triangle count");
+            ensure!(part.indices.iter().all(|i| (*i as usize) < part.positions.len()), "puppet vertex index");
+            ensure!(part.positions.iter().flatten().chain(part.uvs.iter().flatten()).chain(part.colors.iter().flatten()).all(|v| v.is_finite()), "nonfinite puppet attribute");
+            ensure!(part.masks.len() <= MAX_PARTS && part.masks.iter().all(|m| *m < self.parts.len() && *m != index), "puppet mask index");
+        }
+        // Masks may reference other masks, but cycles are not valid geometry.
+        fn visit(frame: &PuppetFrame, i: usize, states: &mut [u8]) -> Result<()> {
+            ensure!(states[i] != 1, "cyclic puppet masks");
+            if states[i] == 2 { return Ok(()); }
+            states[i] = 1;
+            for m in &frame.parts[i].masks { visit(frame, *m, states)?; }
+            states[i] = 2; Ok(())
+        }
+        let mut states = vec![0; self.parts.len()];
+        for i in 0..self.parts.len() { visit(self, i, &mut states)?; }
+        Ok(())
+    }
+}
+
+/// Clip a textured mesh against `[left, top, right, bottom]` in its current
+/// coordinate space, interpolating UVs and colors at generated vertices.
+/// The result remains ordinary engine triangles and needs no native scissor API.
+pub fn clip_part_rect(part: &mut FramePart, rect: [f32; 4]) -> Result<()> {
+    ensure!(rect.iter().all(|n| n.is_finite()) && rect[0] <= rect[2] && rect[1] <= rect[3], "invalid mesh clip rectangle");
+    ensure!(part.positions.len() == part.uvs.len() && part.positions.len() == part.colors.len()
+        && part.indices.len() % 3 == 0 && part.indices.iter().all(|i| (*i as usize) < part.positions.len()), "invalid mesh clip input");
+    ensure!(part.positions.len() <= MAX_VERTICES && part.indices.len() <= MAX_VERTICES * 6,
+        "mesh clip input budget");
+    ensure!(part.positions.iter().flatten().chain(part.uvs.iter().flatten()).chain(part.colors.iter().flatten()).all(|v| v.is_finite()),
+        "nonfinite mesh clip input");
+    #[derive(Clone, Copy)] struct Vertex { p: [f32;2], uv: [f32;2], color: [f32;4] }
+    fn mix(a: Vertex, b: Vertex, t: f32) -> Vertex {
+        Vertex { p: std::array::from_fn(|i|a.p[i]+(b.p[i]-a.p[i])*t),
+            uv: std::array::from_fn(|i|a.uv[i]+(b.uv[i]-a.uv[i])*t),
+            color: std::array::from_fn(|i|a.color[i]+(b.color[i]-a.color[i])*t) }
+    }
+    let mut positions=Vec::new(); let mut uvs=Vec::new(); let mut colors=Vec::new(); let mut indices=Vec::new();
+    for triangle in part.indices.chunks_exact(3) {
+        let mut polygon=triangle.iter().map(|i|{let i=*i as usize;Vertex{p:part.positions[i],uv:part.uvs[i],color:part.colors[i]}}).collect::<Vec<_>>();
+        for (axis, boundary, lower) in [(0,rect[0],true),(0,rect[2],false),(1,rect[1],true),(1,rect[3],false)] {
+            if polygon.is_empty() {break}
+            let inside=|v:Vertex|if lower {v.p[axis]>=boundary} else {v.p[axis]<=boundary};
+            let mut next=Vec::with_capacity(polygon.len()+1);let mut previous=*polygon.last().unwrap();
+            for current in polygon {
+                let (a,b)=(inside(previous),inside(current));
+                if a!=b {let t=(boundary-previous.p[axis])/(current.p[axis]-previous.p[axis]);next.push(mix(previous,current,t));}
+                if b {next.push(current)} previous=current;
+            }
+            polygon=next;
+        }
+        if polygon.len()<3 {continue}
+        ensure!(positions.len()+polygon.len()<=MAX_VERTICES,"clipped mesh vertex limit");
+        let base=positions.len() as u32;
+        for i in 1..polygon.len()-1 {indices.extend_from_slice(&[base,base+i as u32,base+i as u32+1]);}
+        for v in polygon {positions.push(v.p);uvs.push(v.uv);colors.push(v.color);}
+    }
+    part.positions=positions;part.uvs=uvs;part.colors=colors;part.indices=indices;
+    Ok(())
+}

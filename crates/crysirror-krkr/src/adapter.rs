@@ -38,6 +38,13 @@ pub struct Config {
     /// Loading a shell does not establish implementation of that plugin.
     #[serde(default)]
     pub plugin_shells: Vec<String>,
+    /// Companion executable basename reported by `System.exeName`.
+    #[serde(default)]
+    pub executable: Option<String>,
+    /// Engine-published protected-bootstrap profile (`hxv4_bootstrap_profile`)
+    /// that `Plugins.linkZ` must match before installing its facade.
+    #[serde(default)]
+    pub bootstrap_profile: Option<String>,
 }
 fn startup() -> String {
     "startup.tjs".into()
@@ -66,10 +73,16 @@ impl Config {
             self.plugin_shells.len() <= 128,
             "KiriKiri plugin shell limit"
         );
+        if let Some(exe) = &self.executable {
+            ensure!(
+                !exe.is_empty() && exe.len() <= 255 && !exe.contains(['/', '\\', ':', '\0']) && exe != "." && exe != "..",
+                "KiriKiri executable must be a basename"
+            );
+        }
         for name in &self.plugin_shells {
             let name = crate::plugins::canonical(name).map_err(|e| anyhow::anyhow!("{e}"))?;
             ensure!(
-                !matches!(name.as_str(), "menu.dll" | "kagparser.dll" | "layerexraster.dll"),
+                !matches!(name.as_str(), "savestruct.dll" | "fstat.dll" | "menu.dll" | "kagparser.dll" | "layerexraster.dll" | "json.dll" | "layerexdraw.dll" | "krmovie.dll" | "layereximage.dll" | "kagparserex.dll" | "textrender.dll" | "motionplayer.dll" | "motionplayer_nod3d.dll" | "csvparser.dll" | "scriptsex.dll" | "addfont.dll" | "windowex.dll" | "win32dialog.dll" | "extrans.dll" | "extnagano.dll"),
                 "engine facade cannot be replaced by a plugin shell"
             );
         }
@@ -136,12 +149,74 @@ impl KrkrVm {
             .iter()
             .map(|s| crate::plugins::canonical(s).expect("validated plugin name"))
             .collect();
+        if let Some(profile) = &self.config.bootstrap_profile {
+            let path = storage
+                .resolve(profile)
+                .with_context(|| format!("bootstrap profile `{profile}` absent"))?;
+            let json = storage.read_limited(&path, 64 * 1024)?;
+            crate::protect_plugin::configure(&mut host.protect, &json)?;
+        }
+        host.executable = self
+            .config
+            .executable
+            .clone()
+            .or_else(|| host.protect.executable());
         host.storage = Some(storage);
         host.images = Some(h.image_metadata(self.client).map_err(err)?);
         host.text_measurement = Some(h.text_measurement(self.client).map_err(err)?);
         host.now = h.now_ms();
         let mut rt = Runtime::with_host(host);
         natives::install(&mut rt);
+        // Developer diagnostic: on the first runtime exception, log the paused
+        // frame's registers and evaluate `;;`-separated expressions in it.
+        if let Ok(exprs) = std::env::var("CRYSIRROR_KRKR_EXCEPTION_EVAL") {
+            struct Ui(Vec<String>, bool);
+            impl krkr_tjs2::debug::DebugUi<KrkrHost> for Ui {
+                fn on_pause(&mut self, p: &mut krkr_tjs2::debug::Pause<'_, KrkrHost>) -> krkr_tjs2::debug::DebugAction {
+                    let reason = format!("{:?}", p.reason());
+                    if std::env::var_os("CRYSIRROR_KRKR_EXCEPTION_ALL").is_some() {
+                        let line = format!("[debug] exception {} at {:?}", reason.chars().take(400).collect::<String>(), p.location().map(|f| (f.object_name.clone(), f.bytecode_offset)));
+                        p.runtime().host_mut().push_log(line);
+                    }
+                    let wanted = std::env::var("CRYSIRROR_KRKR_EXCEPTION_MATCH").map_or(true, |m| reason.contains(&m));
+                    if !self.1 && wanted {
+                        self.1 = true;
+                        let mut lines = vec![format!("[debug] pause {reason} at {:?}", p.location())];
+                        for e in self.0.clone() {
+                            let v = p.eval(&e).map(|v| format!("{v:?}")).unwrap_or_else(|e| format!("error {e}"));
+                            lines.push(format!("[debug] {e} => {}", v.chars().take(1200).collect::<String>()));
+                        }
+                        for (r, v) in p.registers().into_iter().take(if std::env::var_os("CRYSIRROR_KRKR_EXCEPTION_REGS").is_some() { 48 } else { 0 }) {
+                            lines.push(format!("[debug] r{r} = {}", format!("{v:?}").chars().take(160).collect::<String>()));
+                            let h = match &v {
+                                krkr_tjs2::runtime::Variant::Object(h) => Some(*h),
+                                krkr_tjs2::runtime::Variant::Closure(c) => Some(c.this_obj.unwrap_or(c.object)),
+                                _ => None,
+                            };
+                            if let Some(h) = h {
+                                let rt = p.runtime();
+                                let names: Vec<String> = rt.object_members(h).into_iter().map(|(n, _)| n).take(40).collect();
+                                lines.push(format!("[debug]   members {}", names.join(",")));
+                                if let Some(n) = rt.object_member(h, "names").object_handle() {
+                                    let keys: Vec<String> = rt.object_members(n).into_iter().map(|(n, _)| n).collect();
+                                    lines.push(format!("[debug]   names {}", keys.join(",")));
+                                }
+                            }
+                        }
+                        for l in lines {
+                            p.runtime().host_mut().push_log(l);
+                        }
+                    }
+                    krkr_tjs2::debug::DebugAction::Continue
+                }
+            }
+            rt.enable_debugger().set_break_on_exception(true);
+            rt.set_debug_ui(Box::new(Ui(exprs.split(";;").map(str::to_owned).collect(), false)));
+        }
+        // Developer diagnostic: comma-separated `Class.method` trace patterns.
+        if let Ok(patterns) = std::env::var("CRYSIRROR_KRKR_TRACE_NATIVES") {
+            rt.set_native_call_traces(patterns.split(','));
+        }
         let startup = self.config.startup.clone();
         let result = natives::exec_storage(&mut rt, &startup);
         self.rt = Some(rt);
@@ -224,7 +299,7 @@ impl KrkrVm {
             let mut node = Some(id);
             let mut depth = 0;
             while let Some(id) = node {
-                if !rt.object_member(ObjectHandle(id), "enabled").is_truthy() {
+                if !rt.object_member(ObjectHandle(id), "__lp_enabled").is_truthy() {
                     enabled = false;
                     break;
                 }
@@ -234,11 +309,11 @@ impl KrkrVm {
             }
             let layer = rt.host().layer(target)?;
             let kind = rt
-                .object_member(target, "hitType")
+                .object_member(target, "__lp_hitType")
                 .to_integer()
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let threshold = rt
-                .object_member(target, "hitThreshold")
+                .object_member(target, "__lp_hitThreshold")
                 .to_integer()
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let yes = if kind == 1 {
@@ -257,10 +332,7 @@ impl KrkrVm {
                     true
                 } else if threshold >= 256 || !layer.has_image {
                     false
-                } else if rt
-                    .object_member(target, "type")
-                    .to_integer()
-                    .map_err(|e| anyhow::anyhow!("{e}"))?
+                } else if layer.kind
                     == 1
                 {
                     true
@@ -438,7 +510,14 @@ impl KrkrVm {
     fn drive_sound(&mut self, h: &mut dyn HostServices) -> Result<bool> {
         for _ in 0..128 {
             self.flush(h)?;
+            crate::transitions::poll(self.rt.as_mut().unwrap(), h, self.client)?;
+            if !crate::motion_plugin::poll(self.rt.as_mut().unwrap(), h, self.client)? {
+                return Ok(false);
+            }
             if !crate::image_api::poll(self.rt.as_mut().unwrap(), h, self.client)? {
+                return Ok(false);
+            }
+            if !crate::psbfile_plugin::poll(self.rt.as_mut().unwrap(), h, self.client)? {
                 return Ok(false);
             }
             if !crate::save_struct::poll(self.rt.as_mut().unwrap())? {
@@ -582,6 +661,24 @@ impl KrkrVm {
                 p.phase = 4;
                 continue;
             }
+            // Layer.callOnPaint: before the frame is drawn, each flagged layer
+            // gets one onPaint() call and its flag is cleared (krkrz order).
+            let flagged: Vec<usize> = {
+                let rt = self.rt.as_ref().unwrap();
+                rt.host()
+                    .layers
+                    .keys()
+                    .copied()
+                    .filter(|id| rt.object_member(ObjectHandle(*id), "__lp_callOnPaint").is_truthy())
+                    .collect()
+            };
+            for id in flagged {
+                let rt = self.rt.as_mut().unwrap();
+                rt.set_object_member(ObjectHandle(id), "__lp_callOnPaint", Variant::Integer(0));
+                if has_member(rt, ObjectHandle(id), "onPaint") {
+                    self.call(ObjectHandle(id), "onPaint", vec![])?;
+                }
+            }
             self.pass = None;
             self.frames += 1;
             if self.rt.as_ref().unwrap().host().exit_requested {
@@ -629,7 +726,20 @@ impl VmAdapter for KrkrVm {
         match self.execute(h, i) {
             Ok(y) => Ok(y),
             Err(e) => {
-                let message = format!("{e:#}");
+                // Include the VM's latest log lines: script-level errors are
+                // usually reported there before the failing native call.
+                let tail = self
+                    .rt
+                    .as_ref()
+                    .map(|rt| {
+                        let log = &rt.host().log;
+                        log[log.len().saturating_sub(160)..]
+                            .iter()
+                            .map(|l| format!("\n  [vm log] {}", l.chars().take(1500).collect::<String>()))
+                            .collect::<String>()
+                    })
+                    .unwrap_or_default();
+                let message = format!("{e:#}{tail}");
                 self.last_error = Some(message.clone());
                 Err(Error::Io(message))
             }
@@ -657,6 +767,16 @@ impl VmAdapter for KrkrVm {
             "layers": host.map(|h| h.layers.len()),
             "timers": host.map(|h| h.timers.len()),
             "plugins": host.map(|h| &h.loaded_plugins),
+            // Developer diagnostic (CRYSIRROR_KRKR_DUMP_LAYERS): native layer tree.
+            "layer_dump": std::env::var_os("CRYSIRROR_KRKR_DUMP_LAYERS").and_then(|_| {
+                let rt = self.rt.as_ref()?;
+                Some(rt.host().layers.iter().map(|(id, l)| {
+                    let name = rt.object_member(ObjectHandle(*id), "name").to_tjs_string().unwrap_or_default();
+                    json!({"slot": l.slot, "name": name, "parent": l.parent.and_then(|p| rt.host().layers.get(&p)).map(|p| p.slot),
+                        "visible": l.visible, "opacity": l.opacity, "pos": [l.left, l.top], "size": [l.width, l.height],
+                        "image": [l.image_width, l.image_height], "has_image": l.has_image, "kind": l.kind, "blank": l.blank, "full_alpha": l.full_alpha, "children": l.children.len()})
+                }).collect::<Vec<_>>())
+            }),
             "plugin_shells": host.map(|h| &h.plugin_shells),
             "engine_api_calls": host.map(|h| h.api_calls),
             "events": self.events,

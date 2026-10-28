@@ -46,7 +46,7 @@ version = "0.2.0"
 edition = "2021"
 license = "MPL-2.0"
 # Storage leases require Rust 1.89; the workspace is tested on 1.98.1.
-rust-version = "1.89"
+rust-version = "1.95"
 
 [workspace.dependencies]
 crysirror-io = { path = "crates/crysirror-io" }
@@ -67,6 +67,7 @@ crysirror-audio = { path = "crates/crysirror-audio" }
 crysirror-acoustics = { path = "crates/crysirror-acoustics" }
 crysirror-scene = { path = "crates/crysirror-scene" }
 crysirror-puppet = { path = "crates/crysirror-puppet" }
+crysirror-puppet-eluna = { path = "crates/crysirror-puppet-eluna" }
 crysirror-siglus-vm = { path = "crates/crysirror-siglus-vm" }
 crysirror-asset = { path = "crates/crysirror-asset" }
 crysirror-engine = { path = "crates/crysirror-engine" }

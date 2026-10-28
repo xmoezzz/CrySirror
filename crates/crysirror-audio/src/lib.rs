@@ -10,6 +10,8 @@ pub mod buffered;
 pub mod channels;
 mod channel_async;
 pub mod decoder;
+pub mod opus;
+pub mod sli;
 pub mod synth;
 pub mod doppler;
 pub mod motion;

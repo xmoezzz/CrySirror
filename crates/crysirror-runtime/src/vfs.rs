@@ -307,6 +307,51 @@ impl crysirror_core::service::StorageWrite for PendingWrite {
     }
 }
 impl ClientStorage for CapStorage {
+    fn metadata(&self, mount: Mount, relative: &str) -> Result<Option<crysirror_core::service::StorageMetadata>> {
+        use crysirror_core::service::StorageMetadata;
+        if !relative.is_empty() && VfsPath::new(mount, relative)?.relative() != relative {
+            return Err(Error::Invalid("metadata canonical path"));
+        }
+        let virtual_info = |size: Option<u64>| StorageMetadata { is_directory: size.is_none(), size,
+            created_ms: None, modified_ms: None, accessed_ms: None };
+        if mount == Mount::Asset {
+            for (point, provider) in provider_snapshot(&self.providers) {
+                if relative == point || strip_mount(relative, &point).is_some() {
+                    return Ok(Some(virtual_info(None)));
+                }
+                let Some(rest) = strip_mount(&point, relative) else { continue; };
+                match provider.open(rest) {
+                    Ok(reader) => return Ok(Some(virtual_info(Some(reader.len()?)))),
+                    Err(Error::NotFound) => {},
+                    Err(e) => return Err(e),
+                }
+                if !provider.list_dir(rest)?.is_empty() { return Ok(Some(virtual_info(None))); }
+            }
+        }
+        let metadata = match self.dir(mount).metadata(if relative.is_empty() { "." } else { relative }) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io(e)),
+        };
+        if !metadata.is_file() && !metadata.is_dir() { return Err(Error::Unsupported("special storage metadata")); }
+        let millis = |t: std::io::Result<cap_std::time::SystemTime>| t.ok().and_then(|t| {
+            let t = t.into_std();
+            let n = match t.duration_since(std::time::UNIX_EPOCH) {
+                Ok(d) => i128::try_from(d.as_millis()).ok()?,
+                Err(e) => -i128::try_from(e.duration().as_millis()).ok()?,
+            };
+            i64::try_from(n).ok()
+        });
+        Ok(Some(StorageMetadata { is_directory: metadata.is_dir(), size: metadata.is_file().then(|| metadata.len()),
+            created_ms: millis(metadata.created()), modified_ms: millis(metadata.modified()), accessed_ms: millis(metadata.accessed()) }))
+    }
+
+    fn container_mount(&self,source:&str)->Result<Option<String>> {
+        let path=VfsPath::new(Mount::Asset,source)?;
+        if path.relative()!=source {return Err(Error::Invalid("container source path"))}
+        Ok(provider_snapshot(&self.providers).into_iter().find(|(_,p)|p.container_source()==Some(source)).map(|(point,_)|point))
+    }
+
     fn begin_write_atomic(
         &self,
         path: &VfsPath,
@@ -380,6 +425,13 @@ impl ClientStorage for CapStorage {
             len: metadata.len(),
         }))
     }
+    fn open_read(&self, path: &VfsPath) -> Result<Arc<dyn AssetReader>> {
+        if path.mount()==Mount::Asset {return self.open_asset(path)}
+        let file=self.dir(path.mount()).open(path.relative()).map_err(io)?;
+        let metadata=file.metadata().map_err(io)?;
+        if !metadata.is_file(){return Err(Error::Invalid("read stream must be a file"))}
+        Ok(Arc::new(CapAssetReader{file:Mutex::new(file),len:metadata.len()}))
+    }
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>> {
         if path.mount() == Mount::Asset {
             for (point, provider) in provider_snapshot(&self.providers) {
@@ -441,22 +493,14 @@ impl ClientStorage for CapStorage {
         }
         if mount == Mount::Asset {
             for (point, provider) in provider_snapshot(&self.providers) {
-                let Ok(files) = provider.list() else { continue };
-                for f in files {
-                    let full = if point.is_empty() {
-                        f
-                    } else {
-                        format!("{point}/{f}")
-                    };
-                    let child = if rel.is_empty() {
-                        Some(full.as_str())
-                    } else {
-                        strip_mount(&rel, &full)
-                    };
-                    if let Some(c) = child {
-                        names.insert(c.split('/').next().unwrap_or(c).to_owned());
-                    }
+                if rel==point {
+                    names.extend(provider.list_dir("")?);
+                } else if let Some(rest)=strip_mount(&point,&rel) {
+                    names.extend(provider.list_dir(rest)?);
+                } else if let Some(rest)=strip_mount(&rel,&point) {
+                    if let Some(child)=rest.split('/').next().filter(|v|!v.is_empty()){names.insert(child.into());}
                 }
+                if names.len()>65536{return Err(Error::Limit("directory listing"))}
             }
         }
         Ok(names.into_iter().collect())
@@ -491,6 +535,46 @@ impl FileSystem for DiskVfs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn metadata_preserves_capabilities_and_does_not_invent_archive_timestamps() {
+        use crysirror_core::vfs::MemoryProvider;
+        let assets = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        std::fs::create_dir(assets.path().join("empty")).unwrap();
+        std::fs::write(assets.path().join("same.bin"), b"disk").unwrap();
+        let mut fs = DiskVfs::new(assets.path(), state.path()).unwrap();
+        fs.register(ClientId(1), "test", "one").unwrap();
+        fs.register(ClientId(2), "test", "two").unwrap();
+        let mut provider = MemoryProvider::new();
+        provider.insert("same.bin", b"archive".to_vec()).unwrap();
+        provider.insert("folder/child", b"x".to_vec()).unwrap();
+        fs.mount_provider(ClientId(1), "", Arc::new(provider)).unwrap();
+        let one = fs.storage(ClientId(1)).unwrap();
+        let archive = one.metadata(Mount::Asset, "same.bin").unwrap().unwrap();
+        assert_eq!(archive.size, Some(7));
+        assert_eq!((archive.created_ms, archive.modified_ms, archive.accessed_ms), (None, None, None));
+        assert!(one.metadata(Mount::Asset, "folder").unwrap().unwrap().is_directory);
+        assert!(one.metadata(Mount::Asset, "empty").unwrap().unwrap().is_directory);
+        assert!(one.metadata(Mount::Asset, "absent").unwrap().is_none());
+        assert!(one.metadata(Mount::Asset, "../outside").is_err());
+        let save = VfsPath::new(Mount::Save, "private.bin").unwrap();
+        one.write_atomic(&save, b"private").unwrap();
+        assert_eq!(one.metadata(Mount::Save, "private.bin").unwrap().unwrap().size, Some(7));
+        assert!(fs.storage(ClientId(2)).unwrap().metadata(Mount::Save, "private.bin").unwrap().is_none());
+    }
+    #[test]
+    fn read_streams_cover_scoped_save_and_cache_without_reading_foreign_clients() {
+        let a=tempfile::tempdir().unwrap();let w=tempfile::tempdir().unwrap();
+        let mut fs=DiskVfs::new(a.path(),w.path()).unwrap();
+        fs.register(ClientId(1),"krkr","a").unwrap();fs.register(ClientId(2),"krkr","b").unwrap();
+        let one=fs.storage(ClientId(1)).unwrap();let two=fs.storage(ClientId(2)).unwrap();
+        for mount in [Mount::Save,Mount::Cache] {
+            let path=VfsPath::new(mount,"small.json").unwrap();one.write_atomic(&path,b"{\"ok\":true}").unwrap();
+            let reader=one.open_read(&path).unwrap();assert_eq!(reader.len().unwrap(),11);
+            let mut bytes=[0;11];assert_eq!(reader.read_at(0,&mut bytes).unwrap(),11);assert_eq!(&bytes,b"{\"ok\":true}");
+            assert!(two.open_read(&path).is_err());
+        }
+    }
     #[test]
     fn disk_namespaces_are_separate() {
         let a = tempfile::tempdir().unwrap();

@@ -391,6 +391,9 @@ pub(crate) fn install_array_methods<H: TjsHost + 'static>(
     runtime.register_object_native(handle, "sort", array_sort::<H>);
     runtime.register_object_native(handle, "reverse", array_reverse::<H>);
     runtime.register_object_native(handle, "find", array_find::<H>);
+    for (name, value) in runtime.array_extensions.clone() {
+        runtime.set_object_member(handle, name, value);
+    }
 }
 
 pub fn install_dictionary_methods<H: TjsHost + 'static>(

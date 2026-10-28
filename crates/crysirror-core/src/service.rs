@@ -188,6 +188,9 @@ pub struct AudioParameters {
     pub looping: bool,
     /// Decoded-source frame to repeat from, default zero.
     pub loop_start: u64,
+    /// Decoded-source frame at which a loop jumps back to `loop_start`;
+    /// None loops at the end of the source.
+    pub loop_end: Option<u64>,
     /// Startup position in source milliseconds unless start_frame is set.
     pub start_ms: u64,
     /// Exact decoded-source frame; when present this overrides start_ms.
@@ -217,6 +220,7 @@ impl Default for AudioParameters {
             pan: 0.5,
             looping: false,
             loop_start: 0,
+            loop_end: None,
             start_ms: 0,
             start_frame: None,
             clamp_range: false,
@@ -484,6 +488,7 @@ pub struct FontMetrics {
 #[derive(Clone, Copy, Debug)]
 pub enum EngineQuery {
     Layer(u32),
+    LayerCrossfade(u32),
     Canvas(u32),
     UiWidget(u32),
     UiEvents,
@@ -507,7 +512,23 @@ pub trait StorageWrite: Send {
 /// that read synchronously from their own threads or stream large packs
 /// (ADR 0008). It carries no authority beyond that client's asset (read-only,
 /// including provider mounts), save and cache roots.
+/// Capability-scoped metadata. Missing timestamps mean unavailable, never epoch zero.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageMetadata {
+    pub is_directory: bool,
+    pub size: Option<u64>,
+    pub created_ms: Option<i64>,
+    pub modified_ms: Option<i64>,
+    pub accessed_ms: Option<i64>,
+}
+
 pub trait ClientStorage: Send + Sync {
+    /// Read metadata for a canonical mount-relative name; empty names denote
+    /// the mount root. Queries must not open ambient paths or decode resources.
+    fn metadata(&self, _mount: crate::path::Mount, _relative: &str) -> Result<Option<StorageMetadata>> {
+        Err(crate::Error::Unsupported("capability storage metadata"))
+    }
+
     /// Reserve worker capacity before moving immutable bytes. Ready means the
     /// atomic commit completed; unsupported providers reject before admission.
     fn begin_write_atomic(
@@ -530,6 +551,14 @@ pub trait ClientStorage: Send + Sync {
         }
         Ok(Arc::new(MemoryAssetReader(Arc::from(bytes))))
     }
+    /// Read-only capability stream with no whole-file fallback. Providers must
+    /// explicitly support opening before the consumer admits its byte budget.
+    fn open_read(&self, _path: &VfsPath) -> Result<Arc<dyn AssetReader>> {
+        Err(crate::Error::Unsupported("capability read stream"))
+    }
+    /// Find a previously mounted container within this client's asset namespace.
+    /// This metadata query does not open files or grant additional authority.
+    fn container_mount(&self, _source:&str) -> Result<Option<String>> { Ok(None) }
     /// Optional exclusive lease inside this client's cache namespace. Used by
     /// native save implementations that cannot merge concurrent writers.
     fn acquire_lease(&self, _name: &str) -> Result<alloc::boxed::Box<dyn StorageLease>> {
@@ -548,6 +577,15 @@ pub trait ClientStorage: Send + Sync {
 /// client's assets. Native VMs whose original API answers image metadata
 /// synchronously (for example a layer's image size right after a load) hold
 /// it between steps instead of borrowing the host or decoding privately.
+/// Result of [`HostServices::upload_encoded_image`].
+#[derive(Clone, Debug)]
+pub struct UploadedImage {
+    pub path: VfsPath,
+    pub size: [u32; 2],
+    /// True only when every decoded texel has alpha 255.
+    pub opaque: bool,
+}
+
 pub trait ImageMetadata: Send + Sync {
     /// Encoded content identity observed by the metadata decode. Native retained
     /// image processing rejects a changed file rather than transforming new bytes.
@@ -801,6 +839,19 @@ pub trait HostServices: FileSystem {
     ) -> Result<VfsPath> {
         Err(crate::Error::Unsupported("decoded image upload"))
     }
+    /// Decode provider-owned encoded image bytes (for example an image embedded
+    /// in a native container the VFS does not mount) with the engine's shared
+    /// decoder registry, then register the pixels exactly like `upload_rgba`.
+    /// `name` is the logical name used for format probing.
+    fn upload_encoded_image(
+        &mut self,
+        _client: ClientId,
+        _id: u32,
+        _name: &str,
+        _bytes: &[u8],
+    ) -> Result<UploadedImage> {
+        Err(crate::Error::Unsupported("encoded image upload"))
+    }
     /// Thread-safe image metadata handle for this client (ADR 0053).
     fn image_metadata(&mut self, _client: ClientId) -> Result<Arc<dyn ImageMetadata>> {
         Err(crate::Error::Unsupported("image metadata handle"))
@@ -812,6 +863,11 @@ pub trait HostServices: FileSystem {
     /// Thread-safe storage handle for this client (ADR 0008).
     fn storage(&mut self, _client: ClientId) -> Result<Arc<dyn ClientStorage>> {
         Err(crate::Error::Unsupported("client storage handle"))
+    }
+    /// Publish a validated JSON PuppetFrame on an existing client-owned layer.
+    /// Only decoded textures and engine mesh data cross this device-free boundary.
+    fn present_puppet_frame(&mut self, _client: ClientId, _layer: u32, _frame: &[u8]) -> Result<()> {
+        Err(crate::Error::Unsupported("dynamic puppet frame"))
     }
     /// Replace a client-scoped dynamic RGBA resource or engine render target.
     /// Do not use this to host another engine's composed screen. Unlike `upload_rgba`, the

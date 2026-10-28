@@ -1,0 +1,18 @@
+// Copyright (c) 2026 CrySirror contributors.
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
+Plugins.link('layerExDraw.dll');
+var w=new Window();var root=new Layer(w,null);root.visible=true;w.visible=true;
+root.fillRect(0,0,640,420,0xff0e1626);root.font.height=24;
+root.drawText(24,18,'CrySirror / shared native vector pipeline',0xffedf3ff);
+root.font.height=16;root.drawText(24,53,'TJS facade > engine image worker > retained layers > wgpu',0xff93b8df);
+var a=new Layer(w,root);a.setImageSize(280,240);a.setSizeToImageSize();a.setPos(24,94);a.visible=true;a.clear(0xff182740);
+var brush=new GdiPlus.Appearance();brush.addBrush(0x99000000,9,11);brush.addBrush(0xffffb454,0,0);
+a.translateTransform(30,30);a.drawRectangle(brush,0,0,155,115);a.resetTransform();
+brush.clear();brush.addBrush(0xfff66c7b,0,0);a.drawPolygon(brush,[[90,90],[245,85],[225,205],[125,190]]);
+var b=new Layer(w,root);b.setImageSize(280,240);b.setSizeToImageSize();b.setPos(336,94);b.visible=true;b.clear(0xff182740);
+var path=new GdiPlus.Path();path.drawRectangle(20,20,200,160);path.drawRectangle(70,65,100,70);
+brush.clear();brush.addBrush(0xff39cbb5,0,0);b.scaleTransform(0.95,0.95);b.rotateViewTransform(10);b.translateViewTransform(25,0);b.drawPath(brush,path);
+root.font.height=18;root.drawText(24,353,'Brush order / offsets / polygon',0xffedf3ff);root.drawText(336,353,'Even-odd / Append transform',0xffedf3ff);
+root.font.height=14;root.drawText(24,389,'Self-authored validation scene; engine-owned pixels and operations.',0xff93b8df);
+Debug.message('native-vector-demo-ready');

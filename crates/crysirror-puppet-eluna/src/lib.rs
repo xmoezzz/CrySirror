@@ -14,6 +14,7 @@
 //! difference is that positions stay in model space instead of the Siglus
 //! render-target clip space.
 #![forbid(unsafe_code)]
+pub mod motion;
 use anyhow::{bail, ensure, Context, Result};
 use crysirror_puppet::{FramePart, MotionInfo, ParameterInfo, PartBlend, PlayOptions, PuppetFrame, PuppetSource};
 use eluna::{EmoteDrawPass, EmoteStaticScene, EmoteStaticSprite, TimelinePlayMode};

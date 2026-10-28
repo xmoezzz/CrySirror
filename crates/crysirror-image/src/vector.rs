@@ -107,30 +107,7 @@ impl ImageSurface {
             "vector pixel budget"
         );
         check()?;
-        let mut pb = tiny_skia::PathBuilder::new();
-        for command in &path.commands {
-            match command {
-                PathCommand::Move { to } => pb.move_to(to[0], to[1]),
-                PathCommand::Line { to } => pb.line_to(to[0], to[1]),
-                PathCommand::Quad { control, to } => {
-                    pb.quad_to(control[0], control[1], to[0], to[1])
-                }
-                PathCommand::Cubic {
-                    control1,
-                    control2,
-                    to,
-                } => pb.cubic_to(
-                    control1[0],
-                    control1[1],
-                    control2[0],
-                    control2[1],
-                    to[0],
-                    to[1],
-                ),
-                PathCommand::Close => pb.close(),
-            }
-        }
-        let shape = pb.finish().context("empty vector geometry")?;
+        let shape = crate::vector_geometry::build_path(&path.commands)?;
         let mut pixels = self.rgba.clone();
         for row in pixels.chunks_exact_mut(self.width as usize * 4) {
             check()?;
@@ -179,9 +156,22 @@ impl ImageSurface {
         }
         check()?;
         let mut rgba = pixmap.take();
-        for row in rgba.chunks_exact_mut(self.width as usize * 4) {
+        for (row, original) in rgba
+            .chunks_exact_mut(self.width as usize * 4)
+            .zip(self.rgba.chunks_exact(self.width as usize * 4))
+        {
             check()?;
-            for p in row.chunks_exact_mut(4) {
+            for (p, original) in row.chunks_exact_mut(4).zip(original.chunks_exact(4)) {
+                // Premultiplication must not quantize pixels outside the draw.
+                let unchanged = p[3] == original[3]
+                    && (0..3).all(|c| {
+                        p[c] == ((u16::from(original[c]) * u16::from(original[3]) + 127) / 255)
+                            as u8
+                    });
+                if unchanged {
+                    p.copy_from_slice(original);
+                    continue;
+                }
                 for c in 0..3 {
                     p[c] = if p[3] == 0 {
                         0

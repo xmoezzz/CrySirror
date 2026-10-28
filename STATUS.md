@@ -3738,3 +3738,425 @@ Remaining boundaries:
   remain open. Engine mask/blur transitions do not claim KaichoTrans equivalence.
 - Processing is CPU-worker based. GPU shader variants, metadata/discovery async,
   every other ADR 0050 boundary and broader 3D engine completion remain open.
+
+## 2026-10-28 — local game-kr probe and shared HXV4/document/vector capabilities
+
+Implementation:
+- Inspected the owner's local game-kr package: 39 DLL files and one 1.6 GB XP3.
+  The inventory is not an executed dependency list. docs/krkr-plugin-audit.md
+  distinguishes available reference modules from actually mapped capabilities.
+- Extracted only the pinned xp3-brute pure HXV4 Special/authentication/object/hash,
+  static PE bootstrap/KDF and reconstructed content-filter algorithms into the
+  existing shared XP3 resource plugin. MIT notices and complete source hashes are
+  retained. No CLI, native Win32 host, Unicorn, GPU solver or game runtime is
+  imported. Companion bytes come through the caller's existing VFS authority.
+- Authenticated requested-name lookup survives both ordinary and worker archive
+  mounts. Protected streams are incrementally verified with a 64 KiB buffer;
+  random-access reads apply the same native filter state. Plaintext bootstrap
+  entries with a protected flag retain their checksum-verified bytes. The
+  protected-warning pseudo entry is recognized by its actual prefix, not merely
+  by a fake ID. Optional PE RCDATA startup bytes are a separately labelled derived
+  resource, never a replacement for an archive's own startup.
+- Core adds optional read streams, container-origin metadata queries and direct
+  provider directory listings. Runtime supplies scoped asset/save/cache streams;
+  unsupported stream providers reject before reading. Shared archive directory
+  indices have a 16 MiB admission bound, avoiding repeated full-pack scans.
+  Native current-directory/auto-path rules preserve native archive URIs and only
+  refer to already installed client containers. Unknown media, unmounted archives,
+  traversal and foreign native roots fail. No OS working directory is changed.
+- A parallel agent implemented shared bounded document values/parser/writer and
+  a real json.dll Scripts facade; saves retain original TJS until atomic worker
+  completion. It also added shared vector geometry/Append matrices/bounds and a
+  solid-linear LayerExDraw facade over existing shared image workers. Original
+  superclass/function identity and RectF ObjThis behavior were preserved after
+  tests exposed incorrect initial mappings. Pen/gradient/font/metafile and full
+  native GDI edge equivalence remain unsupported.
+- Added the self-authored examples/krkr-vector scene and tools/probe_krkr.py.
+  The latter preserves project containment and removes its temporary project on
+  native failure; a process exit or blank frame is never classified as a running
+  game. Original user game files, fonts, keys, executables and DLLs are not shipped.
+  ADR 0091–0093 and their source audits record the exact profiles.
+
+Compilation and tooling:
+- Release workspace --all-targets check with desktop krkr/arc-formats/
+  acoustics-obvhs and audio rodio-output passed; existing CBG/RealLive warnings
+  remain. Release desktop builds passed for the actual probes below.
+- Generated API docs/command coverage: 7 + 1 passed. Explicit regeneration left
+  the reflected registry fingerprint unchanged at 4fa7e1d7f355d61a; Rust-only
+  contracts/native extensions are recorded under that fingerprint in CHANGES.md.
+- Final Python 3.11 suite: 191 passed, including probe failure/cleanup and companion
+  scope tests. No GitHub CI, workflows or remote automation added.
+
+Behavior validation:
+- Shared Core library: 20 passed; resource library: 3 passed; resource contracts:
+  10 passed; formats library: 14 passed; ordinary archive tests: 7 passed.
+  HXV4's 5 dedicated primitive tests cover the synthetic KDF vector, malformed
+  objects, AEAD tampering, bounded inflation and partition-invariant filtering.
+- Image library: 66 passed; image effects: 7 passed. Runtime library: 55 passed,
+  1 environment-dependent test ignored (not counted as a pass). Independent
+  vector geometry/pixels and document tests do not load any native VM.
+- Final native fixtures with an explicitly supplied system font and pinned KAG3:
+  LayerExDraw 3 passed; engine bridge 20 passed; JSON 2 passed; stock KAG3 1 passed.
+  Includes ordered brushes/transforms/bounds, real override rejection, original
+  caller suspension, atomic JSON save/load and scoped file/archive directory rules.
+- Public asynchronous archive -> mounted hash alias -> shared PNG/image product:
+  1 passed, exercising the SharedArchive wrapper, container origin and worker
+  resource opening without a native VM.
+- Explicit external HXV4 test was actually invoked: 1 passed. The local archive
+  yielded 10616 actual resources (warning pseudo entry removed), plus the optional
+  derived PE startup resource. Original startup is 316 bytes. Thirty-two protected
+  sample entries passed checksums; the largest 218196292-byte entry also verified
+  and supported nonzero reads. At that observation the tracked decoded-resource
+  budget was 316 bytes; this is not a measurement of total process peak memory.
+- Actual self-authored native-vector capture: Apple M5 / Metal, 640x420 raster.
+  Brush offsets/order, polygon, even-odd hole and affine view were visually
+  inspected. Native diagnostics: 9 engine API calls, 3 layers, no error,
+  plugin_shells=[], owns_framebuffer=false, native-vector-demo-ready. This is a
+  plugin/shared-API fixture, not a game-kr frame, Windows GDI pixel oracle,
+  hardware RT, cross-platform or live audio-device result.
+
+Actual game startup and remaining blocker:
+- Initial actual resource open rejected unknown Hxv4; this was fixed in the shared
+  parser. Opening the packed directory directly initially lacked startup because
+  no archive was mounted. An early external symlink project was correctly rejected
+  by containment; the reproducible probe keeps that check enabled instead.
+- Executing the archive's ordinary startup produced its own corruption-sentinel
+  message and zero game layers. The executable is not thereby declared corrupt,
+  and that blank renderer completion is not a successful game boot.
+- The correct, unchanged PE RCDATA startup now executes from its explicit derived
+  resource, passes the real native archive-directory request, then fails at
+  Plugins.linkZ (bytecode 43). No game scene/title/gameplay frame is established.
+- linkZ is not an alias for ordinary link. Its bootstrap registers signature and
+  CompoundStorage/media state beyond the already validated HXV4 reader. The
+  separate pinned research record docs/krkr-bootstrap-gap.md identifies PSS-SHA256,
+  bootstrap return-octet and CompoundStorage requirements, and explicit ABI/oracle
+  gaps. No signature success, returned key/octet, media/domain state or native DLL
+  execution is fabricated. Original executable identity/bres routing also remains
+  part of that future native bootstrap profile. The 39 DLLs are not all implemented.
+
+Corrections and evidence:
+- Initial integration tests exposed advisory protected flags/ordinary startup,
+  incorrect Special startup-by-basename binding, a local helper-name shadow,
+  ambiguous map typing and test-fixture setup/borrowing issues; they were corrected
+  before the final passing scopes. Early LayerExDraw checks also exposed inherited
+  update lookup and RectF ObjThis errors; both were fixed and revalidated. Final
+  review also moved built-in update identity capture before all scripts, with
+  a passing native-method override-before-link regression. An
+  initial repeated --lib CLI argument and Python macOS path-alias assertion failed;
+  corrected invocations passed. Failures are not counted as successful validation.
+- Local evidence is ignored under target/verification/game-kr/: hxv4-*-final.log,
+  hxv4-stream-final.log, shared-resource-tests.log, image-runtime-tests.log,
+  native-last-tests.log, async-hashed-test.log, final-{workspace-check,
+  python-tests,api-tests}.log, desktop-last-build.log, embedded-container/
+  summary.json and vector-demo/{final.png,final-render.log}. Source snapshots remain
+  ignored under target/research/. The broader engine and ADR 0050 work remain open.
+
+## 2026-10-28 — game-kr protected bootstrap runs through shared services
+
+Implementation:
+- `Plugins.linkZ` now installs the protected-bootstrap facade only when the
+  storage equals the bootstrap module named by the engine-published profile
+  (`hxv4_bootstrap_profile`, derived by the HXV4 resource plugin: prefix, unique
+  key, media name, PUBKEY PEM, context token — never the archive key). Member
+  surface taken from the bootstrap module's own string table: System.bootStrap,
+  System.checkSignature, Storages.CompoundStorageMedia, parseArchiveIndex,
+  archiveUniqueKey, isExistentStorageNoSearchNoNormalize, and the archive
+  addAutoPath/removeAutoPath hook. Unmapped media members fail visibly.
+- New shared `crysirror_resource::compound` (mount/domain/route state, pathHash/
+  fileHash) and `crysirror_resource::text_stream` (KiriKiri FE FE mode 0/1/2,
+  krkrz TextStream.cpp fd5c4ba). Signature checks use the existing shared
+  RSA-PSS verifier. `krmovie.dll` is an engine facade (no TJS exports).
+- Fixed shared pathHash: little-endian bytes over the exact spelling, directories
+  with trailing `/`, root `""` (root = 94d4a97c61498621 as documented). The
+  pinned xp3-brute spelling (big-endian, slashless) matched no directory record,
+  so every hashed lookup previously missed. Hashed names now resolve only under
+  an explicit `hxv4_hashed_root`, so the plain sentinel startup cannot shadow them.
+
+Compilation/tests: `cargo test --release -p crysirror-resource -p
+crysirror-formats-arc -p crysirror-krkr` all pass; the two ignored real-game
+HXV4 tests pass with CRYSIRROR_HXV4_GAME. Desktop built with `krkr,arc-formats`.
+
+Behavior (CPU probe, tools/probe_krkr.py, log under
+target/verification/game-kr/linkz/): bootStrap → CompoundStorage mount of
+data.xp3 → checkSignature(exe) true → krmovie link → real arc://./startup.tjs →
+Storages.tjs (ciphered text) → KAG system scripts. Now stops at
+`Plugins.link("layerExImage.dll")`. No rendered frame; whole game not established.
+Not mapped: the bootstrap's Plugins.link signature hook, setFile/getFile/getHashes,
+custom archive seeds; checkSignature reads synchronously (ADR 0050 split open).
+
+### 2026-10-28 (later) — next plugins on game-kr's real call chain
+
+- `layerExImage.dll` (wamsoft 3aff625): light/colorize/modulate/noise/
+  generateWhiteNoise/gaussianBlur onto shared `ImageEffect`s. New shared
+  `crysirror_image::cximage` ports the CxImage brightness/contrast LUT, HSL
+  colorize and HSL modulate exactly (notice: docs/third-party/cximage.txt).
+  gaussianBlur uses the native std-dev derivation with the shared sampled
+  kernel (CxImage's 50-sample integration is not reproduced).
+- `KAGParserEx.dll` (wamsoft 61d5f1e): extended-format parsers with `taglist`;
+  the shared parser already keeps attributes before `*` (Ex rule).
+  multiLineTagEnabled=true and paramMacros fail visibly (unused by game-kr).
+- Tests: crysirror-image/resource/krkr pass. Probe now stops at
+  `Plugins.link("textrender.dll")` (TextRenderBase message layout).
+- `textrender.dll` TextRenderBase: new shared `crysirror_text::markup`
+  (VM-free typed port of krkrz_rs b4a295f text_render.rs, MIT notice in
+  docs/third-party/krkrz_rs.txt) with width/font/eval/label host callbacks;
+  the adapter maps TJS values and script handlers only. Vertical ruby,
+  graphical characters, word_break and width_time_scale fail visibly.
+- System.confirm fails visibly with its prompt (no modal dialog service).
+- Probe now stops at `Plugins.link("motionplayer_nod3d.dll")` (E-mote Motion).
+
+### 2026-10-28 (session end) — game-kr boots into KAGWindow/UI construction
+
+Implemented this round (all tests in krkr/scene/runtime/text/image/resource pass):
+- Plugins: motionplayer(_nod3d) Motion namespace (real PSB ResourceManager via
+  eluna_rs; playback members fail visibly), csvParser (shared
+  `crysirror_runtime::csv`, TextStream BOM/FE FE decoding), scriptsEx, windowEx and
+  win32dialog vendored from Kirakira c451918 (win32dialog open/messageBox fail
+  visibly), addFont, known-surface table (msdfrender, k2compat, layerStwCopy:
+  members installed, each fails visibly when used).
+- Core: Scripts.setCallMissing/getClassNames/loadDataPack/getTraceString(empty),
+  Window.BasicDrawDevice/drawDevice/left/top/zoom/registerHotKey + empty base
+  event handlers, System.desktopLeft/Top, readRegValue (empty registry),
+  WaveSoundBuffer.PhaseVocoder (non-identity filters fail at play), VideoOverlay
+  geometry state, Layer.children/numChildren/order setter/callOnPaint+onPaint
+  dispatch, plain-state Layer properties as real native properties, pre-construct
+  left/top, standard cursor constants (shape not applied to host cursor).
+- Shared canvas: partial region replace, TransformCopy (rotate/scale, no skew),
+  Resize; krkr copyRect/affineCopy/stretchCopy/setImageSize use them.
+- Window inner size may be any uniform zoom of the canvas (probe uses 1920x1080).
+- Vendored lexer patch (regexp scan stops at line breaks in skipped @if blocks),
+  recorded in krkr-upstream SOURCE.json `patched` / UPSTREAM.md.
+- Diagnostics: CRYSIRROR_KRKR_TRACE_NATIVES, CRYSIRROR_KRKR_EXCEPTION_{EVAL,MATCH,ALL,REGS},
+  CRYSIRROR_KRKR_TRACE_STORAGE; tests/decompile_tool.rs; hxv4 dump_named test.
+
+Current stop: `Layer.convertType` missing during UI construction. Known open:
+per-channel draw faces (face=1/holdAlpha), fstat.dll, System.versionInformation,
+Debug.addLoggingHandler, Motion playback, psbfile/.scn scenarios, video/AMV,
+audio decoders. No rendered game frame yet; whole game not established.
+
+### 2026-10-29 — game-kr renders its first real screen
+
+Behavior: `crysirror render` (Metal, 1920x1080, 900 frames of 16 ms) shows the
+game's ATTENTION screen (attention.png drawn through the game's own AffineLayer
+onPaint path onto the shared canvas) plus the game's menu bar via UI.MenuSpec;
+Vorbis audio decodes. KAG is click-waiting at `sysvoice` in custom.ks *caution.
+Capture: target/verification/game-kr/render/attention-900.png (local, ignored).
+
+Fixes this round:
+- Vendored krkr-tjs2 patches (recorded in SOURCE.json `patched` + UPSTREAM.md):
+  `&a.p incontextof t` keeps the ignore-property context (parser rewrite matching
+  tjsInterCodeGen.cpp); call opcodes record the caller's `this`
+  (`Runtime::native_caller_this`), used by scriptsEx foreach `functhis`.
+- Shared canvas (crysirror-scene): band pruning keeps partial replaces linear
+  (400-cell test), copies keep only source nodes inside the copied rect,
+  destination draw clips on Copy/TransformCopy, new `Fill` with replace.
+- Adapter: Layer.update raises callOnPaint (krkrz UpdateByScript), layer growth
+  enlarges the image (krkrz ImageLayerSizeChanged), setClip/clip* properties,
+  partial translucent fillRect, convertType (alpha/add-alpha identity in the
+  adapter's straight-alpha representation; to-opaque fails), Layer.focused (false,
+  consistent with focusedLayer null), extrans/extNagano provider links,
+  KAGParser.store with native callStack/macroArgs layout (restoring active call
+  frames still fails visibly).
+- Tests: krkr/scene/runtime/text/image/resource all pass; tests/tjs_semantics.rs.
+
+Open: input/click to advance past the caution screen is unverified, title screen
+not yet reached; Motion playback, psbfile/.scn, video, per-channel faces, fstat,
+save-path cfu write, hotkey dispatch, cursor shapes, focus.
+
+## 2026-10-28: game-kr continuation and shared codec work (Codex)
+
+### Implementation
+
+- Explicit `void` native storage strings convert to the empty string, distinct
+  from a missing argument. `windowEx.getCursorPos` reads the client engine input
+  snapshot in virtual window coordinates (not the OS desktop cursor).
+- Native relative/absolute sibling ordering now maps to engine retained order.
+  ADR 0094 adds engine-owned isolated subtree crossfades, public Layers commands
+  and progress, with KiriKiri exchange/completion semantics in a thin adapter.
+- Shared text-file encoding and scoped VFS metadata back `Array.save2` and the
+  fstat read/query profile. Saves await actual atomic-write completion; failure
+  does not resume the script as success. Unsupported mutation/saveStruct2 modes
+  remain explicit errors.
+- Shared M2 motion resources, worker samples, validated dynamic PuppetFrames and
+  immutable textures back the Motion native profile. This does not imply all
+  Motion timeline, physics, masking or feedback modes are implemented.
+- MP4 AVC/HEVC/AV1 software decoding is in `crysirror-video`, with pinned Rust
+  OxideAV decoders and provenance in its SOURCE.json. The unused `crysirror-mp4`
+  prototype was moved to ignored local research storage, removed from the
+  workspace. The dependency baseline is now Rust 1.95 (tested host: 1.98.1).
+
+### Compilation and behavior evidence recorded so far
+
+- Release storage-plugin tests: 3 passed. Independent runtime text-encoding and
+  scoped metadata tests: 1 passed each. Exact CP932/UTF-8 bytes, newline modes,
+  worker failure, client isolation and absent archive timestamps are covered.
+- Release video tests: 16 passed, 1 existing local-file test ignored. Six
+  generated MP4 samples cover AVC Baseline/Main with B frames, HEVC Main/Main10,
+  AV1 8/10 bit; decoded pixels, ordered PTS, seek, rewind, cancel and EOF are
+  checked. Old MPEG/WMV/AC3 tests also ran. No FFmpeg subprocess is used for
+  runtime decode. These fixtures are synthetic, not user game data.
+- Earlier in this phase, the native bridge suite passed 22 tests with 1 ignored,
+  and Python tooling passed 191 tests. Those results precede the new crossfade
+  and Motion changes and are not reported as verification of the final state.
+- Actual game-kr clicks progressed beyond ATTENTION and exposed native storage
+  string, cursor, ordering and transition gaps. At this checkpoint no title
+  screen has been verified. Later release/GPU/game results are appended below;
+  implementation or an authored test alone is not counted as a pass.
+
+- Subsequent native bridge release run: **23 passed, 1 ignored**, including
+  actual engine-clock crossfade completion, self-bound native object identity,
+  order/visibility exchange and exactly one callback.
+- Runtime Media release behavior run: **13 passed, 1 ignored** (47 unrelated
+  tests filtered). AVC/HEVC/AV1 frames publish through the existing bounded media
+  workers; an MP4 audio track with audio enabled fails explicitly. MP4 audio
+  decode, HDR tone mapping and hardware video decode are not implemented.
+- Desktop release build with `krkr,arc-formats` completed. The next real game
+  replay failed in a retained Canvas batch with `layer missing`; this is not a
+  successful title-screen result and is being investigated independently.
+
+- Shared subtree state tests: **3 passed**. Explicit release GPU test on
+  **Apple M5 / Metal: 1 passed, 0 ignored**. Pixels verify overlapping descendants,
+  gamma blend, transparent alpha, clipping, endpoints, unchanged external layers
+  and stop restoration; invalid progress and oversized worksets are rejected.
+  An initial cache-key review concern was withdrawn after tracing the actual
+  ordinary-image path; the original namespace is correct and is GPU-tested.
+
+- Motion release native profile test: **1 passed**; public frame-validation and
+  rectangle-clipping/UV-color interpolation tests: **2 passed**. Explicit local
+  logo native tests both passed (yuzulogo: 5 parts/14 immutable textures at
+  500 ms; m2logo: 13 parts/38 textures). They verify engine-owned 1920x1080
+  presentation, real decoded texture resources, retained resource lifetime and
+  one onSync event, with `owns_framebuffer=false`. These are headless native-to-
+  engine checks, not whole-game or GPU visual validation.
+
+- Canvas lifecycle release tests: **14 passed, 0 ignored** (3 new regressions
+  plus 11 existing Canvas tests). Cleanup of missing derived nodes is scoped to
+  Canvas ownership; ordinary Layer Remove still rejects an absent ID.
+- API reference regenerated, command coverage passed (1 test), and the release
+  API documentation binary passed all 7 tests after logging fingerprint
+  `cca12b45f54104e4`. Public command coverage also now records the existing
+  Canvas resize/fill/transform_copy commands.
+
+- The next actual game replay passed the earlier Canvas failure and executed to
+  `custom.ks:110` (`loadfadein prepare`, after the logo sequence). It then failed
+  explicitly at `Layer.piledCopy`. No title image was captured. The run exited
+  itself before a proposed termination signal was sent; it was not a timeout or
+  a successful render. Evidence: local `title-bringup/render6.log`.
+- Sampling this replay exposed repeated rebuilding of every Canvas presentation.
+  Dirty-source/root filtering now updates only affected bindings. Its release
+  tests plus lifecycle/existing Canvas coverage: **17 passed, 0 ignored**.
+  This is behavior verification; actual post-change game timing is pending.
+
+- CopySubtree now freezes one `Paint::Snapshot { size, layers }` rather than
+  expanding its draw tree into the destination. Scene release coverage is
+  **25 passed, 0 ignored**. Explicit Snapshot GPU tests on Apple M5/Metal:
+  **2 passed, 0 ignored**; overall/ancestor opacity, scaling and source mutation
+  preserve the frozen product with exactly one rasterization. Immutable-image
+  validation and asynchronous readiness are tested; ordinary paths, dynamic
+  surfaces and uncaptured font aliases are rejected in this first profile.
+- Replay 7 reached the same prepare point but rejected a type-1 source. Upstream
+  inspection identified that raw-image Complete is a direct RGBA copy independent
+  of type/opacity; the native fast path is being corrected. Composite opaque
+  alpha is not universally 255 in upstream and is not silently normalized here.
+
+### Final verified checkpoint for this batch
+
+- MP4: pure Rust AVC/HEVC/AV1 video is wired through the shared decoder and Media
+  workers. The old prototype is outside the source tree. MP4 audio, hardware
+  decode, HDR tone mapping and exhaustive codec conformance are not claimed.
+- Native piledCopy release tests: **3 passed, 0 ignored**. The raw-image branch
+  preserves RGBA (including hidden RGB in the synthetic PNG) independently of
+  opaque type/opacity; the composed branch uses the shared Snapshot profile.
+- Explicit GPU regression across Snapshot and subtree crossfade: **3 passed,
+  0 ignored, Apple M5/Metal**. Image readiness is gated deterministically; an
+  unfinished dependency never becomes a cached blank product. Crossfade's
+  alternating-input snapshot cache retention remains a performance follow-up.
+- Final API fingerprint: `08381e9cfceae9bf`. Reference regeneration and command
+  coverage ran; after the fingerprint log update, all **7 API documentation
+  checks passed** from the newly built release test executable.
+- Desktop build8 with `krkr,arc-formats` passed. Actual replay8 still stops at
+  `custom.ks:110`: source slot3 is type1, uniform alpha0, 1920x1440, with two
+  visible type2 children; destination slot214 is type1 with no children. This is
+  an opaque composed-subtree path, not the raw-image fast path. Its upstream
+  cache-alpha behavior is distinct from ordinary alpha composition. It remains
+  an explicit error rather than being forced to A255 or silently approximated.
+  **The title screen has not been reached or captured.** The next engine gap is
+  a defined opaque bitmap/subtree composition and presentation policy.
+- No commits or pushes were made. No CI was added. Verification used local
+  release builds, synthetic redistributable fixtures, existing local game data
+  and runtime system fonts.
+- Final native release regression (`engine_bridge`, `motion_plugin`,
+  `piled_copy`, `storage_plugins`): **30 passed, 2 ignored, 0 failed**.
+  Ignored tests are not included in the pass count. Evidence:
+  `target/verification/game-kr/title-bringup/native-final.log`.
+
+### 2026-10-28 — game-kr reaches its title screen
+
+Behavior: `crysirror render` (Metal, 1920x1080, input track clicking the caution
+screen at frames 900/1200) runs 1800 and 2600 frames with exit 0 and shows the
+title screen: the seven menu buttons, the 体験版 badge (PSB pimg images), title
+BGM (Ogg Opus with .sli loop). Captures: target/verification/game-kr/title-bringup/
+title-1800.png, title-2600.png (local, ignored). Clicking はじめから reaches the
+next UI, which stops on unmapped toml.dll (uitexts.toml) and an audio open
+inside a non-resumable native callback.
+
+Fixes this round (on top of Codex's uncommitted work):
+- Repaired Codex's non-compiling image_processing edit and its `image_alpha`
+  present field the canvas never accepted.
+- Layer.piledCopy of a composed ltOpaque source goes through the shared
+  copy_subtree with straight alpha and logs the deviation (krkrz displays stored
+  RGB; where the source alpha is below 255 ours shows what lies beneath).
+- Window.focusedLayer writable, Layer.focus/focused, onBlur/onFocus delivery.
+- Shared canvas `fill keep_alpha` (holdAlpha); fillRect dfOpaque/holdAlpha.
+- VideoOverlay.stop is a no-op (open always fails visibly, nothing can play).
+- crysirror-audio: Ogg Opus decoder (opus-decoder 0.1.1, MIT/Apache, no unsafe),
+  `.sli` parser; AudioParameters.loop_end; WaveSoundBuffer labels/flags.
+- psbfile.dll facade: PSBFile.load/root via eluna_rs; `psb://` images decoded
+  by the engine registry through new HostServices::upload_encoded_image.
+- CSVParser accepts a null target. API docs regenerated (224cb89811441323).
+- Tests: krkr (all binaries), scene, audio, core, runtime pass; api_docs pass.
+  Opus decode/seek verified on the game's BGM via an ignored local-file test.
+
+Open: the title background motion (title_bg.mtn) publishes PuppetFrames but
+only its dark base parts render (character/logo art missing: motion renderer
+gaps); operateRect/colorRect with face=1 holdAlpha; toml.dll; WIN32Dialog;
+opaque-layer display semantics; fstat deleteFile.
+
+### 2026-10-28 — game-kr plays its opening scenario
+
+Behavior: `crysirror render` with an input track (caution clicks, はじめから at
+frame 2010, then a click every 150 frames) runs 3000 and 4900 frames with exit
+0: start.ks loads the PSB scenario (`.scn` via PSBFile) and the opening NVL
+monologue advances line by line with the click-wait icon and quick menu.
+Captures: target/verification/game-kr/title-bringup/start-3000.png,
+story-4900.png (local, ignored). Backgrounds/characters of these opening lines
+are dark/absent in the capture; whether that is the scene or a gap is not yet
+established.
+
+Fixes this round:
+- toml.dll: Scripts.tomlDecodeFromStorage over shared structured_text TOML
+  (toml_edit 0.25.17).
+- WaveSoundBuffer: open/play queued from input callbacks (no suspend there);
+  metadata reads while such an open prepares fail visibly; `frequency` writable
+  (rate applied at play; live change fails visibly).
+- Vendored krkr-kag: `%arg|default` resolves inside argument-less macros (KAG3
+  argument-stack depth); recorded in SOURCE.json/UPSTREAM.md.
+- Canvas: `fade` (krkr negative-opacity colorRect: alpha scaled, isolated
+  snapshot); copy provenance turns a krkr save/restore of a cell around each
+  redraw into (region over base) instead of nesting clones (was O(frames^2),
+  hit the 4096-layer limit within ~100 frames).
+- Layer: affineCopy clear (neutral-colour fill of the clip area, then copy);
+  drawText void colour → 0 and font members read through PropGet (script font
+  properties); blurred shadows via a new shared glyph blur ported from krkrz
+  fd5c4baa CharacterData::Blur / TVPChBlurCopy (crysirror_text::glyph_blur,
+  Paint::GlyphRun.blur; licence docs/third-party/krkrz.txt).
+- PSBFile(storage) constructor; msdfrender.dll links without its SDF members
+  (scripts feature-detect them and use the atlas stretchCopy path).
+- TextRender: read-only state visible to callbacks; `%n[N];` line breaks per the
+  game's TagTextConverter ([xr num]) and krkrz drop-in krkrsdl3 semantics (the
+  wamsoft source was not available).
+- Window.focusedLayer writable earlier this round; see previous entry.
+
+Open: title_bg motion art; operateRect/colorRect face=1 holdAlpha; WIN32Dialog;
+opaque-layer display; save/load not exercised.
+

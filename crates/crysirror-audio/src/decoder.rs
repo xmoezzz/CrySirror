@@ -308,12 +308,14 @@ impl Stream {
             (8000..=192000).contains(&rate) && (1..=2).contains(&channels),
             "only mono/stereo audio at 8000..192000 Hz is supported"
         );
-        let decoder = symphonia::default::get_codecs()
+        let decoder = crate::opus::codecs()
             .make(&track.codec_params, &DecoderOptions::default())
             .context("audio codec")?;
         let (id, frames) = (track.id, track.codec_params.n_frames);
         let startup_delay =
-            if track.codec_params.codec == symphonia::core::codecs::CODEC_TYPE_VORBIS {
+            if [symphonia::core::codecs::CODEC_TYPE_VORBIS, symphonia::core::codecs::CODEC_TYPE_OPUS]
+                .contains(&track.codec_params.codec)
+            {
                 track.codec_params.delay.unwrap_or(0) as u64
             } else {
                 0
@@ -476,7 +478,7 @@ impl AudioSource for Stream {
             )?
             .format;
         let track = format.default_track().context("audio track disappeared")?;
-        self.decoder = symphonia::default::get_codecs()
+        self.decoder = crate::opus::codecs()
             .make(&track.codec_params, &DecoderOptions::default())?;
         self.track = track.id;
         self.format = Some(format);

@@ -36,6 +36,20 @@ pub enum PixelMath {
     CopyNonTransparent,
     /// Conventional straight RGBA source-over, including destination alpha.
     SourceOver,
+    /// Encoded-byte scalar interpolation /256; full opacity copies RGBA,
+    /// otherwise alpha is zero. No color-space conversion is performed.
+    OpaqueScalar256,
+    /// Scalar source-alpha /256 interpolation into an opaque bitmap. Writes
+    /// alpha zero even at source alpha zero; opacity zero skips the whole draw.
+    MaskScalar256,
+    /// Encoded-byte scalar opaque-source blend onto straight alpha. Full
+    /// opacity copies RGB and writes alpha 255; partial opacity uses the
+    /// scalar opacity-on-opacity lookup table, ignoring source alpha.
+    OpaqueOnAlphaScalar256,
+    /// Encoded-byte scalar straight-alpha blend using the scalar lookup table.
+    /// This deliberately preserves the scalar transparent-pixel quirks; it is
+    /// not the SIMD or conventional /255 source-over profile.
+    AlphaOnAlphaScalar256,
     /// Straight mask blend: truncate opacity*source_alpha/255, rounded RGB,
     /// alpha = dst_alpha + floor((255-dst_alpha)*effective_alpha/255).
     Mask255,
@@ -84,6 +98,36 @@ pub struct StretchOptions {
 fn lerp(d: u8, s: u8, a: u32) -> u8 {
     ((u32::from(d) * (255 - a) + u32::from(s) * a + 127) / 255) as u8
 }
+// Reference contract: krkrz fd5c4baa6a2ef5978db1bd043634351f48667daf,
+// visual/tvpgl.c TVPCreateTable and the scalar *_c blend functions. In particular
+// TVPCreateTable mixes binary64 constants and binary32 stored intermediates.
+// Keep those rounding boundaries rather than substituting an idealized ratio.
+// SIMD upstream paths have different alpha/endpoint semantics and are excluded.
+fn scalar_alpha_tables() -> &'static [[u8; 2]] {
+    static TABLES: std::sync::OnceLock<Vec<[u8; 2]>> = std::sync::OnceLock::new();
+    TABLES.get_or_init(|| {
+        (0..65536u32)
+            .map(|index| {
+                let source = index >> 8;
+                let dest = index & 255;
+                let weight = if dest == 0 {
+                    255
+                } else {
+                    let da = (f64::from(dest) / 255.0) as f32;
+                    let sa = (f64::from(source) / 255.0) as f32;
+                    let ratio = sa / da;
+                    let denominator = (1.0 - f64::from(sa) + f64::from(ratio)) as f32;
+                    ((ratio / denominator * 255.0) as u32).min(255) as u8
+                };
+                let alpha = 255 - (255 - dest) * (255 - source) / 255;
+                [weight, alpha as u8]
+            })
+            .collect()
+    })
+}
+fn lerp256(d: u8, s: u8, weight: u8) -> u8 {
+    (i32::from(d) + ((i32::from(s) - i32::from(d)) * i32::from(weight)).div_euclid(256)) as u8
+}
 fn check_mode(mode: PixelMath, opacity: u8) -> Result<()> {
     ensure!(
         mode != PixelMath::PremultipliedMask256 || opacity == 255,
@@ -97,6 +141,43 @@ fn combine(d: &mut [u8], s: &[u8], opacity: u8, mode: PixelMath) {
         return;
     }
     match mode {
+        PixelMath::OpaqueScalar256 | PixelMath::MaskScalar256 => {
+            if mode == PixelMath::OpaqueScalar256 && opacity == 255 {
+                d.copy_from_slice(s);
+                return;
+            }
+            let a = if mode == PixelMath::OpaqueScalar256 {
+                op
+            } else if opacity == 255 {
+                u32::from(s[3])
+            } else {
+                u32::from(s[3]) * op / 256
+            } as i32;
+            for c in 0..3 {
+                d[c] = (i32::from(d[c]) + ((i32::from(s[c]) - i32::from(d[c])) * a).div_euclid(256))
+                    as u8;
+            }
+            d[3] = 0;
+        }
+        PixelMath::OpaqueOnAlphaScalar256 | PixelMath::AlphaOnAlphaScalar256 => {
+            if mode == PixelMath::OpaqueOnAlphaScalar256 && opacity == 255 {
+                d[..3].copy_from_slice(&s[..3]);
+                d[3] = 255;
+                return;
+            }
+            let alpha = if mode == PixelMath::OpaqueOnAlphaScalar256 {
+                op
+            } else if opacity == 255 {
+                u32::from(s[3])
+            } else {
+                u32::from(s[3]) * op / 256
+            };
+            let [weight, alpha] = scalar_alpha_tables()[(alpha as usize) * 256 + usize::from(d[3])];
+            for c in 0..3 {
+                d[c] = lerp256(d[c], s[c], weight);
+            }
+            d[3] = alpha;
+        }
         PixelMath::Copy | PixelMath::CopyRgb | PixelMath::CopyNonTransparent => {
             if mode == PixelMath::CopyNonTransparent && s[3] == 0 {
                 return;
@@ -279,6 +360,121 @@ mod tests {
             mode,
             color_key: None,
         }
+    }
+    const SCALAR_MODES: [PixelMath; 4] = [
+        PixelMath::OpaqueScalar256,
+        PixelMath::MaskScalar256,
+        PixelMath::OpaqueOnAlphaScalar256,
+        PixelMath::AlphaOnAlphaScalar256,
+    ];
+    // Derived vectors from the unmodified pinned glgen/gengl.pl-generated C,
+    // compiled with clang -O2 -fno-fast-math -ffp-contract=off on arm64 macOS.
+    // Inputs are self-authored; no upstream implementation or assets are bundled.
+    #[test]
+    fn scalar_profiles_match_independent_c_endpoint_vectors() {
+        let vectors: &[(usize, u8, u8, u8, [u8; 4])] = &[
+            (0, 0, 0, 255, [255, 0, 231, 0]),
+            (0, 17, 0, 255, [238, 0, 231, 0]),
+            (0, 0, 255, 255, [255, 255, 231, 255]),
+            (0, 128, 128, 128, [127, 127, 124, 0]),
+            (0, 255, 255, 128, [127, 127, 124, 0]),
+            (0, 17, 255, 255, [238, 255, 231, 255]),
+            (0, 128, 0, 128, [127, 127, 124, 0]),
+            (0, 128, 128, 0, [128, 127, 17, 128]),
+            (1, 0, 0, 255, [0, 255, 17, 0]),
+            (1, 17, 0, 255, [17, 255, 17, 0]),
+            (1, 0, 255, 255, [254, 254, 230, 0]),
+            (1, 128, 128, 128, [127, 127, 70, 0]),
+            (1, 255, 255, 128, [128, 126, 123, 0]),
+            (1, 17, 255, 255, [237, 254, 230, 0]),
+            (1, 128, 0, 128, [128, 255, 17, 0]),
+            (1, 128, 128, 0, [128, 127, 17, 128]),
+            (2, 0, 0, 255, [255, 0, 231, 255]),
+            (2, 17, 0, 255, [238, 0, 231, 255]),
+            (2, 0, 255, 255, [255, 255, 231, 255]),
+            (2, 128, 128, 128, [127, 127, 159, 192]),
+            (2, 255, 255, 128, [127, 127, 124, 255]),
+            (2, 17, 255, 255, [238, 255, 231, 255]),
+            (2, 128, 0, 128, [127, 85, 159, 192]),
+            (2, 128, 128, 0, [128, 127, 17, 128]),
+            (3, 0, 0, 255, [254, 0, 230, 0]),
+            (3, 17, 0, 255, [17, 255, 17, 17]),
+            (3, 0, 255, 255, [254, 254, 230, 255]),
+            (3, 128, 128, 128, [127, 127, 102, 160]),
+            (3, 255, 255, 128, [128, 126, 123, 255]),
+            (3, 17, 255, 255, [237, 254, 230, 255]),
+            (3, 128, 0, 128, [128, 255, 17, 128]),
+            (3, 128, 128, 0, [128, 127, 17, 128]),
+        ];
+        for &(mode, da, sa, opacity, expected) in vectors {
+            let mut dest = [da, 255 - sa, 17, da];
+            combine(
+                &mut dest,
+                &[255 - da, sa, 231, sa],
+                opacity,
+                SCALAR_MODES[mode],
+            );
+            assert_eq!(
+                dest, expected,
+                "mode={mode} da={da} sa={sa} opacity={opacity}"
+            );
+        }
+    }
+    #[test]
+    fn scalar_alpha_clipping_and_opacity_zero_preserve_other_pixels() {
+        let source = ImageSurface::filled(2, 1, [127, 128, 231, 128]).unwrap();
+        let mut dest = ImageSurface::filled(3, 1, [128, 127, 17, 128]).unwrap();
+        let mut opts = options(
+            BitmapRect::new(-1, 0, 4, 1),
+            [-1, 0],
+            PixelMath::AlphaOnAlphaScalar256,
+        );
+        opts.opacity = 128;
+        dest.blit(&source, opts).unwrap();
+        assert_eq!(
+            dest.rgba,
+            [127, 127, 102, 160, 127, 127, 102, 160, 128, 127, 17, 128]
+        );
+        let before = dest.clone();
+        opts.opacity = 0;
+        for mode in SCALAR_MODES {
+            opts.mode = mode;
+            dest.blit(&source, opts).unwrap();
+        }
+        assert_eq!(dest, before);
+    }
+    /// The local oracle is generated independently from the pinned upstream C.
+    /// Its header contains both entire tables, followed by four modes times
+    /// seven opacities times every source/destination alpha pair, in RGBA order.
+    #[test]
+    #[ignore = "requires CRYSIRROR_SCALAR_ORACLE from the pinned upstream C oracle"]
+    fn scalar_profiles_match_full_external_c_oracle() {
+        let data = std::fs::read(std::env::var_os("CRYSIRROR_SCALAR_ORACLE").expect("oracle path"))
+            .unwrap();
+        assert_eq!(data.len(), 4 + 2 * 65536 + 4 * 7 * 256 * 256 * 4);
+        assert_eq!(&data[..4], b"CSO1");
+        for (index, &[weight, alpha]) in scalar_alpha_tables().iter().enumerate() {
+            assert_eq!(weight, data[4 + index], "weight table index {index}");
+            assert_eq!(alpha, data[4 + 65536 + index], "alpha table index {index}");
+        }
+        let mut offset = 4 + 2 * 65536;
+        for mode in SCALAR_MODES {
+            for opacity in [0, 1, 2, 127, 128, 254, 255] {
+                for da in 0..=255u8 {
+                    for sa in 0..=255u8 {
+                        let mut dest = [da, 255 - sa, 17, da];
+                        combine(&mut dest, &[255 - da, sa, 231, sa], opacity, mode);
+                        assert_eq!(
+                            dest,
+                            data[offset..offset + 4],
+                            "{mode:?} da={da} sa={sa} opacity={opacity}"
+                        );
+                        offset += 4;
+                    }
+                }
+            }
+        }
+        assert_eq!(offset, data.len());
     }
     #[test]
     fn clipping_keeps_source_destination_correspondence_and_accepts_extreme_rects() {

@@ -27,6 +27,14 @@ pub struct Buffer {
     pub start: u64,
     pub fading: bool,
     installed_gain: f32,
+    /// `<storage>.sli` loop information, read at open (WaveLoopManager).
+    sli: Option<crysirror_audio::sli::LoopInfo>,
+    /// An open queued from a non-resumable callback whose preparation has not
+    /// completed; metadata reads fail visibly until it has.
+    opening: bool,
+    /// Script-set playback frequency (krkrz `frequency`), applied at play as
+    /// a rate relative to the source sample rate.
+    frequency: Option<i64>,
 }
 impl Buffer {
     fn group(&self) -> String {
@@ -90,19 +98,24 @@ fn control(rt: &mut Rt, r: AudioRequest) -> krkr_tjs2::Result<()> {
     s.ops.push_back(Op::Control(r));
     Ok(())
 }
+/// Queue an operation that needs host completion. At a resumable boundary the
+/// VM waits for it; inside a non-resumable callback (input events) it is
+/// queued in order and completes after the callback returns.
 fn park(rt: &mut Rt, op: Op) -> krkr_tjs2::Result<Variant> {
-    if !rt.host().can_suspend {
-        return Err(unsupported(
-            "audio preparation in this native callback",
-            "a resumable callback boundary",
-        ));
-    }
+    let suspend = rt.host().can_suspend;
     let s = &mut rt.host_mut().sounds;
     if s.ops.len() >= 4096 {
         return Err(err("native audio operation budget"));
     }
+    if let (false, Op::Open { object, .. }) = (suspend, &op) {
+        if let Some(b) = s.buffers.get_mut(object) {
+            b.opening = true;
+        }
+    }
     s.ops.push_back(op);
-    rt.request_suspend();
+    if suspend {
+        rt.request_suspend();
+    }
     Ok(Variant::Void)
 }
 fn notify(rt: &mut Rt, t: Option<ObjectHandle>, name: &str) -> krkr_tjs2::Result<Variant> {
@@ -113,6 +126,76 @@ fn notify(rt: &mut Rt, t: Option<ObjectHandle>, name: &str) -> krkr_tjs2::Result
     }
     rt.call_object_method(h, name, vec![])
 }
+/// Filters change the decoded signal; one that is not an identity must be
+/// applied by a shared DSP stage, which is not mapped yet.
+fn active_filter_check(rt: &Rt, h: krkr_tjs2::runtime::ObjectHandle) -> krkr_tjs2::Result<()> {
+    let Some(list) = rt.object_member(h, "filters").object_handle() else {
+        return Ok(());
+    };
+    for f in rt.array_elements(list).unwrap_or(&[]).to_vec() {
+        let Some(f) = crate::natives::object_arg(&f) else { continue };
+        let identity = matches!(rt.object_member(f, "__vocoder"), Variant::Integer(1))
+            && rt.object_member(f, "pitch").to_real().unwrap_or(0.) == 1.
+            && rt.object_member(f, "time").to_real().unwrap_or(0.) == 1.;
+        if !identity {
+            return Err(unsupported(
+                "WaveSoundBuffer filter",
+                "shared DSP stages for KiriKiri WaveFilters (phase vocoder time/pitch)",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `WaveSoundBuffer.PhaseVocoder`: krkrz's built-in WaveFilter parameters.
+fn install_phase_vocoder(rt: &mut Rt, wave: krkr_tjs2::runtime::ObjectHandle) {
+    let c = rt.alloc_native_constructor(|rt: &mut Rt, this: Option<krkr_tjs2::runtime::ObjectHandle>, _| {
+        let h = this
+            .map(|h| rt.bound_this(h).unwrap_or(h))
+            .filter(|h| *h != rt.global_handle())
+            .unwrap_or_else(|| rt.alloc_ordinary_object());
+        rt.add_object_class_info(h, "PhaseVocoder");
+        rt.set_object_member(h, "__vocoder", Variant::Integer(1));
+        // krkrz defaults: window 4096, overlap 8, pitch 1, time 1.
+        rt.set_object_member(h, "__window", Variant::Integer(4096));
+        rt.set_object_member(h, "__overlap", Variant::Integer(8));
+        rt.set_object_member(h, "pitch", Variant::Real(1.));
+        rt.set_object_member(h, "time", Variant::Real(1.));
+        Ok(Variant::Object(h))
+    });
+    rt.add_object_class_info(c, "PhaseVocoder");
+    rt.register_object_native_property(
+        c,
+        "window",
+        |rt, t| Ok(rt.object_member(this_of(rt, t, "PhaseVocoder.window")?, "__window")),
+        |rt, t, v| {
+            let h = this_of(rt, t, "PhaseVocoder.window")?;
+            let n = v.to_integer()?;
+            if !(64..=32768).contains(&n) || n & (n - 1) != 0 {
+                return Err(err("PhaseVocoder.window must be a power of two in 64..32768"));
+            }
+            rt.set_object_member(h, "__window", Variant::Integer(n));
+            Ok(())
+        },
+    );
+    rt.register_object_native_property(
+        c,
+        "overlap",
+        |rt, t| Ok(rt.object_member(this_of(rt, t, "PhaseVocoder.overlap")?, "__overlap")),
+        |rt, t, v| {
+            let h = this_of(rt, t, "PhaseVocoder.overlap")?;
+            let n = v.to_integer()?;
+            if !matches!(n, 2 | 4 | 8 | 16 | 32) {
+                return Err(err("PhaseVocoder.overlap must be 2, 4, 8, 16 or 32"));
+            }
+            rt.set_object_member(h, "__overlap", Variant::Integer(n));
+            Ok(())
+        },
+    );
+    rt.register_object_native(c, "finalize", |_: &mut Rt, _, _| Ok(Variant::Void));
+    rt.set_object_member(wave, "PhaseVocoder", Variant::Object(c));
+}
+
 pub fn install(rt: &mut Rt) {
     rt.host_mut().sounds.global = 100000;
     rt.host_mut()
@@ -144,9 +227,18 @@ pub fn install(rt: &mut Rt) {
             start: 0,
             fading: false,
             installed_gain: 1.,
+            sli: None,
+            opening: false,
+            frequency: None,
         };
         let group = b.group();
         rt.host_mut().sounds.buffers.insert(h.0, b);
+        // WaveSoundBuffer.filters: the ordered WaveFilter list (an Array).
+        let filters = rt.alloc_array_object(vec![]);
+        rt.set_object_member(h, "filters", Variant::Object(filters));
+        // WaveSoundBuffer.flags: the loop-link condition flags (16 slots).
+        let flags = rt.alloc_array_object(vec![Variant::Integer(0); crysirror_audio::sli::MAX_FLAGS]);
+        rt.set_object_member(h, "flags", Variant::Object(flags));
         control(
             rt,
             AudioRequest::SetMixGroup {
@@ -160,6 +252,7 @@ pub fn install(rt: &mut Rt) {
         )?;
         Ok(Variant::Void)
     });
+    install_phase_vocoder(rt, c);
     methods(
         rt,
         c,
@@ -179,11 +272,21 @@ pub fn install(rt: &mut Rt) {
                         "audio preparation from the Save mount",
                     ));
                 }
-                let path = rt
-                    .host()
-                    .storage()?
+                let storage = rt.host().storage()?;
+                let path = storage
                     .resolve(&name)
                     .ok_or_else(|| err(format!("sound storage absent: {name}")))?;
+                // krkrz reads loop information from `<placed name>.sli`.
+                let sli_name = format!("{}.sli", path.rsplit('/').next().unwrap_or(&path));
+                let sli = match storage.resolve(&format!("{path}.sli")).or_else(|| storage.resolve(&sli_name)) {
+                    Some(sli) => {
+                        let bytes = storage.read(&sli).map_err(err)?;
+                        let text = String::from_utf8(bytes).map_err(|e| err(format!("{sli}: {e}")))?;
+                        Some(crysirror_audio::sli::parse(&text).map_err(|e| err(format!("{sli}: {e:#}")))?)
+                    }
+                    None => None,
+                };
+                rt.host_mut().sounds.buffers.get_mut(&h.0).unwrap().sli = sli;
                 park(
                     rt,
                     Op::Open {
@@ -197,9 +300,10 @@ pub fn install(rt: &mut Rt) {
                 if b.status == "play" {
                     return Ok(Variant::Void);
                 }
-                if b.resource.is_none() {
+                if b.resource.is_none() && !b.opening {
                     return Err(err("WaveSoundBuffer.play requires open"));
                 }
+                active_filter_check(rt, h)?;
                 park(rt, Op::Play(h.0))
             }),
             ("stop", |rt, t, _| {
@@ -287,12 +391,19 @@ pub fn install(rt: &mut Rt) {
         "totalTime",
         "totalSamples",
         "frequency",
+        "labels",
     ] {
         rt.register_object_native_property(
             c,
             name,
             move |rt, t| {
                 let (_, b) = buffer(rt, t)?;
+                if b.opening && !matches!(name, "status" | "volume" | "volume2" | "pan" | "paused" | "looping" | "labels") {
+                    return Err(unsupported(
+                        &format!("WaveSoundBuffer.{name} while an open from a native callback is preparing"),
+                        "synchronous audio metadata inside non-resumable callbacks",
+                    ));
+                }
                 Ok(match name {
                     "status" => Variant::String(b.status.into()),
                     "volume" => Variant::Integer(b.volume),
@@ -312,7 +423,19 @@ pub fn install(rt: &mut Rt) {
                     "totalTime" => Variant::Integer(b.info.map_or(0, |i| {
                         i.source_frames.unwrap_or(0) * 1000 / i.source_rate as u64
                     }) as i64),
-                    "frequency" => Variant::Integer(b.info.map_or(0, |i| i.source_rate) as i64),
+                    "frequency" => Variant::Integer(
+                        b.frequency.unwrap_or(b.info.map_or(0, |i| i.source_rate as i64)),
+                    ),
+                    // name -> %[samplePosition] from the .sli labels.
+                    "labels" => {
+                        let d = rt.alloc_dictionary_object();
+                        for l in b.sli.iter().flat_map(|i| &i.labels) {
+                            let e = rt.alloc_dictionary_object();
+                            rt.set_object_member(e, "samplePosition", Variant::Integer(l.position as i64));
+                            rt.set_object_member(d, l.name.clone(), Variant::Object(e));
+                        }
+                        Variant::Object(d)
+                    }
                     _ => unreachable!(),
                 })
             },
@@ -393,6 +516,16 @@ pub fn install(rt: &mut Rt) {
                             n
                         };
                     }
+                    "frequency" => {
+                        let f = v.to_integer()?;
+                        if b.status == "play" && Some(f) != b.frequency {
+                            return Err(unsupported(
+                                "WaveSoundBuffer.frequency change during playback",
+                                "live shared voice rate control",
+                            ));
+                        }
+                        b.frequency = Some(f);
+                    }
                     _ => return Err(err("read-only sound property")),
                 }
                 rt.host_mut().sounds.buffers.insert(h.0, b);
@@ -454,6 +587,7 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                                 .ok_or_else(|| anyhow::anyhow!("native sound owner invalidated"))?;
                             s.resource = Some(resource);
                             s.info = Some(info);
+                            s.opening = false;
                             s.status = "stop";
                             s.start = 0;
                             s.paused = false;
@@ -530,7 +664,26 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                 rt.host_mut().sounds.pending = Some(Pending::Resource { object, ticket });
             }
             Op::Play(object) => {
+                let mut flags = [0; crysirror_audio::sli::MAX_FLAGS];
+                if let Some(f) = rt.object_member(ObjectHandle(object), "flags").object_handle() {
+                    for (v, e) in flags.iter_mut().zip(rt.array_elements(f).unwrap_or_default()) {
+                        *v = e.to_integer().unwrap_or(0);
+                    }
+                }
                 let b = &rt.host().sounds.buffers[&object];
+                let sli_loop = sli_loop(b, &flags)?;
+                let rate = match (b.frequency, b.info) {
+                    (None, _) => 1.,
+                    (Some(f), Some(i)) => {
+                        let rate = f as f32 / i.source_rate as f32;
+                        anyhow::ensure!(
+                            (0.125..=4.).contains(&rate),
+                            "WaveSoundBuffer.frequency {f} outside the shared voice rate range"
+                        );
+                        rate
+                    }
+                    (Some(_), None) => anyhow::bail!("sound frequency without source metadata"),
+                };
                 let ticket = h.begin_audio(
                     client,
                     AudioRequest::PlayResource {
@@ -539,7 +692,10 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                             .resource
                             .ok_or_else(|| anyhow::anyhow!("sound resource missing"))?,
                         parameters: AudioParameters {
-                            looping: b.looping,
+                            rate,
+                            looping: b.looping || sli_loop.is_some(),
+                            loop_start: sli_loop.map_or(0, |l| l.0),
+                            loop_end: sli_loop.map(|l| l.1),
                             paused: b.paused,
                             start_frame: Some(b.start),
                             pan: b.pan as f32 / 200000. + 0.5,
@@ -599,4 +755,21 @@ pub fn observations(
         }
     }
     Ok(callbacks)
+}
+
+/// The loop a `.sli` file applies with the flag values at play time: one
+/// backward, non-smooth link becomes the shared loop range. Flag changes
+/// during playback take effect at the next play (krkrz re-evaluates links
+/// live). Other link profiles fail visibly.
+fn sli_loop(b: &Buffer, flags: &[i64; crysirror_audio::sli::MAX_FLAGS]) -> anyhow::Result<Option<(u64, u64)>> {
+    let Some(info) = &b.sli else { return Ok(None) };
+    let taken: Vec<_> = info.links.iter().filter(|l| l.taken(flags)).collect();
+    match taken.as_slice() {
+        [] => Ok(None),
+        [l] if l.to < l.from && !l.smooth => Ok(Some((l.to, l.from))),
+        _ => anyhow::bail!(
+            "WaveSoundBuffer .sli link profile is not supported by the CrySirror KiriKiri adapter: \
+             requires one backward non-smooth link"
+        ),
+    }
 }

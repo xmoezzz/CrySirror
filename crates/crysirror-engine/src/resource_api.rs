@@ -259,6 +259,7 @@ impl Archive for DecodedArchive {
 }
 struct SharedArchive(Arc<dyn Archive>);
 impl Archive for SharedArchive {
+    fn resolve(&self,path:&str)->Option<u32>{self.0.resolve(path)}
     fn entries(&self) -> &[ArchiveEntry] {
         self.0.entries()
     }
