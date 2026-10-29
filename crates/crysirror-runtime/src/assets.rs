@@ -52,7 +52,7 @@ impl SurfaceSnapshot {
     }
 }
 pub const SURFACE_PREFIX: &str = "__surface/";
-pub const MAX_SURFACES_PER_CLIENT: usize = 16;
+pub const MAX_SURFACES_PER_CLIENT: usize = 4096;
 impl Assets {
     pub fn new(path: &Path) -> Result<Self> {
         #[allow(unused_mut)]
@@ -214,6 +214,14 @@ impl Assets {
         }
         self.insert(key, data)?;
         Ok(())
+    }
+    /// Whether `path` is served by a mounted container for this client (its
+    /// bytes cannot change while mounted, unlike plain project files).
+    pub fn container_backed(&self, client: ClientId, path: &str) -> bool {
+        let (Some(storage), Ok(logical)) = (self.storage.get(&client), VfsPath::new(Mount::Asset, path)) else {
+            return false;
+        };
+        storage.served_by_container(&logical)
     }
     /// Read an already-published immutable engine resource, scoped to its owner.
     /// Unlike read_for this never falls back to disk or bypasses provider mounts.

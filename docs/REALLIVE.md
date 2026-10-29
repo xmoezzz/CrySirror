@@ -156,8 +156,10 @@ were rehashed with no content, size, mtime or inventory changes.
 
 - Opening-profile behavior is verified separately from compilation and from
   the rejected hosted implementation. No complete-game support is claimed.
-- Native save-file import/export, whole-adapter snapshots and DLL emulation are
-  not supported. VM bank/call-stack savepoint bookkeeping is not a save-file
+- Native save-file import/export and whole-adapter snapshots are not
+  supported. `LoadDLL`/`CallDLL` (2:1:10-12) run the owner's EF00/PT00/DT00
+  emulation (vendored `reallive-dll`); it has run only on synthetic inputs, no
+  Little Busters!/Tomoyo After install has been tested. VM bank/call-stack savepoint bookkeeping is not a save-file
   implementation. These capabilities must not silently serialize a different
   substitute format.
 - The native syscall mapping is partial. Unsupported text/layout/graphics,

@@ -145,24 +145,39 @@ pub struct ServiceBatch {
     pub ui: Vec<ui::UiCommand>,
 }
 impl EngineSystems {
+    /// Apply one client batch atomically. Each subsystem's `apply_batch` is
+    /// itself atomic and validates what it changed; the sections are staged
+    /// without cloning the layer tree (one layer transaction) and canvas
+    /// surfaces are copy-on-write, so a batch costs what it touches rather
+    /// than the size of the whole engine state.
     pub fn submit(&mut self, client: ClientId, batch: &ServiceBatch) -> Result<()> {
-        let mut staged = self.clone();
-        if !batch.canvases.is_empty() {
-            staged
-                .canvases
-                .apply_batch(client, &batch.canvases, &mut staged.layers)?;
+        let mut canvases = (!batch.canvases.is_empty()).then(|| self.canvases.clone());
+        let mut world = (!batch.world.is_empty()).then(|| self.world.clone());
+        let mut ui = (!batch.ui.is_empty()).then(|| self.ui.clone());
+        self.layers.transaction(|layers| {
+            if let Some(canvases) = &mut canvases {
+                canvases.apply_batch(client, &batch.canvases, layers)?;
+            }
+            if let Some(world) = &mut world {
+                world.apply_batch(client, &batch.world)?;
+            }
+            if !batch.layers.is_empty() {
+                layers.apply_batch(client, &batch.layers)?;
+            }
+            if let Some(ui) = &mut ui {
+                ui.apply_batch(client, &batch.ui)?;
+            }
+            Ok(())
+        })?;
+        if let Some(canvases) = canvases {
+            self.canvases = canvases;
         }
-        if !batch.world.is_empty() {
-            staged.world.apply_batch(client, &batch.world)?;
+        if let Some(world) = world {
+            self.world = world;
         }
-        if !batch.layers.is_empty() {
-            staged.layers.apply_batch(client, &batch.layers)?;
+        if let Some(ui) = ui {
+            self.ui = ui;
         }
-        if !batch.ui.is_empty() {
-            staged.ui.apply_batch(client, &batch.ui)?;
-        }
-        staged.validate()?;
-        *self = staged;
         Ok(())
     }
 }

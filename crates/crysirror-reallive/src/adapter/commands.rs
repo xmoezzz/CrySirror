@@ -21,13 +21,17 @@ impl RealLiveVm {
             (1, 30) => match c.op.opcode {
                 0 => self.draw_stack.clear(),
                 3 => m.store = self.draw_stack.len() as i32,
-                20 => {}
-                21 | 22 => bail!(
-                    "manual native presentation requires engine surface visibility transactions"
-                ),
+                // Auto / semi-auto show every draw; manual shows refreshes only.
+                20 | 21 => self.set_manual(h, false)?,
+                22 => self.set_manual(h, true)?,
                 _ => bail!("unsupported screen operation"),
             },
-            (1, 31) => m.yield_frame = true,
+            (1, 31) => {
+                if self.manual {
+                    self.refresh_manual(h)?;
+                }
+                m.yield_frame = true;
+            }
             (1, 33) => self.graphics(m, h, c)?,
             (0, 3) => self.message(m, h, c)?,
             (1, 10) if c.op.opcode == 100 => {
@@ -36,6 +40,8 @@ impl RealLiveVm {
             }
             (1, 20 | 21 | 22 | 23) => self.sound(m, h, c)?,
             (1, 26) => self.movie(m, h, c)?,
+            (2, 1) => self.dll(m, c)?,
+            (1, 40) => self.haikei(m, h, c)?,
             _ => bail!("unsupported native syscall {}", c.op),
         }
         Ok(Next::Advance)
@@ -194,10 +200,6 @@ impl RealLiveVm {
                 let asset = self.resource(m, "image", &name)?;
                 let size = h.image_size(self.client, &asset).map_err(err)?;
                 let mask = matches!(op, 51 | 71);
-                ensure!(
-                    mask || h.image_is_opaque(self.client, &asset).map_err(err)?,
-                    "non-mask copying a transparent image needs a shared alpha-override API"
-                );
                 let (rect, pos, alpha) = if n >= 8 {
                     (
                         read_rect(m, c, 2, rec)?,
@@ -215,8 +217,10 @@ impl RealLiveVm {
                         },
                     )
                 };
+                // Upstream blits clip the source rectangle to the image.
+                let rect = clip_source(rect, size);
                 let layer = self.image_layer(
-                    asset,
+                    asset.clone(),
                     [pos[0], pos[1], rect[2], rect[3]],
                     Some(uv(rect, size)),
                     alpha,
@@ -240,6 +244,13 @@ impl RealLiveVm {
                     && pos == [0., 0.]
                     && rect[2] >= extent[0] as f32
                     && rect[3] >= extent[1] as f32;
+                // Upstream Blend::Copy keeps the image's alpha: a whole-surface
+                // `set` is exactly that; a partial copy over existing pixels
+                // would need an engine region replace.
+                ensure!(
+                    mask || replace || h.image_is_opaque(self.client, &asset).map_err(err)?,
+                    "non-mask partial copy of a transparent image needs an engine region replace"
+                );
                 ops.push(json!({"op":if replace{"set"}else{"draw"},"id":dc,"layer":layer}));
                 self.canvas(h, ops)?;
             }
@@ -252,10 +263,6 @@ impl RealLiveVm {
                 };
                 let (src, pos, time, style, alpha) =
                     display(m, c, 1, self.width, self.height, rec)?;
-                ensure!(
-                    matches!(style, 0 | 1 | 4 | 5) || time == 0,
-                    "transition style {style} needs a shared engine implementation"
-                );
                 if self.grp_closes || (time > 0 && style != 1 && self.wipe_closes) {
                     self.hide_text(h)?;
                 }
@@ -269,17 +276,17 @@ impl RealLiveVm {
                     ops.push(json!({"op":"copy","source":1,"destination":0,"rect":src.unwrap_or([0.,0.,size[0]as f32,size[1]as f32]),"position":pos,"opacity":alpha,"replace":false}));
                 } else {
                     let resource = if name == "???" {
-                        self.default_grp.clone()
+                        m.sys.default_grp.clone()
                     } else {
                         name.clone()
                     };
                     let asset = self.resource(m, "image", &resource)?;
                     let size = h.image_size(self.client, &asset).map_err(err)?;
-                    ensure!(
-                        op == 74 || h.image_is_opaque(self.client, &asset).map_err(err)?,
-                        "non-mask opening a transparent image needs shared alpha override"
-                    );
-                    let r = src.unwrap_or([0., 0., size[0] as f32, size[1] as f32]);
+                    // Non-mask opens copy the image (Blend::Copy); DC 0 is shown
+                    // without its alpha, so transparent pixels show their colour
+                    // (black in practice): back them with opaque black.
+                    let backed = op != 74 && !h.image_is_opaque(self.client, &asset).map_err(err)?;
+                    let r = clip_source(src.unwrap_or([0., 0., size[0] as f32, size[1] as f32]), size);
                     let layer = self.image_layer(
                         asset,
                         [pos[0], pos[1], r[2], r[3]],
@@ -293,37 +300,38 @@ impl RealLiveVm {
                     if !full {
                         ops.push(json!({"op":"copy","source":0,"destination":1,"rect":[0,0,self.width,self.height],"position":[0,0],"opacity":255,"replace":true}));
                     }
+                    if backed {
+                        ops.push(json!({"op":"fill","id":1,"rect":[pos[0], pos[1], r[2], r[3]],"color":[0,0,0,255],"replace":true}));
+                    }
                     ops.push(json!({"op":if full{"set"}else{"draw"},"id":1,"layer":layer}));
                     ops.push(json!({"op":"copy","source":1,"destination":0,"rect":[0,0,self.width,self.height],"position":[0,0],"opacity":255,"replace":true}));
                     if op == 73 && name != "???" {
-                        self.default_grp = name;
+                        m.sys.default_grp = name;
                     }
                 }
                 self.canvas(h, ops)?;
+                // grpDisplay / grpOpenBg promote background objects (upstream
+                // `open_onto_screen`); they join the transition's after-image.
+                if matches!(op, 72 | 73) {
+                    m.sys.gfx.promote_objects();
+                }
+                self.sync_objects(m, h)?;
                 if time > 0 && style != 1 {
-                    let effect = if matches!(style, 4 | 5) {
-                        let values = if c.params.len() >= 17 {
-                            m.int_params_from(c, 1)?
-                        } else {
-                            let index = m.int_param_or(c, 1, 0)?;
-                            m.gameexe.ints(&format!("SEL.{index:03}"))
-                        };
-                        json!({"kind":"ordered_dither","cell":[values.get(10).copied().unwrap_or(1).max(1),values.get(11).copied().unwrap_or(1).max(1)],"diagonal":style==5,"steps":1+values.get(9).copied().unwrap_or(0).max(0)})
+                    let mut values = if c.params.len() >= 17 {
+                        m.int_params_from(c, 1)?
                     } else {
-                        json!({"kind":"crossfade"})
+                        let index = m.int_param_or(c, 1, 0)?;
+                        m.gameexe.ints(&format!("SEL.{index:03}"))
                     };
-                    self.submit(h,json!({"layers":[{"op":"transition","transition":{"effect":effect,"duration_ms":time}}]}))?;
-                    self.wait = Some(Wait::Time {
-                        until: h.now_ms().saturating_add(time as u64),
-                        cancel: false,
-                    });
+                    values.resize(16, 0);
+                    values[6] = time;
+                    values[7] = style;
+                    self.sel_transition(h, &values)?;
                 }
             }
             100 | 101 | 102 => {
-                ensure!(
-                    op == 100,
-                    "external copy masks require a shared canvas mask API"
-                );
+                // 100 copies (Blend::Copy); 101/102 blend by the source alpha
+                // (Blend::Mask) — upstream `copy_blend`.
                 let (source, rect, pos, dst, at) = if n >= 8 {
                     (
                         m.int_param(c, 4)?,
@@ -345,10 +353,198 @@ impl RealLiveVm {
                 };
                 let alpha = m.int_param_or(c, at, 255)?.clamp(0, 255) as u8;
                 let target = self.extent(h, dst)?;
-                let replace = pos == [0., 0.]
-                    && rect == [0., 0., target[0] as f32, target[1] as f32]
-                    && alpha == 255;
+                // grpCopy at full opacity replaces the region (upstream
+                // Blend::Copy); the engine drops what it covers.
+                let _ = target;
+                let replace = op == 100 && alpha == 255;
                 self.canvas(h,vec![json!({"op":"copy","source":source,"destination":dst,"rect":rect,"position":pos,"opacity":alpha,"replace":replace})])?;
+            }
+            // freeDC(dc): DC 0 stays, DC 1 is emptied at screen size, others
+            // are released (upstream `Graphics::free_dc`).
+            16 => {
+                let dc = m.int_param(c, 0)?;
+                ensure!((0..=255).contains(&dc), "invalid DC {dc}");
+                match dc {
+                    0 => {}
+                    1 => self.canvas(h, vec![json!({"op":"create","id":1,"width":self.width,"height":self.height})])?,
+                    _ => self.canvas(h, vec![json!({"op":"create","id":dc,"width":1,"height":1})])?,
+                }
+            }
+            // grpStretchBlt / grpMaskStretchBlt(src rect, src, dst rect, dst[, alpha])
+            401 | 409 => {
+                let from = read_rect(m, c, 0, rec)?;
+                let source = m.int_param(c, 4)?;
+                let to = read_rect(m, c, 5, rec)?;
+                let target = m.int_param(c, 9)?;
+                let alpha = if n > 10 { m.int_param(c, 10)? } else { 255 }.clamp(0, 255);
+                if from[2] > 0. && from[3] > 0. && to[2] > 0. && to[3] > 0. {
+                    let (sx, sy) = (to[2] / from[2], to[3] / from[3]);
+                    let matrix = [sx, 0., 0., sy, to[0] - from[0] * sx, to[1] - from[1] * sy];
+                    // Blend::Copy replaces the area; partial opacity blends over it.
+                    let replace = op == 401 && alpha == 255;
+                    self.canvas(h, vec![json!({"op":"transform_copy","source":source,"destination":target,"rect":from,"matrix":matrix,"replace":replace,"opacity":alpha})])?;
+                }
+            }
+            // grpInvert / grpMono([area,] dc[, alpha]), grpColour([area,] dc, r, g, b)
+            // / grpLight([area,] dc, level): upstream grp 300..303 as an
+            // engine region filter (apply_tint: + toward white, - toward black).
+            300..=303 => {
+                let width = match op {
+                    300 | 301 => 1,
+                    302 => 4,
+                    _ => 2,
+                };
+                let (area, at) = if n >= width + 4 { (Some(read_rect(m, c, 0, rec)?), 4) } else { (None, 0) };
+                let dc = m.int_param(c, at)?;
+                let (filter, alpha) = match op {
+                    300 | 301 => {
+                        let alpha = if n > at + 1 { m.int_param(c, at + 1)? } else { 255 }.clamp(0, 255);
+                        (if op == 300 { json!({"invert": 1.0}) } else { json!({"mono": 1.0}) }, alpha)
+                    }
+                    _ => {
+                        let rgb = if op == 302 {
+                            [m.int_param(c, at + 1)?, m.int_param(c, at + 2)?, m.int_param(c, at + 3)?]
+                        } else {
+                            [m.int_param(c, at + 1)?; 3]
+                        };
+                        ensure!(rgb[0] == rgb[1] && rgb[1] == rgb[2], "grpColour with unequal channels needs an engine per-channel tint");
+                        let v = rgb[0].clamp(-255, 255) as f32 / 255.;
+                        (json!({"bright": v.max(0.), "dark": (-v).max(0.)}), 255)
+                    }
+                };
+                let rect = match area {
+                    Some(r) => r,
+                    None => {
+                        let size = self.extent(h, dc)?;
+                        [0., 0., size[0] as f32, size[1] as f32]
+                    }
+                };
+                if rect[2] > 0. && rect[3] > 0. && alpha > 0 {
+                    self.canvas(h, vec![json!({"op":"filter","id":dc,"rect":rect,"filter":filter,"opacity":alpha})])?;
+                }
+            }
+            // grpMulti(file | dc, effect..., compositors...) — upstream grp 75/77.
+            75 | 77 => {
+                use crate::vm::expr::Expr;
+                let plain = c.params.iter().take_while(|p| !matches!(p.value, Expr::Special { .. })).count();
+                let mut values = if plain >= 17 {
+                    (1..17).map(|i| m.int_param(c, i)).collect::<Result<Vec<_>>>()?
+                } else if plain >= 2 {
+                    let sel = m.int_param(c, 1)?;
+                    m.gameexe.ints(&format!("{}.{sel:03}", if rec { "SELR" } else { "SEL" }))
+                } else {
+                    vec![]
+                };
+                if values.is_empty() {
+                    values = vec![0, 0, self.width as i32 - 1, self.height as i32 - 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 0];
+                }
+                values.resize(16, 0);
+                let src_rect = |v: &[i32]| -> [f32; 4] {
+                    if rec {
+                        [v[0] as f32, v[1] as f32, v[2] as f32, v[3] as f32]
+                    } else {
+                        [v[0].min(v[2]) as f32, v[1].min(v[3]) as f32, (v[0].abs_diff(v[2]) + 1) as f32, (v[1].abs_diff(v[3]) + 1) as f32]
+                    }
+                };
+                let mut ops = vec![json!({"op":"clear","id":1,"color":[0,0,0,255]})];
+                if op == 75 {
+                    let name = m.str_param(c, 0)?;
+                    let name = if name == "???" { m.sys.default_grp.clone() } else { m.sys.default_grp = name.clone(); name };
+                    let asset = self.resource(m, "image", &name)?;
+                    let size = h.image_size(self.client, &asset).map_err(err)?;
+                    let r = clip_source(src_rect(&values), size);
+                    ops.push(json!({"op":"draw","id":1,"layer":self.image_layer(asset, [values[4] as f32, values[5] as f32, r[2], r[3]], Some(uv(r, size)), 255)}));
+                } else {
+                    let dc = m.int_param(c, 0)?;
+                    let r = src_rect(&values);
+                    ops.push(json!({"op":"copy","source":dc,"destination":1,"rect":r,"position":[values[4],values[5]],"opacity":255,"replace":true}));
+                }
+                for index in plain..c.params.len() {
+                    let Expr::Special { tag, pieces } = c.params[index].value.clone() else { continue };
+                    let Some(first) = pieces.first() else { continue };
+                    let name = m.eval_str(first)?;
+                    let numbers = pieces[1..].iter().map(|p| m.eval_int(p)).collect::<Result<Vec<_>>>()?;
+                    let asset = self.resource(m, "image", &name)?;
+                    let size = h.image_size(self.client, &asset).map_err(err)?;
+                    let (r, dest, alpha) = match (tag, numbers.as_slice()) {
+                        (0, _) => ([0., 0., size[0] as f32, size[1] as f32], [0., 0.], 255),
+                        (1 | 2, [effect, rest @ ..]) => {
+                            let mut v = m.gameexe.ints(&format!("{}.{effect:03}", if rec { "SELR" } else { "SEL" }));
+                            v.resize(16, 0);
+                            (src_rect(&v), [v[4] as f32, v[5] as f32], rest.first().copied().unwrap_or(if v[14] == 0 { 255 } else { v[14] }))
+                        }
+                        (3 | 4, [a, b, cc, d, dx, dy, rest @ ..]) => (src_rect(&[*a, *b, *cc, *d]), [*dx as f32, *dy as f32], rest.first().copied().unwrap_or(255)),
+                        _ => continue,
+                    };
+                    let r = clip_source(r, size);
+                    ops.push(json!({"op":"draw","id":1,"layer":self.image_layer(asset, [dest[0], dest[1], r[2], r[3]], Some(uv(r, size)), alpha.clamp(0, 255) as u8)}));
+                }
+                ops.push(json!({"op":"copy","source":1,"destination":0,"rect":[0,0,self.width,self.height],"position":[0,0],"opacity":255,"replace":true}));
+                if self.grp_closes {
+                    self.hide_text(h)?;
+                }
+                self.canvas(h, ops)?;
+                m.sys.gfx.promote_objects();
+                self.sync_objects(m, h)?;
+                if values[7] != 1 {
+                    self.sel_transition(h, &values)?;
+                }
+            }
+            // shake(spec): `#SHAKE.spec` (else `#SHAKE.000`), waited for.
+            32 => {
+                let spec = m.int_param(c, 0)?;
+                let mut values = m.gameexe.ints(&format!("SHAKE.{spec:03}"));
+                if values.is_empty() {
+                    values = m.gameexe.ints("SHAKE.000");
+                }
+                let steps = values.chunks_exact(3).map(|c| (c[0], c[1], c[2])).collect();
+                self.wait = Some(Wait::Shake { steps, start: h.now_ms() });
+            }
+            // grpZoom(from, to, src, dest, time)
+            402 => {
+                let from = read_rect(m, c, 0, rec)?;
+                let to = read_rect(m, c, 4, rec)?;
+                let source = u32::try_from(m.int_param(c, 8)?)?;
+                let dest = read_rect(m, c, 9, rec)?;
+                let time = m.int_param(c, 13)?.max(0) as u64;
+                self.wait = Some(Wait::Zoom { source, from, to, dest, start: h.now_ms(), time });
+            }
+            // grpOutline / grpFill(([area,] dc, r, g, b[, alpha])), upstream grp 200/201.
+            200 | 201 => {
+                let (area, at) = if n >= 8 {
+                    (Some(read_rect(m, c, 0, rec)?), 4)
+                } else {
+                    (None, 0)
+                };
+                let dc = m.int_param(c, at)?;
+                let color = rgb(m, c, at + 1)?;
+                let alpha = if n > at + 4 { m.int_param(c, at + 4)? } else { 255 }.clamp(0, 255) as u8;
+                let rect = match area {
+                    Some(r) => r,
+                    None => {
+                        let size = self.extent(h, dc)?;
+                        [0., 0., size[0] as f32, size[1] as f32]
+                    }
+                };
+                if rect[2] > 0. && rect[3] > 0. {
+                    let [x, y, w, hh] = rect;
+                    let parts = if op == 201 {
+                        vec![rect]
+                    } else {
+                        vec![
+                            [x, y, w, 1.],
+                            [x, y + hh - 1., w, 1.],
+                            [x, y + 1., 1., hh - 2.],
+                            [x + w - 1., y + 1., 1., hh - 2.],
+                        ]
+                    };
+                    let ops = parts
+                        .into_iter()
+                        .filter(|r| r[2] > 0. && r[3] > 0.)
+                        .map(|r| json!({"op":"fill","id":dc,"rect":r,"color":[color[0],color[1],color[2],alpha],"replace":alpha==255}))
+                        .collect();
+                    self.canvas(h, ops)?;
+                }
             }
             403 => {
                 let (color, time) = match n {
@@ -466,12 +662,9 @@ impl RealLiveVm {
                 let fade = m
                     .int_param_or(c, if module == 20 { 1 } else { 2 }, 0)?
                     .max(0) as f32;
-                ensure!(
-                    module != 20
-                        || m.int_param_or(c, 2, 0)? <= 0
-                        || !h.audio_playing(self.client, channel).map_err(err)?,
-                    "outgoing music fade needs shared queued replacement API"
-                );
+                // bgmPlay(file, fadein, fadeout): the playing track fades out
+                // as the new one starts (engine replacement fade).
+                let replace_fade = if module == 20 { m.int_param_or(c, 2, 0)?.max(0) as f32 } else { 0. };
                 let ticket = h
                     .begin_audio(
                         self.client,
@@ -487,6 +680,7 @@ impl RealLiveVm {
                                 loop_start,
                                 start_ms,
                                 fade_ms: fade,
+                                replace_fade_ms: replace_fade,
                                 bus: if module == 20 {
                                     PcmBus::Music
                                 } else {
@@ -556,6 +750,116 @@ impl RealLiveVm {
                     self.wait = Some(Wait::Audio { channel });
                 }
             }
+            // koePlay family (upstream `modules::sound::koe` / `voice_pcm`):
+            // voice `id` is sample id % 100000 of archive id / 100000.
+            (23, 0 | 1 | 7..=10) => {
+                let id = m.int_param(c, 0)?;
+                let character = if Machine::param_count(c) >= 2 { Some(m.int_param(c, 1)?) } else { None };
+                let honour = matches!(op, 0 | 1 | 7);
+                let settings = &m.sys.settings;
+                let muted = settings.koe_mode == 2
+                    || !settings.enabled[crate::vm::settings::channel::KOE]
+                    || (honour && character.is_some_and(|ch| settings.use_koe.get(&ch) == Some(&false)));
+                h.submit_audio(self.client, AudioRequest::Stop { channel, fade_ms: 0. }).map_err(err)?;
+                if muted {
+                    return Ok(());
+                }
+                let (file, sample) = (id / 100_000, id % 100_000);
+                let archive = self.resources.as_ref().context("RealLive resources")?.borrow_mut().find(&m.gameexe, "koe", &format!("z{file:04}")).ok();
+                let asset = match archive {
+                    // A voice archive (KOEPAC/OVK/NWK) is an engine container:
+                    // the project mounts it (`real-live/koepac` etc.) and its
+                    // samples are ordinary audio assets.
+                    Some(archive) => {
+                        let storage = self.resources.as_ref().context("RealLive resources")?.borrow().storage.clone();
+                        let point = storage.container_mount(&archive).map_err(err)?.with_context(|| {
+                            format!("reallive: voice archive {archive} is not mounted (mount it with format real-live/koepac, ovk or nwk)")
+                        })?;
+                        let names = storage.list(Mount::Asset, &point).map_err(err)?;
+                        let stem = format!("sample{sample:05}");
+                        let name = names
+                            .iter()
+                            .find(|n| n.split('.').next() == Some(stem.as_str()))
+                            .with_context(|| format!("reallive: voice {id} is not in {archive}"))?;
+                        format!("{point}/{name}")
+                    }
+                    None => {
+                        let loose = format!("z{file:04}{sample:05}");
+                        self.resource(m, "koe", &loose)
+                            .or_else(|_| self.resource(m, "koe", &format!("{file:04}/{loose}")))
+                            .with_context(|| format!("reallive: voice {id} not found"))?
+                    }
+                };
+                let volume = settings_volume(&m.sys.settings, crate::vm::settings::channel::KOE);
+                let ticket = h
+                    .begin_audio(
+                        self.client,
+                        AudioRequest::PlayAsset {
+                            channel,
+                            source: AudioAsset { path: VfsPath::new(Mount::Asset, &asset).map_err(err)?, frame_limit: None },
+                            intro: None,
+                            parameters: AudioParameters { gain: volume, bus: PcmBus::Voice, ..Default::default() },
+                        },
+                    )
+                    .map_err(err)?;
+                self.pending_audio = Some((ticket, matches!(op, 1 | 7 | 9 | 10).then_some(channel)));
+                self.poll_audio(h)?;
+                return Ok(());
+            }
+            // se(number): `#SE.number` = file, played once over other SEs
+            // (upstream `Sound::se_play`; none while fast-forwarding).
+            (22, 0) => {
+                let number = m.int_param(c, 0)?;
+                let file = m.gameexe.get(&format!("SE.{number:03}")).and_then(|e| e.str(0).map(str::to_owned)).unwrap_or_default();
+                if file.is_empty() || m.sys.should_fast_forward() {
+                    return Ok(());
+                }
+                let asset = self.resource(m, "wav", &file)?;
+                let slot = 32 + (self.se_serial % 16);
+                self.se_serial = self.se_serial.wrapping_add(1);
+                let gain = settings_volume(&m.sys.settings, crate::vm::settings::channel::SE);
+                let ticket = h
+                    .begin_audio(
+                        self.client,
+                        AudioRequest::PlayAsset {
+                            channel: slot,
+                            source: AudioAsset { path: VfsPath::new(Mount::Asset, &asset).map_err(err)?, frame_limit: None },
+                            intro: None,
+                            parameters: AudioParameters { gain, bus: PcmBus::Sfx, ..Default::default() },
+                        },
+                    )
+                    .map_err(err)?;
+                self.pending_audio = Some((ticket, None));
+                self.poll_audio(h)?;
+                return Ok(());
+            }
+            (23, 3 | 6) => self.wait = Some(Wait::Audio { channel }),
+            (23, 4) => m.store = i32::from(h.audio_playing(self.client, channel).map_err(err)?),
+            // wavStop / wavStopEx, wavFadeOut(channel[, time = 1000]).
+            (21, 9 | 10) => {
+                h.submit_audio(self.client, AudioRequest::Stop { channel, fade_ms: 0. }).map_err(err)?;
+            }
+            (21, 105 | 106) => {
+                let fade = m.int_param_or(c, 1, 1000)?.max(0) as f32;
+                h.submit_audio(self.client, AudioRequest::Stop { channel, fade_ms: fade }).map_err(err)?;
+            }
+            // bgmSetVolume / wavSetVolume(volume[, time]), *VolMax / *VolMin([time]).
+            (20, 12) | (21, 12) => {
+                let at = usize::from(module == 21);
+                let volume = m.int_param(c, at)?.clamp(0, 255) as f32 / 255.;
+                let fade = m.int_param_or(c, at + 1, 0)?.max(0) as f32;
+                h.submit_audio(self.client, AudioRequest::SetGain { channel, gain: volume, fade_ms: fade }).map_err(err)?;
+            }
+            (20, 13 | 14) | (21, 13 | 14) => {
+                let at = usize::from(module == 21);
+                let fade = m.int_param_or(c, at, 0)?.max(0) as f32;
+                let gain = if op == 13 { 1. } else { 0. };
+                h.submit_audio(self.client, AudioRequest::SetGain { channel, gain, fade_ms: fade }).map_err(err)?;
+            }
+            // bgmPause / bgmUnPause.
+            (20, 9 | 10) => {
+                h.submit_audio(self.client, AudioRequest::Pause { channel, paused: op == 9, fade_ms: 0. }).map_err(err)?;
+            }
             _ => bail!("unsupported native audio operation {}", c.op),
         }
         self.api_calls += 1;
@@ -577,24 +881,47 @@ impl RealLiveVm {
             103 => self.fast_text = true,
             104 => self.fast_text = false,
             100 | 105 => self.color = m.int_param(c, 0)?.max(0) as u32,
+            // FontSize([size]): no size returns to the window's default.
             101 => {
-                let i = if c.params.len() > 1 { 1 } else { 0 };
-                let size = m.int_param(c, i)?;
-                ensure!((1..=512).contains(&size), "native text size");
-                self.sizes.insert(self.window, size);
+                if c.params.is_empty() {
+                    self.sizes.remove(&self.window);
+                } else {
+                    let i = if c.params.len() > 1 { 1 } else { 0 };
+                    let size = m.int_param(c, i)?;
+                    ensure!((1..=512).contains(&size), "native text size");
+                    self.sizes.insert(self.window, size);
+                }
             }
-            151 => self.clear_window(h, self.window)?,
-            161 => self.hide_text(h)?,
-            152 | 162 => {
-                self.hide_text(h)?;
-                self.pen.clear();
+            // Upstream msg: 151 closes the active window (frame included),
+            // 152 clears its text, 161 closes every window, 162 clears all.
+            151 => {
+                self.close_window(h, self.window)?;
                 m.message_page_empty = true;
             }
-            201 => {
-                let size = self.font_size(m);
+            152 => {
+                self.clear_window(h, self.window)?;
+                m.message_page_empty = true;
+            }
+            161 => {
+                self.hide_text(h)?;
+                m.message_page_empty = true;
+            }
+            162 => {
+                let windows: Vec<u32> = self.pen.keys().copied().collect();
+                for w in windows {
+                    self.clear_window(h, w)?;
+                }
+                m.message_page_empty = true;
+            }
+            // br: the next line (upstream `hard_break`); par: a new line only
+            // when the current one has text (upstream `paragraph`).
+            201 | 3 | 202 => {
+                let line = self.window_geometry(m, self.window).line;
                 let pen = self.pen.entry(self.window).or_insert([0, 0]);
-                pen[0] = 0;
-                pen[1] += size + 10;
+                if c.op.opcode == 201 || pen[0] > 0 {
+                    pen[0] = 0;
+                    pen[1] += line;
+                }
             }
             _ => bail!("unsupported native message operation {}", c.op),
         }
@@ -609,6 +936,9 @@ impl RealLiveVm {
                     ops.push(json!({"op":"remove","id":id}));
                 }
             }
+        }
+        for id in std::mem::take(&mut self.waku_ids) {
+            ops.push(json!({"op":"remove","id":id}));
         }
         self.submit(h, json!({"layers":ops}))?;
         self.pen.clear();
@@ -628,7 +958,23 @@ impl RealLiveVm {
         }
         Ok(())
     }
-    fn clear_window(&mut self, h: &mut dyn HostServices, window: u32) -> Result<()> {
+    /// Close one window: its text and its frame (upstream `close_window`).
+    pub(super) fn close_window(&mut self, h: &mut dyn HostServices, window: u32) -> Result<()> {
+        self.clear_window(h, window)?;
+        let frame = 20000 + window * 8..20000 + window * 8 + 8;
+        let ops: Vec<Value> = self
+            .waku_ids
+            .iter()
+            .filter(|id| frame.contains(id))
+            .map(|id| json!({"op":"remove","id":id}))
+            .collect();
+        self.waku_ids.retain(|id| !frame.contains(id));
+        if !ops.is_empty() {
+            self.submit(h, json!({ "layers": ops }))?;
+        }
+        Ok(())
+    }
+    pub(super) fn clear_window(&mut self, h: &mut dyn HostServices, window: u32) -> Result<()> {
         let mut ops = vec![];
         for id in (10000 + window * 4)..(10003 + window * 4) {
             if !self.query(h, EngineQuery::Layer(id))?.is_null() {
@@ -699,6 +1045,9 @@ impl RealLiveVm {
             ids.push((index, id));
         }
         if !ids.is_empty() {
+            // The original dialog's OK: commits even when the field lost focus.
+            let y = 152 + ids.len() * 80;
+            ops.push(json!({"op":"put","widget":{"id":NAME_OK,"kind":"button","rect":[560,y,160,36],"text":"OK","font":self.config.font_alias,"text_size":24}}));
             ops.push(json!({"op":"focus","id":ids[0].1}));
             self.submit(h, json!({"ui":ops}))?;
             self.wait = Some(Wait::Name { local, fields: ids });
@@ -725,7 +1074,6 @@ impl RealLiveVm {
         let text = interpret_names(text, |local, index| m.memory.name(local, index).to_owned());
         let size = self.font_size(m);
         let prefix = format!("WINDOW.{:03}.", self.window);
-        require_supported_text_window(&m.gameexe, &prefix)?;
         let pos = m.gameexe.ints(&(prefix.clone() + "POS"));
         let pad = m.gameexe.ints(&(prefix.clone() + "MOJI_POS"));
         let rep = m.gameexe.ints(&(prefix.clone() + "MOJI_REP"));
@@ -752,8 +1100,11 @@ impl RealLiveVm {
             .font_metrics(&self.config.font_alias, size as f32, '字')
             .map_err(err)?;
         let color = colour(&m.gameexe, self.color as i32);
+        let kinsoku = m.gameexe.int(&(prefix.clone() + "KINSOKU_USE")).unwrap_or(1) != 0;
         let pen = self.pen.entry(self.window).or_insert([0, 0]);
-        for ch in text.chars() {
+        let page_was_empty = *pen == [0, 0];
+        let mut overflow: Option<usize> = None;
+        for (rest_from, ch) in text.char_indices() {
             if ch == '\n' {
                 pen[0] = 0;
                 pen[1] += height;
@@ -764,14 +1115,42 @@ impl RealLiveVm {
             } else {
                 size
             };
-            if pen[0] + cell > width {
+            // Upstream `needs_break`: kinsoku characters (and spaces) may hang
+            // one cell past the line; a run of them stays with its character.
+            let extended = width + size;
+            let half = |c: char| if c.is_ascii() || ('\u{ff61}'..='\u{ff9f}').contains(&c) { size / 2 } else { size };
+            let squeeze = kinsoku && (is_kinsoku(ch) || ch == ' ');
+            let wrap = if squeeze && pen[0] + cell <= extended {
+                false
+            } else if pen[0] + cell > width {
+                true
+            } else if kinsoku && !squeeze {
+                let mut end = pen[0] + cell;
+                let mut wrap = false;
+                for next in text[rest_from + ch.len_utf8()..].chars() {
+                    if !is_kinsoku(next) {
+                        break;
+                    }
+                    end += half(next);
+                    if end > extended {
+                        wrap = true;
+                        break;
+                    }
+                }
+                wrap
+            } else {
+                false
+            };
+            if wrap {
                 pen[0] = 0;
                 pen[1] += height;
             }
-            ensure!(
-                pen[1] + size <= rows * height,
-                "native page full requires paragraph policy"
-            );
+            if pen[1] + size > rows * height {
+                // The window is full: show this page, then continue the
+                // speech on a fresh one after a click (upstream PageFull).
+                overflow = Some(rest_from);
+                break;
+            }
             glyphs.push(native_glyph(
                 ch,
                 [
@@ -783,11 +1162,15 @@ impl RealLiveVm {
             ));
             pen[0] += cell + rep.first().copied().unwrap_or(0);
         }
-        let mut backing = vec![];
+        if let Some(at) = overflow {
+            ensure!(!(page_was_empty && at == 0), "RealLive text window too small for one line");
+            self.page_rest = Some(text[at..].to_owned());
+        }
+        let mut backing = self.waku_layers(m, &prefix, [bx, y])?;
         if m.gameexe.int(&(prefix.clone() + "WAKU_SETNO")) == Some(-1) {
             let attr = m.gameexe.ints(&(prefix.clone() + "ATTR"));
             if attr.len() >= 4 {
-                backing.push(json!({"op":"put","layer":{"id":id+2,"rect":[bx,y,width+left+size,window_h],"order":[999,0],"paint":{"kind":"solid","color":[attr[0].clamp(0,255),attr[1].clamp(0,255),attr[2].clamp(0,255),255]},"blend":if attr.get(4).copied().unwrap_or(0)==0{"subtract"}else{"normal"},"opacity":attr[3].clamp(0,255)}}));
+                backing.push(json!({"op":"put","layer":{"id":id+2,"parent":SCENE_ROOT,"rect":[bx,y,width+left+size,window_h],"order":[999,0],"paint":{"kind":"solid","color":[attr[0].clamp(0,255),attr[1].clamp(0,255),attr[2].clamp(0,255),255]},"blend":if attr.get(4).copied().unwrap_or(0)==0{"subtract"}else{"normal"},"opacity":attr[3].clamp(0,255)}}));
             }
         }
         let speed = if self.fast_text {
@@ -796,7 +1179,7 @@ impl RealLiveVm {
             m.gameexe.int("INIT_MESSAGE_SPEED").unwrap_or(30).max(0)
         };
         let paint = json!({"kind":"glyph_run","font":self.config.font_alias,"size":size,"color":color,"glyphs":glyphs,"reveal":{"unit":"unicode_scalar","interval_ms":speed,"initial_visible":old+1}});
-        backing.push(json!({"op":"put","layer":{"id":id,"rect":[0,0,self.width,self.height],"order":[1000,1],"paint":paint}}));
+        backing.push(json!({"op":"put","layer":{"id":id,"parent":SCENE_ROOT,"rect":[0,0,self.width,self.height],"order":[1000,1],"paint":paint}}));
         if m.gameexe.int(&(prefix + "MOJI_SHADOW")).unwrap_or(1) != 0 {
             let mut shadow = backing.last().unwrap()["layer"].clone();
             shadow["id"] = json!(id + 1);
@@ -830,6 +1213,28 @@ impl RealLiveVm {
             .int(&format!("WINDOW.{window:03}.MOJI_SIZE"))
             .unwrap_or(24)
             .clamp(1, 512);
+        // Choices are lines of a text window (upstream `lay_out_in_window`):
+        // below the text already shown, or on a cleared page if they do not
+        // fit; `SELCOM_USE` adds the `SELCOM_MOJIPOS` indent.
+        let g = self.window_geometry(m, window as u32);
+        let visible = select.options.len() as i32;
+        let pen = self.pen.get(&(window as u32)).copied().unwrap_or([0, 0]);
+        let mut first_row = if pen == [0, 0] { 0 } else { pen[1] / g.line.max(1) + i32::from(pen[0] > 0) };
+        let prefix = format!("WINDOW.{window:03}.");
+        if first_row + visible > g.rows.max(1) {
+            self.clear_window(h, window as u32)?;
+            // More choices than rows: grow upward so all stay on screen.
+            first_row = (g.rows.max(1) - visible).min(0);
+        }
+        let frame = self.waku_layers(m, &prefix, [g.window_x, g.window_y])?;
+        if !frame.is_empty() {
+            self.submit(h, json!({ "layers": frame }))?;
+        }
+        let indent = if m.gameexe.int(&(prefix.clone() + "SELCOM_USE")).unwrap_or(0) != 0 {
+            m.gameexe.int(&(prefix + "SELCOM_MOJIPOS")).unwrap_or(0).max(0)
+        } else {
+            0
+        };
         let mut indices = Vec::new();
         let mut ids = Vec::new();
         let mut enabled_choices = Vec::new();
@@ -859,11 +1264,15 @@ impl RealLiveVm {
             }
             let text = m.eval_str(&option.text)?;
             let id = 600000 + indices.len() as u32;
-            let y = (indices.len() as i32) * (size + 4);
+            let row = indices.len() as i32;
+            // `SELCOM_USE=1`: the choices are lines of the text window
+            // (upstream `select::draw_window_items`); otherwise a plain list.
+            let rect = [g.x + indent, g.y + g.luby + (first_row + row) * g.line - g.rep_y / 2, g.width - indent, g.line];
             indices.push(index);
             ids.push(id);
             enabled_choices.push(enabled);
-            ops.push(json!({"op":"put","widget":{"id":id,"kind":"button","rect":[0,y,self.width,size+4],"text":text,"font":self.config.font_alias,"text_size":size,"enabled":enabled,"color":[0,0,0,160],"z":1000}}));
+            let color = [0, 0, 0, 0];
+            ops.push(json!({"op":"put","widget":{"id":id,"kind":"button","rect":rect,"text":text,"font":self.config.font_alias,"text_size":size,"enabled":enabled,"color":color,"z":1000}}));
         }
         ensure!(!indices.is_empty(), "empty native selection");
         self.submit(h, json!({"ui":ops}))?;
@@ -907,6 +1316,14 @@ fn read_rect(m: &mut Machine, c: &Command, at: usize, rec: bool) -> Result<[f32;
             (b.abs_diff(d) + 1) as f32,
         ]
     })
+}
+/// `r` ([x, y, w, h]) intersected with an image of `size`.
+fn clip_source(r: [f32; 4], size: [u32; 2]) -> [f32; 4] {
+    let x0 = r[0].clamp(0., size[0] as f32);
+    let y0 = r[1].clamp(0., size[1] as f32);
+    let x1 = (r[0] + r[2]).clamp(x0, size[0] as f32);
+    let y1 = (r[1] + r[3]).clamp(y0, size[1] as f32);
+    [x0, y0, x1 - x0, y1 - y0]
 }
 fn uv(r: [f32; 4], size: [u32; 2]) -> [f32; 4] {
     [
@@ -1071,6 +1488,214 @@ fn black_glyph_shadow(layer: &mut Value) -> Result<()> {
     }
     Ok(())
 }
+impl RealLiveVm {
+    /// Module 1:40 (upstream `scr::bgr` / `load_haikei`): DC 0 is cleared to
+    /// black, the background drawn at the haikei position, objects promoted,
+    /// and the `#SEL` transition runs from the previous screen.
+    fn haikei(&mut self, m: &mut Machine, h: &mut dyn HostServices, c: &Command) -> Result<()> {
+        let op = c.op.opcode;
+        let count = Machine::param_count(c);
+        let (name, sel, time, promote, overlays) = match op {
+            10 | 11 | 20 | 21 | 101 => {
+                let mut count = count;
+                let time = if matches!(op, 20 | 21 | 101) && count >= 2 {
+                    count -= 1;
+                    Some(m.int_param(c, count)?)
+                } else {
+                    None
+                };
+                let (name, sel) = if count <= 1 {
+                    (None, m.int_param_or(c, 0, 0)?)
+                } else {
+                    (Some(m.str_param(c, 0)?), m.int_param(c, 1)?)
+                };
+                (name, sel, time, !matches!(op, 11 | 21), 0)
+            }
+            // bgrMulti(file[, sel], (file[, x, y])...): overload 1 carries the
+            // `#SEL` number before the overlays.
+            100 => {
+                let with_sel = c.params.get(1).is_some_and(|p| !matches!(p.value, crate::vm::expr::Expr::Special { .. }));
+                let sel = if with_sel { m.int_param(c, 1)? } else { 0 };
+                (Some(m.str_param(c, 0)?), sel, None, true, c.params.len().saturating_sub(1 + usize::from(with_sel)))
+            }
+            _ => bail!("unsupported native background operation {}", c.op),
+        };
+        let name = name.map(|n| {
+            if !n.is_empty() && n.chars().all(|ch| ch == '?') { m.sys.default_bgr.clone() } else { n }
+        });
+        let mut ops = vec![json!({"op":"clear","id":0,"color":[0,0,0,255]})];
+        if let Some(name) = &name {
+            m.sys.default_bgr.clone_from(name);
+            let hik = self.resources.as_ref().context("RealLive resources")?.borrow_mut().file("", &format!("{name}.hik"))?;
+            ensure!(hik.is_none(), "RealLive HIK animated backgrounds need an engine mapping");
+            let asset = self.resource(m, "image", name)?;
+            let size = h.image_size(self.client, &asset).map_err(err)?;
+            ops.push(json!({"op":"draw","id":0,"layer":self.image_layer(asset, [0., 0., size[0] as f32, size[1] as f32], None, 255)}));
+        }
+        let first_overlay = c.params.len() - overlays;
+        for index in first_overlay..c.params.len() {
+            let pieces = m.complex_param(c, index)?;
+            let Some(first) = pieces.first() else { continue };
+            let file = m.eval_str(first)?;
+            let x = match pieces.get(1) { Some(e) => m.eval_int(e)?, None => 0 };
+            let y = match pieces.get(2) { Some(e) => m.eval_int(e)?, None => 0 };
+            let asset = self.resource(m, "image", &file)?;
+            let size = h.image_size(self.client, &asset).map_err(err)?;
+            ops.push(json!({"op":"draw","id":0,"layer":self.image_layer(asset, [x as f32, y as f32, size[0] as f32, size[1] as f32], None, 255)}));
+        }
+        if self.grp_closes {
+            self.hide_text(h)?;
+        }
+        self.canvas(h, ops)?;
+        if promote {
+            m.sys.gfx.promote_objects();
+        }
+        self.sync_objects(m, h)?;
+        let mut values = m.gameexe.ints(&format!("SEL.{sel:03}"));
+        values.resize(16, 0);
+        if let Some(t) = time {
+            values[6] = t;
+        }
+        self.sel_transition(h, &values)
+    }
+
+    /// Start the engine transition a `#SEL` row describes (time at 6,
+    /// style at 7, pattern size at 10/11, steps at 9).
+    fn sel_transition(&mut self, h: &mut dyn HostServices, values: &[i32]) -> Result<()> {
+        let get = |i: usize| values.get(i).copied().unwrap_or(0);
+        let (time, style) = (get(6), get(7));
+        if time <= 0 || style == 1 {
+            return Ok(());
+        }
+        let effect = match style {
+            0 | 50 | 54 => json!({"kind":"crossfade"}),
+            4 | 5 => json!({"kind":"ordered_dither","cell":[get(10).max(1),get(11).max(1)],"diagonal":style==5,"steps":1+get(9).max(0)}),
+            _ => {
+                // Every other reveal style: the engine's rule image for it.
+                let key = values.iter().take(12).map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+                let rule = if self.rules.contains_key(&key) {
+                    None
+                } else {
+                    crysirror_image::reallive_wipe::reveal_rule(values, self.width, self.height)
+                };
+                if !self.rules.contains_key(&key) && rule.is_none() {
+                    // Scroll/squash/slide/zoom/ripple styles move pictures; the
+                    // engine has no motion transition for them yet. Crossfade,
+                    // and record the substitution in diagnostics.
+                    *self.approximated.entry(style).or_default() += 1;
+                    self.submit(h, json!({"layers":[{"op":"transition","transition":{"effect":{"kind":"crossfade"},"duration_ms":time}}]}))?;
+                    self.wait = Some(Wait::Time { until: h.now_ms().saturating_add(time as u64), cancel: false });
+                    return Ok(());
+                }
+                let asset = match self.rules.get(&key) {
+                    Some(asset) => asset.clone(),
+                    None => {
+                        let (rgba, _) = rule.context("reveal rule")?;
+                        let id = 0x5245_0000 + self.rules.len() as u32;
+                        let path = h.upload_rgba(self.client, id, self.width, self.height, &rgba).map_err(err)?;
+                        let asset = path.relative().to_owned();
+                        self.rules.insert(key, asset.clone());
+                        asset
+                    }
+                };
+                json!({"kind":"mask","asset":asset,"fade":get(9).clamp(0, 8)})
+            }
+        };
+        self.submit(h, json!({"layers":[{"op":"transition","transition":{"effect":effect,"duration_ms":time}}]}))?;
+        self.wait = Some(Wait::Time { until: h.now_ms().saturating_add(time as u64), cancel: false });
+        Ok(())
+    }
+
+    /// Text-area geometry of a window, as `text` lays glyphs out.
+    fn window_geometry(&self, m: &Machine, window: u32) -> WindowGeometry {
+        let prefix = format!("WINDOW.{window:03}.");
+        let exe = &m.gameexe;
+        let size = exe.int(&(prefix.clone() + "MOJI_SIZE")).unwrap_or(24).clamp(1, 512);
+        let pos = exe.ints(&(prefix.clone() + "POS"));
+        let pad = exe.ints(&(prefix.clone() + "MOJI_POS"));
+        let rep = exe.ints(&(prefix.clone() + "MOJI_REP"));
+        let count = exe.ints(&(prefix + "MOJI_CNT"));
+        let left = pad.get(2).copied().unwrap_or(0);
+        let top = pad.first().copied().unwrap_or(0);
+        let columns = count.first().copied().unwrap_or(25).max(1);
+        let rows = count.get(1).copied().unwrap_or(3).max(1);
+        let pitch = size + rep.first().copied().unwrap_or(0);
+        let line = size + rep.get(1).copied().unwrap_or(0);
+        let bx = pos.get(1).copied().unwrap_or(0);
+        let by = pos.get(2).copied().unwrap_or(0);
+        let window_h = rows * line + top + pad.get(1).copied().unwrap_or(0);
+        let y = if pos.first().is_some_and(|n| *n == 2 || *n == 3) { self.height as i32 - window_h - by } else { by };
+        let luby = exe.int(&format!("WINDOW.{window:03}.LUBY_SIZE")).unwrap_or(0);
+        WindowGeometry { window_x: bx, window_y: y, x: bx + left, y: y + top, width: columns * pitch, line, rows, rep_y: rep.get(1).copied().unwrap_or(0), luby }
+    }
+
+    /// The window frame (`#WAKU.set.pattern`, upstream `textout::waku` and
+    /// `draw_window` for non-nine-slice types): BACK tinted by the window
+    /// attribute (subtractive for filter 0), NAME drawn over it.
+    fn waku_layers(&mut self, m: &Machine, prefix: &str, at: [i32; 2]) -> Result<Vec<Value>> {
+        let exe = &m.gameexe;
+        let set = exe.int(&format!("{prefix}WAKU_SETNO")).unwrap_or(0);
+        if set < 0 {
+            return Ok(vec![]);
+        }
+        let waku_mod = exe.int(&format!("{prefix}WAKU_MOD")).unwrap_or(0);
+        let pattern = if waku_mod != 0 {
+            exe.int(&format!("{prefix}WAKU_NO")).unwrap_or(0)
+        } else {
+            m.sys.settings.waku_all
+        };
+        let key = |part: &str| format!("WAKU.{set:03}.{pattern:03}.{part}");
+        let kind = exe.int(&key("TYPE")).or_else(|| exe.int(&format!("WAKU.{set:03}.TYPE")));
+        ensure!(!matches!(kind, Some(3 | 4)), "RealLive nine-slice window frames (WAKU type 3/4) need an engine nine-slice paint");
+        let attr = if exe.int(&format!("{prefix}ATTR_MOD")).unwrap_or(0) != 0 {
+            crate::vm::settings::WindowAttr::from_slice(&exe.ints(&format!("{prefix}ATTR"))).unwrap_or_default()
+        } else {
+            m.sys.settings.window_attr
+        };
+        let window = (prefix.trim_start_matches("WINDOW.").trim_end_matches('.').parse::<u32>()).unwrap_or(0);
+        let base = 20000 + window * 8;
+        let loader = m.sys.gfx.loader.clone().context("RealLive resources")?;
+        let image = |name: Option<&str>| -> Result<Option<Rc<crate::vm::graphics::Image>>> {
+            match name.filter(|n| !n.is_empty()) {
+                Some(n) => Ok(Some(loader.image(n)?)),
+                None => Ok(None),
+            }
+        };
+        let back = image(exe.str(&key("BACK")))?;
+        let main = image(exe.str(&key("NAME")))?;
+        let colour = [attr.r, attr.g, attr.b].map(|c| c.clamp(0, 255) as f32 / 255.);
+        let strength = attr.alpha.clamp(0, 255);
+        let sprite = |id: u32, img: &crate::vm::graphics::Image, order: i32| {
+            json!({"id": id, "parent": SCENE_ROOT, "rect": [at[0], at[1], img.width, img.height], "paint": {"kind":"image","asset":img.asset}, "order": [998, order]})
+        };
+        let mut layers = vec![];
+        if let Some(back) = &back {
+            let mut tint = sprite(base, back, 0);
+            tint["filter"] = json!({"color_rate": 1.0, "color": colour});
+            tint["opacity"] = json!(strength);
+            if attr.filter == 0 {
+                // d - m + colour * m: subtract the mask, then add the colour.
+                let mut cut = sprite(base + 1, back, 0);
+                cut["filter"] = json!({"color_rate": 1.0, "color": [1.0, 1.0, 1.0]});
+                cut["opacity"] = json!(strength);
+                cut["blend"] = json!("subtract");
+                tint["blend"] = json!("add");
+                tint["order"] = json!([998, 1]);
+                layers.push(cut);
+            }
+            layers.push(tint);
+        }
+        if let Some(main) = &main {
+            layers.push(sprite(base + 2, main, 2));
+        }
+        self.waku_ids.extend(layers.iter().filter_map(|l| l["id"].as_u64()).map(|id| id as u32));
+        self.waku_ids.sort_unstable();
+        self.waku_ids.dedup();
+        Ok(layers.into_iter().map(|layer| json!({"op":"put","layer":layer})).collect())
+    }
+}
+
+#[allow(dead_code)]
 fn require_supported_text_window(exe: &Gameexe, prefix: &str) -> Result<()> {
     // Pinned WindowConfig::from_gameexe uses set 0 when this key is absent.
     // A nonnegative set selects a WAKU resource; it cannot silently become an
@@ -1157,4 +1782,163 @@ mod text_style_tests {
             .is_ok()
         );
     }
+}
+
+impl RealLiveVm {
+    /// `LoadDLL` / `UnloadDLL` / `CallDLL` (2:1), as upstream `modules::dll`.
+    /// The EF00/PT00/DT00 emulation is the vendored `reallive-dll` crate.
+    fn dll(&mut self, m: &mut Machine, c: &Command) -> Result<()> {
+        match c.op.opcode {
+            10 => {
+                let slot = m.int_param(c, 0)?;
+                let name = m.str_param(c, 1)?;
+                m.sys.dlls.load(slot, &name);
+            }
+            11 => {
+                let slot = m.int_param_or(c, 0, 0)?;
+                m.sys.dlls.unload(slot);
+            }
+            12 => {
+                let slot = m.int_param(c, 0)?;
+                let mut args = [0; 5];
+                for (i, arg) in args.iter_mut().enumerate() {
+                    *arg = m.int_param_or(c, i + 1, 0)?;
+                }
+                let resources = self.resources.clone().context("RealLive resources")?;
+                let mut resources = resources.borrow_mut();
+                let mut dlls = std::mem::take(&mut m.sys.dlls);
+                let Machine { memory, stack, sys, .. } = &mut *m;
+                let mut sys = DllSystem { rng: sys, resources: &mut resources };
+                let frame = &mut stack.last_mut().context("empty native stack")?.vars;
+                let mut banks = Banks { memory, frame };
+                // Restore the slots even when the call fails.
+                let result = dlls.call(slot, &mut sys, &mut banks, args);
+                m.sys.dlls = dlls;
+                m.store = result?;
+            }
+            _ => bail!("unsupported native DLL operation {}", c.op),
+        }
+        Ok(())
+    }
+}
+
+/// The original System calls a DLL makes: the script RNG and its own file.
+struct DllSystem<'a> {
+    rng: &'a mut crate::vm::sys_state::Sys,
+    resources: &'a mut Resources,
+}
+impl reallive_dll::System for DllSystem<'_> {
+    fn random(&mut self, low: i32, high: i32) -> i32 {
+        self.rng.random(low, high)
+    }
+    fn root_file(&mut self, name: &str) -> Result<Vec<u8>> {
+        let path = self
+            .resources
+            .file("", name)?
+            .with_context(|| format!("reallive: {name} not found in the game directory"))?;
+        self.resources.read(&path)
+    }
+}
+
+/// intA–intF, intG, intZ of the running machine (upstream `dll::Banks`).
+struct Banks<'a> {
+    memory: &'a mut crate::vm::memory::Memory,
+    frame: &'a mut crate::vm::memory::FrameMemory,
+}
+impl reallive_dll::DllMemory for Banks<'_> {
+    fn bank(&mut self, bank: u8) -> Result<&mut [i32]> {
+        self.memory.words_mut(bank, self.frame)
+    }
+}
+
+/// A channel group's player volume (`#VOLUME` settings, enable switch).
+fn settings_volume(s: &crate::vm::settings::Settings, index: usize) -> f32 {
+    if !s.enabled[index] {
+        return 0.;
+    }
+    s.volume[index].clamp(0, 255) as f32 / 255.
+}
+
+/// Where a text window and its text area are on screen.
+struct WindowGeometry {
+    window_x: i32,
+    window_y: i32,
+    x: i32,
+    y: i32,
+    width: i32,
+    line: i32,
+    rows: i32,
+    rep_y: i32,
+    luby: i32,
+}
+
+/// UI id of the name-entry OK button.
+pub(super) const NAME_OK: u32 = 619_999;
+
+// Copied from siglus_rs `textout.rs` (5f358ef).
+/// Characters that may not start a line.
+pub fn is_kinsoku(c: char) -> bool {
+    matches!(
+        c,
+        '、' | '。'
+            | '，'
+            | '．'
+            | '：'
+            | '；'
+            | '？'
+            | '！'
+            | '゛'
+            | '゜'
+            | 'ヽ'
+            | 'ヾ'
+            | 'ゝ'
+            | 'ゞ'
+            | '々'
+            | 'ー'
+            | '）'
+            | '］'
+            | '｝'
+            | '」'
+            | '』'
+            | '〕'
+            | '〉'
+            | '》'
+            | '】'
+            | '’'
+            | '”'
+            | 'ぁ'
+            | 'ぃ'
+            | 'ぅ'
+            | 'ぇ'
+            | 'ぉ'
+            | 'っ'
+            | 'ゃ'
+            | 'ゅ'
+            | 'ょ'
+            | 'ゎ'
+            | 'ァ'
+            | 'ィ'
+            | 'ゥ'
+            | 'ェ'
+            | 'ォ'
+            | 'ッ'
+            | 'ャ'
+            | 'ュ'
+            | 'ョ'
+            | 'ヮ'
+            | 'ヵ'
+            | 'ヶ'
+            | '・'
+            | '…'
+            | '‥'
+            | '～'
+            | '─'
+            | ','
+            | '.'
+            | '!'
+            | '?'
+            | ')'
+            | ']'
+            | '}'
+    )
 }

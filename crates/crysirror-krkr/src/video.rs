@@ -4,7 +4,7 @@
 //! Unloaded native declarations allow stock class construction. Opening media
 //! requires prepare/pause/seek semantics beyond the current shared Play/Stop API.
 use crate::natives::*;
-use krkr_tjs2::runtime::Variant;
+use crysirror_tjs2::runtime::Variant;
 pub fn install(rt: &mut Rt) {
     let c = native_class(rt, "VideoOverlay", |rt, t, _| {
         let h = this_of(rt, t, "VideoOverlay")?;

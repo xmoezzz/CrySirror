@@ -93,7 +93,16 @@ pub fn decode(id: &str, b: &[u8], ctx: &ImageDecodeContext<'_>) -> Result<ImageS
         "nscripter/spb" => spb::decode(b),
         "real-live/pdt9" => pdt::pdt9(b),
         "real-live/pdt10" => pdt::pdt10(b),
-        "real-live/g00" => pdt::g00(b),
+        // One RealLive g00 implementation: the engine atlas decoder, whose
+        // layout matches the pattern regions RealLive objects select.
+        "real-live/g00" => {
+            let atlas = crysirror_image::g00::decode_g00(b)?;
+            Ok(ImageSurface {
+                width: u32::try_from(atlas.width)?,
+                height: u32::try_from(atlas.height)?,
+                rgba: atlas.rgba,
+            })
+        }
         "kirikiri/tlg" => tlg::decode(b, ctx),
         _ => anyhow::bail!("unsupported A-group image {id}"),
     }

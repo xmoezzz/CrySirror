@@ -22,7 +22,12 @@ use crysirror_core::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+/// Engine layer every scene layer hangs under (screen shake moves it).
+const SCENE_ROOT: u32 = 9;
+/// Canvas presented while the draw mode is manual.
+const SHOWN: u32 = 1000;
 mod commands;
+mod objects;
 use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,6 +78,28 @@ enum Wait {
     Reveal {
         layer: u32,
     },
+    /// `shake(spec)`: `#SHAKE` steps `(x, y, wait ms)` played once over the
+    /// whole screen (upstream `shake::Shake::offset`, pattern kind).
+    Shake {
+        steps: Vec<(i32, i32, i32)>,
+        start: u64,
+    },
+    /// The window filled up: a click clears it and the rest of the text
+    /// continues on the new page (upstream `PauseKind::PageFull`).
+    PageFull {
+        window: u32,
+        rest: String,
+    },
+    /// `grpZoom`: `from` → `to` of DC `source` stretched onto `dest` of DC 0
+    /// (upstream `longop::ZoomOp`).
+    Zoom {
+        source: u32,
+        from: [f32; 4],
+        to: [f32; 4],
+        dest: [f32; 4],
+        start: u64,
+        time: u64,
+    },
     Pause {
         kind: u16,
         window: u32,
@@ -91,7 +118,19 @@ pub struct RealLiveVm {
     client: ClientId,
     config: Config,
     machine: Option<Machine>,
-    resources: Option<Resources>,
+    resources: Option<Rc<std::cell::RefCell<Resources>>>,
+    /// Engine layers of the VM's objects, as last submitted.
+    object_layers: BTreeMap<u32, Value>,
+    /// Engine layers of open text-window frames.
+    waku_ids: Vec<u32>,
+    /// Generated `#SEL` reveal rule images by style row.
+    rules: BTreeMap<String, String>,
+    /// Rotates SE voices over channels 32..48.
+    se_serial: u32,
+    /// Motion transition styles shown as crossfades, with counts.
+    approximated: BTreeMap<i32, u64>,
+    /// Text that did not fit the window, shown after a click on a new page.
+    page_rest: Option<String>,
     wait: Option<Wait>,
     pending_audio: Option<(u64, Option<u32>)>,
     width: u32,
@@ -102,7 +141,6 @@ pub struct RealLiveVm {
     title: String,
     menu: bool,
     syscom: BTreeMap<i32, i32>,
-    default_grp: String,
     window: u32,
     pen: BTreeMap<u32, [i32; 2]>,
     sizes: BTreeMap<u32, i32>,
@@ -117,6 +155,9 @@ pub struct RealLiveVm {
     opcode_counts: BTreeMap<String, u64>,
     last_error: Option<String>,
     input_used: bool,
+    /// Original draw mode is manual (1:30:22): the screen shows the frozen
+    /// copy of DC 0 (canvas `SHOWN`) until `refresh`.
+    manual: bool,
 }
 impl RealLiveVm {
     pub fn new(client: ClientId, config: Config) -> Result<Self> {
@@ -136,7 +177,6 @@ impl RealLiveVm {
             title: String::new(),
             menu: true,
             syscom: BTreeMap::new(),
-            default_grp: String::new(),
             window: 0,
             pen: BTreeMap::new(),
             sizes: BTreeMap::new(),
@@ -151,6 +191,13 @@ impl RealLiveVm {
             opcode_counts: BTreeMap::new(),
             last_error: None,
             input_used: false,
+            object_layers: BTreeMap::new(),
+            waku_ids: Vec::new(),
+            rules: BTreeMap::new(),
+            se_serial: 0,
+            approximated: BTreeMap::new(),
+            page_rest: None,
+            manual: false,
         })
     }
     fn boot(&mut self, h: &mut dyn HostServices) -> Result<()> {
@@ -211,21 +258,53 @@ impl RealLiveVm {
         };
         self.grp_closes = exe.int("GRPCOM_WINDOWCLOSE").unwrap_or(0) != 0;
         self.wipe_closes = exe.int("WAIP_WINDOWCLOSE").unwrap_or(0) != 0;
-        self.resources = Some(r);
+        self.resources = Some(Rc::new(std::cell::RefCell::new(r)));
         let mut ops = Vec::new();
         for id in 0..16 {
             ops.push(json!({"op":"create","id":id,"width":self.width,"height":self.height}));
         }
-        ops.push(json!({"op":"present","id":0,"layer":0}));
+        ops.push(json!({"op":"present","id":0,"layer":0,"parent":SCENE_ROOT}));
+        // One root for DC 0, objects and windows, so the whole screen can move.
+        self.submit(h, json!({"layers":[{"op":"put","layer":{"id":SCENE_ROOT,"rect":[0,0,self.width,self.height],"paint":{"kind":"solid","color":[0,0,0,0]}}}]}))?;
         self.submit(h, json!({"canvases":ops}))?;
+        self.install_object_assets(h, &mut vm)?;
         self.machine = Some(vm);
         Ok(())
     }
     fn submit(&mut self, h: &mut dyn HostServices, batch: Value) -> Result<()> {
+        if std::env::var_os("CRYSIRROR_REALLIVE_TRACE").is_some() {
+            if let Some(m) = &self.machine {
+                eprintln!("[reallive {}:{}] {}", m.scene_number(), m.line, batch);
+            } else {
+                eprintln!("[reallive] {batch}");
+            }
+        }
         h.submit_engine(self.client, 1, &serde_json::to_vec(&batch)?)
             .map_err(err)?;
         self.api_calls += 1;
         Ok(())
+    }
+    /// Manual draw mode (upstream `DrawMode::Manual`): the screen keeps the
+    /// last refreshed picture. DC 0 is frozen into canvas `SHOWN`, which is
+    /// presented instead; `refresh` replaces it with DC 0 (shared nodes).
+    fn set_manual(&mut self, h: &mut dyn HostServices, manual: bool) -> Result<()> {
+        if manual == self.manual {
+            return Ok(());
+        }
+        self.manual = manual;
+        let ops = if manual {
+            vec![
+                json!({"op":"create","id":SHOWN,"width":self.width,"height":self.height}),
+                json!({"op":"copy","source":0,"destination":SHOWN,"rect":[0,0,self.width,self.height],"position":[0,0],"opacity":255,"replace":true}),
+                json!({"op":"present","id":SHOWN,"layer":0,"parent":SCENE_ROOT}),
+            ]
+        } else {
+            vec![json!({"op":"present","id":0,"layer":0,"parent":SCENE_ROOT})]
+        };
+        self.submit(h, json!({ "canvases": ops }))
+    }
+    fn refresh_manual(&mut self, h: &mut dyn HostServices) -> Result<()> {
+        self.submit(h, json!({"canvases":[{"op":"copy","source":0,"destination":SHOWN,"rect":[0,0,self.width,self.height],"position":[0,0],"opacity":255,"replace":true}]}))
     }
     fn canvas(&mut self, h: &mut dyn HostServices, ops: Vec<Value>) -> Result<()> {
         self.submit(h, json!({"canvases":ops}))
@@ -247,8 +326,9 @@ impl RealLiveVm {
     }
     fn resource(&mut self, m: &Machine, kind: &str, name: &str) -> Result<String> {
         self.resources
-            .as_mut()
-            .unwrap()
+            .as_ref()
+            .context("RealLive resources")?
+            .borrow_mut()
             .find(&m.gameexe, kind, name)
     }
     fn image_layer(&self, asset: String, rect: [f32; 4], uv: Option<[f32; 4]>, alpha: u8) -> Value {
@@ -326,6 +406,50 @@ impl RealLiveVm {
                 }
             }
             Wait::Audio { channel } => !h.audio_playing(self.client, *channel).map_err(err)?,
+            Wait::PageFull { window, rest } => {
+                if pressed {
+                    self.input_used = true;
+                    self.clear_window(h, *window)?;
+                    let rest = rest.clone();
+                    // The continuation may itself fill the page again.
+                    self.text(m, h, &rest)?;
+                    return Ok(false);
+                }
+                false
+            }
+            Wait::Shake { steps, start } => {
+                let total: u64 = steps.iter().map(|s| s.2.max(1) as u64).sum();
+                let mut t = h.now_ms().saturating_sub(*start);
+                let mut offset = (0, 0);
+                let done = t >= total || m.sys.should_fast_forward();
+                if !done {
+                    for &(x, y, wait) in steps.iter() {
+                        let wait = wait.max(1) as u64;
+                        if t < wait {
+                            offset = (x, y);
+                            break;
+                        }
+                        t -= wait;
+                    }
+                }
+                self.submit(h, json!({"layers":[{"op":"put","layer":{"id":SCENE_ROOT,"rect":[offset.0,offset.1,self.width,self.height],"paint":{"kind":"solid","color":[0,0,0,0]}}}]}))?;
+                done
+            }
+            Wait::Zoom { source, from, to, dest, start, time } => {
+                let t = if *time == 0 || m.sys.should_fast_forward() {
+                    1.0
+                } else {
+                    (h.now_ms().saturating_sub(*start) as f32 / *time as f32).clamp(0., 1.)
+                };
+                let mix = |a: f32, b: f32| (a + (b - a) * t).round();
+                let area = [mix(from[0], to[0]), mix(from[1], to[1]), mix(from[2], to[2]), mix(from[3], to[3])];
+                if area[2] > 0. && area[3] > 0. {
+                    let (sx, sy) = (dest[2] / area[2], dest[3] / area[3]);
+                    let matrix = [sx, 0., 0., sy, dest[0] - area[0] * sx, dest[1] - area[1] * sy];
+                    self.canvas(h, vec![json!({"op":"transform_copy","source":source,"destination":0,"rect":area,"matrix":matrix,"replace":true})])?;
+                }
+                t >= 1.
+            }
             Wait::Reveal { layer } => {
                 if pressed {
                     self.input_used = true;
@@ -360,7 +484,8 @@ impl RealLiveVm {
                 let events: Vec<crysirror_scene::ui::UiEvent> =
                     serde_json::from_value(self.query(h, EngineQuery::UiEvents)?)?;
                 let submitted = events.iter().any(|e| {
-                    e.kind == "submit" && fields.last().is_some_and(|(_, id)| *id == e.widget.id)
+                    (e.kind == "submit" && fields.last().is_some_and(|(_, id)| *id == e.widget.id))
+                        || (e.kind == "activate" && e.widget.id == commands::NAME_OK)
                 });
                 if submitted {
                     let mut values = vec![];
@@ -379,7 +504,9 @@ impl RealLiveVm {
                     for (index, text) in values {
                         m.memory.set_name(*local, index.max(0) as usize, text);
                     }
-                    self.submit(h,json!({"ui":fields.iter().flat_map(|(_,id)|[json!({"op":"remove","id":id}),json!({"op":"remove","id":id+1000})]).collect::<Vec<_>>()}))?;
+                    let mut removed: Vec<Value> = fields.iter().flat_map(|(_,id)|[json!({"op":"remove","id":id}),json!({"op":"remove","id":id+1000})]).collect();
+                    removed.push(json!({"op":"remove","id":commands::NAME_OK}));
+                    self.submit(h,json!({"ui":removed}))?;
                     true
                 } else {
                     false
@@ -429,6 +556,10 @@ impl RealLiveVm {
         };
         if !done {
             self.wait = Some(wait);
+        } else if let Some(rest) = self.page_rest.take() {
+            // The shown page was full: wait for a click before the rest.
+            self.wait = Some(Wait::PageFull { window: self.window, rest });
+            return Ok(false);
         }
         Ok(done)
     }
@@ -494,6 +625,12 @@ impl RealLiveVm {
         }
         let mut m = self.machine.take().unwrap();
         m.begin_frame();
+        m.sys.clock_ms = h.now_ms();
+        m.sys.fast_forward = input.buttons_down & buttons::CTRL != 0;
+        if input.buttons_pressed & buttons::MOUSE_LEFT != 0 {
+            m.sys.input.clicks.push((input.pointer_x, input.pointer_y));
+            m.sys.input.clicks.truncate(8);
+        }
         let result = (|| {
             if self.pending_audio.is_some() {
                 if !self.poll_audio(h)? {
@@ -544,6 +681,10 @@ impl RealLiveVm {
             }
             Ok(VmYield::BudgetExhausted)
         })();
+        let result = result.and_then(|y| {
+            self.sync_objects(&mut m, h)?;
+            Ok(y)
+        });
         self.last_down = input.buttons_down;
         self.frames += 1;
         self.machine = Some(m);
@@ -585,7 +726,7 @@ impl VmAdapter for RealLiveVm {
         Err(Error::Unsupported("RealLive VM checkpoint not implemented"))
     }
     fn diagnostics(&self) -> Vec<u8> {
-        serde_json::to_vec(&json!({"vm":"original-reallive-bytecode","frames":self.frames,"engine_api_calls":self.api_calls,"wait":format!("{:?}",self.wait),"scene":self.machine.as_ref().map(Machine::scene_number),"line":self.machine.as_ref().map(|m|m.line),"instructions":self.machine.as_ref().map(|m|m.instructions),"opcodes":self.opcode_counts,"error":self.last_error,"rendering":"engine retained Canvas/Layer/GlyphRun/Ui/Media","owns_framebuffer":false})).unwrap_or_default()
+        serde_json::to_vec(&json!({"vm":"original-reallive-bytecode","frames":self.frames,"engine_api_calls":self.api_calls,"wait":format!("{:?}",self.wait),"scene":self.machine.as_ref().map(Machine::scene_number),"line":self.machine.as_ref().map(|m|m.line),"instructions":self.machine.as_ref().map(|m|m.instructions),"opcodes":self.opcode_counts,"error":self.last_error,"rendering":"engine retained Canvas/Layer/GlyphRun/Ui/Media","owns_framebuffer":false,"approximated_transitions":self.approximated})).unwrap_or_default()
     }
 }
 pub struct RealLiveFactory;

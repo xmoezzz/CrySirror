@@ -8,7 +8,7 @@ import tomllib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-AGPL = {"crysirror-krkr", "krkr-tjs2", "krkr-kag"}
+AGPL = {"crysirror-krkr", "crysirror-tjs2", "crysirror-kag"}
 
 
 def manifests():
@@ -43,19 +43,9 @@ class KrkrPolicy(unittest.TestCase):
         desktop = tomllib.loads((ROOT / "crates/crysirror-desktop/Cargo.toml").read_text())
         self.assertNotIn("krkr", desktop["features"]["default"])
 
-    def test_vendored_sources_match_pinned_hashes(self):
-        base = ROOT / "crates/krkr-upstream"
-        source = json.loads((base / "SOURCE.json").read_text())
-        self.assertRegex(source["commit"], r"^[0-9a-f]{40}$")
-        recorded = source["source_sha256"]
-        present = {
-            p.relative_to(base).as_posix()
-            for crate in source["crates"]
-            for p in (base / crate / "src").rglob("*.rs")
-        }
-        self.assertEqual(present, set(recorded))
-        for rel, digest in recorded.items():
-            self.assertEqual(hashlib.sha256((base / rel).read_bytes()).hexdigest(), digest, rel)
+    def test_derived_crates_keep_their_licence(self):
+        for crate in ("crysirror-tjs2", "crysirror-kag"):
+            self.assertTrue((ROOT / "crates" / crate / "LICENSE").is_file(), crate)
 
     def test_adapter_owns_no_renderer_or_mixer(self):
         manifest = tomllib.loads((ROOT / "crates/crysirror-krkr/Cargo.toml").read_text())

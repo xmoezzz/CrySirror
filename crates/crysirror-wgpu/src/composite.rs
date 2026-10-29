@@ -146,13 +146,11 @@ impl Renderer {
                     frame.progress.is_finite() && (0.0..=1.0).contains(&frame.progress),
                     "invalid composite progress"
                 );
+                // Nested composites (an inner crossfade inside this one's
+                // inputs) are prepared by the child renderer's own compositor.
                 ensure!(
-                    frame
-                        .before
-                        .iter()
-                        .chain(&frame.after)
-                        .all(|p| p.composite.is_none() && p.owner == owner),
-                    "nested or foreign-client compositor input"
+                    frame.before.iter().chain(&frame.after).all(|p| p.owner == owner),
+                    "foreign-client compositor input"
                 );
                 // The rule image is an ordinary immutable image texture.
                 // Until an asynchronously decoded rule is ready the wipe has
@@ -339,6 +337,10 @@ impl Renderer {
     }
 }
 
+/// Snapshot draws one frame may reference; their memory is bounded by the
+/// working-set and cache budgets checked per snapshot.
+const MAX_FRAME_SNAPSHOTS: usize = 512;
+
 impl Renderer {
     pub(super) fn snapshot_key(
         assets: &Assets,
@@ -351,33 +353,67 @@ impl Renderer {
             definition.len() <= 4 * 1024 * 1024,
             "snapshot definition exceeds 4 MiB"
         );
+        // Text is rasterized from the shared fonts: their content digests
+        // are part of the key, so replacing a font alias re-keys the snapshot.
+        let mut fonts = BTreeSet::new();
+        fn collect<'a>(layers: &'a [crysirror_scene::layer::LayerSpec], out: &mut BTreeSet<&'a str>) {
+            for layer in layers {
+                match &layer.paint {
+                    Paint::Text { font, .. } | Paint::GlyphRun { font, .. } => {
+                        out.insert(font.as_str());
+                    }
+                    Paint::Snapshot { layers, .. } => collect(layers, out),
+                    _ => {}
+                }
+            }
+        }
+        collect(layers, &mut fonts);
+        let mut hash = blake3::Hasher::new();
+        hash.update(&definition);
+        for font in fonts {
+            hash.update(font.as_bytes());
+            hash.update(assets.text.font_digest(font)?.as_bytes());
+        }
         Ok(format!(
             "snapshot:{}:{owner}:{}",
             assets.store_id(),
-            blake3::hash(&definition)
+            hash.finalize()
         ))
     }
 
     /// Frozen engine resources only. A namespace-shaped string is not proof:
     /// generated_for must find the bytes in the owner's immutable resource map.
     fn snapshot_dependencies(
+        plain: &mut std::collections::HashMap<(u32, String), blake3::Hash>,
         assets: &mut Assets,
         owner: u32,
         layers: &[crysirror_scene::layer::LayerSpec],
     ) -> Result<Option<Vec<crysirror_runtime::assets::AssetLease>>> {
         let mut names = BTreeSet::new();
-        for layer in layers {
+        // Nested snapshot payloads are rasterized first by the isolated
+        // renderer; their images are dependencies of this snapshot too.
+        let mut all = Vec::new();
+        fn flatten<'a>(layers: &'a [crysirror_scene::layer::LayerSpec], out: &mut Vec<&'a crysirror_scene::layer::LayerSpec>) {
+            for layer in layers {
+                if let Paint::Snapshot { layers, .. } = &layer.paint {
+                    flatten(layers, out);
+                }
+                out.push(layer);
+            }
+        }
+        flatten(layers, &mut all);
+        for layer in all {
             match &layer.paint {
                 Paint::Solid { .. } => {}
                 Paint::Image { asset, .. } => {
                     names.insert(asset.as_str());
                 }
-                Paint::Text { .. } | Paint::GlyphRun { .. } => {
-                    anyhow::bail!("snapshot font requires an immutable captured font handle")
+                // Fonts are pinned by content digest in the snapshot key.
+                Paint::Text { font, .. } | Paint::GlyphRun { font, .. } => {
+                    assets.text.font_digest(font)?;
                 }
-                Paint::Puppet { .. } | Paint::Snapshot { .. } => {
-                    anyhow::bail!("dynamic or nested snapshot dependency")
-                }
+                Paint::Snapshot { .. } => {}
+                Paint::Puppet { .. } => anyhow::bail!("dynamic snapshot dependency"),
             }
             if let Some(filter) = &layer.filter {
                 if let Some(mask) = &filter.mask {
@@ -391,18 +427,35 @@ impl Renderer {
         let mut ready = true;
         let mut pins = Vec::new();
         for name in names {
-            let bytes = assets
-                .generated_for(ClientId(owner), name)?
-                .with_context(|| {
-                    format!("snapshot requires a published immutable engine image: {name}")
-                })?;
-            // Native immutable image publication uses self-contained PNG. Other
-            // codecs can read mutable companion files even when their main
-            // bytes are immutable; those need a captured dependency graph.
-            ensure!(
-                bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
-                "snapshot immutable image profile requires self-contained PNG: {name}"
-            );
+            // Engine-published images must be self-contained PNG (other codecs
+            // can read mutable companion files). Images served by a mounted
+            // container are immutable while mounted; plain files are refused.
+            if !assets.container_backed(ClientId(owner), name) {
+                if name.starts_with("__crysirror/") {
+                    let bytes = assets
+                        .generated_for(ClientId(owner), name)?
+                        .with_context(|| {
+                            format!("snapshot requires a published immutable engine image: {name}")
+                        })?;
+                    ensure!(
+                        bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+                        "snapshot immutable image profile requires self-contained PNG: {name}"
+                    );
+                } else {
+                    // A plain project file: only self-contained codecs (no
+                    // companion files), pinned by content on first use; a
+                    // later change fails visibly instead of reusing a stale
+                    // snapshot keyed by name.
+                    let bytes = assets.read_for(ClientId(owner), name)?;
+                    ensure!(
+                        self_contained_image(name, &bytes),
+                        "snapshot requires a self-contained image (PNG, JPEG, BMP, g00): {name}"
+                    );
+                    let hash = blake3::hash(&bytes);
+                    let pinned = *plain.entry((owner, name.to_owned())).or_insert(hash);
+                    ensure!(pinned == hash, "snapshot image changed on disk: {name}");
+                }
+            }
             // Preflight every dependency before rasterization. In nonblocking
             // mode None means pending, never a successful blank snapshot.
             pins.push(assets.lease(
@@ -416,18 +469,20 @@ impl Renderer {
     }
 
     pub(super) fn prepare_snapshots(&mut self, assets: &mut Assets) -> Result<()> {
-        let snapshots: Vec<_> = self
-            .engine_frame
-            .iter()
-            .filter_map(|p| match &p.paint {
-                Paint::Snapshot { size, layers } => Some((p.owner, *size, layers.clone())),
-                _ => None,
-            })
-            .collect();
+        // The same frozen content drawn several times is one snapshot.
+        let mut seen = BTreeSet::new();
+        let mut snapshots = Vec::new();
+        for p in &self.engine_frame {
+            if let Paint::Snapshot { size, layers } = &p.paint {
+                if seen.insert(Self::snapshot_key(assets, p.owner, *size, layers)?) {
+                    snapshots.push((p.owner, *size, layers.clone()));
+                }
+            }
+        }
         if snapshots.is_empty() {
             return Ok(());
         }
-        ensure!(snapshots.len() <= 64, "snapshot frame count limit");
+        ensure!(snapshots.len() <= MAX_FRAME_SNAPSHOTS, "snapshot frame count limit ({} > {MAX_FRAME_SNAPSHOTS})", snapshots.len());
         ensure!(
             snapshots
                 .iter()
@@ -473,7 +528,7 @@ impl Renderer {
                         <= 256 * 1024 * 1024,
                     "snapshot and texture caches exceed 256 MiB"
                 );
-                let Some(_pins) = Self::snapshot_dependencies(assets, owner, &layers)? else {
+                let Some(_pins) = Self::snapshot_dependencies(&mut self.snapshot_plain_images, assets, owner, &layers)? else {
                     continue;
                 };
                 let mut isolated = crysirror_scene::layer::LayerSystem::default();
@@ -519,7 +574,7 @@ impl Renderer {
                         .device
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("snapshot alpha conversion"),
-                            contents: bytemuck::cast_slice(&[0.0f32; 4]),
+                            contents: bytemuck::cast_slice(&[0.0f32; 8]),
                             usage: wgpu::BufferUsages::UNIFORM,
                         });
                 // Reuse the tested isolated compositor's alpha conversion with
@@ -542,6 +597,11 @@ impl Renderer {
                             wgpu::BindGroupEntry {
                                 binding: 2,
                                 resource: uniform.as_entire_binding(),
+                            },
+                            // Rule slot unused here (params.a.z = 0).
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::TextureView(&input),
                             },
                         ],
                     });
@@ -601,4 +661,13 @@ impl Renderer {
         self.compositor = if result.is_ok() { Some(c) } else { None };
         result
     }
+}
+
+/// Image files whose decode reads no other file.
+fn self_contained_image(name: &str, bytes: &[u8]) -> bool {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+        || bytes.starts_with(b"BM")
+        || (ext == "g00" && bytes.first().is_some_and(|v| *v <= 2))
 }

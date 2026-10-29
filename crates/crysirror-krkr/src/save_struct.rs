@@ -4,7 +4,7 @@
 //! Preserve original builtin serializers; only file capability/commit boundaries
 //! are adapted. A successful native return follows the atomic worker commit.
 use crate::natives::*;
-use krkr_tjs2::runtime::{Closure, Variant};
+use crysirror_tjs2::runtime::{Closure, Variant};
 pub fn install(rt: &mut Rt) {
     for name in ["Dictionary", "Array"] {
         let Some(class) = rt.global_member(name).object_handle() else {

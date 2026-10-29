@@ -549,7 +549,13 @@ requested-name hash lookup survives that worker publication. Cipher state and
 keys are not serialized into project/save JSON. Native archive URI handling only
 refers to already installed client mounts.
 
-`tools/probe_krkr.py` is an offline diagnostic over the same Resources API, using
+ADR 0096 documents the CXDEC profile in the same format: `cxdec_modules` names the
+capability-relative EXE/DLL/TPM companions from which content-filter and Special
+filename parameters are recovered statically at mount time and validated against
+the archive's own checksums. No parameter is passed by the caller or persisted.
+
+`tools/probe_krkr.py` (`--protection hxv4|cxdec`, `--module` for CXDEC companions)
+is an offline diagnostic over the same Resources API, using
 a temporary project and explicit local inputs. It preserves normal asset-root
 containment and records native failures. A zero renderer exit, blank frame or
 plugin file inventory is not a whole-game result. JSON document grammar and

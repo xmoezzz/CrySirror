@@ -4,7 +4,7 @@
 //! Native module registration, never an OS DLL loader. A registration-only
 //! shell has no native exports and cannot masquerade as an implemented API.
 use crate::natives::{Rt, methods, string, unsupported};
-use krkr_tjs2::{Result, TjsError, runtime::Variant};
+use crysirror_tjs2::{Result, TjsError, runtime::Variant};
 
 pub fn canonical(name: &str) -> Result<String> {
     let name = name.replace('\\', "/");
@@ -58,7 +58,7 @@ fn kind(rt: &Rt, name: &str) -> Option<&'static str> {
     }
 }
 
-pub fn install(rt: &mut Rt, plugins: krkr_tjs2::runtime::ObjectHandle) {
+pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
     methods(
         rt,
         plugins,

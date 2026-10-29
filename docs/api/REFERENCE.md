@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `94359a5460ac7b99`
+API fingerprint: `c6204fad405840ca`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -191,7 +191,7 @@ Script global: `canvases`.
 | `apply(commands: Record<string, any>[])` | `void` | Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs. |
 | `get(id: number)` | `Record<string, any> \| null` | Inspect this client's canvas dimensions and logical draw nodes, or null when absent. No flattened native frame is returned. |
 
-Commands issued: `apply` → `canvas.create`, `apply` → `canvas.clear`, `apply` → `canvas.draw`, `apply` → `canvas.set`, `apply` → `canvas.copy`, `apply` → `canvas.resize`, `apply` → `canvas.fill`, `apply` → `canvas.transform_copy`, `apply` → `canvas.copy_subtree`, `apply` → `canvas.fade`, `apply` → `canvas.present`, `apply` → `canvas.hide`.
+Commands issued: `apply` → `canvas.create`, `apply` → `canvas.clear`, `apply` → `canvas.draw`, `apply` → `canvas.set`, `apply` → `canvas.copy`, `apply` → `canvas.resize`, `apply` → `canvas.fill`, `apply` → `canvas.transform_copy`, `apply` → `canvas.copy_subtree`, `apply` → `canvas.fade`, `apply` → `canvas.filter`, `apply` → `canvas.restore`, `apply` → `canvas.present`, `apply` → `canvas.hide`.
 
 ## Class Client
 
@@ -391,9 +391,10 @@ Script global: `layers`.
 | `crossfadeStatus(id: number)` | `Record<string, any> \| null` | Owned subtree transition {source, duration_ms, elapsed_ms}, or null. |
 | `beginCrossfade(id: number, source: number, durationMs: number)` | `void` | Crossfade two isolated sibling subtrees using the engine clock. |
 | `endCrossfade(id: number)` | `void` | Release a subtree crossfade; leaves original nodes intact. |
+| `setCrossfadeElapsed(id: number, elapsedMs: number)` | `void` | Set an externally clocked crossfade's progress (clamped to its duration). |
 | `endTransition(—)` | `void` | Finish this client's transition now (skip). |
 
-Commands issued: `put` → `layer.put`, `remove` → `layer.remove`, `setTransform` → `layer.set_transform`, `setVisible` → `layer.set_visible`, `completeReveal` → `layer.complete_reveal`, `setOpacity` → `layer.set_opacity`, `setOrder` → `layer.set_order`, `setClip` → `layer.set_clip`, `setFilter` → `layer.set_filter`, `transition` → `layer.transition`, `endTransition` → `layer.end_transition`, `beginCrossfade` → `layer.begin_crossfade`, `endCrossfade` → `layer.end_crossfade`.
+Commands issued: `put` → `layer.put`, `remove` → `layer.remove`, `setTransform` → `layer.set_transform`, `setVisible` → `layer.set_visible`, `completeReveal` → `layer.complete_reveal`, `setOpacity` → `layer.set_opacity`, `setOrder` → `layer.set_order`, `setClip` → `layer.set_clip`, `setFilter` → `layer.set_filter`, `transition` → `layer.transition`, `endTransition` → `layer.end_transition`, `beginCrossfade` → `layer.begin_crossfade`, `endCrossfade` → `layer.end_crossfade`, `setCrossfadeElapsed` → `layer.set_crossfade_elapsed`.
 
 ## Class Localization
 
@@ -599,6 +600,9 @@ Script global: `ui`.
 | `removeMenu(id: number)` | `void` | Remove a client menu tree. |
 | `openMenu(id: number, item: number \| null, position: number[] \| null)` | `void` | Open a root submenu or a context popup at a logical canvas position. |
 | `closeMenu(id: number)` | `void` | Close this client's menu popups. |
+| `openDialog(dialog: Record<string, any>)` | `void` | Open an engine-drawn modal message dialog {id, title?, message, buttons:[{id,label}], default, cancel?, font, text_size?}; the choice arrives as a dialog_result event (value = button id). |
+| `closeDialog(id: number)` | `void` | Close this client's open dialog without a result. |
+| `warpPointer(position: number[])` | `void` | Ask the presenting host to move the OS pointer to a canvas position. |
 | `setMenuChecked(id: number, item: number, checked: boolean)` | `void` | Update checked state with shared sibling radio-group semantics. |
 | `put(widget: Record<string, any>)` | `void` | Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}. |
 | `remove(id: number)` | `void` | Remove a widget and its children. |
@@ -614,7 +618,7 @@ Script global: `ui`.
 | `backspace(id: number)` | `void` | Remove the final Unicode scalar from a client-owned text field. |
 | `setText(id: number, text: string, font: string \| null)` | `void` | Label/button text and font alias. |
 
-Commands issued: `setMenu` → `ui.set_menu`, `removeMenu` → `ui.remove_menu`, `openMenu` → `ui.open_menu`, `closeMenu` → `ui.close_menu`, `setMenuChecked` → `ui.set_menu_checked`, `put` → `ui.put`, `remove` → `ui.remove`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setText` → `ui.set_text`, `setTitle` → `ui.set_title`, `setWindowPolicy` → `ui.set_window_policy`, `setFullscreen` → `ui.set_fullscreen`, `setCursorVisible` → `ui.set_cursor_visible`, `insertText` → `ui.insert_text`, `backspace` → `ui.backspace`, `focusTextField` → `ui.focus`.
+Commands issued: `setMenu` → `ui.set_menu`, `removeMenu` → `ui.remove_menu`, `openMenu` → `ui.open_menu`, `openDialog` → `ui.open_dialog`, `closeDialog` → `ui.close_dialog`, `warpPointer` → `ui.warp_pointer`, `closeMenu` → `ui.close_menu`, `setMenuChecked` → `ui.set_menu_checked`, `put` → `ui.put`, `remove` → `ui.remove`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setText` → `ui.set_text`, `setTitle` → `ui.set_title`, `setWindowPolicy` → `ui.set_window_policy`, `setFullscreen` → `ui.set_fullscreen`, `setCursorVisible` → `ui.set_cursor_visible`, `insertText` → `ui.insert_text`, `backspace` → `ui.backspace`, `focusTextField` → `ui.focus`.
 
 ## Class Vfx
 
@@ -727,6 +731,7 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | layer | `end_transition` | `Layers.endTransition` |
 | layer | `begin_crossfade` | `Layers.beginCrossfade` |
 | layer | `end_crossfade` | `Layers.endCrossfade` |
+| layer | `set_crossfade_elapsed` | `Layers.setCrossfadeElapsed` |
 | layer | `puppet` | `Puppets.setParameter` |
 | canvas | `create` | `Canvases.apply` |
 | canvas | `clear` | `Canvases.apply` |
@@ -738,11 +743,16 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | canvas | `transform_copy` | `Canvases.apply` |
 | canvas | `copy_subtree` | `Canvases.apply` |
 | canvas | `fade` | `Canvases.apply` |
+| canvas | `filter` | `Canvases.apply` |
+| canvas | `restore` | `Canvases.apply` |
 | canvas | `present` | `Canvases.apply` |
 | canvas | `hide` | `Canvases.apply` |
 | ui | `set_menu` | `Ui.setMenu` |
 | ui | `remove_menu` | `Ui.removeMenu` |
 | ui | `open_menu` | `Ui.openMenu` |
+| ui | `open_dialog` | `Ui.openDialog` |
+| ui | `close_dialog` | `Ui.closeDialog` |
+| ui | `warp_pointer` | `Ui.warpPointer` |
 | ui | `close_menu` | `Ui.closeMenu` |
 | ui | `set_menu_checked` | `Ui.setMenuChecked` |
 | ui | `put` | `Ui.put` |
@@ -3015,7 +3025,7 @@ Variants are tagged by `"kind"`.
 | `image` | `asset: String, tint: [u8; 4]` | Image asset with an RGBA8 tint. |
 | `text` | `text: String, font: String, size: u16, color: [u8; 4], layout: String` | Text with an explicit project font alias, pixel size, color and layout. |
 | `glyph_run` | `font: String, size: f32, color: [u8; 4], bold: bool, glyphs: Vec<PositionedGlyph>, reveal: Option<GlyphReveal>, blur: Option<GlyphBlur>` | Retained explicit glyph positions, rendered as independent cached glyph quads. No VM renderer or flattened text/screen image is involved. |
-| `snapshot` | `size: [u32; 2], layers: Vec<LayerSpec>` | Frozen, source-local static scene, rasterized once at `size` before the outer Layer's transform, opacity, UV crop and filter are applied. Inputs contain no nested snapshots, external parents or dynamic state. |
+| `snapshot` | `size: [u32; 2], layers: Arc<Vec<LayerSpec>>` | Frozen, source-local static scene, rasterized once at `size` before the outer Layer's transform, opacity, UV crop and filter are applied. Inputs contain no nested snapshots, external parents or dynamic state. |
 | `puppet` | `asset: String, tint: [u8; 4]` | 2D deformable puppet (ADR 0029): an engine puppet rig JSON asset, fitted into the layer rect (aspect preserved). |
 
 ### PositionedGlyph
@@ -3099,13 +3109,15 @@ Variants are tagged by `"op"`.
 | `create` | `id: u32, width: u32, height: u32` | Issued by `Canvases.apply`. |
 | `clear` | `id: u32, color: [u8; 4]` | Issued by `Canvases.apply`. |
 | `resize` | `id: u32, width: u32, height: u32` | Change the surface size, keeping its contents anchored at the top-left; area outside previous content stays transparent. |
-| `draw` | `id: u32, layer: LayerSpec` | Issued by `Canvases.apply`. |
+| `draw` | `id: u32, layer: LayerSpec, atop: Option<AtopMode>` | Append a draw; with `atop` it is drawn source-atop (see Copy). |
 | `set` | `id: u32, layer: LayerSpec` | Atomically replace this surface's contents with one logical resource draw. |
-| `copy` | `source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool, clip: Option<[f32; 4]>` | Issued by `Canvases.apply`. |
+| `copy` | `source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool, clip: Option<[f32; 4]>, atop: Option<AtopMode>` | Issued by `Canvases.apply`. |
 | `fill` | `id: u32, rect: [f32; 4], color: [u8; 4], replace: bool, keep_alpha: bool` | Fill `rect` with a solid colour; `replace` replaces the region's pixels (transparent colours included) instead of drawing over them.  `keep_alpha` sets only the colour of the region's existing content and keeps its alpha (krkr `holdAlpha` fills); `color[3]` is then ignored. |
 | `fade` | `id: u32, rect: [f32; 4], opacity: u8` | Multiply the alpha of `rect`'s existing content by `opacity`/255, colour unchanged (krkr negative-opacity colorRect). The region is frozen as one isolated snapshot so overlapping draws fade as a single composite. |
-| `transform_copy` | `source: u32, destination: u32, rect: [f32; 4], matrix: [f32; 6], replace: bool, clip: Option<[f32; 4]>` | Copy `rect` of `source` through an affine map of source-surface coordinates (`[a, b, c, d, tx, ty]`: x' = a·x + c·y + tx, y' = b·x + d·y + ty) without skew. `replace` replaces the covered destination region; it requires an axis-aligned result. |
+| `filter` | `id: u32, rect: [f32; 4], filter: crate::layer::LayerFilter, opacity: u8` | Recolour `rect`'s existing content through a layer filter (mono, invert, bright/dark, colour mix), blended over the original by `opacity`/255 (RealLive `grpMono`/`grpInvert`/`grpLight`). The region is frozen as one isolated snapshot, like `fade`. |
+| `transform_copy` | `source: u32, destination: u32, rect: [f32; 4], matrix: [f32; 6], replace: bool, clip: Option<[f32; 4]>, opacity: u8` | Copy `rect` of `source` through an affine map of source-surface coordinates (`[a, b, c, d, tx, ty]`: x' = a·x + c·y + tx, y' = b·x + d·y + ty) without skew. `replace` replaces the covered destination region; it requires an axis-aligned result. |
 | `copy_subtree` | `source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], clip: Option<[f32; 4]>` | Freeze a visible, static, normal-alpha Layer subtree as one snapshot draw. The renderer rasterizes it at its original size before later effects. `rect` is source-root-local; `position` and `clip` are destination-space. The region is replaced, including alpha. Root placement/visibility/opacity and inheritance from outside the subtree do not enter the snapshot. |
+| `restore` | `id: u32, surface: CanvasSurface` | Replace (or create) a surface with a previously queried state (`EngineQuery::Canvas`), e.g. a native game's saved DCs. |
 | `present` | `id: u32, layer: u32, order: i32, parent: Option<u32>, position: [f32; 2]` | Issued by `Canvases.apply`. |
 | `hide` | `layer: u32` | Issued by `Canvases.apply`. |
 
@@ -3224,6 +3236,9 @@ Used by: `LayerSpec.blend`.
 | `subtract` | — | Subtractive. |
 | `multiply` | — | Multiply. |
 | `screen` | — | Screen. |
+| `atop` | — | Source-atop: drawn only where the destination has alpha, which it keeps (KiriKiri holdAlpha draws). Meaningful in isolated canvas snapshots, where the destination is the surface's own content. |
+| `atop_multiply` | — | Photoshop multiply keeping the destination alpha (KiriKiri omPsMultiplicative with holdAlpha): D·(1 - a + a·S). |
+| `atop_screen` | — | Photoshop screen keeping the destination alpha (omPsScreen with holdAlpha): D·(1 - a·S) + a·S·Da. |
 
 ### ToneCurve
 
@@ -3649,7 +3664,8 @@ Variants are tagged by `"op"`.
 | `set_filter` | `id: u32, filter: Option<LayerFilter>` | Issued by `Layers.setFilter`. |
 | `puppet` | `id: u32, command: PuppetCommand` | Drive a puppet layer (ADR 0029). |
 | `transition` | `transition: TransitionSpec` | Start a screen transition owned by this client. |
-| `begin_crossfade` | `id: u32, source: u32, duration_ms: u64` | Crossfade two equally sized sibling subtrees using isolated engine targets. |
+| `begin_crossfade` | `id: u32, source: u32, duration_ms: u64, rule: Option<RuleWipe>, external: bool` | Crossfade two equally sized sibling subtrees using isolated engine targets; with `rule`, each pixel's progress follows a grayscale rule image. |
+| `set_crossfade_elapsed` | `id: u32, elapsed_ms: u64` | Progress of an `external` crossfade, in ms of its duration. |
 | `end_crossfade` | `id: u32` | Release a subtree transition after observing completion or cancellation. |
 | `end_transition` | — | Finish this client's transition immediately (skip). |
 
@@ -3662,6 +3678,8 @@ Variants are tagged by `"op"`.
 | Variant | Fields | Description |
 |---|---|---|
 | `set_menu` | `menu: menu::MenuSpec` | Issued by `Ui.setMenu`. |
+| `open_dialog` | `dialog: dialog::DialogSpec` | Open a modal message dialog; its choice arrives as `dialog_result`. |
+| `close_dialog` | `id: u32` | Close an open dialog without a result. |
 | `remove_menu` | `id: u32` | Issued by `Ui.removeMenu`. |
 | `open_menu` | `id: u32, item: Option<u32>, position: Option<[f32; 2]>` | Issued by `Ui.openMenu`. |
 | `close_menu` | `id: u32` | Issued by `Ui.closeMenu`. |
@@ -3670,6 +3688,7 @@ Variants are tagged by `"op"`.
 | `backspace` | `id: u32` | Remove the last Unicode scalar from a client-local TextField. |
 | `focus` | `id: u32` | Issued by `Ui.focusTextField`. |
 | `set_cursor_visible` | `visible: bool` | Issued by `Ui.setCursorVisible`. |
+| `warp_pointer` | `position: [i32; 2]` | Move the OS pointer to a canvas position. |
 | `set_title` | `text: String` | Issued by `Ui.setTitle`. |
 | `set_window_policy` | `decorated: bool, resizable: bool` | Issued by `Ui.setWindowPolicy`. |
 | `set_fullscreen` | `enabled: bool` | Issued by `Ui.setFullscreen`. |
@@ -3771,20 +3790,9 @@ Used by: UiEvent.widget client/local identity.
 
 | Field | Rust type | Description |
 |---|---|---|
-| `profile` | `String` | Explicit native profile: non-novel, no custom frame/effects, plain text. |
-| `scenes` | `BTreeMap<i32, String>` | Native scene number to capability-relative TPC32 file. |
-| `start_scene` | `i32` | Scene number used by the original Scenario at boot. |
-| `version` | `i32` | Original opcode revision; choose explicitly for the title being adapted. |
-| `encoding` | `String` | Native string codec accepted by the original NLS parser (default sjis). |
-| `font` | `String` | Installed engine font alias; no font file or native font is bundled. |
-| `message_rect` | `[i32; 4]` | Absolute position and cell-layout width/height in logical pixels. |
-| `font_size` | `u16` | Native nominal glyph size in logical pixels (1..256). |
-| `cell_step` | `[i32; 2]` | Native horizontal half-cell and line pitch in pixels; never inferred from font metrics. |
-| `message_interval_ms` | `i32` | Original interpreter print interval in milliseconds (0 displays immediately). |
-| `resources` | `BTreeMap<String, String>` | Native resource names to engine image/audio paths. No filesystem bypass. |
-| `sound_effects` | `BTreeMap<i32, String>` | Explicit native SE table; a referenced missing entry fails visibly. |
-| `voices` | `BTreeMap<i32, String>` | Native voice IDs mapped to shared supported audio containers. |
-| `message_icon` | `Option<String>` | Explicit engine image used for native message-wait icons. |
+| `root` | `String` | Asset-relative directory of the installed game (holds `Gameexe.ini`). |
+| `font` | `String` | Project font alias for message, choice and menu text. |
+| `encoding` | `String` | Native string codec (`sjis`, `gbk`, `big5`, `utf8`). |
 
 ### `krkr`
 

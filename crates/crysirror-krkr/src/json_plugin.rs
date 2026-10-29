@@ -4,7 +4,7 @@
 //! json.dll semantic/value/storage facade over shared document APIs.
 use crate::natives::{Rt, int, string, unsupported};
 use crysirror_runtime::structured_text::{self, DocumentValue as D, JsonDialect};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::Variant,
 };
@@ -66,7 +66,7 @@ fn from_native(
             }
             D::Text(s.clone())
         }
-        Variant::Object(h) | Variant::Closure(krkr_tjs2::runtime::Closure { object: h, .. }) => {
+        Variant::Object(h) | Variant::Closure(crysirror_tjs2::runtime::Closure { object: h, .. }) => {
             if !rt.object_valid(*h) {
                 return Ok(D::Void);
             }

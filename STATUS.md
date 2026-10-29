@@ -3,6 +3,73 @@
 Snapshot: 2026-10-25. Owner priority: the new AAA engine first;
 compatibility layers are secondary (ADR 0010).
 
+## KiriKiri CXDEC XP3 archives (ADR 0096, 2026-10-30)
+
+- Implementation: `crysirror-formats-arc` XP3 gains a CXDEC content filter and
+  the encrypted filename index (`yuz:`), ported from the owner's MIT xp3-brute
+  @ c82cb14. Parameters are recovered at mount time from the user's own
+  EXE/TPM and the archive's startup script; no per-game data is in the repo,
+  no module code is executed. Emulator init, SteamStub and symbolic TJS
+  execution are not ported (fail visibly).
+- Tests: `crysirror-formats-arc` release 221 passed, 0 failed, 20 ignored
+  (15 new synthetic CXDEC tests). Desktop `--features krkr,arc-formats` check
+  passed. `tests.test_krkr_probe` 3/3.
+- Behaviour (sampled reads, every 97th entry plus 128 at open, checksums
+  verified): CLOVERDAYS (classic, tpm) 4/4 archives, 392 ok; Riddle Joker 8/8,
+  476 ok; Cafe Stella 10/10, 490 ok, including prefix words read from the
+  module (upstream xp3-brute fails on this title). Logs in
+  `target/verification/krkr-cxdec/`.
+- Boot: none of the three reaches a title. CLOVERDAYS stops at a TJS parse
+  error on the `expr if cond` statement form (`MyYesNoDialog.tjs`); Riddle
+  Joker and Cafe Stella stop because `Storages.setupArchiveData` is not
+  provided by the adapter.
+
+## AVG32 installed games: Kanon through shared services (ADR 0095, 2026-10-30)
+
+- Implementation: `crysirror-avg32` now vendors the original AVG32
+  interpreter from siglus_rs 5f358ef (per-file hashes and seam list in
+  `src/vm/SOURCE.json`) instead of the portable-vm Git build. The PDT bank,
+  copy/mask/fade/stretch primitives and all transitions moved to
+  `crysirror_image::avg32` (plus buffer-0 write damage and a present
+  revision). The screen is one engine surface layer; buffer-0 text is a
+  retained GlyphRun; menus/backlog/name entry are solid + GlyphRun layers;
+  audio is engine channels; files and `SAVE.INI` use client storage and the
+  save mount. Config is `{root, font, encoding?}` (breaking, API fingerprint
+  `c6204fad405840ca`, logged).
+- Install: owner-supplied Kanon CloneCD Disc 1 extracted per its SETUP.INI
+  copy list to `~/Downloads/game_kanon`, CD-DA tracks 02-23 ripped to
+  `BGM/TRACKnn.WAV`; Disc 2 (12 audio tracks, not referenced by
+  GAMEEXE.INI) ripped to `DISC2/`. Unmodified upstream `avg32_probe` on the
+  install reached SEEN050 prologue in 3000 frames.
+- Compilation: `cargo check --release --workspace --all-targets` passed
+  (after giving the vendored `reallive-dll` tests a test-only `game_fs`
+  shim). Desktop release build with default features passed.
+- Tests: avg32/image/reallive-dll/reallive/desktop/runtime release suites
+  330 passed, 0 failed, 5 ignored; 4 new synthetic-install AVG32 tests
+  (screen surface, GlyphRun text, `#CDTRACK` BGM, glyph removal on
+  overwrite, movie warning, read-only game files/save mount), plus a fifth
+  added afterwards for choice-row highlight (glyphs recoloured, not removed);
+  `crysirror-avg32` then passed 25 (20 vendored unit + 5 integration). Python 3.11
+  tooling 195 passed. API docs 7 passed.
+- Behaviour (Kanon, release `render`/`trace`, Apple M5/Metal, scripted
+  input): KEY logo and title, the graphical main menu, prologue text in the
+  message frame, the right-click system menu, save to slot 5 and load from
+  the title (prologue restored, 29 glyphs), and a Ctrl-skip trace into
+  SEEN501 "１月８日 金曜日" after 12000 frames with 52 audio requests and
+  no warnings. Images in `target/verification/avg32-kanon/`. A 900-frame
+  windowed `run` exited cleanly; audible output was not verified. Local
+  launcher: `~/Downloads/Run-kanon.command` (system Hiragino font, saves in
+  `~/Downloads/CrySirror-kanon-state`).
+- Limits: not played to completion; choices were only clicked blindly
+  during skip. Text into PDT buffers other than 0, Cinepak movies,
+  `FN.DAT`/`＊００` glyphs as engine glyphs, framework snapshots and script
+  `Bitmap` exposure of the AVG32 raster primitives remain open. Glyph
+  visibility follows buffer-0 writes, not native present timing.
+- RealLive DLLs: the owner's EF00/PT00/DT00 emulation (`reallive-dll`) is
+  wired to `LoadDLL`/`CallDLL`; its upstream tests now run (4 passed; the two
+  game-DLL cases return early without a Little Busters!/Tomoyo After
+  install). No DLL-using game has been run.
+
 ## RT step 6: ray-traced irradiance probes (ADR 0059)
 
 - `irradiance_volume.ray_traced`: probes refreshed by 256 rays each against
@@ -4160,3 +4227,241 @@ Fixes this round:
 Open: title_bg motion art; operateRect/colorRect face=1 holdAlpha; WIN32Dialog;
 opaque-layer display; save/load not exercised.
 
+### 2026-10-29 — game-kr plays into the prologue with backgrounds and characters
+
+Behavior: `crysirror render` with an input track (New Game, then a click every
+90 frames) runs 12000 frames with exit 0 through scene changes: background art,
+event CG with name plate and dialogue (captures title-bringup/scene-8000.png,
+long-12000.png; local, ignored). Remaining caught script errors in that run:
+ctxfontprefs.tjs encoding, onResize `recreate` on void. System variables save
+(datasu/datasc.ksd with the game's backup rotation) in a 3000-frame run.
+A windowed `run` (Metal, Retina scale 2, surface 3024x1666 BGRA sRGB, opaque
+alpha) presents a full, correctly letterboxed caution screen: verified by
+reading back the presented swapchain image (CRYSIRROR_SURFACE_CAPTURE).
+
+Fixes this round:
+- Transitions: `universal` rule wipes (krkrz TVPInitUnivTransBlendTable) and
+  transitions without children (temporary sibling presentation + krkrz Swap);
+  strictly nested crossfades composed inside-out (scene + renderer); piledCopy
+  of a tree with an active transition captures its nearest endpoint (logged).
+- Keep-alpha drawing: Blend atop / atop_multiply / atop_screen; canvas atop
+  copies/draws frozen into region snapshots (inlined, never nested); krkr
+  operateRect/colorRect holdAlpha incl. omPsMultiplicative/omPsScreen (_HDA);
+  single-draw copy opacity.
+- Data packs: encrypted TJS/4s0 `.pbd` (ChaCha, LZ4 with 64 KiB dictionary)
+  via crysirror_resource::krkr_pbd, ported from xmoezzz/xp3-brute (MIT).
+- fstat deleteFile/moveFile/copyFile/createDirectory on the save mount.
+- Performance: menu specs rebuilt only on change; layer validation skips frozen
+  snapshot payloads (checked on entry); snapshot payloads shared via Arc.
+- Snapshots admit images served by mounted containers; plain files refused.
+- Tests: scene/krkr/resource/text/audio/runtime 458 passed 0 failed; GPU tests
+  (Metal, single-threaded, CRYSIRROR_TEST_FONT set) all pass; api_docs pass.
+
+Memory (same machine, `crysirror render`, input track long.json):
+- Before: peak RSS 2.27 GB and rising. Cause: every Array/Dictionary carried
+  its own native method objects, every call allocated a new this-proxy, and
+  the TJS heap never freed anything.
+- Now: shared built-in natives, a cached this-proxy, and a mark-and-sweep GC
+  for the TJS heap (krkr-upstream UPSTREAM.md item 5). The GC runs between
+  adapter steps. Swept objects invalidate their native state. PSBFile,
+  CSVParser and TextRender instances are no longer GC roots.
+- 9000 frames: peak RSS 821 MB, exit 0.
+- 30000 frames (about 410 s, around 73 frames/s headless): RSS stayed between
+  443 and 620 MB and ended at 455 MB, with no steady growth.
+- GC: two collections, freeing 19982 and 43262 objects; the larger took
+  90 ms (a visible hitch).
+- `TJS_GC_NO_REUSE` (freed slots never reused) 9000-frame run: no
+  invalid-object errors.
+- Profile: about half of the live heap is TJS member tables (about 2 KB per
+  Array, because methods are copied per instance as in TJS2). Most come from
+  PSB trees that motion/psbfile convert eagerly.
+- Tests: krkr-tjs2 lib 420 passed; crysirror-krkr all suites pass;
+  scene/core/runtime 246 passed, 0 failed.
+
+Follow-up (same day), measured on the same machine:
+- Throughput: EngineSystems::submit cloned and fully revalidated all engine
+  state per batch (about 87% of main-thread samples). Batches now stage only
+  touched systems: one LayerSystem transaction (journaled, no tree clone),
+  copy-on-write canvas surfaces, validation of touched surfaces only.
+  9000 frames: 150 s -> 33.6 s (exit 0, frame 9000 pixel-identical);
+  12000 frames ~50 s; 30000 frames 58 s (was 410 s).
+- GC pause: dead objects are dropped on a background thread and collected
+  objects only release weakly held native state (`object_collected`):
+  ~27 ms -> ~11 ms (mark phase).
+- Script errors fixed: completion callbacks (`_stop` missing) -- the port
+  bound context-free closures when stored into a member, unlike krkrz
+  PropSet; `Scripts.evalStorage`/`execStorage` read `KBAD100` binary struct
+  packs (ctxfontprefs.tjs) as krkrz LoadByteCode does; that table then
+  reached `Layer.operateStretch`, now an engine transformed blend with
+  opacity (normal alpha modes; holdAlpha/other modes fail visibly). The
+  12000-frame run logs no caught script exception.
+- Native menu bar (macOS, muda 0.19.3): engine menu bars are mirrored into
+  the OS menu bar; selections become the same engine menu events. Verified
+  only by the install log listing the game's menus; clicking has not been
+  exercised (screen locked, no accessibility/screen-recording permission).
+  Windows/Linux keep the engine-drawn bar. `CRYSIRROR_NATIVE_MENU=0` opts out.
+- A windowed run does not advance while the window is occluded or the
+  screen is locked (macOS delivers no redraws; ticks run in redraw).
+- Tests: krkr-tjs2/krkr/scene/core/runtime/desktop 738 passed 0 failed;
+  wgpu incl. ignored GPU tests (Metal, single-threaded) 93 passed; api_docs
+  pass (fingerprint 3a2df66087609087).
+
+Title motion and close/confirm flow (same day), measured headless:
+- Title (title_bg.mtn) now renders background, logo and character art. Fixes:
+  motion samples continue from the player's previous native step (type-0
+  HOLD keyframes keep state; previously everything vanished at the end
+  hold); eluna port changes 8-10 (sprite centre = coord - origin + size/2;
+  HOLD state keyed by structural path, labels repeat; a Null priority frame
+  keeps the previous order); krkr/win 32-bit motion textures are BGRA;
+  E-mote MODULATE2X (bm 0x10) vertex colour gain (0x80 neutral; the logo
+  screens were grey).
+- WIN32Dialog.messageBox is an engine-drawn modal dialog on every platform
+  (UiSystem dialogs; Win32 button sets, MB_DEFBUTTONn, Escape rules,
+  IDOK..IDCONTINUE returned on resume via a new VM resume-value hook).
+  chooseColor still answers cancel (stub); template dialogs (open) fail
+  visibly.
+- Window.close runs onCloseQuery like krkrz (program close synchronous,
+  user close posted); the desktop close button / native Quit go through the
+  game and the window closes when the VM halts. The title's ゲームの終了 shows
+  the game's own 「ゲームを終了しますか？」; はい saves system variables
+  (datavc.ksd via safe-save rename) and halts.
+- Added for that flow: Layer.setMode/removeMode (modal layers, hit/focus
+  limits, onNodeEnabled/Disabled, BlurTree on disable/hide), transition
+  `callback` tick sources (engine external crossfade clock), universal
+  vague 0, bounded nested snapshots, Layer.setCursorPos (engine pointer
+  warp, applied by the desktop), Scripts.saveDataPack (TJS/ns0; the
+  cryptmode/compress/iv 4s0 options are not reproduced), Storages.saveOctet,
+  registerHotKey(id) unregister, void integer arguments read as 0.
+- Not verified: clicking the native menu bar; windowed play (screen locked
+  during this session).
+- Tests: krkr-tjs2 420; scene 84; krkr/core/runtime/resource/puppet/engine/
+  desktop pass (api_coverage included); wgpu incl. ignored 93 (after the
+  nested-snapshot change, Metal, single-threaded); api_docs pass (4936e7b23cc5a98a).
+  12000-frame playthrough: exit 0, 45 s, no caught script exceptions.
+
+Owner play report follow-up (same day):
+- System Setting opens (headless capture): a script class with a later native
+  base (`extends Script, Layer`) now gets that base's members copied at
+  inclusion, as krkrz tTJSNativeClass::FuncCall does (VM change);
+  System.personalPath/appDataPath map into the save root; transitions may
+  join endpoints under different parents (KAG fore/back pages; krkrz
+  Exchange on completion); engine layer budget 4096 -> 16384 (the screen
+  needs 4793).
+- PackinOne data packs are the Kirakira c451918 port (reference container:
+  LZ4/ChaCha, IV, digest XXH32; thumbnails not captured), replacing the
+  interim ns0 writer. Saving system variables and the voice clip index works.
+- The engine-drawn in-window menu bar is the default again on every platform;
+  the macOS system menu bar is opt-in (CRYSIRROR_NATIVE_MENU=1).
+- Tests: krkr-tjs2/krkr/scene/engine 693 passed, 0 failed.
+
+Open: real-time frame rate not yet measured in a window; save/load slots not
+exercised; title_bg motion art; WIN32Dialog; owner-reported windowed "top-left
+quarter / wrong colours" not reproduced with the current build.
+
+
+## 2026-10-29 — RFVP through the vendored portable core
+
+- Implementation: `crates/rfvp-upstream` vendors xmoezzz/rfvp 062fec8
+  (`crates/rfvp`, MPL-2.0, byte-identical sources; the Microsoft fonts are
+  excluded; new manifest building only the `no_std` profile). The old
+  hand-written `crysirror-rfvp` interpreter (`script/`, `bridge.rs`) is
+  removed. `crysirror-rfvp` is now the core's host: files come from
+  ClientStorage, textures are engine surfaces, each frame's sprites and solids
+  are one engine dynamic puppet mesh on one engine layer (scissor via
+  clip_part_rect, blend modes mapped), sound slots are channel audio
+  (EncodedAudio), time is the engine clock, saves go to the save mount
+  (`rfvp/save/*`), and save dates use local wall time.
+- Engine additions: HostServices::release_surface; per-client surface slots
+  raised from 16 to 4096 (same 256 MiB budget). The `.sli` parser moved to
+  crysirror-resource, so crysirror-krkr no longer depends on crysirror-audio.
+  Also fixed stale krkr-upstream SOURCE.json hashes and recorded gc.rs as an
+  addition.
+- Behaviour (headless `render`, owner-authorized ~/Downloads/testcase, White
+  Eternity, 1024x640): title with BGM; NewGame → prologue text → CG with the
+  in-game toolbar; the toolbar menu (SAVE/LOAD/…); SAVE screen; saving slot 1
+  writes `rfvp_s001.bin` and the slot shows text and date. Logged
+  "Invalid duration" / "history_set … Nil" are the game script passing nil
+  into upstream syscalls, not adapter errors.
+- Not done / not verified: save thumbnails (capture_thumbnail; the engine has
+  no synchronous frame readback, same as krkr); loading a slot; movies
+  (meffect/*.wmv layer effects); windowed play; streaming audio
+  (create_stream/submit_* return Unsupported). The core still decodes game
+  images and rasterizes glyphs (ab_glyph) privately, so it hands over finished
+  RGBA; moving these into engine image/text services is open extraction work.
+- Tests: crysirror-rfvp 3 unit tests; runtime/krkr/scene/engine/resource/
+  audio/rfvp/krkr-tjs2 598 passed, 0 failed; policy tests (krkr + new rfvp)
+  8 OK; api_docs pass (4936e7b23cc5a98a, Rust-only changes logged).
+
+## 2026-10-29 — RealLive: AIR SE and Game_RUSUR play through the story
+
+Owner-authorized games: `~/Downloads/AIR Standard Edition` (a RealLive title,
+not AVG32: Seen.txt scene index, g00 art, RealLive.exe) and
+`~/Downloads/Game_RUSUR`. Scripts: `target/verification/reallive/scripts/`.
+
+- Copied from siglus_rs 5f358ef into the adapter VM (recorded in
+  `vm/SOURCE.json`): settings/syscom, frame counters, GAN, the object model
+  (params, properties, mutators, pattern/GAN animation, promotion) and
+  `modules/obj.rs`, and the VM-state 1:4 system functions (arithmetic, date,
+  settings 22xx/23xx/26xx, syscom states, flags, savepoints, call stack,
+  `end`). The extension DLLs (EF00, PT00 Little Busters, DT00 Tomoyo After)
+  are vendored as `crates/reallive-upstream/reallive-dll` and wired to
+  LoadDLL/CallDLL; no authorized game uses them, so they are compiled and
+  wired but not game-tested. Unknown DLLs fail visibly.
+- Engine additions: RealLive g00 atlas decoding with pattern regions
+  (`crysirror_image::g00`; the shared g00 decoders now return multi-pattern
+  files as that atlas), `#SEL` reveal rule images
+  (`crysirror_image::reallive_wipe`, used with the engine mask transition),
+  canvas `filter` (region mono/invert/light/colour), snapshots of
+  self-contained plain project images (content-pinned), present_surface
+  release, raw NWA with an unset packed size.
+- Adapter mapping onto engine services: objects as retained layers (geometry
+  from upstream blit_region: origin/rep origin, scale, rotation, clip,
+  alpha, add/subtract, filters; digits; child objects), haikei backgrounds
+  (1:40), grpMulti, grpZoom, grpStretchBlt, freeDC, grpFill/Outline,
+  region colour effects, masked copies, manual draw mode (held batches until
+  refresh), window frames (WAKU types other than nine-slice: BACK tinted by
+  the window attribute, NAME on top), choices laid out in the text window,
+  kinsoku and page-full continuation, koePlay (loose files, or voice
+  archives mounted as engine containers), SE table, BGM replacement fades,
+  volumes, screen shake (whole scene under one root layer), name entry OK.
+- Behaviour (headless render, scripted clicks): AIR — title, chapter
+  select, prologue, opening sequence, story into day 2 (July 19) with
+  backgrounds, sprites, calendar object, choices, voices; 150,000 frames, no
+  error, no approximated transition. RUSUR — title, name entry, story to day
+  14; 300,000 frames, no error.
+- Not done / known gaps: save/load and the system-command menu (right-click
+  does nothing yet; RealLive saves need graphics-stack replay); save
+  thumbnails; motion transition styles (scroll/squash/slide/zoom/ripple)
+  are shown as crossfades and counted in diagnostics
+  (`approximated_transitions`); nine-slice window frames, per-channel tint,
+  drift (weather) objects, HIK animated backgrounds and filter-area objects
+  fail visibly; the text-object control syntax (`#c` etc.) is not
+  interpreted; window open/close animations, backlog and auto mode are not
+  implemented. Windowed play not verified.
+- Tests: reallive/reallive-dll/image/scene/runtime/engine/audio/siglus/
+  formats-arc/rfvp/krkr 907 passed, 0 failed; policy tests OK; api_docs pass
+  (fingerprint 0a86cec0fc22dca2, logged).
+
+Follow-up (same day, owner report: kr crashes after a while, AIR `play` would not start):
+- `run.py … play` passed a nonexistent `play` subcommand; it now runs `crysirror run`.
+- kr exits reproduced and fixed at the engine level: snapshots may now contain
+  text (fonts pinned by content digest in the snapshot key; previously
+  "snapshot font requires an immutable captured font handle"); per-frame
+  snapshots are de-duplicated and limited to 512 (the load screen had 198,
+  extra mode 150); region freezes (fade/filter/opacity group/atop) are
+  rasterized at the region's size instead of the whole canvas (the load
+  screen exceeded the 256 MiB texture budget). All seven title buttons
+  (new game, load, last save, flowchart, extra, settings, quit) render
+  without error headless. An unresolved E-mote motion icon
+  ("normal/mask", seen once in a window, not reproduced headless) now logs
+  a warning and skips that frame instead of exiting.
+- AIR window exit ("manual-mode draw backlog limit") fixed: manual draw mode
+  now presents a frozen copy of DC 0 that `refresh` replaces, instead of
+  holding batches.
+- Canvas `restore` (replace a surface with a queried state) added for native
+  saves. Tests: scene pass; wgpu with ignored GPU tests (Metal, font set)
+  60 passed 0 failed (new: text inside a frozen canvas).
+- Owner report "the text window stays up during AIR's OP": the adapter had
+  msg 151/152/162 inverted. Now as upstream: 151 closes the active window
+  (frame included), 152 clears it, 161 closes all, 162 clears all. AIR's
+  opening shows no window; story text still shows it; RUSUR 300k frames pass.

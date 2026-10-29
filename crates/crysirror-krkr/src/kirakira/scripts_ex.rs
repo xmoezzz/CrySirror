@@ -22,7 +22,7 @@
 //!   skipped by name (see [`is_hidden_member`]).
 //! - `getObjectKeys`/`foreach` walk members in `EnumMembers` order: the
 //!   member table is the reference's hash store, so a key list comes out in
-//!   the reference's bucket order (`krkr-tjs2`'s `runtime::symbol_table`).
+//!   the reference's bucket order (`crysirror-tjs2`'s `runtime::symbol_table`).
 //! - `getObjectContext` answers the closure's `ObjThis` (null for a plain
 //!   object), `isNullContext` tests exactly that.
 //! - `equalStruct` compares arrays element-wise with an equal length, and
@@ -60,7 +60,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::host::KrkrHost;
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{Closure, ObjectHandle, Runtime, Variant},
 };
@@ -162,7 +162,7 @@ pub(crate) const ARRAY_METHOD_NAMES: &[&str] = &[
 ///
 /// A Dictionary is deliberately *not* filtered: this object model builds
 /// dictionary instances with an empty member map (`native_dictionary`,
-/// `krkr-tjs2/src/runtime/builtins.rs:39-50`), so every key is data. The
+/// `crysirror-tjs2/src/runtime/builtins.rs:39-50`), so every key is data. The
 /// reference skips a dictionary member only when it carries the
 /// `TJS_HIDDENMEMBER` flag, which no dictionary key here does — filtering by
 /// name would silently drop real fields such as `%["count" => 1]`, and it would

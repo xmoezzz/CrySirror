@@ -16,7 +16,15 @@
     "modules/jmp.rs": "2fdac96785b499b89822ef2d5f47f89e226fb1176f6d588a12718326e2fc7b77",
     "modules/mem.rs": "3160e9266f8afdbdc0bc306a817168b872e7bfdc54f0f90f911d084956ef73f4",
     "modules/str.rs": "a0e0fc58cb65aec6f25210f4f3373215c0ca5353ced22c84cd3b23e4a73a1296",
-    "archive.rs": "ebd08e0159eeedcf13fcb430d640b10b034d33f38a197e799adada2d7e82d812"
+    "archive.rs": "ebd08e0159eeedcf13fcb430d640b10b034d33f38a197e799adada2d7e82d812",
+    "settings.rs": "35a508f6d92afb07aa512a8a2ecd5049cf236d5f38f17dd476b79a74306c1552",
+    "gan.rs": "b22438c7344147f095da20db83511c56e50a2c05b643792ad7d277da5f6f1939",
+    "object.rs": "743549dd5b01cff195deee4e5c31757f73c82e1891f3f1a7aaabd3eb1809304b",
+    "clock.rs": "5e5011bc6be4d52e47816f92f306470efc70550c2a7976f758c6b85b05a637b1",
+    "rect.rs": "aa332fb7b320fc18099a609a2affbdecd96c6c9c6d8d92b47739e61174c1b73c",
+    "graphics.rs": "7cfa4727387776acbd0e4d841abf2eabb018e49bddeab69bbba9173acf3b8261",
+    "modules/obj.rs": "5002578a7d3c41b28e9a68e35df63e571b3d91645f417f1faad135721d9f11c6",
+    "modules/sys.rs": "06b3e608bec0cd6d96828f5d07605d6ec98ea995b4ae50d0195f01a8f05c5d8e"
   },
   "excluded_engine_modules": [
     "System",
@@ -136,5 +144,13 @@
     "read flags and VM savepoint banks/call stack",
     "pure memory and string builtins"
   ],
-  "external_operations": "All native engine operations are pending Command/Text events until successful CrySirror API acknowledgement; no native rendering/text/audio implementation is linked"
+  "external_operations": "All native engine operations are pending Command/Text events until successful CrySirror API acknowledgement; no native rendering/text/audio implementation is linked",
+  "partial_copies": {
+    "rect.rs": "Rect only from surface.rs; pixel operations are engine services",
+    "object.rs": "object state, properties, mutators and animation; render/blit/text rasterization removed (engine layers)",
+    "graphics.rs": "ObjectRef, object store, promotion, animation queues; DCs/composition removed (engine canvases)",
+    "clock.rs": "frame counters; the clock is the engine's",
+    "modules/sys.rs": "VM-state 1:4 functions (arithmetic, date, settings, syscom, frames, flags); adapter maps the rest",
+    "modules/obj.rs": "unchanged except image/GAN loading through the adapter's AssetLoader and LOADTHUMBNAIL failing visibly"
+  }
 }

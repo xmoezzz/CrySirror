@@ -5,6 +5,7 @@ mod audio;
 #[cfg(feature = "gamepad")]
 mod gamepad;
 mod input_track;
+mod native_menu;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use crysirror_core::service::InputFrame;
@@ -196,6 +197,8 @@ fn adapter_registry() -> Result<AdapterRegistry> {
     crysirror_reallive::register(&mut registry)?;
     #[cfg(feature = "krkr")]
     crysirror_krkr::register(&mut registry)?;
+    #[cfg(feature = "rfvp")]
+    crysirror_rfvp::register(&mut registry)?;
     #[cfg(feature = "avg32")]
     crysirror_avg32::register(&mut registry)?;
     Ok(registry)
@@ -204,7 +207,7 @@ fn load_project(path: &Path) -> Result<Project> {
     let project = Project::load(path)?;
     for client in &project.clients {
         anyhow::ensure!(
-            !matches!(client.adapter.as_str(), "bgi" | "rfvp"),
+            client.adapter != "bgi",
             "hosted engine adapter '{}' has been removed; a CrySirror API bridge is required",
             client.adapter
         );
@@ -212,6 +215,10 @@ fn load_project(path: &Path) -> Result<Project> {
     #[cfg(feature = "krkr")]
     for c in project.clients.iter().filter(|c| c.adapter == "krkr") {
         serde_json::from_value::<crysirror_krkr::Config>(c.config.clone())?.validate()?;
+    }
+    #[cfg(feature = "rfvp")]
+    for c in project.clients.iter().filter(|c| c.adapter == "rfvp") {
+        serde_json::from_value::<crysirror_rfvp::Config>(c.config.clone())?.validate()?;
     }
     #[cfg(feature = "reallive")]
     for c in project.clients.iter().filter(|c| c.adapter == "reallive") {
@@ -596,7 +603,7 @@ fn run() -> Result<()> {
                 "{}",
                 serde_json::to_string_pretty(
                     &serde_json::json!({"project":p,"registered_adapters":adapters,
-                        "rfvp_native_vm":false,
+                        "rfvp_native_vm":adapters.contains(&"rfvp"),
                         "bgi_native_vm":false,
                         "reallive_native_vm":adapters.contains(&"reallive"),
                         "avg32_native_vm":adapters.contains(&"avg32"),

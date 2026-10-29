@@ -66,6 +66,7 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("layer", "end_transition", "Layers.endTransition"),
     ("layer", "begin_crossfade", "Layers.beginCrossfade"),
     ("layer", "end_crossfade", "Layers.endCrossfade"),
+    ("layer", "set_crossfade_elapsed", "Layers.setCrossfadeElapsed"),
     ("layer", "puppet", "Puppets.setParameter"),
     ("canvas", "create", "Canvases.apply"),
     ("canvas", "clear", "Canvases.apply"),
@@ -77,11 +78,16 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("canvas", "transform_copy", "Canvases.apply"),
     ("canvas", "copy_subtree", "Canvases.apply"),
     ("canvas", "fade", "Canvases.apply"),
+    ("canvas", "filter", "Canvases.apply"),
+    ("canvas", "restore", "Canvases.apply"),
     ("canvas", "present", "Canvases.apply"),
     ("canvas", "hide", "Canvases.apply"),
     ("ui", "set_menu", "Ui.setMenu"),
     ("ui", "remove_menu", "Ui.removeMenu"),
     ("ui", "open_menu", "Ui.openMenu"),
+    ("ui", "open_dialog", "Ui.openDialog"),
+    ("ui", "close_dialog", "Ui.closeDialog"),
+    ("ui", "warp_pointer", "Ui.warpPointer"),
     ("ui", "close_menu", "Ui.closeMenu"),
     ("ui", "set_menu_checked", "Ui.setMenuChecked"),
     ("ui", "put", "Ui.put"),
@@ -177,6 +183,7 @@ fn layers_info() -> &'static ClassInfo {
             m("crossfadeStatus", vec![("id", T::Int)], T::Optional(Box::new(T::Map)), "Owned subtree transition {source, duration_ms, elapsed_ms}, or null."),
             m("beginCrossfade", vec![("id", T::Int), ("source", T::Int), ("durationMs", T::Int)], T::Void, "Crossfade two isolated sibling subtrees using the engine clock."),
             m("endCrossfade", vec![("id", T::Int)], T::Void, "Release a subtree crossfade; leaves original nodes intact."),
+            m("setCrossfadeElapsed", vec![("id", T::Int), ("elapsedMs", T::Int)], T::Void, "Set an externally clocked crossfade's progress (clamped to its duration)."),
             m("endTransition", vec![], T::Void, "Finish this client's transition now (skip)."),
         ],
     })
@@ -271,8 +278,9 @@ impl Class for LayersClass {
                 transition: json(arg(args, 0, "transition")?, "transition")?,
             },
             "endTransition" => LayerCommand::EndTransition,
-            "beginCrossfade" => LayerCommand::BeginCrossfade { id: id(args)?, source: u32::try_from(arg(args, 1, "source")?.as_i64()?)?, duration_ms: u64::try_from(arg(args, 2, "durationMs")?.as_i64()?)?, rule: None },
+            "beginCrossfade" => LayerCommand::BeginCrossfade { id: id(args)?, source: u32::try_from(arg(args, 1, "source")?.as_i64()?)?, duration_ms: u64::try_from(arg(args, 2, "durationMs")?.as_i64()?)?, rule: None, external: false },
             "endCrossfade" => LayerCommand::EndCrossfade { id: id(args)? },
+            "setCrossfadeElapsed" => LayerCommand::SetCrossfadeElapsed { id: id(args)?, elapsed_ms: u64::try_from(arg(args, 1, "elapsedMs")?.as_i64()?)? },
             _ => unreachable!(),
         };
         submit(
@@ -303,6 +311,9 @@ fn ui_info() -> &'static ClassInfo {
             m("removeMenu",vec![("id",T::Int)],T::Void,"Remove a client menu tree."),
             m("openMenu",vec![("id",T::Int),("item",T::Optional(Box::new(T::Int))),("position",T::Optional(Box::new(T::List(Box::new(T::Number)))))],T::Void,"Open a root submenu or a context popup at a logical canvas position."),
             m("closeMenu",vec![("id",T::Int)],T::Void,"Close this client's menu popups."),
+            m("openDialog",vec![("dialog",T::Map)],T::Void,"Open an engine-drawn modal message dialog {id, title?, message, buttons:[{id,label}], default, cancel?, font, text_size?}; the choice arrives as a dialog_result event (value = button id)."),
+            m("closeDialog",vec![("id",T::Int)],T::Void,"Close this client's open dialog without a result."),
+            m("warpPointer",vec![("position",T::List(Box::new(T::Int)))],T::Void,"Ask the presenting host to move the OS pointer to a canvas position."),
             m("setMenuChecked",vec![("id",T::Int),("item",T::Int),("checked",T::Bool)],T::Void,"Update checked state with shared sibling radio-group semantics."),
             m("put", vec![("widget", T::Map)], T::Void, "Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}."),
             m("remove", vec![("id", T::Int)], T::Void, "Remove a widget and its children."),
@@ -354,7 +365,7 @@ impl Class for UiClass {
                     .host
                     .engine
                     .ui
-                    .drain_events(state.client.0, false),
+                    .drain_events(state.client.0, None),
             )?));
         }
         let cmd = match method {
@@ -376,6 +387,13 @@ impl Class for UiClass {
                     .transpose()?,
             },
             "closeMenu" => UiCommand::CloseMenu { id: id(args)? },
+            "openDialog" => UiCommand::OpenDialog {
+                dialog: json(arg(args, 0, "dialog")?, "dialog spec")?,
+            },
+            "closeDialog" => UiCommand::CloseDialog { id: id(args)? },
+            "warpPointer" => UiCommand::WarpPointer {
+                position: json(arg(args, 0, "position")?, "pointer position")?,
+            },
             "setMenuChecked" => UiCommand::SetMenuChecked {
                 id: id(args)?,
                 item: u32::try_from(arg(args, 1, "item")?.as_i64()?)?,

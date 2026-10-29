@@ -139,7 +139,7 @@ fn snapshot_image(name: &str) -> Primitive {
         [0., 0., 4., 4.],
         Paint::Snapshot {
             size: [4, 4],
-            layers: vec![layer],
+            layers: vec![layer].into(),
         },
         None,
         [0, 0],
@@ -230,7 +230,11 @@ fn only_registered_immutable_images_can_publish_and_pending_is_not_cached_blank(
     )
     .unwrap();
     std::fs::write(root.path().join("assets/plain.png"), png([255; 4])).unwrap();
-    for forbidden in ["__crysirror/not-published.png", "plain.png", &dynamic] {
+    // A plain project PNG is self-contained and pinned by content, so it may
+    // enter a snapshot; unpublished engine names and dynamic surfaces may not.
+    r.set_engine_frame(vec![snapshot_image("plain.png")]).unwrap();
+    assert!(r.capture(&rt.host.scene, &mut rt.assets, [16, 16], [0; 4]).is_ok());
+    for forbidden in ["__crysirror/not-published.png", &dynamic] {
         r.set_engine_frame(vec![snapshot_image(forbidden)]).unwrap();
         assert!(
             r.capture(&rt.host.scene, &mut rt.assets, [16, 16], [0; 4])
@@ -246,5 +250,34 @@ fn only_registered_immutable_images_can_publish_and_pending_is_not_cached_blank(
             .0,
         [0, 0, 255, 255]
     );
+    // The plain PNG snapshot and this one.
+    assert_eq!(bakes(&mut r), 2);
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter and a system font; execute explicitly"]
+fn frozen_canvas_text_rasterizes_from_the_shared_font() {
+    let Ok(font) = std::fs::read("/System/Library/Fonts/Supplemental/Arial.ttf") else {
+        eprintln!("no system font; skipped");
+        return;
+    };
+    let (_root, mut rt, mut r) = fixture();
+    rt.assets.text.add_font("ui", font).unwrap();
+    submit(
+        &mut rt,
+        json!({"layers":[{"op":"put","layer":{"id":100,"rect":[0,0,16,16],"paint":{"kind":"solid","color":[0,0,0,0]}}}]}),
+    );
+    submit(
+        &mut rt,
+        json!({"canvases":[
+            {"op":"create","id":10,"width":16,"height":16},
+            {"op":"clear","id":10,"color":[0,0,0,255]},
+            {"op":"draw","id":10,"layer":{"id":0,"rect":[0,0,16,16],"paint":{"kind":"text","text":"M","font":"ui","size":14,"color":[255,255,255,255],"layout":"simple-horizontal-v1"}}},
+            {"op":"fade","id":10,"rect":[0,0,16,16],"opacity":200},
+            {"op":"present","id":10,"layer":10,"parent":100,"order":10}
+        ]}),
+    );
+    let frame = capture(&mut rt, &mut r);
+    assert!(frame.pixels().any(|p| p.0[0] > 64), "frozen text is missing");
     assert_eq!(bakes(&mut r), 1);
 }

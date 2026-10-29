@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-30",
+  "repository": "https://github.com/xmoezzz/xp3-brute",
+  "commit": "c82cb14302138125640478556723705aa720007b",
+  "files": [
+    {
+      "path": "src/cxdec_classic.rs",
+      "bytes": 26901,
+      "sha256": "1d3a534b0ad4ba4b857485f8adf4cd2ae8dbedac49a3d246110c7fdc29bed2c8",
+      "review": "Complete parameterized content core reviewed and adapted; published per-title profile tables and fixtures excluded. Prefix8 XOR words made profile parameters.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/legacy_cxdec.rs",
+      "bytes": 194448,
+      "sha256": "35900f5892d47bcc75a5018d6c2c39d8d6cb06a5d82d27bdd7bf7598a0eb8e05",
+      "review": "Reviewed: probe/facts collection, game-module combination, coherent/generic candidate builders, dispatch/control/boundary/callback/dynamic-xcode/Cabbage/Prefix8 recognizers, bit-permutation self-decode, PeImage (lines 1-210, 1213-4677). Adapted those static recognizers. Not reviewed in full: the generated-lane micro-op filter and offset-XOR table recovery (210-1212) and static Special-param call-site recovery (2962-3316); neither is used. Unicorn initialization fallback and filesystem scanning excluded.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/embedded_pe.rs",
+      "bytes": 10289,
+      "sha256": "60be4ba692ea1c351a68ac2fb602056b5470d8a093e847209d743e00fdbd46e0",
+      "review": "Complete; internal-module zlib extraction and startup redirect adapted.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/special_cipher.rs",
+      "bytes": 10372,
+      "sha256": "a0c684b08edbeeac5d0ebe1583130dbd2bfbc9c0843d20c659d18b7eac1a90e0",
+      "review": "Complete; complemented ChaCha8 name cipher adapted.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/special_params.rs",
+      "bytes": 27803,
+      "sha256": "b6fda1b5651658f24b2e81cf6fc16aad85ba9766f959c6d11743fa23168f746e",
+      "review": "Complete; SHAKE256/BLAKE2s setupArchiveData derivation and generator recognizer adapted. Script candidate extraction replaced by a TJS2 string-pool reader validated by Special decode.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/cxdec_names.rs",
+      "bytes": 51710,
+      "sha256": "ab3a986d2d78ab1e325f8458689fb0611765b7342e2da316d07017f572f49e19",
+      "review": "Complete; record parser, filename normalization, MD5 token adapted. Built-in Riddle Joker reference profile, its control-block binary and Nana cipher excluded.",
+      "new_code_copied": true
+    },
+    {
+      "path": "src/filter_detection.rs",
+      "bytes": 17310,
+      "sha256": "4d3e174b16a17b77d6cc98e1123029057d0539caf5198ebbc3df89e949e911f6",
+      "review": "Generation taxonomy (types and enums) reviewed; not copied.",
+      "new_code_copied": false
+    },
+    {
+      "path": "src/krkr_exe.rs",
+      "bytes": 44071,
+      "sha256": "aa29da8749a1a2e1a2deb7f8bdedac83a7291c02e3bada37a0fba7131fbe307e",
+      "review": "Not reviewed for this path (HXV4 bootstrap only); not used by CXDEC.",
+      "new_code_copied": false
+    },
+    {
+      "path": "src/pe_normalize.rs",
+      "bytes": 21648,
+      "sha256": "1d62cb7a0ddc5b6734ab3ad9826f63b6b0f9d5bf9aae7ea98624679b9a464449",
+      "review": "Complete; SteamStub 3.1 normalization not ported (unsupported packed modules fail visibly).",
+      "new_code_copied": false
+    },
+    {
+      "path": "src/main.rs",
+      "bytes": 444243,
+      "sha256": "5859b52df8dab939b551f9f5d4d334197ad728a5fa49e998153742f11e5d7bef",
+      "review": "Reviewed only the CXDEC unpack path (Special validation, setupArchiveData candidates, select_recovered_cxdec_engine, sample validation); CLI not copied.",
+      "new_code_copied": false
+    },
+    {
+      "path": "src/tjs_symexec.rs",
+      "bytes": 58857,
+      "sha256": "ebf70be6625637bbdb4b9e07220a8e34f1cadbb41abfb1debf323cd4008a6bb7",
+      "review": "Not imported; replaced by a string-pool candidate reader whose results must authenticate the Special index.",
+      "new_code_copied": false
+    },
+    {
+      "path": "docs/adr/0006-cxdec-architecture-and-parameter-recovery.md",
+      "bytes": 6978,
+      "sha256": "bde5d7314de210b9fd2479f34f468feeba926a3b5c184d64ba199e54280591a3",
+      "review": "Architecture and anti-hardcoding invariants followed.",
+      "new_code_copied": false
+    }
+  ]
+}

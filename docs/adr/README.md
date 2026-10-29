@@ -95,7 +95,7 @@ moves to `done` only with recorded behavior evidence.
 | [0059](0059-rt-irradiance-probes.md) | Ray-traced irradiance probe updates writing the ADR 0028 SH/visibility data | implemented; Metal validated |
 | [0060](0060-glossy-and-per-pixel-ray-lighting.md) | GGX glossy reflections, per-pixel diffuse GI, local-light bounces and GPU timing comparison | implemented bounded hit-shading profile; Metal validated |
 | [0061](0061-siglus-plain-message-engine-apis.md) | Native Siglus TEXT/NAME through shared cell layout, GlyphRun and reveal state | explicit plain profile; full native MWND/game compatibility pending |
-| [0062](0062-avg32-portable-vm-engine-apis.md) | Original AVG32 portable VM library over engine services; shared associated-RGB operations | bounded ADV profile; original saves and complex drawing remain unsupported |
+| [0062](0062-avg32-portable-vm-engine-apis.md) | Original AVG32 portable VM library over engine services; shared associated-RGB operations | superseded by 0095 for the adapter runtime |
 | [0063](0063-native-font-measurement.md) | Immutable engine font metrics, unwrapped Canvas text and KiriKiri Font callbacks | implemented; system-font and original TJS2 behavior validated |
 | [0064](0064-modular-vfx-cpu-gpu.md) | Engine-owned modular CPU/GPU VFX, typed data/parameters, events, sprites/meshes/ribbons and asynchronous submission | implemented profile; remaining Niagara gaps explicit |
 | [0065](0065-native-resource-codecs-and-async-decode.md) | Shared native archive/image/audio/file codecs, capability companions and bounded owner-polled resource decode tasks | all 289 named IDs implemented; partial variants explicit |
@@ -128,3 +128,5 @@ moves to `done` only with recorded behavior evidence.
 | [0092](0092-shared-documents-and-native-json-facade.md) | Shared bounded documents and native JSON facade | explicit grammar/encoding profile; synchronous in-memory/read boundaries remain |
 | [0093](0093-shared-vector-and-native-draw-facade.md) | Shared vector authoring/bounds and solid-fill native LayerExDraw | bounded linear/rectangle profile; full GDI/text/pen/gradient compatibility remains open |
 | [0094](0094-isolated-layer-subtree-crossfades.md) | Engine-owned isolated subtree crossfades and thin native exchange semantics | bounded profile; see STATUS for validation |
+| [0095](0095-avg32-installed-games-shared-raster.md) | Installed AVG32 games: vendored original interpreter over a shared PDT raster device, engine glyph/overlay layers, audio channels and save mount | implemented; see STATUS for validation |
+| [0096](0096-cxdec-xp3-content-filter-and-special-index.md) | CXDEC XP3 content filter and encrypted filename index, parameters recovered from the user's own EXE/TPM at mount | implemented; see STATUS for validation |

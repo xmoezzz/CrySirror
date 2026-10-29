@@ -493,6 +493,8 @@ pub enum EngineQuery {
     UiWidget(u32),
     UiEvents,
     MenuEvents,
+    /// Only `dialog_result` events (modal message dialog choices).
+    DialogEvents,
 }
 
 /// Retained completion of an accepted worker-backed atomic write.
@@ -559,6 +561,9 @@ pub trait ClientStorage: Send + Sync {
     /// Find a previously mounted container within this client's asset namespace.
     /// This metadata query does not open files or grant additional authority.
     fn container_mount(&self, _source:&str) -> Result<Option<String>> { Ok(None) }
+    /// True when `path` resolves to a mounted container provider (an archive
+    /// whose contents cannot change while mounted), not to a plain file.
+    fn served_by_container(&self, _path: &VfsPath) -> bool { false }
     /// Optional exclusive lease inside this client's cache namespace. Used by
     /// native save implementations that cannot merge concurrent writers.
     fn acquire_lease(&self, _name: &str) -> Result<alloc::boxed::Box<dyn StorageLease>> {
@@ -882,6 +887,11 @@ pub trait HostServices: FileSystem {
         _rgba: &[u8],
     ) -> Result<VfsPath> {
         Err(crate::Error::Unsupported("dynamic surface"))
+    }
+    /// Drop a `present_surface` slot after this tick; its path stops resolving.
+    /// Releasing an absent slot is a no-op.
+    fn release_surface(&mut self, _client: ClientId, _slot: u32) -> Result<()> {
+        Err(crate::Error::Unsupported("dynamic surface release"))
     }
 }
 

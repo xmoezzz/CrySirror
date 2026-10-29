@@ -2,6 +2,7 @@
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Retained widgets/layout/focus/input and rendering. Button capture/release and
 //! letterbox mapping are ported from RFVP exit_confirm_ui.rs (see UPSTREAM.md).
+pub mod dialog;
 pub mod menu;
 use crate::{
     input::{InputState, VmKey, VmMouseButton},
@@ -146,8 +147,15 @@ pub struct WindowPolicy {
 pub struct UiSystem {
     #[serde(default, skip_serializing_if = "menu::MenuSystem::is_empty")]
     pub menus: menu::MenuSystem,
+    /// Open modal message dialogs (engine-drawn on every platform).
+    #[serde(default, skip_serializing_if = "dialog::DialogSystem::is_empty")]
+    pub dialogs: dialog::DialogSystem,
     #[serde(default)]
     pub cursor: Option<(u32, bool)>,
+    /// One-shot request to move the OS pointer to a canvas position
+    /// (KiriKiri `setCursorPos`); a presenting host takes and applies it.
+    #[serde(skip)]
+    pub pointer_warp: Option<(u32, [i32; 2])>,
     #[serde(default)]
     pub title: Option<(u32, String)>,
     #[serde(default)]
@@ -181,6 +189,14 @@ pub enum UiCommand {
     SetMenu {
         menu: menu::MenuSpec,
     },
+    /// Open a modal message dialog; its choice arrives as `dialog_result`.
+    OpenDialog {
+        dialog: dialog::DialogSpec,
+    },
+    /// Close an open dialog without a result.
+    CloseDialog {
+        id: u32,
+    },
     RemoveMenu {
         id: u32,
     },
@@ -212,6 +228,10 @@ pub enum UiCommand {
     },
     SetCursorVisible {
         visible: bool,
+    },
+    /// Move the OS pointer to a canvas position.
+    WarpPointer {
+        position: [i32; 2],
     },
     SetTitle {
         text: String,
@@ -250,6 +270,8 @@ impl UiSystem {
         for command in commands {
             match command {
                 UiCommand::SetMenu { menu } => staged.menus.put(client.0, menu.clone())?,
+                UiCommand::OpenDialog { dialog } => staged.dialogs.open(client.0, dialog.clone())?,
+                UiCommand::CloseDialog { id } => staged.dialogs.close(client.0, *id)?,
                 UiCommand::RemoveMenu { id } => staged.menus.remove(client.0, *id)?,
                 UiCommand::OpenMenu { id, item, position } => {
                     staged.menus.open(client.0, *id, *item, *position)?
@@ -291,6 +313,10 @@ impl UiSystem {
                 }
                 UiCommand::SetCursorVisible { visible } => {
                     staged.cursor = Some((client.0, *visible))
+                }
+                UiCommand::WarpPointer { position } => {
+                    ensure!(position.iter().all(|v| v.abs() <= 65536), "pointer warp range");
+                    staged.pointer_warp = Some((client.0, *position));
                 }
                 UiCommand::SetFullscreen{enabled}=>{staged.fullscreen=Some((client.0,*enabled));}
                 UiCommand::SetWindowPolicy{decorated,resizable} => {staged.window_policy=Some((client.0,WindowPolicy{decorated:*decorated,resizable:*resizable}));}
@@ -378,6 +404,7 @@ impl UiSystem {
     }
     pub fn reset_input_after_restore(&mut self) {
         self.menus.reset_input();
+        self.dialogs.reset_input();
         self.input = InputState::default();
         self.pressed = None;
         self.hover = None;
@@ -393,15 +420,17 @@ impl UiSystem {
             .chain(self.window_policy.as_ref().map(|v| v.0))
             .chain(self.fullscreen.as_ref().map(|v|v.0))
             .chain(self.menus.client_ids())
+            .chain(self.dialogs.client_ids())
             .chain(self.focus.map(|v| v.owner))
             .chain(self.events.iter().map(|v| v.widget.owner))
     }
     /// Consume only this client's retained UI events. Native menu adapters
     /// can select menu events without stealing ordinary widget events.
-    pub fn drain_events(&mut self, owner: u32, menus_only: bool) -> Vec<UiEvent> {
+    /// Take `owner`'s queued events, all of them or only those of `kind`.
+    pub fn drain_events(&mut self, owner: u32, kind: Option<&str>) -> Vec<UiEvent> {
         let mut selected = Vec::new();
         self.events.retain(|event| {
-            if event.widget.owner == owner && (!menus_only || event.kind == "menu_activate") {
+            if event.widget.owner == owner && kind.is_none_or(|k| event.kind == k) {
                 selected.push(event.clone());
                 false
             } else {
@@ -430,6 +459,7 @@ impl UiSystem {
     }
     pub fn validate(&self) -> Result<()> {
         self.menus.validate()?;
+        self.dialogs.validate()?;
         ensure!(
             self.clients.len() <= 64
                 && self.clients.values().map(BTreeMap::len).sum::<usize>() <= 4096
@@ -599,7 +629,23 @@ impl UiSystem {
                 frame.buttons_pressed = 0;
             }
         }
+        // A modal dialog takes all input before menus and widgets.
+        let (dialog_events, dialog_consumed) = self.dialogs.tick(frame, canvas)?;
+        self.push_menu_events(dialog_events);
+        if dialog_consumed {
+            self.pressed = None;
+            self.menus.reset_input();
+            return Ok((vec![], true));
+        }
         let (menu_events, menu_consumed) = self.menus.tick(frame, canvas)?;
+        self.push_menu_events(menu_events);
+        if menu_consumed {
+            self.pressed = None;
+            return Ok((vec![], true));
+        }
+        self.tick_widgets(frame, canvas)
+    }
+    fn push_menu_events(&mut self, menu_events: Vec<UiEvent>) {
         for event in menu_events {
             // Same retained-last-256 policy as ordinary widget events.
             if self.events.len() == 256 {
@@ -607,10 +653,19 @@ impl UiSystem {
             }
             self.events.push(event);
         }
-        if menu_consumed {
-            self.pressed = None;
-            return Ok((vec![], true));
-        }
+    }
+    /// A native menu (host presentation) chose `item` of `owner`'s menu
+    /// `bar`: the same event a pointer activation would queue.
+    pub fn activate_menu_item(&mut self, owner: u32, bar: u32, item: u32) -> Result<()> {
+        let event = self.menus.activate_item(owner, bar, item)?;
+        self.push_menu_events(vec![event]);
+        Ok(())
+    }
+    fn tick_widgets(
+        &mut self,
+        frame: InputFrame,
+        canvas: [u32; 2],
+    ) -> Result<(Vec<(u32, Vec<WorldCommand>)>, bool)> {
         let layouts = self.layout(canvas)?;
         self.input.next_frame();
         self.input.on_mouse_move(frame.pointer_x, frame.pointer_y);
@@ -923,6 +978,7 @@ impl UiSystem {
             }
         }
         out.extend(self.menus.frame(canvas)?);
+        out.extend(self.dialogs.frame(canvas)?);
         Ok(out)
     }
 }

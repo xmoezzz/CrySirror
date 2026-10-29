@@ -81,6 +81,10 @@ impl DeferredDispatch {
         self.serial = serial;
         Ok(())
     }
+    /// Targets still queued for `client` (owners use them as liveness roots).
+    pub fn targets(&self, client: u32) -> impl Iterator<Item = u64> + '_ {
+        self.queue.iter().filter(move |e| e.client == client).map(|e| e.target)
+    }
     pub fn cancel(&mut self, client: u32, target: u64) -> usize {
         let n = self.queue.len();
         self.queue

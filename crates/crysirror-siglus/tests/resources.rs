@@ -68,7 +68,12 @@ fn native_type2_slots_crops_centers_and_reused_cuts_are_preserved() {
         assert_eq!(frame.rgba, [3, 2, 1, 4, 7, 6, 5, 8]);
     }
     assert_eq!(decoded.frames[2].rgba, [0; 4]);
-    assert!(SiglusImageDecoder.decode(&file).is_err());
+    // The shared decoder returns a multi-pattern file as the RealLive atlas;
+    // Siglus cut selection stays with `decode_g00` above.
+    let atlas = crysirror_image::g00::decode_g00(&file).unwrap();
+    let shared = SiglusImageDecoder.decode(&file).unwrap();
+    assert_eq!((shared.width as i32, shared.height as i32), (atlas.width, atlas.height));
+    assert_eq!(shared.rgba, atlas.rgba);
     for end in 0..file.len() {
         assert!(decode_g00(&file[..end]).is_err(), "truncation {end}");
     }

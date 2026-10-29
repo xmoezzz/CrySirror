@@ -243,6 +243,8 @@ pub struct Renderer {
     pub gpu: Arc<Gpu>,
     pub format: wgpu::TextureFormat,
     compositor: Option<composite::Compositor>,
+    /// Content hashes of plain project images pinned by their first snapshot.
+    snapshot_plain_images: std::collections::HashMap<(u32, String), blake3::Hash>,
     snapshot_rasterizations: u64,
     quad_pipelines: Vec<wgpu::RenderPipeline>,
     filtered_pipelines: Vec<wgpu::RenderPipeline>,
@@ -378,6 +380,9 @@ impl Renderer {
             Blend::Subtract,
             Blend::Multiply,
             Blend::Screen,
+            Blend::Atop,
+            Blend::AtopMultiply,
+            Blend::AtopScreen,
         ];
         let quad_pipeline = |blend: Blend, filtered: bool| {
             let color = match blend {
@@ -402,6 +407,33 @@ impl Renderer {
                     dst_factor: wgpu::BlendFactor::OneMinusSrc,
                     operation: wgpu::BlendOperation::Add,
                 },
+                // Premultiplied source-atop: S·Da + D·(1 - Sa).
+                Blend::Atop => wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::DstAlpha,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                // Premultiplied PS multiply: S·D + D·(1 - Sa) = D·(1 - a + a·s).
+                Blend::AtopMultiply => wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::Dst,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                // Premultiplied PS screen: S·Da + D·(1 - S).
+                Blend::AtopScreen => wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::DstAlpha,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrc,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            };
+            // Atop keeps the destination alpha; every other mode is "over".
+            let alpha = match blend {
+                Blend::Atop | Blend::AtopMultiply | Blend::AtopScreen => wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::Zero,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                _ => wgpu::BlendComponent::OVER,
             };
             d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 cache: None,
@@ -424,7 +456,7 @@ impl Renderer {
                 fragment: Some(wgpu::FragmentState {
                     module: &quad_shader,
                     entry_point: Some(
-                        match (filtered, matches!(blend, Blend::Multiply | Blend::Screen)) {
+                        match (filtered, matches!(blend, Blend::Multiply | Blend::Screen | Blend::Atop | Blend::AtopMultiply | Blend::AtopScreen)) {
                             (false, true) => "fs_premultiply",
                             (false, false) => "fs_main",
                             (true, true) => "fs_filtered_premultiply",
@@ -434,10 +466,7 @@ impl Renderer {
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
-                        blend: Some(wgpu::BlendState {
-                            color,
-                            alpha: wgpu::BlendComponent::OVER,
-                        }),
+                        blend: Some(wgpu::BlendState { color, alpha }),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
@@ -542,6 +571,7 @@ impl Renderer {
             puppets,
             format,
             compositor: None,
+            snapshot_plain_images: std::collections::HashMap::new(),
             snapshot_rasterizations: 0,
             quad_pipelines,
             filtered_pipelines,
@@ -1516,6 +1546,9 @@ impl Renderer {
                     Blend::Subtract => 2,
                     Blend::Multiply => 3,
                     Blend::Screen => 4,
+                    Blend::Atop => 5,
+                    Blend::AtopMultiply => 6,
+                    Blend::AtopScreen => 7,
                 };
                 match &draw.filter {
                     Some(k) => {
@@ -1578,7 +1611,15 @@ impl Renderer {
             ),
             "capture renderer must use RGBA8 or BGRA8 sRGB"
         );
-        let (width, height) = (canvas[0], canvas[1]);
+        // Developer diagnostic: CRYSIRROR_CAPTURE_TARGET=WxH renders into a
+        // target of another size (as a HiDPI window surface does).
+        let (width, height) = std::env::var("CRYSIRROR_CAPTURE_TARGET")
+            .ok()
+            .and_then(|v| {
+                let (w, h) = v.split_once('x')?;
+                Some((w.parse().ok()?, h.parse().ok()?))
+            })
+            .unwrap_or((canvas[0], canvas[1]));
         ensure!(
             width > 0 && height > 0 && width <= 8192 && height <= 8192,
             "capture size"
@@ -1610,12 +1651,22 @@ impl Renderer {
                 assets,
                 RenderTarget {
                     view: &view,
-                    size: canvas,
+                    size: [width, height],
                 },
                 canvas,
                 background,
             )?;
         }
+        self.read_texture(&texture, width, height)
+    }
+    /// Read back an RGBA8/BGRA8 sRGB texture with COPY_SRC usage (captures;
+    /// a window surface configured with COPY_SRC for diagnostics).
+    pub fn read_texture(
+        &self,
+        texture: &wgpu::Texture,
+        width: u32,
+        height: u32,
+    ) -> Result<image::RgbaImage> {
         let stride = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
             * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let buffer = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {

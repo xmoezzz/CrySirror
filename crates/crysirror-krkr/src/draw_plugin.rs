@@ -5,7 +5,7 @@
 //! are shared engine operations. Profile: ordered solid fills and line paths.
 use crate::natives::{Rt, methods, object_arg, properties, read_only, this_of, unsupported};
 use crysirror_runtime::vector::{self, Affine2, IDENTITY, PathCommand as C, VectorPath};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, Variant},
 };
@@ -609,4 +609,12 @@ pub fn install(rt: &mut Rt) {
             ),
         ],
     );
+}
+
+impl State {
+    pub(crate) fn gc_roots(&self, out: &mut Vec<crysirror_tjs2::runtime::ObjectHandle>) {
+        use crysirror_tjs2::runtime::ObjectHandle;
+        out.extend(self.builtin_update);
+        out.extend(self.apps.keys().chain(self.paths.keys()).chain(self.layers.keys()).map(|k| ObjectHandle(*k)));
+    }
 }

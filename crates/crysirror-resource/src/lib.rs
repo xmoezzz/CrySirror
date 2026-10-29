@@ -8,6 +8,8 @@ mod wave;
 pub mod signature;
 pub mod compound;
 pub mod text_stream;
+pub mod krkr_pbd;
+pub mod sli;
 pub use jobs::{ResourceResult, ResourceTasks, MAX_RESOURCE_JOBS, MAX_RESOURCE_JOBS_PER_CLIENT};
 mod file;
 pub mod io;

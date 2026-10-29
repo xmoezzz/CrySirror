@@ -2,9 +2,9 @@
 // Distributed under the GNU Affero General Public License, version 3 or later.
 //! saveStruct/fstat native semantics over CrySirror's client storage services.
 //! saveStruct reference: wtnbgo/saveStruct f03a81a46018d89d20d1e4614006fc502fd12d2c.
-use crate::natives::{Rt, int, string, this_of, unsupported};
+use crate::natives::{Rt, int, methods, string, this_of, unsupported};
 use crysirror_runtime::text_storage::{self, LineEnding, TextEncoding};
-use krkr_tjs2::{Result, TjsError, runtime::Variant};
+use crysirror_tjs2::{Result, TjsError, runtime::Variant};
 fn error(e: impl std::fmt::Display) -> TjsError {
     TjsError::runtime(e.to_string())
 }
@@ -138,18 +138,46 @@ pub fn install_fstat(rt: &mut Rt) {
         }
         Ok(Variant::Object(dict))
     });
+    // Save-mount file operations (safeSaveStruct backup rotation).
+    methods(
+        rt,
+        storages,
+        &[
+            ("deleteFile", |rt, _, a| {
+                let name = string(&a, 0, "Storages.deleteFile")?;
+                let storage = rt.host().storage()?;
+                Ok(Variant::Integer(storage.delete_save(&name).map_err(error)? as i64))
+            }),
+            ("moveFile", |rt, _, a| {
+                let from = string(&a, 0, "Storages.moveFile")?;
+                let to = string(&a, 1, "Storages.moveFile")?;
+                let storage = rt.host().storage()?;
+                Ok(Variant::Integer(storage.move_save(&from, &to).map_err(error)? as i64))
+            }),
+            ("copyFile", |rt, _, a| {
+                let from = string(&a, 0, "Storages.copyFile")?;
+                let to = string(&a, 1, "Storages.copyFile")?;
+                let storage = rt.host().storage()?;
+                Ok(Variant::Integer(storage.copy_to_save(&from, &to).map_err(error)? as i64))
+            }),
+            // Save-mount directories exist implicitly (writes create parents).
+            ("createDirectory", |_, _, a| {
+                let name = string(&a, 0, "Storages.createDirectory")?;
+                Ok(Variant::Integer(
+                    crate::storage::save_path(name.trim_end_matches('/')).map_err(error)?.is_some() as i64,
+                ))
+            }),
+        ],
+    );
     for method in [
         "getTime",
         "setTime",
         "getLastModifiedFileTime",
         "setLastModifiedFileTime",
         "exportFile",
-        "deleteFile",
         "truncateFile",
-        "moveFile",
         "dirlistEx",
         "removeDirectory",
-        "createDirectory",
         "createDirectoryNoNormalize",
         "changeDirectory",
         "setFileAttributes",

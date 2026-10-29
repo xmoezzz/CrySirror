@@ -21,6 +21,21 @@ pub struct RgbaImage {
 pub struct SiglusImageDecoder;
 impl ImageDecoder for SiglusImageDecoder {
     fn decode(&self, bytes: &[u8]) -> Result<ImageSurface> {
+        // RealLive type-2 files carry several patterns in one bitmap: the
+        // engine's shared atlas decoder returns that bitmap whole, and the
+        // RealLive frontend selects patterns with `g00_regions`.
+        if bytes.first() == Some(&2) {
+            if let Ok((_, _, regions)) = crysirror_image::g00::g00_regions(bytes) {
+                if regions.len() > 1 {
+                    let atlas = crysirror_image::g00::decode_g00(bytes)?;
+                    return Ok(ImageSurface {
+                        width: u32::try_from(atlas.width)?,
+                        height: u32::try_from(atlas.height)?,
+                        rgba: atlas.rgba,
+                    });
+                }
+            }
+        }
         let mut decoded = g00::decode_g00(bytes)?;
         ensure!(
             decoded.frames.len() == 1,

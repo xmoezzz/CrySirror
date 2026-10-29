@@ -15,7 +15,7 @@ use crysirror_core::{
     state::ClientId,
     vm::{VmAdapter, VmYield},
 };
-use krkr_tjs2::runtime::{ObjectHandle, Runtime, Variant};
+use crysirror_tjs2::runtime::{ObjectHandle, Runtime, Variant};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
@@ -41,8 +41,9 @@ pub struct Config {
     /// Companion executable basename reported by `System.exeName`.
     #[serde(default)]
     pub executable: Option<String>,
-    /// Engine-published protected-bootstrap profile (`hxv4_bootstrap_profile`)
-    /// that `Plugins.linkZ` must match before installing its facade.
+    /// Engine-published protected-bootstrap profile (`hxv4_bootstrap_profile`
+    /// for `Plugins.linkZ`, or `cxdec_bootstrap_profile` for the startup
+    /// `Storages.setupArchiveData` facade) the natives must match.
     #[serde(default)]
     pub bootstrap_profile: Option<String>,
 }
@@ -107,6 +108,8 @@ pub struct KrkrVm {
     last_down: u64,
     last_pointer: [i32; 2],
     pressed: Option<usize>,
+    /// Live TJS object count that triggers the next collection.
+    gc_threshold: usize,
     frames: u64,
     last_error: Option<String>,
     halted: bool,
@@ -114,6 +117,32 @@ pub struct KrkrVm {
 }
 
 impl KrkrVm {
+    /// Reclaim unreachable TJS objects between steps (outside execution).
+    /// Collects when live objects doubled since the last collection; the
+    /// adapter's own references (pending frame handlers, pressed layer) are
+    /// extra roots.
+    fn collect_garbage(&mut self) {
+        let Some(rt) = self.rt.as_mut() else { return };
+        // Diagnostic: CRYSIRROR_KRKR_GC=0 disables reclamation.
+        if std::env::var_os("CRYSIRROR_KRKR_GC").is_some_and(|v| v == "0") {
+            return;
+        }
+        let live = rt.live_object_count();
+        if live < self.gc_threshold {
+            return;
+        }
+        let mut extra: Vec<Variant> = self.pass.as_ref().map(|p| p.handlers.clone()).unwrap_or_default();
+        extra.extend(self.pressed.map(|p| Variant::Object(ObjectHandle(p))));
+        let started = std::time::Instant::now();
+        let freed = rt.collect_garbage(&extra);
+        let live = rt.live_object_count();
+        self.gc_threshold = live + (live / 2).max(50_000);
+        if std::env::var_os("CRYSIRROR_KRKR_TRACE_GC").is_some() {
+            let line = format!("[gc] freed {freed}, live {live}, {:?}", started.elapsed());
+            rt.host_mut().push_log(line);
+        }
+    }
+
     pub fn new(client: ClientId, config: Config) -> Result<Self> {
         config.validate()?;
         Ok(Self {
@@ -125,6 +154,7 @@ impl KrkrVm {
             last_down: 0,
             last_pointer: [-1, -1],
             pressed: None,
+            gc_threshold: 50_000,
             frames: 0,
             last_error: None,
             halted: false,
@@ -167,12 +197,13 @@ impl KrkrVm {
         host.now = h.now_ms();
         let mut rt = Runtime::with_host(host);
         natives::install(&mut rt);
+        crate::protect_plugin::install_startup(&mut rt);
         // Developer diagnostic: on the first runtime exception, log the paused
         // frame's registers and evaluate `;;`-separated expressions in it.
         if let Ok(exprs) = std::env::var("CRYSIRROR_KRKR_EXCEPTION_EVAL") {
             struct Ui(Vec<String>, bool);
-            impl krkr_tjs2::debug::DebugUi<KrkrHost> for Ui {
-                fn on_pause(&mut self, p: &mut krkr_tjs2::debug::Pause<'_, KrkrHost>) -> krkr_tjs2::debug::DebugAction {
+            impl crysirror_tjs2::debug::DebugUi<KrkrHost> for Ui {
+                fn on_pause(&mut self, p: &mut crysirror_tjs2::debug::Pause<'_, KrkrHost>) -> crysirror_tjs2::debug::DebugAction {
                     let reason = format!("{:?}", p.reason());
                     if std::env::var_os("CRYSIRROR_KRKR_EXCEPTION_ALL").is_some() {
                         let line = format!("[debug] exception {} at {:?}", reason.chars().take(400).collect::<String>(), p.location().map(|f| (f.object_name.clone(), f.bytecode_offset)));
@@ -189,8 +220,8 @@ impl KrkrVm {
                         for (r, v) in p.registers().into_iter().take(if std::env::var_os("CRYSIRROR_KRKR_EXCEPTION_REGS").is_some() { 48 } else { 0 }) {
                             lines.push(format!("[debug] r{r} = {}", format!("{v:?}").chars().take(160).collect::<String>()));
                             let h = match &v {
-                                krkr_tjs2::runtime::Variant::Object(h) => Some(*h),
-                                krkr_tjs2::runtime::Variant::Closure(c) => Some(c.this_obj.unwrap_or(c.object)),
+                                crysirror_tjs2::runtime::Variant::Object(h) => Some(*h),
+                                crysirror_tjs2::runtime::Variant::Closure(c) => Some(c.this_obj.unwrap_or(c.object)),
                                 _ => None,
                             };
                             if let Some(h) = h {
@@ -207,7 +238,7 @@ impl KrkrVm {
                             p.runtime().host_mut().push_log(l);
                         }
                     }
-                    krkr_tjs2::debug::DebugAction::Continue
+                    crysirror_tjs2::debug::DebugAction::Continue
                 }
             }
             rt.enable_debugger().set_break_on_exception(true);
@@ -295,7 +326,9 @@ impl KrkrVm {
         let mut hit = None;
         for (id, lx, ly) in candidates {
             let target = ObjectHandle(id);
-            let mut enabled = true;
+            // Outside the current modal layer counts as disabled (krkrz
+            // GetMostFrontChildAt: `IsDisabledByMode` blocks the hit).
+            let mut enabled = !rt.host().disabled_by_mode(id);
             let mut node = Some(id);
             let mut depth = 0;
             while let Some(id) = node {
@@ -520,6 +553,9 @@ impl KrkrVm {
             if !crate::psbfile_plugin::poll(self.rt.as_mut().unwrap(), h, self.client)? {
                 return Ok(false);
             }
+            if !crate::kirakira::win32_dialog::poll(self.rt.as_mut().unwrap(), h, self.client)? {
+                return Ok(false);
+            }
             if !crate::save_struct::poll(self.rt.as_mut().unwrap())? {
                 return Ok(false);
             }
@@ -563,6 +599,21 @@ impl KrkrVm {
                     DispatchPhase::Exclusive,
                     false,
                 )?;
+            }
+            // A user close (window close button): krkrz posts onCloseQuery(true)
+            // to the main window as an input event; `super.onCloseQuery(true)`
+            // closes, `false` cancels (KAG asks first when askOnClose).
+            // The native handler consumes `closing_by_user`, also after the
+            // script suspended (a confirmation dialog) before answering.
+            let rt = self.rt.as_mut().unwrap();
+            if std::mem::take(&mut rt.host_mut().user_close_pending) {
+                match rt.host().windows.keys().next().copied() {
+                    Some(main) => {
+                        rt.host_mut().closing_by_user = true;
+                        self.call(ObjectHandle(main), "onCloseQuery", vec![Variant::Integer(1)])?;
+                    }
+                    None => rt.host_mut().exit_requested = true,
+                }
             }
             let menus = h
                 .query_engine(
@@ -711,6 +762,15 @@ impl VmAdapter for KrkrVm {
     fn engine_id(&self) -> &'static str {
         "krkr"
     }
+    fn request_close(&mut self) -> bool {
+        match self.rt.as_mut() {
+            Some(rt) if !self.halted => {
+                rt.host_mut().user_close_pending = true;
+                true
+            }
+            _ => false,
+        }
+    }
     fn snapshot_schema(&self) -> u32 {
         1
     }
@@ -724,7 +784,10 @@ impl VmAdapter for KrkrVm {
             return Ok(VmYield::BudgetExhausted);
         }
         match self.execute(h, i) {
-            Ok(y) => Ok(y),
+            Ok(y) => {
+                self.collect_garbage();
+                Ok(y)
+            }
             Err(e) => {
                 // Include the VM's latest log lines: script-level errors are
                 // usually reported there before the failing native call.
@@ -768,6 +831,10 @@ impl VmAdapter for KrkrVm {
             "timers": host.map(|h| h.timers.len()),
             "plugins": host.map(|h| &h.loaded_plugins),
             // Developer diagnostic (CRYSIRROR_KRKR_DUMP_LAYERS): native layer tree.
+            // Developer diagnostic: TJS heap composition.
+            "heap_histogram": std::env::var_os("CRYSIRROR_KRKR_HEAP_HISTOGRAM").and_then(|_| {
+                self.rt.as_ref().map(|rt| rt.heap_histogram())
+            }),
             "layer_dump": std::env::var_os("CRYSIRROR_KRKR_DUMP_LAYERS").and_then(|_| {
                 let rt = self.rt.as_ref()?;
                 Some(rt.host().layers.iter().map(|(id, l)| {

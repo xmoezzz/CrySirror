@@ -32,9 +32,12 @@ members = [
     "crates/crysirror-video",
     "crates/crysirror-reallive",
     "crates/crysirror-avg32",
-    "crates/krkr-upstream/krkr-tjs2",
-    "crates/krkr-upstream/krkr-kag",
+    "crates/crysirror-tjs2",
+    "crates/crysirror-kag",
+    "crates/rfvp-upstream/rfvp",
     "crates/crysirror-krkr",
+    "crates/crysirror-rfvp",
+    "crates/reallive-upstream/reallive-dll",
 ]
 exclude = [
     "vendor/sofar",
@@ -73,10 +76,13 @@ crysirror-asset = { path = "crates/crysirror-asset" }
 crysirror-engine = { path = "crates/crysirror-engine" }
 crysirror-script-js = { path = "crates/crysirror-script-js" }
 crysirror-reallive = { path = "crates/crysirror-reallive" }
+crysirror-rfvp = { path = "crates/crysirror-rfvp" }
+reallive-dll = { path = "crates/reallive-upstream/reallive-dll" }
 crysirror-avg32 = { path = "crates/crysirror-avg32" }
 crysirror-krkr = { path = "crates/crysirror-krkr" }
-krkr-tjs2 = { path = "crates/krkr-upstream/krkr-tjs2" }
-krkr-kag = { path = "crates/krkr-upstream/krkr-kag" }
+crysirror-tjs2 = { path = "crates/crysirror-tjs2" }
+crysirror-kag = { path = "crates/crysirror-kag" }
+rfvp = { path = "crates/rfvp-upstream/rfvp", default-features = false, features = ["no_std"] }
 crysirror-author = { path = "crates/crysirror-author" }
 # Vendored original Siglus SceneVm (MPL-2.0), headless profile; see crates/siglus-upstream/UPSTREAM.md.
 siglus_scene_vm = { path = "crates/siglus-upstream/siglus_scene_vm", default-features = false }

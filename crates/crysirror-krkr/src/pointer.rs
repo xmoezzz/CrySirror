@@ -4,7 +4,7 @@
 //! Coordinate/key naming over logical engine input. This profile supports the
 //! host default arrow and hidden cursor; custom cursor resources fail visibly.
 use crate::natives::*;
-use krkr_tjs2::{
+use crysirror_tjs2::{
     TjsError,
     runtime::{ObjectHandle, Variant},
 };
@@ -91,6 +91,30 @@ pub fn install(rt: &mut Rt) {
                 Ok(())
             },
         );
+        // krkrz Layer.setCursorPos(x, y): move the pointer to a layer-local
+        // position. The engine asks the presenting host to warp the OS
+        // pointer; cursorX/cursorY read the new position at once.
+        methods(
+            rt,
+            c,
+            &[("setCursorPos", |rt, t, a| {
+                let h = this_of(rt, t, "Layer.setCursorPos")?;
+                let (mut x, mut y) = (need_int(&a, 0, "Layer.setCursorPos")?, need_int(&a, 1, "Layer.setCursorPos")?);
+                let mut node = Some(h.0);
+                let mut depth = 0;
+                while let Some(id) = node {
+                    let l = rt.host().layer(ObjectHandle(id))?;
+                    x += l.left;
+                    y += l.top;
+                    node = l.parent;
+                    depth += 1;
+                    if depth > 64 {
+                        return Err(TjsError::runtime("cursor ancestry limit"));
+                    }
+                }
+                warp(rt, x, y)
+            })],
+        );
         for (field, axis) in [("cursorX", 0), ("cursorY", 1)] {
             rt.register_object_native_property(
                 c,
@@ -166,4 +190,14 @@ pub fn apply(rt: &mut Rt, target: ObjectHandle) {
     }
     rt.host_mut()
         .ui_op(json!({"op":"set_cursor_visible","visible":!matches!(shape,Variant::Integer(-1))}));
+}
+
+/// Request an OS pointer warp to canvas `(x, y)` and report it immediately.
+fn warp(rt: &mut Rt, x: i64, y: i64) -> crysirror_tjs2::Result<Variant> {
+    let (x, y) = (x.clamp(-65536, 65536) as i32, y.clamp(-65536, 65536) as i32);
+    let host = rt.host_mut();
+    host.input.pointer_x = x;
+    host.input.pointer_y = y;
+    host.ui_op(serde_json::json!({"op": "warp_pointer", "position": [x, y]}));
+    Ok(Variant::Void)
 }

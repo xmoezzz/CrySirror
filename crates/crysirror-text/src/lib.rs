@@ -118,6 +118,15 @@ impl TextSystem {
         self.fonts.insert(alias.into(), (font, digest));
         Ok(())
     }
+    /// Content digest of the face loaded under `alias`.
+    pub fn font_digest(&self, alias: &str) -> Result<&str> {
+        Ok(self
+            .fonts
+            .get(alias)
+            .with_context(|| format!("font alias '{alias}' is not loaded"))?
+            .1
+            .as_str())
+    }
     fn font(&self, alias: &str) -> Result<&FontArc> {
         Ok(&self
             .fonts

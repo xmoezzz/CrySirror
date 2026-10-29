@@ -1,0 +1,172 @@
+{
+ "repository": "https://github.com/xmoezzz/siglus_rs.git",
+ "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+ "license": "MPL-2.0",
+ "excluded_upstream_modules": {
+  "engine.rs": "replaced by vm/engine.rs (same tick/input/save-action logic; opens through vm::fs on the engine clock)",
+  "font.rs": "TrueType rasteriser removed; only the game's FN.DAT bitmap font remains (vm/font.rs)",
+  "movie.rs": "Cinepak decoding removed; vm/movie.rs reports the missing shared video decoder",
+  "pdt.rs": "shared crysirror_image::pdt",
+  "lib.rs": "crate root replaced by the CrySirror adapter",
+  "bin/": "desktop player/probe not vendored"
+ },
+ "new_seams": {
+  "vm/fs.rs": "game_fs replacement over client capability storage; @save/ is the client save mount; asset writes rejected",
+  "vm/text.rs": "retained glyph layer replacing rasterisation into buffer 0; glyphs drop under buffer-0 write damage",
+  "vm/movie.rs": "visible failure stand-in"
+ },
+ "seam_changes": [
+  "every crate:: path became crate::vm::; buffer/pdtmgr/effect/pdt became crysirror_image::{avg32::{buffer,bank,effect},pdt}",
+  "game.rs: engine_detect replaced by a Gameexe.ini lookup (the project names the adapter)",
+  "game_fs::{read,read_dir,write,open,is_dir,is_file,read_to_string,file_len} -> vm::fs equivalents",
+  "sound.rs: kira device replaced by AudioCommand queue on engine channels; playing = engine channel state",
+  "system.rs: Clock is the engine clock only; AVG32_VERSION/AVG32_SAVE_DIR env reads removed; SAVE.INI on @save; frame_rgba replaced by screen_rgba/shake_offset/overlay",
+  "meswin.rs: draw_char keeps buffer-0 glyphs in vm::text (other buffers warn); window frame/icon writes report damage",
+  "menu.rs: fill/text record an Overlay (rects + glyphs) instead of drawing into RGBA",
+  "system.rs: screen_fade reports full-screen damage",
+  "tests that used the host filesystem (savedata, sound CloneCD) are not vendored",
+  "meswin.rs: choice-row inversion recolours the glyphs in that row (vm::text::invert) instead of removing them",
+  "vm/fs.rs: the game root may be the asset root (empty root)"
+ ],
+ "shared_device_changes": [
+  "bank.rs: buffer-0 write damage (mark_damage/take_damage), present revision counter",
+  "effect.rs: buffer-0 damage before present; three unneeded `mut` bindings removed"
+ ],
+ "files": {
+  "crysirror-avg32/src/vm/animation.rs": {
+   "upstream": "crates/avg32/src/animation.rs",
+   "upstream_sha256": "524ce67401a20113f0445ba0726337b273c8e3560129ed23dede45628beb2065",
+   "sha256": "f0fe01e6aa05f37fa46b075503da2414af3865c4a575ea14194f473762156e41"
+  },
+  "crysirror-avg32/src/vm/archive.rs": {
+   "upstream": "crates/avg32/src/archive.rs",
+   "upstream_sha256": "f3c4b41e7d14213de339eb18e9ce56ecf7c6e89931450d9374133ebf0d1dfcdb",
+   "sha256": "ac5dec49c5cff7fcab11d2231b6455b3ca0930baa04d2db239a82bef7577b336"
+  },
+  "crysirror-avg32/src/vm/ard.rs": {
+   "upstream": "crates/avg32/src/ard.rs",
+   "upstream_sha256": "f7426b23131f2f4d61a3d94c1365d85dd26dec05ca857020158d55d8c7fe9d89",
+   "sha256": "f7426b23131f2f4d61a3d94c1365d85dd26dec05ca857020158d55d8c7fe9d89"
+  },
+  "crysirror-avg32/src/vm/cgmode.rs": {
+   "upstream": "crates/avg32/src/cgmode.rs",
+   "upstream_sha256": "9024b424018bc7c03a3ce8ca4ab0ebd40e8333678b9863fb41e40b1c4ae0d2a4",
+   "sha256": "4577e76907af1508042856d85e622be09ff7bb596936e8cf837ddcb9be14cec4"
+  },
+  "crysirror-avg32/src/vm/cursor.rs": {
+   "upstream": "crates/avg32/src/cursor.rs",
+   "upstream_sha256": "d9844fcc143a770c782d23d5dd507cb6dd7cfebf19f1ac27b77bc6bd4ec4653d",
+   "sha256": "d9844fcc143a770c782d23d5dd507cb6dd7cfebf19f1ac27b77bc6bd4ec4653d"
+  },
+  "crysirror-avg32/src/vm/engine.rs": {
+   "upstream": "crates/avg32/src/engine.rs",
+   "upstream_sha256": "533a47ece50b1bb2f89827ac2fde6ddb248c2636734d5e22877bd22112ead4a9",
+   "sha256": "cc7c371bb8b0290a354164d0394cb7d1bc389757cd576c31f032a2020a5b0a4c"
+  },
+  "crysirror-avg32/src/vm/flags.rs": {
+   "upstream": "crates/avg32/src/flags.rs",
+   "upstream_sha256": "5999900e26de77724d7a6a9bdbc36a2632e26ce8ee259665bc7ab4051a22ff62",
+   "sha256": "5999900e26de77724d7a6a9bdbc36a2632e26ce8ee259665bc7ab4051a22ff62"
+  },
+  "crysirror-avg32/src/vm/font.rs": {
+   "upstream": "crates/avg32/src/font.rs",
+   "upstream_sha256": "448782956c6d85d01e23f17a3316848dba09b7ac53f68833c4418c290de76349",
+   "sha256": "6dd9048f3a8b2f552e24c0f95a71cb4ccf08ea513895dbbf00c00092efc6419a"
+  },
+  "crysirror-avg32/src/vm/fs.rs": {
+   "upstream": null,
+   "upstream_sha256": null,
+   "sha256": "ad8fe0ef36fe8ebf5142dbb19d3b043dd0e1dd5c6d8e609652c8fab9bb5e5f29"
+  },
+  "crysirror-avg32/src/vm/game.rs": {
+   "upstream": "crates/avg32/src/game.rs",
+   "upstream_sha256": "1e2026cef678e4fb9e433c08cc3a74af6a96caa72c6b06bcd10cf6efda817dd1",
+   "sha256": "efd8c21b6205a40bc3b58037866460d5d0ee3daa731d08ca6fa55cb5102e6110"
+  },
+  "crysirror-avg32/src/vm/ini.rs": {
+   "upstream": "crates/avg32/src/ini.rs",
+   "upstream_sha256": "cf76a907d5844b1aafd4c9d38b1366d5510090ac7a1f3df98b620dad1de994c4",
+   "sha256": "b53ceb4d6d698991db893fd114a46424ac3015abb26c2e69d992b133ad7c16ee"
+  },
+  "crysirror-avg32/src/vm/menu.rs": {
+   "upstream": "crates/avg32/src/menu.rs",
+   "upstream_sha256": "d9241a53c8b6b5f1a51b4cfe75e31d39971e395599c5e99081e55e1734872b37",
+   "sha256": "255d4c05308e703d2aec9deb500190234f593205e406bbca9dad67716e1dd62b"
+  },
+  "crysirror-avg32/src/vm/meswin.rs": {
+   "upstream": "crates/avg32/src/meswin.rs",
+   "upstream_sha256": "656b30bce5c858a5862f5b445ed2b2f98617a07fb4fa51df05c760dbc5961b50",
+   "sha256": "748c22c0452ebe42a5e0a1670323aadccb9fe3952b0b22535a60e6db1410c5bc"
+  },
+  "crysirror-avg32/src/vm/mod.rs": {
+   "upstream": null,
+   "upstream_sha256": null,
+   "sha256": "54745dbf34152ed72f15002810448545efd8fa3e27a38f3693d92ad00ddeb3bb"
+  },
+  "crysirror-avg32/src/vm/movie.rs": {
+   "upstream": "crates/avg32/src/movie.rs",
+   "upstream_sha256": "ab909b276dcb009cca949a11c44a158f8a93d6e30576a69b566db9b062c28be9",
+   "sha256": "71dcee61ca709b2fd70aeffef1041c7f0e3188c4f0fdb300791aeae1c4097bad"
+  },
+  "crysirror-avg32/src/vm/nls.rs": {
+   "upstream": "crates/avg32/src/nls.rs",
+   "upstream_sha256": "9290c257514ea0e6fe7762a301e88d31d002761195a13dab6f0ee07fc33a0149",
+   "sha256": "9290c257514ea0e6fe7762a301e88d31d002761195a13dab6f0ee07fc33a0149"
+  },
+  "crysirror-avg32/src/vm/resource.rs": {
+   "upstream": "crates/avg32/src/resource.rs",
+   "upstream_sha256": "f16e6dd1a0ddfa195a1470cf81ede03547cf40874476217c5a1b91db8dcbd569",
+   "sha256": "91cb48f4965c1c32ad3e42837277708dab9126963643e43490da2330c0a6a46b"
+  },
+  "crysirror-avg32/src/vm/savedata.rs": {
+   "upstream": "crates/avg32/src/savedata.rs",
+   "upstream_sha256": "1a520512d27e40641bd01a92b6ed301277c2ebac435791fac73bbf4272ebd475",
+   "sha256": "34c2da73371ee3f32ba900509ff8902e700c104308ed6de2200ca91fe7635c65"
+  },
+  "crysirror-avg32/src/vm/scenario.rs": {
+   "upstream": "crates/avg32/src/scenario.rs",
+   "upstream_sha256": "8342b836931cb481fb21b25e98592ae89c71f531402083789cef31e66e0d4460",
+   "sha256": "c9569aac62c20c9d813d052f1ac47df9862752dfba2c3541258c5ef6778498ce"
+  },
+  "crysirror-avg32/src/vm/scene.rs": {
+   "upstream": "crates/avg32/src/scene.rs",
+   "upstream_sha256": "680df1a8dae9f2205340386167220a844433549664b8cff0d04eabac230d852f",
+   "sha256": "680df1a8dae9f2205340386167220a844433549664b8cff0d04eabac230d852f"
+  },
+  "crysirror-avg32/src/vm/sound.rs": {
+   "upstream": "crates/avg32/src/sound.rs",
+   "upstream_sha256": "a197bf8ad8d188f6139762e0d3bf3c0e2d2015858fbaa293702180caea69b4e8",
+   "sha256": "0424195ff1899a53ab8f2a6845e4bc955f1f8236852982b12f583cc31f61373a"
+  },
+  "crysirror-avg32/src/vm/system.rs": {
+   "upstream": "crates/avg32/src/system.rs",
+   "upstream_sha256": "525e4762deace7106553fe66a5e9d6ffe634296587868f8098f8abfb01d1c29c",
+   "sha256": "0c7e658c671daa0fe3e8278bb5a291b3dd6a24664272be4d61443711a383cb7b"
+  },
+  "crysirror-avg32/src/vm/text.rs": {
+   "upstream": null,
+   "upstream_sha256": null,
+   "sha256": "0eb0cc5ecd9fdf7a171b9ff87d9aaf486d0157b1efa2a4f8669cfcb9c0ebe4fc"
+  },
+  "crysirror-avg32/src/vm/voicepatch.rs": {
+   "upstream": "crates/avg32/src/voicepatch.rs",
+   "upstream_sha256": "eac9b1a1463f9983cdead38b97af2eade02cd3203f7743914c933f79e3d0588a",
+   "sha256": "33a291288c2e6073e8919a6e2c2317324cbb74aa7ccb2f63f706e0acaf9bf525"
+  },
+  "crysirror-image/src/avg32/buffer.rs": {
+   "upstream": "crates/avg32/src/buffer.rs",
+   "upstream_sha256": "af8297d04d8294c856937c5879503be8487dc67f55dbe370953362e47d634135",
+   "sha256": "663b5ab52727ea8cc1a86b28dad0cb0895c87fbd922c470946b45cdc583ba897"
+  },
+  "crysirror-image/src/avg32/bank.rs": {
+   "upstream": "crates/avg32/src/pdtmgr.rs",
+   "upstream_sha256": "85b53b9a8c8fa3cb8029890b6be7b8a774da607132837d09f34d58a2a4eb4b44",
+   "sha256": "8bd1bc99036c9715dab8915720596fe76ab1c03ef01f3635c4971e6512287313"
+  },
+  "crysirror-image/src/avg32/effect.rs": {
+   "upstream": "crates/avg32/src/effect.rs",
+   "upstream_sha256": "60945e2ab923bf1a4b120006bc7ec170a14529b2d317c78a73918f7f3adcbf0b",
+   "sha256": "51f1d6cbc295426f9508988f32555051ff4f9c960d61856bb6463f084c8342b9"
+  }
+ }
+}

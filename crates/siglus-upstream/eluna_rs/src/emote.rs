@@ -2995,13 +2995,16 @@ fn build_sprite(
     // evaluates recovered mesh deformation and child-mesh-sync semantics; this
     // static preview path does not re-evaluate parameterized mesh state.
     let subtract_icon_origin = ctx.mesh_transform == 0;
+    // CrySirror port change: `coord - origin` is the image's top-left (the
+    // icon origin is measured from the top-left, as `parse_mesh_domain_icon`
+    // also reads it: domain `[-origin, size]`); `center_x/y` are centres.
     let center_x = if subtract_icon_origin {
-        ox - icon.origin_x
+        ox - icon.origin_x + width * 0.5
     } else {
         ox
     };
     let center_y = if subtract_icon_origin {
-        oy - icon.origin_y
+        oy - icon.origin_y + height * 0.5
     } else {
         oy
     };
@@ -3646,17 +3649,23 @@ fn evaluate_priority_content(
     time_ticks: f32,
 ) -> Option<&[PsbValue]> {
     let priority = priority?;
-    let mut current = priority.first();
+    // sub_10340BA0 reads `content` from the currently selected priority frame
+    // unconditionally. It does not filter the frame by `type` here.
+    // CrySirror port change: a frame whose content is not a list (the `Null`
+    // terminal marker at the motion's last time, like the layers' type-0
+    // HOLD keys there) keeps the previous priority list instead of dropping
+    // to per-sibling fallback ranks.
+    let mut current = priority.first().and_then(|f| f.field("content")).and_then(PsbValue::as_list);
     for frame in priority {
         let frame_time = frame.field_f32("time").unwrap_or(0.0);
         if frame_time > time_ticks {
             break;
         }
-        current = Some(frame);
+        if let Some(content) = frame.field("content").and_then(PsbValue::as_list) {
+            current = Some(content);
+        }
     }
-    // sub_10340BA0 reads `content` from the currently selected priority frame
-    // unconditionally. It does not filter the frame by `type` here.
-    current?.field("content").and_then(PsbValue::as_list)
+    current
 }
 
 fn max_layer_frame_time(layer: &PsbValue) -> f32 {
@@ -4704,11 +4713,14 @@ fn patch_with_domain(mut patch: EmoteMeshPatch, domain: Option<[f32; 4]>) -> Emo
     patch
 }
 
-fn frame_runtime_state_key(motion_name: &str, path: &str) -> String {
+fn frame_runtime_state_key(motion_name: &str, path: &str, index_path: &str) -> String {
     // Paths can be identical across top-level motions. Native switching to a
     // different MMotionPlayer does not inherit the prior motion's type-0 HOLD
     // state, so scope the persistent snapshot by motion identity as well.
-    format!("{motion_name}\0{path}")
+    // CrySirror port change: labels may repeat among siblings (see
+    // `enter_layer_context`), so the structural index path joins the key;
+    // otherwise a later same-label sibling's state replaced an earlier one's.
+    format!("{motion_name}\0{path}\0{index_path}")
 }
 
 fn travel_layer_at(
@@ -4832,7 +4844,8 @@ fn travel_layer_at(
         child_ctx.local_time_ticks = Some(param_eval.local_time_ticks);
         let local_time = param_eval.local_time_ticks;
         let easing_table = psb.root.field("easing").and_then(PsbValue::as_list);
-        let frame_runtime_key = frame_runtime_state_key(motion_name, &draw_ctx.path);
+        let frame_runtime_key =
+            frame_runtime_state_key(motion_name, &draw_ctx.path, &draw_ctx.scope_index_path);
         let previous_local_state = previous_frame_states
             .and_then(|states| states.get(&frame_runtime_key))
             .or(join_seed.as_ref());

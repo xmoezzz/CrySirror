@@ -6,7 +6,7 @@
 //! No snapshot pixels, compositing algorithm or renderer lives in this adapter.
 use crate::host::LayerState;
 use crate::natives::{has_member, need_int, this_of, unsupported, Rt};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     runtime::{ObjectHandle, Variant},
     Result, TjsError,
 };
@@ -104,6 +104,11 @@ pub(crate) fn copy(rt: &mut Rt, this: Option<ObjectHandle>, args: Vec<Variant>) 
             profile_diagnostic(rt, destination)
         ))
     })?;
+    if !rt.host().transitions.0.is_empty() {
+        rt.host_mut().push_log(
+            "Layer.piledCopy during an active transition: a transition inside the copied tree is captured at its nearest endpoint, not blended".into(),
+        );
+    }
     // Publish current native placement/order first. The shared Canvas command
     // snapshots preceding canvas draws in command order, including same-batch draws.
     rt.host_mut().sync()?;

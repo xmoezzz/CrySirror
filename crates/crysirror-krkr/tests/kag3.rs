@@ -1,6 +1,6 @@
 // Copyright (c) 2026 CrySirror contributors.
 // This file is distributed under the GNU Affero General Public License,
-// version 3 or (at your option) any later version; see ../krkr-upstream/LICENSE.
+// version 3 or (at your option) any later version; see ../../crysirror-kag/LICENSE.
 //! External original KAG3 scripts are read only at runtime, never distributed.
 use crysirror_core::service::InputFrame;
 use crysirror_runtime::{AdapterRegistry, Runtime};

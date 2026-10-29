@@ -5,6 +5,13 @@
 //! visible pixels. Last fill wins; zero is the empty region. No private VM painter.
 use crate::{Error, Result};
 use alloc::vec::Vec;
+/// Half-open integer rectangle query, with overflow-safe coordinate sums.
+/// Negative/empty extents have no coverage. Usable without a VM or device.
+pub fn contains_rect(rect: [i64; 4], point: [i64; 2]) -> bool {
+    let [x,y,w,h]=rect.map(i128::from);
+    let [px,py]=point.map(i128::from);
+    w>0 && h>0 && px>=x && py>=y && px<x+w && py<y+h
+}
 #[derive(Clone, Debug)]
 pub struct RegionMap {
     client: u32,

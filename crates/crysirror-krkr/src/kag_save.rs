@@ -4,8 +4,8 @@
 //! Original KAGParser dictionary names/layout. Store maps active call frames and
 //! macro arguments; restoring active frames is refused, never faked.
 use crate::natives::*;
-use krkr_kag::{KagParser, Krkr2ConditionState, ParserSnapshot};
-use krkr_tjs2::{
+use crysirror_kag::{KagParser, Krkr2ConditionState, ParserSnapshot};
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, Variant},
 };
@@ -53,10 +53,10 @@ pub fn capture(rt: &mut Rt, p: &KagParser) -> Result<Variant> {
     if !p.macro_params().is_empty() {
         let d = rt.alloc_dictionary_object();
         for a in p.macro_params() {
-            if let krkr_kag::Attribute::Named { name, value } = a {
+            if let crysirror_kag::Attribute::Named { name, value } = a {
                 let v = match value {
-                    krkr_kag::AttributeValue::Literal(s) => Variant::String(s.clone()),
-                    krkr_kag::AttributeValue::Void => Variant::Void,
+                    crysirror_kag::AttributeValue::Literal(s) => Variant::String(s.clone()),
+                    crysirror_kag::AttributeValue::Void => Variant::Void,
                     _ => return Err(TjsError::runtime("unresolved KAG macro argument")),
                 };
                 put(rt, d, name, v);

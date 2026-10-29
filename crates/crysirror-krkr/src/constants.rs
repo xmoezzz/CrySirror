@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Ported from Kirakira crates/krkr-engine/src/globals/constants.rs @ c451918023477620ff9055a2eb8a6714b947d9c1
 // (AGPL-3.0-or-later); only the host type and visibility changed.
-use krkr_tjs2::runtime::{Runtime, Variant};
+use crysirror_tjs2::runtime::{Runtime, Variant};
 
 use crate::host::KrkrHost;
 

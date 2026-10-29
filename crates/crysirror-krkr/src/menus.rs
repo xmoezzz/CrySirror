@@ -10,7 +10,7 @@ use crate::{
     natives::{Rt, methods, native_class, need_int, properties, read_only, this_of, unsupported},
 };
 use crysirror_scene::ui::menu::{MenuItemSpec, MenuSpec};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, Variant},
 };
@@ -36,6 +36,7 @@ fn state(rt: &Rt, h: ObjectHandle) -> Result<&MenuState> {
         .ok_or_else(|| TjsError::runtime("MenuItem is not constructed"))
 }
 fn state_mut(rt: &mut Rt, h: ObjectHandle) -> Result<&mut MenuState> {
+    rt.host_mut().menus_revision += 1;
     rt.host_mut()
         .menus
         .get_mut(&h.0)
@@ -51,6 +52,7 @@ fn make(rt: &mut Rt, h: ObjectHandle, window: usize, caption: String) -> Result<
     let id = (1..=1024)
         .find(|id| !rt.host().menus.values().any(|m| m.id == *id))
         .ok_or_else(|| TjsError::runtime("native menu limit"))?;
+    rt.host_mut().menus_revision += 1;
     rt.host_mut().menus.insert(
         h.0,
         MenuState {
@@ -151,12 +153,21 @@ fn checked(rt: &mut Rt, h: ObjectHandle, value: bool) -> Result<()> {
         }
     }
     apply(rt.host_mut(), &items);
+    rt.host_mut().menus_revision += 1;
     Ok(())
 }
 fn label(caption: &str) -> String {
-    let mut caption = caption.to_owned();
-    for letter in ('A'..='Z').chain('a'..='z').chain('0'..='9') {
-        caption = caption.replace(&format!("(&{letter})"), "");
+    // Drop "(&X)" accelerator suffixes (X alphanumeric ASCII) in one pass.
+    let chars: Vec<char> = caption.chars().collect();
+    let mut caption = String::with_capacity(caption.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '(' && chars.get(i + 1) == Some(&'&') && chars.get(i + 2).is_some_and(char::is_ascii_alphanumeric) && chars.get(i + 3) == Some(&')') {
+            i += 4;
+            continue;
+        }
+        caption.push(chars[i]);
+        i += 1;
     }
     let mut out = String::new();
     let mut chars = caption.chars().peekable();
@@ -221,6 +232,17 @@ fn spec(host: &KrkrHost, root: usize, context: bool) -> Result<MenuSpec> {
     })
 }
 pub fn sync(host: &mut KrkrHost) -> Result<()> {
+    let windows: Vec<(usize, bool)> = host
+        .windows
+        .iter()
+        .filter(|(_, w)| w.menu.is_some())
+        .map(|(id, w)| (*id, w.visible))
+        .collect();
+    let key = (host.menus_revision, windows, host.canvas);
+    if host.menu_popups.is_empty() && host.menus_synced.as_ref() == Some(&key) {
+        return Ok(());
+    }
+    host.menus_synced = Some(key);
     let specs = host
         .windows
         .values()

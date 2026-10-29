@@ -1,0 +1,42 @@
+{
+ "repository": "https://github.com/xmoezzz/siglus_rs.git",
+ "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+ "license": "MPL-2.0",
+ "files": "crates/reallive/src/{dll.rs,pt00/,dt00/}",
+ "patched": {
+  "reallive-dll/src/dll.rs": {
+   "upstream_sha256": "e14d4580bf88848ec7af6d95d60bbbcdb84ca00d77174f1bb55fc935b6730fc1",
+   "reason": "System is a two-method host trait (RNG, game-root file); unknown DLLs fail visibly instead of returning 0; Banks moved to the adapter"
+  }
+ },
+ "source_sha256": {
+  "reallive-dll/src/dll.rs": "53a8da71c18ff6435d7694947f16e9cf0cadb7a785aabdb481bb8f9f70c38037",
+  "reallive-dll/src/dt00/code/dispatch.rs": "18dd53ad88a2fdd1904259db2db5584c434f8b8ee29d4c1b51482266f9f8a90c",
+  "reallive-dll/src/dt00/code/f01c50.rs": "8cbe9335f97e157d9a2d9c3211687567c9e2fd3eb7f31434917d9ecf6c8ca411",
+  "reallive-dll/src/dt00/code/f04900.rs": "a1b2be3a494b987d9a6c8381941c280e7e23a39bf6a5a893ca8b605cff1168a3",
+  "reallive-dll/src/dt00/code/f07240.rs": "a1eaad848d5211ddec429e9589a2fb642d862256f75eec5fa976607b8bdb4a73",
+  "reallive-dll/src/dt00/code/f0a0a0.rs": "b02b17d8b1ef807e59c1a3b1f68762985c7176da6289d92dd55a45749fd754e1",
+  "reallive-dll/src/dt00/code/f0f8c0.rs": "916e5898897c973f838fc87f71f1d3a6109ba7171dd1b2891993f090fd9dcb9f",
+  "reallive-dll/src/dt00/code/f123c0.rs": "55a624ae71232bc7bd59e47dc8e3d9c3db8d9021da7b6c4d509c0cfa3c660962",
+  "reallive-dll/src/dt00/code/f16130.rs": "f220b8fab66dfe73e31dd8e25963316201caecf5d76b673f2a9840736d9affb3",
+  "reallive-dll/src/dt00/code/f20450.rs": "d626f2c7f8134bda780af1d4ec46df3a80fc8eb991f3d8f84d7f30147101f94c",
+  "reallive-dll/src/dt00/code/mod.rs": "67382b02b334b84c9feaffdf1853de4170a5acdfc2a55ae1d28b4a22c4543e76",
+  "reallive-dll/src/dt00/mod.rs": "9f9e6ac7e44eb0f1c2441db6e9da764f372cb5c6bb5c762c56c0eb2e6edb0c58",
+  "reallive-dll/src/dt00/rt.rs": "49e2fc45b55c8f3662d34803e524bdb7508743b3b1ac51f5c909ea0ef22f459c",
+  "reallive-dll/src/pt00/actors/cats.rs": "80fc34c1232f4b5c0919452e0d8611fe9e1733d6f43df9062d9b56dc4b8d2206",
+  "reallive-dll/src/pt00/actors/class0.rs": "510a05dcfb95312f2ce398d36cc84c3800aa8290172e51da04fe584adf9a8557",
+  "reallive-dll/src/pt00/actors/class1.rs": "80f47948543381376424e35baf46fe86e596b67e24021f83285905dcec669fcf",
+  "reallive-dll/src/pt00/actors/class10.rs": "ebe6f97ea00811b04b226ff4e93fbcb16c2df1dba2d12fa9d9a7533df5a4bad2",
+  "reallive-dll/src/pt00/actors/class2.rs": "d59da4dec37c78fd9d2a3aa63024ba7041de9b41c30aa6badea1fb5f63ebf3b6",
+  "reallive-dll/src/pt00/actors/class3.rs": "bcfcac7ca88ad4fdd9e4a238a9ecdc6d9c62adf16a3ac5873f6d36dcf523d404",
+  "reallive-dll/src/pt00/actors/class4.rs": "fee3c2a4d93290247daf9504d607fb3a12a5818dcd60ea09abbd7783267d144d",
+  "reallive-dll/src/pt00/actors/class5.rs": "81b8e1e22e892c0620451fca8f2b0d01b5f1f2c00ddf97bbb0147846b9fad7a0",
+  "reallive-dll/src/pt00/actors/class7.rs": "485165e2433c462277956dbd0fbd6318c1469be3d6233b760dc9b595cca41d35",
+  "reallive-dll/src/pt00/actors/class8.rs": "b540f21b3436c9c8beede65e2d9ef880d42184c0a12ea0d66f86c3d4fcf41f2e",
+  "reallive-dll/src/pt00/actors/class9.rs": "b3dbbdf66cca0245a041ba8bb3ba1337752a6074b616cd6779966f12b8adac22",
+  "reallive-dll/src/pt00/actors/mod.rs": "22431955d4b5d4f4fbd6cd1af2af4692c45d7eafd08ca64b976047f36279c1ed",
+  "reallive-dll/src/pt00/base.rs": "6b3c96300ba789ed8cbebae9de5bc351e1e1e9eef95909ada9c2b7416a3aeff1",
+  "reallive-dll/src/pt00/mod.rs": "cfc6f78228907e1941597b5d86061bf1c8ebb733becaddf705842bdd33853cff",
+  "reallive-dll/src/pt00/special.rs": "db31d0870f044f38275e2fb9b5d7081291910e1d30bc3e7439a018d3ba088f0e"
+ }
+}

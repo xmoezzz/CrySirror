@@ -204,8 +204,8 @@ use std::{
 };
 
 use crate::host::KrkrHost;
-use krkr_tjs2::runtime::TjsHost;
-use krkr_tjs2::{
+use crysirror_tjs2::runtime::TjsHost;
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{NativeArgCount, ObjectHandle, Runtime, Variant},
 };

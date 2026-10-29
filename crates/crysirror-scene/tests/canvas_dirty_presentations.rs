@@ -100,7 +100,7 @@ fn all_copy_operations_only_invalidate_the_destination() {
             position: [0., 0.],
             opacity: 255,
             replace: true,
-            clip: None,
+            clip: None, atop: None
         },
         C::TransformCopy {
             source: 1,
@@ -108,7 +108,7 @@ fn all_copy_operations_only_invalidate_the_destination() {
             rect: [0., 0., 8., 8.],
             matrix: [1., 0., 0., 1., 0., 0.],
             replace: true,
-            clip: None,
+            clip: None, opacity: 255,
         },
         C::CopySubtree {
             source: 10,

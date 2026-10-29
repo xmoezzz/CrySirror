@@ -337,3 +337,30 @@ fn object_anchor_and_rotated_leaf_clips_follow_sprite_projection() {
     let invalid: LayerSystem = serde_json::from_value(v).unwrap();
     assert!(invalid.frame([400, 400]).is_err());
 }
+
+#[test]
+fn external_crossfade_progress_comes_only_from_the_client() {
+    use crysirror_scene::layer::LayerCommand as L;
+    let specs: Vec<crysirror_scene::LayerSpec> = serde_json::from_value(json!([
+        {"id":1,"rect":[0,0,64,64],"paint":{"kind":"solid"}},
+        {"id":10,"parent":1,"rect":[0,0,32,32],"paint":{"kind":"solid","color":[255,0,0,255]}},
+        {"id":20,"parent":1,"rect":[0,0,32,32],"paint":{"kind":"solid","color":[0,0,255,255]}}
+    ])).unwrap();
+    let mut layers = LayerSystem::default();
+    layers.install(ClientId(1), &specs).unwrap();
+    layers
+        .apply_batch(ClientId(1), &[L::BeginCrossfade { id: 10, source: 20, duration_ms: 200, rule: None, external: true }])
+        .unwrap();
+    layers.tick(1000);
+    assert_eq!(layers.crossfade(ClientId(1), 10).unwrap().elapsed_ms, 0, "engine clock does not advance it");
+    layers.apply_batch(ClientId(1), &[L::SetCrossfadeElapsed { id: 10, elapsed_ms: 50 }]).unwrap();
+    assert_eq!(layers.crossfade(ClientId(1), 10).unwrap().elapsed_ms, 50);
+    layers.apply_batch(ClientId(1), &[L::SetCrossfadeElapsed { id: 10, elapsed_ms: 9999 }]).unwrap();
+    assert_eq!(layers.crossfade(ClientId(1), 10).unwrap().elapsed_ms, 200, "clamped to the duration");
+    // An engine-clocked crossfade refuses external progress.
+    layers.apply_batch(ClientId(1), &[L::EndCrossfade { id: 10 }]).unwrap();
+    layers
+        .apply_batch(ClientId(1), &[L::BeginCrossfade { id: 10, source: 20, duration_ms: 200, rule: None, external: false }])
+        .unwrap();
+    assert!(layers.apply_batch(ClientId(1), &[L::SetCrossfadeElapsed { id: 10, elapsed_ms: 5 }]).is_err());
+}

@@ -12,9 +12,15 @@
 //! `crysirror_resource::compound` media routes `arc://` lookups onto mounted
 //! containers, and `crysirror_resource::signature` verifies `.sig` files.
 //! Unmapped members (`setFile`, `getFile`, custom archive seeds ...) fail visibly.
+//!
+//! CXDEC titles instead receive `Storages.setupArchiveData` from their
+//! protection module before `startup.tjs` runs. Its effect (Special name
+//! index and content-filter parameters) is already applied by the shared
+//! `kirikiri/xp3` mount; the facade only checks that the script supplies the
+//! exact argument that mount authenticated, so a mismatch fails visibly.
 use crate::natives::{Rt, methods, object_arg, string};
 use crysirror_resource::{compound::CompoundStorage, signature::RsaPssSha256Verifier};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{Closure, ObjectHandle, Variant},
 };
@@ -35,9 +41,21 @@ pub struct Profile {
     pub signature_public_key: String,
 }
 
+/// Engine-published CXDEC profile (`cxdec_bootstrap_profile`).
+#[derive(Clone, Debug, Deserialize)]
+pub struct CxdecProfile {
+    pub family: String,
+    /// The argument whose derived seeds authenticated the Special index.
+    pub setup_archive_data: String,
+    /// Native startup redirect (`archive.xp3>member`) served as startup.tjs.
+    pub startup: String,
+}
+
 #[derive(Default)]
 pub struct State {
     profile: Option<Profile>,
+    cxdec: Option<CxdecProfile>,
+    archive_data_set: bool,
     linked: bool,
     booted: bool,
     token: Vec<u8>,
@@ -59,7 +77,18 @@ fn err(e: impl std::fmt::Display) -> TjsError {
 
 /// Load the engine-published profile named by the adapter configuration.
 pub fn configure(state: &mut State, json: &[u8]) -> anyhow::Result<()> {
-    let profile: Profile = serde_json::from_slice(json)?;
+    let value: serde_json::Value = serde_json::from_slice(json)?;
+    if value.get("family").and_then(|f| f.as_str()) == Some("cxdec-setup-archive-data") {
+        let profile: CxdecProfile = serde_json::from_value(value)?;
+        anyhow::ensure!(
+            !profile.setup_archive_data.is_empty()
+                && profile.setup_archive_data.encode_utf16().count() <= 32 * 1024,
+            "CXDEC setupArchiveData profile length"
+        );
+        state.cxdec = Some(profile);
+        return Ok(());
+    }
+    let profile: Profile = serde_json::from_value(value)?;
     anyhow::ensure!(
         profile.family == "hxv4-bootstrap",
         "unknown protected bootstrap family `{}`",
@@ -82,6 +111,38 @@ fn profile(rt: &Rt) -> Result<Profile> {
         .profile
         .clone()
         .ok_or_else(|| err("protected bootstrap profile not configured"))
+}
+
+/// Startup natives a validated profile provides before `startup.tjs` runs
+/// (the CXDEC protection module registers them at process start).
+pub fn install_startup(rt: &mut Rt) {
+    if rt.host().protect.cxdec.is_none() {
+        return;
+    }
+    let storages = rt
+        .global_member("Storages")
+        .object_handle()
+        .expect("Storages");
+    methods(rt, storages, &[("setupArchiveData", setup_archive_data)]);
+}
+
+fn setup_archive_data(rt: &mut Rt, _: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
+    let text = string(&a, 0, "Storages.setupArchiveData")?;
+    let state = &rt.host().protect;
+    let p = state
+        .cxdec
+        .as_ref()
+        .ok_or_else(|| err("Storages.setupArchiveData: no validated CXDEC profile"))?;
+    if text != p.setup_archive_data {
+        return Err(err(
+            "Storages.setupArchiveData: argument does not derive the mounted archives' index",
+        ));
+    }
+    if state.archive_data_set {
+        return Err(err("Storages.setupArchiveData: archive data already set up"));
+    }
+    rt.host_mut().protect.archive_data_set = true;
+    Ok(Variant::Void)
 }
 
 pub fn link_z(rt: &mut Rt, args: Vec<Variant>) -> Result<Variant> {
@@ -452,5 +513,16 @@ fn hash_arg(v: Option<&Variant>) -> Result<[u8; 8]> {
     match v {
         Some(Variant::Octet(b)) if b.len() == 8 => Ok(b.as_slice().try_into().unwrap()),
         _ => Err(err("CompoundStorageMedia: path hash Octet required")),
+    }
+}
+
+impl State {
+    pub(crate) fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
+        out.extend(self.media);
+        match &self.callback {
+            Some(Variant::Object(h)) => out.push(*h),
+            Some(Variant::Closure(c)) => out.extend(std::iter::once(c.object).chain(c.this_obj)),
+            _ => {}
+        }
     }
 }

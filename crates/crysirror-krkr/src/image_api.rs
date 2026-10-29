@@ -9,7 +9,7 @@ use crysirror_core::{
     service::HostServices,
     state::ClientId,
 };
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, Variant},
 };

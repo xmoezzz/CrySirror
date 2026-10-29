@@ -12,7 +12,7 @@
 use crate::natives::{Rt, methods, native_class, read_only, string, this_of, unsupported};
 use crysirror_core::{service::HostServices, state::ClientId};
 use eluna::psb::{PsbFile, PsbNormalizeOptions, PsbValue};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, Variant},
 };
@@ -188,4 +188,18 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
     host_state.canvas_op(json!({"op":"set","id":slot,"layer":{"id":0,"rect":[0,0,w,h],"paint":{"kind":"image","asset":image.path.relative()}}}));
     host_state.api_calls += 1;
     Ok(true)
+}
+
+impl State {
+    pub(crate) fn invalidate(&mut self, object: usize) {
+        self.owners.remove(&object);
+    }
+
+    pub(crate) fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
+        // PSBFile instances are owned by scripts; a collected one drops its
+        // entry through `invalidate`.
+        if let Some(p) = &self.pending {
+            out.push(p.layer);
+        }
+    }
 }

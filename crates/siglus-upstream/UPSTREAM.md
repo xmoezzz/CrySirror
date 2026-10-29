@@ -37,6 +37,25 @@
    are used by `crysirror-puppet-eluna` (ADR 0029) and only delegate to
    existing player calls.
 
+8. `emote.rs` static sprite placement (`build_sprite`): with
+   MeshTransform.None the sprite centre is `coord - origin + size/2`. The
+   icon origin is measured from the image's top-left (eluna's own mesh path
+   reads it so: `parse_mesh_domain_icon` gives the domain `[-origin, size]`);
+   upstream stored `coord - origin` (the top-left) as the centre, shifting
+   every such sprite by half its size. Found on a KiriKiri title motion whose
+   1920x1080 background (origin 960,540, coordinate 0,0) landed a quarter
+   screen up-left.
+9. `emote.rs` type-0 HOLD state key (`frame_runtime_state_key`): the key adds
+   the structural sibling-index path. Labels repeat among siblings (eluna's
+   `enter_layer_context` says so for priority); keyed by label path alone, a
+   later same-label sibling's state overwrote an earlier one's, so a held
+   visible layer took its transparent twin's state (title background and
+   logo vanished at the motion's final HOLD keyframe).
+10. `emote.rs` `evaluate_priority_content`: a priority frame whose content is
+    not a list (the `Null` marker at the motion's last time) keeps the
+    previous list. Upstream returned none, and ranks fell back to per-sibling
+    indices, interleaving nested layers (a title logo dropped behind art).
+
 kira/cpal are still compiled. Without `native-audio` no device is opened.
 No VM, form, text, wait, save or shader code was changed (changes 5 and 7 only add wrappers; change 6 only widens visibility).
 

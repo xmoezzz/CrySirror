@@ -138,6 +138,16 @@ pub enum Blend {
     Multiply,
     /// Screen.
     Screen,
+    /// Source-atop: drawn only where the destination has alpha, which it
+    /// keeps (KiriKiri holdAlpha draws). Meaningful in isolated canvas
+    /// snapshots, where the destination is the surface's own content.
+    Atop,
+    /// Photoshop multiply keeping the destination alpha (KiriKiri
+    /// omPsMultiplicative with holdAlpha): D·(1 - a + a·S).
+    AtopMultiply,
+    /// Photoshop screen keeping the destination alpha (omPsScreen with
+    /// holdAlpha): D·(1 - a·S) + a·S·Da.
+    AtopScreen,
 }
 /// Per-layer 2D filter stack with the stage order and parameter meaning of
 /// the Siglus/tona3 sprite effect (ADR 0021). Color math runs on 8-bit
@@ -436,7 +446,8 @@ pub enum Paint {
     /// Inputs contain no nested snapshots, external parents or dynamic state.
     Snapshot {
         size: [u32; 2],
-        layers: Vec<LayerSpec>,
+        /// Shared, immutable frozen tree (cheap to clone with the system).
+        layers: Arc<Vec<LayerSpec>>,
     },
     /// 2D deformable puppet (ADR 0029): an engine puppet rig JSON asset,
     /// fitted into the layer rect (aspect preserved).
@@ -527,6 +538,24 @@ impl Paint {
         }
     }
 }
+/// Retained layers across all clients. Native UIs (a KiriKiri settings
+/// screen) present many canvas surfaces whose nodes each become a layer.
+pub const MAX_LAYERS: usize = 16384;
+/// Snapshots may contain snapshot draws (a captured tree that already held a
+/// frozen region); renderers rasterize inner payloads first. Bounded so that
+/// validation and rasterization recursion stay small.
+pub const MAX_SNAPSHOT_NESTING: usize = 3;
+/// Levels of snapshot payloads below `layers` (0 when none holds a snapshot).
+pub fn snapshot_nesting(layers: &[LayerSpec]) -> usize {
+    layers
+        .iter()
+        .filter_map(|l| match &l.paint {
+            Paint::Snapshot { layers, .. } => Some(1 + snapshot_nesting(layers)),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0)
+}
 fn validate_snapshot(size: [u32; 2], layers: &[LayerSpec]) -> Result<()> {
     ensure!(size.iter().all(|v| (1..=8192).contains(v)), "snapshot resolution budget");
     ensure!(!layers.is_empty() && layers.len() <= 4096, "snapshot layer budget");
@@ -534,11 +563,11 @@ fn validate_snapshot(size: [u32; 2], layers: &[LayerSpec]) -> Result<()> {
     ensure!(by_id.len() == layers.len(), "snapshot duplicate layer IDs");
     ensure!(layers.iter().filter(|s| s.parent.is_none()).count() == 1, "snapshot needs one local root");
     let parents: BTreeSet<_> = layers.iter().filter_map(|s| s.parent).collect();
+    ensure!(snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING, "snapshot nesting budget");
     for layer in layers {
-        ensure!(!matches!(layer.paint, Paint::Snapshot { .. }), "nested snapshot is unsupported");
         ensure!(!matches!(layer.paint, Paint::Puppet { .. }), "snapshot dynamic puppet is unsupported");
         ensure!(layer.paint.glyph_reveal_status().is_none_or(|r| r.complete), "snapshot dynamic glyph reveal is unsupported");
-        ensure!(layer.blend == Blend::Normal, "snapshot requires normal layer blend");
+        ensure!(matches!(layer.blend, Blend::Normal | Blend::Atop | Blend::AtopMultiply | Blend::AtopScreen), "snapshot requires normal or atop layer blend");
         if parents.contains(&layer.id) {
             ensure!(layer.opacity == 255, "snapshot group opacity requires isolated composition");
         }
@@ -552,8 +581,8 @@ fn validate_snapshot(size: [u32; 2], layers: &[LayerSpec]) -> Result<()> {
             parent = by_id.get(&id).context("snapshot parent outside frozen tree")?.parent;
         }
     }
-    // No nested Snapshot survives the checks above, so this validation cannot
-    // recurse into another scene payload.
+    // Nested payloads are validated by this install; the nesting budget above
+    // bounds that recursion.
     LayerSystem::default().install(ClientId(0), layers)?;
     Ok(())
 }
@@ -709,6 +738,36 @@ pub struct LayerSystem {
     transition: Option<ActiveTransition>,
     #[serde(default)]
     transition_serial: u64,
+    /// An open multi-batch transaction (see [`LayerSystem::transaction`]).
+    #[serde(skip)]
+    txn: TxnSlot,
+}
+
+/// Open transactions, innermost last. A clone of a system is outside them.
+#[derive(Debug, Default)]
+struct TxnSlot(Vec<LayerTxn>);
+impl Clone for TxnSlot {
+    fn clone(&self) -> Self {
+        Self(Vec::new())
+    }
+}
+
+type SideState = (
+    BTreeMap<u32, BTreeMap<u32, SubtreeCrossfade>>,
+    BTreeMap<u32, BTreeMap<u32, PuppetSlot>>,
+    BTreeMap<(u32, u32), Arc<crysirror_puppet::PuppetFrame>>,
+    BTreeSet<(u32, u32)>,
+    Option<ActiveTransition>,
+    u64,
+);
+
+/// Originals of every layer the transaction's batches touched (first touch
+/// wins), plus the side state and owner set at its start.
+#[derive(Debug)]
+struct LayerTxn {
+    journal: BTreeMap<(u32, u32), Option<LayerSpec>>,
+    owners: BTreeSet<u32>,
+    side: SideState,
 }
 
 /// Full-screen transition from the engine's previously presented scene to the
@@ -971,7 +1030,12 @@ pub enum LayerCommand {
         duration_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rule: Option<RuleWipe>,
+        /// Driven by `SetCrossfadeElapsed` instead of the engine clock.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        external: bool,
     },
+    /// Progress of an `external` crossfade, in ms of its duration.
+    SetCrossfadeElapsed { id: u32, elapsed_ms: u64 },
     /// Release a subtree transition after observing completion or cancellation.
     EndCrossfade { id: u32 },
     /// Finish this client's transition immediately (skip).
@@ -984,6 +1048,8 @@ impl LayerSystem {
     }
     /// Frozen static, visible subtree input for shared retained Canvas capture.
     /// The requested root is evaluated in its own local image space.
+    /// Frozen specs of `root`'s visible subtree. An isolated crossfade inside
+    /// it is captured at its nearest endpoint (not the blended intermediate).
     pub(crate) fn snapshot_subtree_specs(&self, client: ClientId, root: u32) -> Result<Vec<LayerSpec>> {
         let owner = self.clients.get(&client.0).context("snapshot client missing")?;
         ensure!(owner.contains_key(&root), "snapshot layer {root} missing");
@@ -1009,7 +1075,9 @@ impl LayerSystem {
             }
             ensure!(layer.blend == Blend::Normal, "snapshot requires normal layer blend");
             ensure!(!matches!(layer.paint, Paint::Puppet { .. }), "snapshot of dynamic puppet needs an evaluated immutable resource");
-            ensure!(!matches!(layer.paint, Paint::Snapshot { .. }), "nested snapshot is unsupported");
+            if let Paint::Snapshot { layers, .. } = &layer.paint {
+                ensure!(1 + snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING, "snapshot nesting budget");
+            }
             ensure!(!self.dynamic_puppets.contains(&(client.0, id)) && !self.puppet_frames.contains_key(&(client.0, id)),
                 "snapshot of evaluated/dynamic puppet needs an immutable mesh resource");
             ensure!(layer.paint.glyph_reveal_status().is_none_or(|r| r.complete), "snapshot of dynamic glyph reveal is unsupported");
@@ -1023,8 +1091,26 @@ impl LayerSystem {
             }
             out.push(layer);
         }
-        // A captured draw cannot silently omit an active isolated composition.
+        // An active isolated composition wholly inside the captured subtree is
+        // frozen at its nearest endpoint (before below half progress, else the
+        // source in the destination's place). One reaching outside fails.
         for (id, fade) in self.crossfades.get(&client.0).into_iter().flatten() {
+            let inside = |n: u32| selected.contains(&n) && n != root;
+            if inside(*id) && inside(fade.source) {
+                let before = fade.elapsed_ms * 2 < fade.duration_ms;
+                let drop = descendants_of(&out, if before { fade.source } else { *id });
+                let dest_rect = owner[id].rect;
+                let dest_visible = owner[id].visible;
+                out.retain(|l| !drop.contains(&l.id));
+                if !before {
+                    if let Some(src) = out.iter_mut().find(|l| l.id == fade.source) {
+                        src.rect[0] = dest_rect[0];
+                        src.rect[1] = dest_rect[1];
+                        src.visible = dest_visible;
+                    }
+                }
+                continue;
+            }
             for &node in &selected {
                 let mut cursor = Some(node);
                 while let Some(n) = cursor {
@@ -1036,13 +1122,116 @@ impl LayerSystem {
         out.sort_by_key(|layer| (layer.order, layer.id));
         Ok(out)
     }
+    /// Apply atomically. Commands mutate in place while an undo journal keeps
+    /// the original value of every touched layer (and a copy of the small side
+    /// state); an error restores them. Only touched layers are re-validated.
+    fn side_state(&self) -> SideState {
+        (
+            self.crossfades.clone(),
+            self.puppets.clone(),
+            self.puppet_frames.clone(),
+            self.dynamic_puppets.clone(),
+            self.transition.clone(),
+            self.transition_serial,
+        )
+    }
+    /// Run `f` as one atomic unit over several `apply_batch` calls without
+    /// cloning the layer tree: on error every layer the calls touched and the
+    /// side state are restored. A nested transaction that succeeds folds its
+    /// originals into the enclosing one.
+    pub fn transaction<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        self.txn.0.push(LayerTxn {
+            journal: BTreeMap::new(),
+            owners: self.clients.keys().copied().collect(),
+            side: self.side_state(),
+        });
+        let depth = self.txn.0.len();
+        let result = f(self);
+        ensure!(self.txn.0.len() == depth, "layer transaction stack");
+        let txn = self.txn.0.pop().expect("transaction state");
+        if result.is_ok() {
+            if let Some(outer) = self.txn.0.last_mut() {
+                for (key, original) in txn.journal {
+                    outer.journal.entry(key).or_insert(original);
+                }
+            }
+        } else {
+            for ((client, id), original) in txn.journal {
+                let owner = self.clients.entry(client).or_default();
+                match original {
+                    Some(spec) => owner.insert(id, spec),
+                    None => owner.remove(&id),
+                };
+            }
+            self.clients
+                .retain(|client, owner| txn.owners.contains(client) || !owner.is_empty());
+            (
+                self.crossfades,
+                self.puppets,
+                self.puppet_frames,
+                self.dynamic_puppets,
+                self.transition,
+                self.transition_serial,
+            ) = txn.side;
+        }
+        result
+    }
     pub fn apply_batch(&mut self, client: ClientId, commands: &[LayerCommand]) -> Result<()> {
         ensure!(commands.len() <= 4096, "layer command limit");
-        let mut staged = self.clone();
+        let side = self.side_state();
+        let had_owner = self.clients.contains_key(&client.0);
+        let mut journal: BTreeMap<u32, Option<LayerSpec>> = BTreeMap::new();
+        let result = self
+            .apply_in_place(client, commands, &mut journal)
+            .and_then(|()| {
+                self.sync_puppets();
+                self.validate_touched(client, journal.keys().copied())
+            });
+        if let Err(e) = result {
+            let owner = self.clients.entry(client.0).or_default();
+            for (id, original) in journal {
+                match original {
+                    Some(spec) => owner.insert(id, spec),
+                    None => owner.remove(&id),
+                };
+            }
+            if !had_owner && owner.is_empty() {
+                self.clients.remove(&client.0);
+            }
+            (
+                self.crossfades,
+                self.puppets,
+                self.puppet_frames,
+                self.dynamic_puppets,
+                self.transition,
+                self.transition_serial,
+            ) = side;
+            return Err(e);
+        }
+        if let Some(txn) = self.txn.0.last_mut() {
+            for (id, original) in journal {
+                txn.journal.entry((client.0, id)).or_insert(original);
+            }
+        }
+        Ok(())
+    }
+    fn apply_in_place(
+        &mut self,
+        client: ClientId,
+        commands: &[LayerCommand],
+        journal: &mut BTreeMap<u32, Option<LayerSpec>>,
+    ) -> Result<()> {
+        let staged = self;
+        // parent → children, built on the first Remove and kept current.
+        let mut children: Option<BTreeMap<u32, BTreeSet<u32>>> = None;
         for command in commands {
             match command {
-                LayerCommand::BeginCrossfade { id, source, duration_ms, rule } => {
-                    staged.begin_crossfade(client, *id, *source, *duration_ms, rule.clone())?;
+                LayerCommand::BeginCrossfade { id, source, duration_ms, rule, external } => {
+                    staged.begin_crossfade(client, *id, *source, *duration_ms, rule.clone(), *external)?;
+                    continue;
+                }
+                LayerCommand::SetCrossfadeElapsed { id, elapsed_ms } => {
+                    staged.set_crossfade_elapsed(client, *id, *elapsed_ms)?;
                     continue;
                 }
                 LayerCommand::EndCrossfade { id } => {
@@ -1108,23 +1297,53 @@ impl LayerSystem {
             let owner = staged.clients.entry(client.0).or_default();
             match command {
                 LayerCommand::Put { layer } => {
-                    owner.insert(layer.id, layer.clone());
+                    // Snapshot payloads are immutable: checked once on entry,
+                    // not on every revalidation.
+                    if matches!(layer.paint, Paint::Snapshot { .. }) {
+                        layer.paint.validate()?;
+                    }
+                    let previous = owner.insert(layer.id, layer.clone());
+                    if let Some(index) = &mut children {
+                        if let Some(p) = previous.as_ref().and_then(|s| s.parent) {
+                            if let Some(set) = index.get_mut(&p) {
+                                set.remove(&layer.id);
+                            }
+                        }
+                        if let Some(p) = layer.parent {
+                            index.entry(p).or_default().insert(layer.id);
+                        }
+                    }
+                    journal.entry(layer.id).or_insert(previous);
                 }
                 LayerCommand::Remove { id } => {
                     ensure!(owner.contains_key(id), "layer {id} missing for removal");
-                    let mut remove = BTreeSet::from([*id]);
-                    loop {
-                        let n = remove.len();
+                    let index = children.get_or_insert_with(|| {
+                        let mut index: BTreeMap<u32, BTreeSet<u32>> = BTreeMap::new();
                         for (id, s) in owner.iter() {
-                            if s.parent.is_some_and(|p| remove.contains(&p)) {
-                                remove.insert(*id);
+                            if let Some(p) = s.parent {
+                                index.entry(p).or_default().insert(*id);
                             }
                         }
-                        if remove.len() == n {
-                            break;
+                        index
+                    });
+                    let mut remove = BTreeSet::from([*id]);
+                    let mut stack = vec![*id];
+                    while let Some(n) = stack.pop() {
+                        for c in index.get(&n).into_iter().flatten() {
+                            if remove.insert(*c) {
+                                stack.push(*c);
+                            }
                         }
                     }
-                    owner.retain(|id, _| !remove.contains(id));
+                    for r in &remove {
+                        if let Some(spec) = owner.remove(r) {
+                            if let Some(set) = spec.parent.and_then(|p| index.get_mut(&p)) {
+                                set.remove(r);
+                            }
+                            journal.entry(*r).or_insert(Some(spec));
+                        }
+                        index.remove(r);
+                    }
                     if let Some(fades) = staged.crossfades.get_mut(&client.0) { fades.retain(|id, f| !remove.contains(id) && !remove.contains(&f.source)); }
                     staged.dynamic_puppets.retain(|(c,id)| *c != client.0 || !remove.contains(id));
                     staged.puppet_frames.retain(|(c,id),_| *c != client.0 || !remove.contains(id));
@@ -1141,6 +1360,7 @@ impl LayerSystem {
                         _ => unreachable!(),
                     };
                     let layer = owner.get_mut(id).context("layer missing")?;
+                    journal.entry(*id).or_insert_with(|| Some(layer.clone()));
                     match other {
                         LayerCommand::SetTransform { transform, .. } => {
                             layer.transform = transform.clone()
@@ -1163,9 +1383,6 @@ impl LayerSystem {
                 }
             }
         }
-        staged.sync_puppets();
-        staged.validate()?;
-        *self = staged;
         Ok(())
     }
     /// Keeps exactly one slot per puppet layer; a changed rig restarts it.
@@ -1255,7 +1472,7 @@ impl LayerSystem {
     }
     /// Advance engine-owned text and transition clocks.
     pub fn tick(&mut self, delta_ms: u64) {
-        for fade in self.crossfades.values_mut().flat_map(|s| s.values_mut()) {
+        for fade in self.crossfades.values_mut().flat_map(|s| s.values_mut()).filter(|f| !f.external) {
             fade.elapsed_ms = fade.elapsed_ms.saturating_add(delta_ms).min(fade.duration_ms);
         }
         for layer in self
@@ -1309,14 +1526,51 @@ impl LayerSystem {
         *self = staged;
         Ok(())
     }
-    pub fn validate(&self) -> Result<()> {
+    /// Global invariants plus the layers a batch touched (still present).
+    fn validate_touched(&self, client: ClientId, ids: impl Iterator<Item = u32>) -> Result<()> {
         if let Some(t) = &self.transition {
             t.spec.validate()?;
             ensure!(t.serial <= self.transition_serial, "transition serial");
         }
         ensure!(
             self.clients.len() <= 64
-                && self.clients.values().map(BTreeMap::len).sum::<usize>() <= 4096,
+                && self.clients.values().map(BTreeMap::len).sum::<usize>() <= MAX_LAYERS,
+            "layer count"
+        );
+        for (client, slots) in &self.puppets {
+            for (id, slot) in slots {
+                ensure!(
+                    matches!(self.clients.get(client).and_then(|o| o.get(id)).map(|l| &l.paint),
+                        Some(Paint::Puppet { asset, .. }) if *asset == slot.asset),
+                    "puppet state without its puppet layer"
+                );
+                for c in &slot.pending {
+                    c.validate()?;
+                }
+            }
+        }
+        if let Some(owner) = self.clients.get(&client.0) {
+            for id in ids {
+                if let Some(s) = owner.get(&id) {
+                    // Snapshot payloads were checked when they entered.
+                    validate_layer(owner, id, s, false)?;
+                }
+            }
+        }
+        self.validate_crossfades()
+    }
+    /// Full validation, including frozen snapshot payloads (restore paths).
+    pub fn validate(&self) -> Result<()> {
+        self.validate_with(true)
+    }
+    fn validate_with(&self, snapshots: bool) -> Result<()> {
+        if let Some(t) = &self.transition {
+            t.spec.validate()?;
+            ensure!(t.serial <= self.transition_serial, "transition serial");
+        }
+        ensure!(
+            self.clients.len() <= 64
+                && self.clients.values().map(BTreeMap::len).sum::<usize>() <= MAX_LAYERS,
             "layer count"
         );
         for (client, slots) in &self.puppets {
@@ -1333,39 +1587,7 @@ impl LayerSystem {
         }
         for owner in self.clients.values() {
             for (id, s) in owner {
-                ensure!(
-                    *id == s.id && rect_valid(s.rect),
-                    "invalid layer identity/bounds"
-                );
-                s.paint.validate()?;
-                s.transform.validate()?;
-                if let Some(clip) = s.clip {
-                    ensure!(rect_valid(clip), "invalid layer clip");
-                }
-                if let Some(f) = &s.filter {
-                    f.validate()?;
-                }
-                if let Some(uv) = s.uv {
-                    ensure!(
-                        !matches!(s.paint, Paint::GlyphRun { .. }),
-                        "glyph runs do not take image UV crops"
-                    );
-                    ensure!(
-                        uv.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v))
-                            && uv[2] > uv[0]
-                            && uv[3] > uv[1],
-                        "invalid source UV"
-                    );
-                }
-                let mut seen = BTreeSet::from([*id]);
-                let mut p = s.parent;
-                while let Some(id) = p {
-                    ensure!(
-                        seen.len() <= 64 && seen.insert(id),
-                        "layer parent cycle/depth"
-                    );
-                    p = owner.get(&id).context("layer parent missing")?.parent;
-                }
+                validate_layer(owner, *id, s, snapshots)?;
             }
         }
         self.validate_crossfades()
@@ -1382,7 +1604,8 @@ impl LayerSystem {
         self.composite_frame(canvas)
     }
     fn frame_plain(&self, canvas: [u32; 2]) -> Result<Vec<Primitive>> {
-        self.validate()?;
+        // State is valid by construction: every mutation path validates what
+        // it changed (apply_batch, install, restore via `validate`).
         ensure!(
             canvas.iter().all(|v| *v > 0 && *v <= 8192),
             "layer canvas bounds"
@@ -1395,6 +1618,9 @@ impl LayerSystem {
                 while let Some(id) = p {
                     let parent = owner.get(&id).context("layer parent missing")?;
                     chain.push(parent);
+                    // Unvalidated (e.g. directly deserialized) state: a chain
+                    // longer than the owner's layer count is a cycle.
+                    ensure!(chain.len() <= owner.len(), "layer parent cycle");
                     p = parent.parent;
                 }
                 chain.reverse();
@@ -1567,4 +1793,54 @@ fn point_bounds(corners: [Vec2; 4]) -> [f32; 4] {
         .copied()
         .fold(Vec2::splat(f32::NEG_INFINITY), Vec2::max);
     [min.x, min.y, max.x - min.x, max.y - min.y]
+}
+
+/// `root` and every spec below it within `specs`.
+fn descendants_of(specs: &[LayerSpec], root: u32) -> BTreeSet<u32> {
+    let mut ids = BTreeSet::from([root]);
+    loop {
+        let before = ids.len();
+        for s in specs {
+            if s.parent.is_some_and(|p| ids.contains(&p)) {
+                ids.insert(s.id);
+            }
+        }
+        if ids.len() == before {
+            return ids;
+        }
+    }
+}
+
+/// Per-layer invariants. The parent walk is bounded by depth instead of a
+/// visited set: a cycle exceeds the depth limit, so no allocation is needed.
+fn validate_layer(owner: &BTreeMap<u32, LayerSpec>, id: u32, s: &LayerSpec, snapshots: bool) -> Result<()> {
+    ensure!(id == s.id && rect_valid(s.rect), "invalid layer identity/bounds");
+    if snapshots || !matches!(s.paint, Paint::Snapshot { .. }) {
+        s.paint.validate()?;
+    }
+    s.transform.validate()?;
+    if let Some(clip) = s.clip {
+        ensure!(rect_valid(clip), "invalid layer clip");
+    }
+    if let Some(f) = &s.filter {
+        f.validate()?;
+    }
+    if let Some(uv) = s.uv {
+        ensure!(
+            !matches!(s.paint, Paint::GlyphRun { .. }),
+            "glyph runs do not take image UV crops"
+        );
+        ensure!(
+            uv.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) && uv[2] > uv[0] && uv[3] > uv[1],
+            "invalid source UV"
+        );
+    }
+    let mut depth = 0;
+    let mut p = s.parent;
+    while let Some(parent) = p {
+        depth += 1;
+        ensure!(depth <= 64 && parent != id, "layer parent cycle/depth");
+        p = owner.get(&parent).context("layer parent missing")?.parent;
+    }
+    Ok(())
 }

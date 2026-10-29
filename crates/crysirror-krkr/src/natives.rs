@@ -7,7 +7,7 @@
 //! semantics need an engine capability CrySirror does not offer yet throw a
 //! TJS exception naming that capability; nothing is silently stubbed.
 use crate::host::{KrkrHost, LayerState, TimerState, WindowState};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError, compile_source_to_bytecode,
     runtime::{Closure, NativeArgCount, ObjectHandle, Runtime, TjsHost, Variant},
 };
@@ -22,6 +22,8 @@ pub fn install(rt: &mut Rt) {
     install_debug(rt);
     install_storages(rt);
     install_scripts(rt);
+    // PackinOne tjsDataPack + Storages octet I/O (vendored from Kirakira).
+    crate::kirakira::packinone::install(rt);
     install_plugins(rt);
     install_timer(rt);
     crate::async_trigger::install(rt);
@@ -63,11 +65,13 @@ pub(crate) fn int(args: &[Variant], i: usize, default: i64) -> Result<i64> {
     }
 }
 
+/// A required integer argument. A short argument list is an error; a passed
+/// `void` is 0, as krkrz natives read `(tjs_int)*param[i]` (ButtonLayer
+/// `_copyButton2` passes a void y to operateRect).
 pub(crate) fn need_int(args: &[Variant], i: usize, what: &str) -> Result<i64> {
     match args.get(i) {
-        None | Some(Variant::Void) => {
-            Err(TjsError::runtime(format!("{what}: argument {i} required")))
-        }
+        None => Err(TjsError::runtime(format!("{what}: argument {i} required"))),
+        Some(Variant::Void) => Ok(0),
         Some(v) => v.to_integer(),
     }
 }
@@ -110,6 +114,108 @@ pub(crate) fn properties(rt: &mut Rt, h: ObjectHandle, list: &[(&str, Getter, Se
         let (g, s) = (*g, *s);
         rt.register_object_native_property(h, *name, g, s);
     }
+}
+
+/// `enabled` along the parent chain (krkrz GetEnabled && ParentEnabled).
+fn layer_node_enabled_plain(rt: &Rt, h: ObjectHandle) -> Result<bool> {
+    let mut node = Some(h.0);
+    let mut depth = 0;
+    while let Some(id) = node {
+        if !rt.object_member(ObjectHandle(id), "__lp_enabled").is_truthy() {
+            return Ok(false);
+        }
+        node = rt.host().layer(ObjectHandle(id))?.parent;
+        depth += 1;
+        if depth > 64 {
+            return Err(TjsError::runtime("layer enable ancestry limit"));
+        }
+    }
+    Ok(true)
+}
+
+/// krkrz GetNodeEnabled: enabled chain and not disabled by a modal layer.
+pub(crate) fn layer_node_enabled(rt: &Rt, h: ObjectHandle) -> Result<bool> {
+    Ok(layer_node_enabled_plain(rt, h)? && !rt.host().disabled_by_mode(h.0))
+}
+
+/// Visible along the parent chain (krkrz GetParentVisible including self).
+fn layer_tree_visible(rt: &Rt, h: ObjectHandle) -> Result<bool> {
+    let mut node = Some(h.0);
+    let mut depth = 0;
+    while let Some(id) = node {
+        let l = rt.host().layer(ObjectHandle(id))?;
+        if !l.visible {
+            return Ok(false);
+        }
+        node = l.parent;
+        depth += 1;
+        if depth > 64 {
+            return Err(TjsError::runtime("layer visibility ancestry limit"));
+        }
+    }
+    Ok(true)
+}
+
+/// krkrz SearchFirstFocusable: this layer, then its children in order,
+/// depth first: the first visible, node-enabled, focusable one.
+fn first_focusable(rt: &Rt, root: ObjectHandle) -> Result<Option<ObjectHandle>> {
+    let mut stack = vec![root.0];
+    let mut seen = 0;
+    while let Some(id) = stack.pop() {
+        seen += 1;
+        if seen > 65536 {
+            return Err(TjsError::runtime("layer focus search limit"));
+        }
+        let h = ObjectHandle(id);
+        let l = rt.host().layer(h)?;
+        if !l.visible {
+            continue;
+        }
+        if rt.object_member(h, "__lp_focusable").is_truthy() && layer_node_enabled(rt, h)? {
+            return Ok(Some(h));
+        }
+        stack.extend(rt.host().sorted_children(id).into_iter().rev());
+    }
+    Ok(None)
+}
+
+/// krkrz RemoveTreeModalState: modal layers inside `root`'s subtree stop
+/// being modal (the layer was hidden or disabled).
+fn remove_tree_modal_state(rt: &mut Rt, root: ObjectHandle) {
+    let host = rt.host();
+    let keep: Vec<usize> = host
+        .modal_layers
+        .iter()
+        .copied()
+        .filter(|m| !host.is_ancestor_or_self(*m, root.0))
+        .collect();
+    rt.host_mut().modal_layers = keep;
+}
+
+fn node_enabled_states(rt: &Rt) -> Vec<(usize, bool)> {
+    let ids: Vec<usize> = rt.host().layers.keys().copied().collect();
+    ids.into_iter()
+        .map(|id| (id, layer_node_enabled(rt, ObjectHandle(id)).unwrap_or(false)))
+        .collect()
+}
+
+/// krkrz NotifyNodeEnabledState: onNodeEnabled / onNodeDisabled, delivered
+/// immediately, to layers whose node-enabled state changed.
+fn notify_node_enabled(rt: &mut Rt, before: Vec<(usize, bool)>) -> Result<()> {
+    for (id, was) in before {
+        let h = ObjectHandle(id);
+        if rt.host().layer(h).is_err() || !rt.object_valid(h) {
+            continue;
+        }
+        let now = layer_node_enabled(rt, h)?;
+        if now != was {
+            let event = if now { "onNodeEnabled" } else { "onNodeDisabled" };
+            if has_member(rt, h, event) {
+                rt.call_object_method(h, event, vec![])?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn focused_layer(rt: &Rt, window: ObjectHandle) -> Option<ObjectHandle> {
@@ -198,10 +304,23 @@ pub fn run_source(
     rt.execute_file_with_this(&file, this)
 }
 
-pub fn exec_storage(rt: &mut Rt, name: &str) -> Result<Variant> {
+/// TVPExecuteStorage's first stage (`ScriptMgnIntf.cpp`, `tTJS::LoadByteCode`
+/// in `tjs.cpp`): TJS2 bytecode runs, and a `KBAD100` binary struct pack
+/// (`saveStruct(.., "b")`) is the result itself. `None`: a text script.
+fn storage_non_text(rt: &mut Rt, name: &str) -> Result<Option<Variant>> {
     let bytes = rt.host_mut().read_binary(name, "")?;
-    if bytes.starts_with(&krkr_tjs2::bytecode::BYTECODE_SIGNATURE) {
-        return rt.execute_bytecode(&bytes);
+    if bytes.starts_with(&crysirror_tjs2::bytecode::BYTECODE_SIGNATURE) {
+        return rt.execute_bytecode(&bytes).map(Some);
+    }
+    if bytes.starts_with(b"KBAD100\0") {
+        return Ok(Some(rt.decode_binary_struct(&bytes)?.unwrap_or_default()));
+    }
+    Ok(None)
+}
+
+pub fn exec_storage(rt: &mut Rt, name: &str) -> Result<Variant> {
+    if let Some(value) = storage_non_text(rt, name)? {
+        return Ok(value);
     }
     let source = rt.host_mut().read_text(name, "")?;
     run_source(rt, name, &source, None)
@@ -339,6 +458,20 @@ fn install_system(rt: &mut Rt) {
             (
                 "dataPath",
                 |_, _| Ok(Variant::String("file://./savedata/".into())),
+                read_only,
+            ),
+            // krkrz personalPath (the user's documents) and appDataPath
+            // (per-user application data) are host folders; the engine keeps
+            // every game write inside the sandboxed save capability root, so
+            // both are folders there, the same on every platform.
+            (
+                "personalPath",
+                |_, _| Ok(Variant::String("file://./savedata/personal/".into())),
+                read_only,
+            ),
+            (
+                "appDataPath",
+                |_, _| Ok(Variant::String("file://./savedata/appdata/".into())),
                 read_only,
             ),
             (
@@ -593,16 +726,29 @@ fn install_scripts(rt: &mut Rt) {
             // Binary data packs (`.pbd`): KBAD100 / TJS ns0 structs.
             ("loadDataPack", |rt, _, a| {
                 let name = string(&a, 0, "Scripts.loadDataPack")?;
-                let name = if name.to_ascii_lowercase().ends_with(".pbd") {
+                // The exact storage first (packs saved under a game-chosen
+                // name such as `datavc.ksd`), else the `.pbd` spelling.
+                let name = if name.to_ascii_lowercase().ends_with(".pbd")
+                    || rt.host().storage()?.resolve(&name).is_some()
+                {
                     name
                 } else {
                     format!("{name}.pbd")
                 };
+                if a.get(1).and_then(object_arg).is_some_and(|o| !matches!(rt.object_member(o, "outeriv"), Variant::Void)) {
+                    return Err(unsupported(
+                        "Scripts.loadDataPack outeriv",
+                        "an external data pack IV (the pack header IV is supported)",
+                    ));
+                }
                 let bytes = rt.host_mut().read_binary(&name, "")?;
                 let value = if bytes.starts_with(b"KBAD100\0") {
                     rt.decode_binary_struct(&bytes)?
-                } else if bytes.starts_with(b"TJS/ns0\0") || bytes.starts_with(b"TJS/4s0\0") {
-                    rt.decode_tjs_ns0(&bytes)?
+                } else if crysirror_resource::krkr_pbd::is_pbd(&bytes) {
+                    // Shared decoder: TJS/ns0 and (encrypted, LZ4) TJS/4s0.
+                    let value = crysirror_resource::krkr_pbd::decode(&bytes)
+                        .map_err(|e| TjsError::runtime(format!("Scripts.loadDataPack `{name}`: {e:#}")))?;
+                    Some(pbd_value(rt, value))
                 } else {
                     None
                 };
@@ -618,6 +764,9 @@ fn install_scripts(rt: &mut Rt) {
             }),
             ("evalStorage", |rt, _, a| {
                 let name = string(&a, 0, "Scripts.evalStorage")?;
+                if let Some(value) = storage_non_text(rt, &name)? {
+                    return Ok(value);
+                }
                 let source = rt.host_mut().read_text(&name, "")?;
                 if source.trim().is_empty() {
                     return Ok(Variant::Void);
@@ -639,6 +788,28 @@ fn install_scripts(rt: &mut Rt) {
             }),
         ],
     );
+}
+
+fn pbd_value(rt: &mut Rt, v: crysirror_resource::krkr_pbd::PbdValue) -> Variant {
+    use crysirror_resource::krkr_pbd::PbdValue as P;
+    match v {
+        P::Void => Variant::Void,
+        P::String(s) => Variant::String(s),
+        P::Integer(i) => Variant::Integer(i),
+        P::Real(r) => Variant::Real(r),
+        P::Array(items) => {
+            let items = items.into_iter().map(|v| pbd_value(rt, v)).collect();
+            Variant::Object(rt.alloc_array_object(items))
+        }
+        P::Dictionary(entries) => {
+            let h = rt.alloc_dictionary_object();
+            for (k, v) in entries {
+                let v = pbd_value(rt, v);
+                rt.set_object_member(h, k, v);
+            }
+            Variant::Object(h)
+        }
+    }
 }
 
 fn install_plugins(rt: &mut Rt) {
@@ -804,6 +975,7 @@ fn install_window(rt: &mut Rt) {
         );
         let root = crate::menus::root(rt, h)?;
         rt.host_mut().windows.get_mut(&h.0).unwrap().menu = Some(root.0);
+        rt.host_mut().menus_revision += 1;
         rt.set_object_member(h, "__caption", Variant::String(String::new()));
         if let Variant::Object(class) = rt.global_member("Window") {
             rt.set_object_member(class, "mainWindow", Variant::self_bound(h));
@@ -1046,6 +1218,14 @@ fn install_window(rt: &mut Rt) {
             ("registerHotKey", |rt, t, a| {
                 let h = this_of(rt, t, "Window.registerHotKey")?;
                 let id = need_int(&a, 0, "Window.registerHotKey")?;
+                // `registerHotKey(id)` with no key removes the registration
+                // (the game does so before screen-mode changes and on shutdown).
+                if a.get(1).is_none_or(|v| matches!(v, Variant::Void)) {
+                    if let Some(table) = rt.object_member(h, "__hotkeys").object_handle() {
+                        rt.delete_object_member(table, &id.to_string());
+                    }
+                    return Ok(Variant::Integer(1));
+                }
                 let table = match rt.object_member(h, "__hotkeys").object_handle() {
                     Some(t) => t,
                     None => {
@@ -1078,8 +1258,34 @@ fn install_window(rt: &mut Rt) {
             ("update", |_, _, _| Ok(Variant::Void)),
             ("add", |_, _, _| Ok(Variant::Void)),
             ("remove", |_, _, _| Ok(Variant::Void)),
-            ("close", |rt, _, _| {
-                rt.host_mut().exit_requested = true;
+            // krkrz TTVPWindowForm::Close (program close): `CanCloseWork`
+            // starts true, onCloseQuery(true) runs immediately and its
+            // `super.onCloseQuery(b)` decides; only an accepted query closes.
+            ("close", |rt, t, _| {
+                let h = this_of(rt, t, "Window.close")?;
+                // A program close supersedes an unanswered user close.
+                rt.host_mut().closing_by_user = false;
+                rt.host_mut().close_decision = true;
+                rt.call_object_method(h, "onCloseQuery", vec![Variant::Integer(1)])?;
+                if rt.host().close_decision {
+                    rt.host_mut().exit_requested = true;
+                }
+                Ok(Variant::Void)
+            }),
+            // The native default handler (`OnCloseQueryCalled`): a user close
+            // closes on `true` and is cancelled on `false`; a program close
+            // records the answer for `close()`.
+            ("onCloseQuery", |rt, _, a| {
+                let allow = a.first().is_some_and(Variant::is_truthy);
+                let host = rt.host_mut();
+                if host.closing_by_user {
+                    host.closing_by_user = false;
+                    if allow {
+                        host.exit_requested = true;
+                    }
+                } else {
+                    host.close_decision = allow;
+                }
                 Ok(Variant::Void)
             }),
             ("showModal", |_, _, _| {
@@ -1354,8 +1560,23 @@ fn install_layer(rt: &mut Rt) {
             move |rt, t, v| {
                 let h = this_of(rt, t, "Layer")?;
                 let v = Variant::Integer(v.to_integer()?);
+                if slot != "__lp_enabled" {
+                    rt.set_object_member(h, slot, v);
+                    return Ok(());
+                }
+                // krkrz SetEnabled: a change notifies node-enabled states, and
+                // disabling runs BlurTree, which drops modal state in the tree.
+                let enable = v.is_truthy();
+                if rt.object_member(h, slot).is_truthy() == enable {
+                    rt.set_object_member(h, slot, v);
+                    return Ok(());
+                }
+                let before = node_enabled_states(rt);
                 rt.set_object_member(h, slot, v);
-                Ok(())
+                if !enable {
+                    remove_tree_modal_state(rt, h);
+                }
+                notify_node_enabled(rt, before)
             },
         );
     }
@@ -1377,6 +1598,9 @@ fn install_layer(rt: &mut Rt) {
             ("onMouseMove", |_, _, _| Ok(Variant::Void)),
             ("onClick", |_, _, _| Ok(Variant::Void)),
             ("onPaint", |_, _, _| Ok(Variant::Void)),
+            // krkrz default handlers of the modal-mode notifications.
+            ("onNodeEnabled", |_, _, _| Ok(Variant::Void)),
+            ("onNodeDisabled", |_, _, _| Ok(Variant::Void)),
             // Pixel representation conversion (from a draw face to this layer's
             // type). The adapter stores every layer canonically as straight
             // alpha composited normally, which renders ltAlpha and ltAddAlpha
@@ -1466,18 +1690,59 @@ fn install_layer(rt: &mut Rt) {
                     .map_err(|e| TjsError::runtime(e.to_string()))?;
                 Ok(Variant::Integer(v as i64))
             }),
-            // No modal mode is admitted by this profile. Removing the absent
-            // mode is valid; entering one remains an explicit capability error.
+            // krkrz tTVPLayerManager::SetModeTo / RemoveModeFrom: input and
+            // focus are limited to the current modal layer's subtree; layers
+            // outside it hit-test as disabled (blocking, not passing through).
             ("removeMode", |rt, t, _| {
                 let h = this_of(rt, t, "Layer.removeMode")?;
                 rt.host().layer(h)?;
+                if std::env::var_os("CRYSIRROR_KRKR_TRACE_MODE").is_some() {
+                    let name = rt.object_member(h, "name").to_tjs_string().unwrap_or_default();
+                    rt.host_mut().push_log(format!("[mode] removeMode {name}#{}", h.0));
+                }
+                if !rt.host().modal_layers.contains(&h.0) {
+                    return Ok(Variant::Void);
+                }
+                let before = node_enabled_states(rt);
+                rt.host_mut().modal_layers.retain(|l| *l != h.0);
+                notify_node_enabled(rt, before)?;
                 Ok(Variant::Void)
             }),
-            ("setMode", |_, _, _| {
-                Err(unsupported(
-                    "Layer.setMode",
-                    "shared native-layer modal input mapping",
-                ))
+            ("setMode", |rt, t, _| {
+                let h = this_of(rt, t, "Layer.setMode")?;
+                if std::env::var_os("CRYSIRROR_KRKR_TRACE_MODE").is_some() {
+                    let name = rt.object_member(h, "name").to_tjs_string().unwrap_or_default();
+                    let stack: Vec<String> = rt.host().modal_layers.iter().map(|l| {
+                        rt.object_member(ObjectHandle(*l), "name").to_tjs_string().unwrap_or_default() + "#" + &l.to_string()
+                    }).collect();
+                    rt.host_mut().push_log(format!("[mode] setMode {name}#{} stack={stack:?}", h.0));
+                }
+                let refuse = |why: &str| {
+                    TjsError::runtime(format!("Layer.setMode: cannot set mode to a disabled or modal layer ({why})"))
+                };
+                if let Some(current) = rt.host().modal_layers.last().copied() {
+                    if rt.host().is_ancestor_or_self(h.0, current) {
+                        return Err(refuse("inside the current modal layer"));
+                    }
+                }
+                if !rt.host().layer(h)?.visible {
+                    let l = rt.host_mut().layer_mut(h)?;
+                    l.visible = true;
+                    l.dirty = true;
+                }
+                if !layer_tree_visible(rt, h)? {
+                    return Err(refuse("a parent is invisible"));
+                }
+                if !layer_node_enabled_plain(rt, h)? {
+                    return Err(refuse("disabled"));
+                }
+                let before = node_enabled_states(rt);
+                rt.host_mut().modal_layers.push(h.0);
+                let window = ObjectHandle(rt.host().layer(h)?.window);
+                let first = first_focusable(rt, h)?;
+                set_focus(rt, window, first, true)?;
+                notify_node_enabled(rt, before)?;
+                Ok(Variant::Void)
             }),
             ("focus", |rt, t, a| {
                 let h = this_of(rt, t, "Layer.focus")?;
@@ -1568,9 +1833,7 @@ fn install_layer(rt: &mut Rt) {
             ("piledCopy", crate::piled_copy::copy),
             ("stretchCopy", layer_stretch_copy),
             ("affineCopy", layer_affine_copy),
-            ("operateStretch", |_, _, _| {
-                Err(unsupported("Layer.operateStretch", "scaled canvas copies"))
-            }),
+            ("operateStretch", layer_operate_stretch),
             ("operateAffine", |_, _, _| {
                 Err(unsupported("Layer.operateAffine", "affine canvas copies"))
             }),
@@ -1620,22 +1883,7 @@ fn install_layer(rt: &mut Rt) {
                 "nodeEnabled",
                 |rt, t| {
                     let h = this_of(rt, t, "Layer.nodeEnabled")?;
-                    let mut node = Some(h.0);
-                    let mut depth = 0;
-                    while let Some(id) = node {
-                        if !rt
-                            .object_member(ObjectHandle(id), "__lp_enabled")
-                            .is_truthy()
-                        {
-                            return Ok(Variant::Integer(0));
-                        }
-                        node = rt.host().layer(ObjectHandle(id))?.parent;
-                        depth += 1;
-                        if depth > 64 {
-                            return Err(TjsError::runtime("layer enable ancestry limit"));
-                        }
-                    }
-                    Ok(Variant::Integer(1))
+                    Ok(Variant::Integer(layer_node_enabled(rt, h)? as i64))
                 },
                 read_only,
             ),
@@ -1797,9 +2045,19 @@ fn install_layer(rt: &mut Rt) {
                 "visible",
                 |rt, t| layer_get(rt, t, |l| l.visible as i64),
                 |rt, t, v| {
-                    layer_set(rt, t, Variant::Integer(boolean(&v) as i64), |l, x| {
+                    let show = boolean(&v);
+                    layer_set(rt, t, Variant::Integer(show as i64), |l, x| {
                         l.visible = x != 0
-                    })
+                    })?;
+                    // krkrz SetVisible(false) runs BlurTree (modal state in
+                    // the hidden tree is removed, with node-enabled notices).
+                    let h = this_of(rt, t, "Layer.visible")?;
+                    if !show && rt.host().modal_layers.iter().any(|m| rt.host().is_ancestor_or_self(*m, h.0)) {
+                        let before = node_enabled_states(rt);
+                        remove_tree_modal_state(rt, h);
+                        notify_node_enabled(rt, before)?;
+                    }
+                    Ok(())
                 },
             ),
             (
@@ -2201,6 +2459,38 @@ fn layer_color_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Re
             .map_err(|e| TjsError::runtime(e.to_string()))?;
         return Ok(Variant::Void);
     }
+    let face = rt.object_member(h, "__lp_face").to_integer().unwrap_or(0);
+    let hold = rt.object_member(h, "__lp_holdAlpha").to_integer().unwrap_or(0) != 0;
+    if hold && matches!(face, 0 | 1 | 128) {
+        // krkrz ColorRect with holdAlpha: blend the colour at `opa` onto the
+        // destination colour, alpha kept (source-atop solid).
+        let r = [
+            need_int(&a, 0, "Layer.colorRect")?,
+            need_int(&a, 1, "Layer.colorRect")?,
+            need_int(&a, 2, "Layer.colorRect")?,
+            need_int(&a, 3, "Layer.colorRect")?,
+        ];
+        let opa = int(&a, 5, 255)?;
+        if !(0..=255).contains(&opa) {
+            return Err(unsupported(
+                &format!("Layer.colorRect holdAlpha opacity {opa}"),
+                "atop colour blend 0..=255",
+            ));
+        }
+        let color = argb(need_int(&a, 4, "Layer.colorRect")?, Some(opa));
+        let l = rt.host().layer(h)?.clone();
+        let Some([x, y, w, ht]) = clip_rect(&l, r).filter(|_| r[2] > 0 && r[3] > 0 && opa > 0) else {
+            return Ok(Variant::Void);
+        };
+        if !l.blank {
+            let host = rt.host_mut();
+            host.canvas_op(json!({"op":"draw","id":l.slot,"atop":"normal",
+                "layer":{"id":0,"rect":[x,y,w,ht],"paint":{"kind":"solid","color":color}}}));
+            host.layer_mut(h)?.image_source = None;
+            host.api_calls += 1;
+        }
+        return Ok(Variant::Void);
+    }
     check_face(rt, h, "Layer.colorRect")?;
     let [x, y, w, ht] = [
         need_int(&a, 0, "Layer.colorRect")?,
@@ -2258,7 +2548,29 @@ fn layer_copy(
         "Layer.operateRect"
     };
     let h = this_of(rt, t, member)?;
-    check_face(rt, h, member)?;
+    // holdAlpha with a colour face: operateRect blends onto the colour and
+    // keeps the destination alpha (source-atop; PSD clipping layers).
+    let face = rt.object_member(h, "__lp_face").to_integer().unwrap_or(0);
+    let hold = rt.object_member(h, "__lp_holdAlpha").to_integer().unwrap_or(0) != 0;
+    let atop = hold && !replace && matches!(face, 0 | 1 | 128);
+    if !atop {
+        check_face(rt, h, member)?;
+    }
+    // krkrz LayerBitmapIntf: Photoshop modes with holdAlpha use the `_HDA`
+    // (hold destination alpha) kernels; without it they zero the alpha.
+    let mode = if replace { 128 } else { int(&a, 7, 128)? };
+    let atop_mode = match (atop, mode) {
+        (false, _) => None,
+        (true, 2 | 13 | 128) => Some("normal"),
+        (true, 16) => Some("multiply"),
+        (true, 17) => Some("screen"),
+        (true, m) => {
+            return Err(unsupported(
+                &format!("{member} holdAlpha mode {m}"),
+                "keep-alpha canvas blend for this operation mode",
+            ))
+        }
+    };
     let (dx, dy) = (need_int(&a, 0, member)?, need_int(&a, 1, member)?);
     let src = a
         .get(2)
@@ -2274,18 +2586,22 @@ fn layer_copy(
     if !replace {
         let mode = int(&a, 7, 128)?;
         let opa = int(&a, 8, 255)?;
-        if !matches!(mode, 2 | 128) {
+        if !matches!(mode, 2 | 128) && atop_mode.is_none() {
             return Err(unsupported(
                 &format!("{member} mode {mode}"),
                 "canvas blend operation modes",
             ));
         }
-        if opa != 255 {
+        if !(0..=255).contains(&opa) {
             return Err(unsupported(
                 &format!("{member} opacity {opa}"),
-                "isolated canvas copy opacity",
+                "canvas copy opacity 0..=255",
             ));
         }
+    }
+    let opa = if replace { 255 } else { int(&a, 8, 255)? };
+    if opa == 0 {
+        return Ok(Variant::Void);
     }
     if sw <= 0 || sh <= 0 {
         return Ok(Variant::Void);
@@ -2305,9 +2621,15 @@ fn layer_copy(
     let host = rt.host_mut();
     host.canvas_op(
         json!({"op":"copy","source":source.slot,"destination":dest.slot,
-        "rect":[sx,sy,sw,sh],"position":[dx,dy],"opacity":255,"replace":replace && (whole || !dest.blank),
-        "clip":dest.draw_clip}),
+        "rect":[sx,sy,sw,sh],"position":[dx,dy],"opacity":opa,"replace":replace && (whole || !dest.blank),
+        "clip":dest.draw_clip,"atop":atop_mode}),
     );
+    if atop {
+        // Alpha is unchanged; only colour moved.
+        host.layer_mut(h)?.image_source = None;
+        host.api_calls += 1;
+        return Ok(Variant::Void);
+    }
     let blank = (replace && whole && source.blank) || (dest.blank && source.blank);
     host.layer_mut(h)?.blank = blank;
     host.layer_mut(h)?.full_alpha = if replace && whole {
@@ -2464,16 +2786,32 @@ fn transform_copy(
     matrix: [f64; 6],
     member: &str,
 ) -> Result<Variant> {
+    transform_blit(rt, h, src, rect, matrix, None, member)
+}
+
+/// A transformed copy (`opacity: None`, replaces what it covers) or a
+/// transformed alpha blend at `opacity` over the destination (operate*).
+fn transform_blit(
+    rt: &mut Rt,
+    h: ObjectHandle,
+    src: ObjectHandle,
+    rect: [f64; 4],
+    matrix: [f64; 6],
+    opacity: Option<u8>,
+    member: &str,
+) -> Result<Variant> {
     check_face(rt, h, member)?;
-    if rect[2] <= 0. || rect[3] <= 0. {
+    if rect[2] <= 0. || rect[3] <= 0. || opacity == Some(0) {
         return Ok(Variant::Void);
     }
     let source = rt.host().layer(src)?.clone();
     let dest = rt.host().layer(h)?.clone();
     let host = rt.host_mut();
+    let replace = opacity.is_none() && !dest.blank;
     host.canvas_op(
         json!({"op":"transform_copy","source":source.slot,"destination":dest.slot,
-        "rect":rect,"matrix":matrix,"replace":!dest.blank,"clip":dest.draw_clip}),
+        "rect":rect,"matrix":matrix,"replace":replace,"clip":dest.draw_clip,
+        "opacity":opacity.unwrap_or(255)}),
     );
     host.layer_mut(h)?.blank = dest.blank && source.blank;
     host.layer_mut(h)?.full_alpha = None;
@@ -2504,6 +2842,39 @@ fn layer_stretch_copy(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> 
         [ax, 0., 0., dy, dl - ax * sl, dt - dy * st],
         M,
     )
+}
+
+/// `Layer.operateStretch(dl, dt, dw, dh, src, sl, st, sw, sh, mode, opacity,
+/// type)`: stretchCopy's geometry blended like operateRect. Normal alpha
+/// modes (omAuto/omAlpha) without holdAlpha are engine blends; others fail
+/// visibly. The stretch filter type selects interpolation quality only; the
+/// renderer's filtered sampling stands in for every type, as in stretchCopy.
+fn layer_operate_stretch(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
+    const M: &str = "Layer.operateStretch";
+    let h = this_of(rt, t, M)?;
+    if rt.object_member(h, "__lp_holdAlpha").to_integer().unwrap_or(0) != 0 {
+        return Err(unsupported(&format!("{M} with holdAlpha"), "keep-alpha transformed canvas blend"));
+    }
+    let mode = int(&a, 9, 128)?;
+    if !matches!(mode, 2 | 128) {
+        return Err(unsupported(&format!("{M} mode {mode}"), "canvas blend operation modes"));
+    }
+    let opa = int(&a, 10, 255)?;
+    let opacity = u8::try_from(opa)
+        .map_err(|_| unsupported(&format!("{M} opacity {opa}"), "canvas copy opacity 0..=255"))?;
+    let n = |i: usize| -> Result<f64> { Ok(need_int(&a, i, M)? as f64) };
+    let (dl, dt, dw, dh) = (n(0)?, n(1)?, n(2)?, n(3)?);
+    let src = a
+        .get(4)
+        .and_then(object_arg)
+        .map(|s| rt.bound_this(s).unwrap_or(s))
+        .ok_or_else(|| TjsError::runtime(format!("{M}: source must be a Layer")))?;
+    let (sl, st, sw, sh) = (n(5)?, n(6)?, n(7)?, n(8)?);
+    if sw <= 0. || sh <= 0. || dw == 0. || dh == 0. {
+        return Ok(Variant::Void);
+    }
+    let (ax, dy) = (dw / sw, dh / sh);
+    transform_blit(rt, h, src, [sl, st, sw, sh], [ax, 0., 0., dy, dl - ax * sl, dt - dy * st], Some(opacity), M)
 }
 
 fn layer_affine_copy(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {

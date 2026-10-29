@@ -45,3 +45,33 @@ class KrkrProbe(unittest.TestCase):
             (root / 'data.xp3').write_bytes(b'synthetic')
             with self.assertRaises(ValueError):
                 PROBE.probe(root, '../elsewhere.exe', root / 'binary', root / 'output')
+
+    def test_cxdec_profile_names_only_companions_and_mounts_sibling_archives(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            game = root / 'game'
+            (game / 'plugin').mkdir(parents=True)
+            for name in ('data.xp3', 'voice.xp3', 'game.exe', 'plugin/game.tpm'):
+                (game / name).write_bytes(b'synthetic')
+            binary = root / 'engine'
+            binary.write_bytes(b'synthetic')
+            seen = {}
+            def run(cmd, **kw):
+                project = json.loads(Path(cmd[2]).read_text())
+                seen['config'] = project['clients'][0]['config']
+                seen['script'] = Path(cmd[4]).read_text()
+                return types.SimpleNamespace(returncode=0)
+            with patch.object(PROBE.subprocess, 'run', side_effect=run):
+                PROBE.probe(game, 'game.exe', binary, root / 'proof', protection='cxdec',
+                            modules=['game.exe', 'plugin/game.tpm'])
+            self.assertEqual(seen['config']['startup'], 'startup.tjs')
+            self.assertIn('"cxdec_modules": ["game.exe", "plugin/game.tpm"]', seen['script'])
+            # The adapter reads the engine-validated setupArchiveData profile
+            # that the startup archive publishes; nothing title-specific here.
+            self.assertEqual(seen['config']['bootstrap_profile'], '__cxdec/protection.json')
+            self.assertIn('"cxdec_bootstrap_profile": "__cxdec/protection.json"', seen['script'])
+            self.assertIn('resources.mount("voice.xp3","__xp3/voice"', seen['script'])
+            self.assertNotIn('hxv4', seen['script'])
+            for bad in (['../x.tpm'], ['plugin/missing.tpm'], ['C:/x.tpm']):
+                with self.assertRaises(ValueError):
+                    PROBE.probe(game, 'game.exe', binary, root / 'proof', protection='cxdec', modules=bad)

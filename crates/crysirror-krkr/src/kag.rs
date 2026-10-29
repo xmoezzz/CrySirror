@@ -4,11 +4,11 @@
 //! KAGParser native semantics only. The original parser owns scenario control;
 //! script handlers draw through CrySirror's existing Layer/Canvas/Text services.
 use crate::natives::*;
-use krkr_kag::{
+use crysirror_kag::{
     Attribute, AttributeValue, CallFrame, DebugLevel, KagError, KagHost, KagParser, LabelEvent,
     ScenarioLoadEvent, ScriptEvent, Tag,
 };
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, TjsHost, Variant},
 };
@@ -107,7 +107,7 @@ fn publish_macros(rt: &mut Rt, h: ObjectHandle, p: &KagParser) -> Result<()> {
 fn operate(
     rt: &mut Rt,
     this: Option<ObjectHandle>,
-    f: impl FnOnce(&mut KagParser, &mut Bridge<'_>) -> krkr_kag::Result<Variant>,
+    f: impl FnOnce(&mut KagParser, &mut Bridge<'_>) -> crysirror_kag::Result<Variant>,
 ) -> Result<Variant> {
     let h = this_of(rt, this, "KAGParser")?;
     let mut p = synced_parser(rt, h)?;
@@ -398,7 +398,7 @@ impl Bridge<'_> {
         self.exception = Some(e);
         KagError::host(msg)
     }
-    fn call(&mut self, name: &str, args: Vec<Variant>) -> krkr_kag::Result<Option<Variant>> {
+    fn call(&mut self, name: &str, args: Vec<Variant>) -> crysirror_kag::Result<Option<Variant>> {
         if !has_member(self.rt, self.owner, name) {
             return Ok(None);
         }
@@ -408,7 +408,7 @@ impl Bridge<'_> {
         self.rt.host_mut().can_suspend = old;
         result.map(Some).map_err(|e| self.wrap(e))
     }
-    fn eval(&mut self, s: &str) -> krkr_kag::Result<Variant> {
+    fn eval(&mut self, s: &str) -> crysirror_kag::Result<Variant> {
         let old = self.rt.host().can_suspend;
         self.rt.host_mut().can_suspend = false;
         let result = run_source(
@@ -420,27 +420,27 @@ impl Bridge<'_> {
         self.rt.host_mut().can_suspend = old;
         result.map_err(|e| self.wrap(e))
     }
-    fn process(&mut self, name: &str, t: &Tag) -> krkr_kag::Result<bool> {
+    fn process(&mut self, name: &str, t: &Tag) -> crysirror_kag::Result<bool> {
         let extended = state(self.rt, self.owner).map(|s| s.extended).unwrap_or(false);
         let value = tag(self.rt, t, extended).map_err(|e| self.wrap(e))?;
         Ok(self.call(name, vec![value])?.is_none_or(|v| v.is_truthy()))
     }
 }
 impl KagHost for Bridge<'_> {
-    fn sync_parser_state(&mut self, p: &KagParser) -> krkr_kag::Result<()> {
+    fn sync_parser_state(&mut self, p: &KagParser) -> crysirror_kag::Result<()> {
         if let Some(s) = self.rt.host_mut().parsers.get_mut(&self.owner.0) {
             s.parser = p.clone();
         }
         publish_macros(self.rt, self.owner, p).map_err(|e| self.wrap(e))?;
         Ok(())
     }
-    fn load_scenario(&mut self, s: &str) -> krkr_kag::Result<String> {
+    fn load_scenario(&mut self, s: &str) -> crysirror_kag::Result<String> {
         self.rt
             .host_mut()
             .read_text(s, "")
             .map_err(|e| self.wrap(e))
     }
-    fn on_scenario_load(&mut self, e: ScenarioLoadEvent<'_>) -> krkr_kag::Result<Option<String>> {
+    fn on_scenario_load(&mut self, e: ScenarioLoadEvent<'_>) -> crysirror_kag::Result<Option<String>> {
         Ok(
             match self.call("onScenarioLoad", vec![Variant::String(e.storage.into())])? {
                 Some(Variant::String(s)) => Some(s),
@@ -448,7 +448,7 @@ impl KagHost for Bridge<'_> {
             },
         )
     }
-    fn on_scenario_loaded(&mut self, e: ScenarioLoadEvent<'_>) -> krkr_kag::Result<()> {
+    fn on_scenario_loaded(&mut self, e: ScenarioLoadEvent<'_>) -> crysirror_kag::Result<()> {
         self.rt
             .host_mut()
             .parsers
@@ -458,19 +458,19 @@ impl KagHost for Bridge<'_> {
         self.call("onScenarioLoaded", vec![Variant::String(e.storage.into())])?;
         Ok(())
     }
-    fn eval_bool(&mut self, s: &str) -> krkr_kag::Result<bool> {
+    fn eval_bool(&mut self, s: &str) -> crysirror_kag::Result<bool> {
         Ok(self.eval(s)?.is_truthy())
     }
-    fn eval_string(&mut self, s: &str) -> krkr_kag::Result<String> {
+    fn eval_string(&mut self, s: &str) -> crysirror_kag::Result<String> {
         self.eval(s)?.to_tjs_string().map_err(|e| self.wrap(e))
     }
-    fn eval_attribute(&mut self, s: &str) -> krkr_kag::Result<Option<String>> {
+    fn eval_attribute(&mut self, s: &str) -> crysirror_kag::Result<Option<String>> {
         match self.eval(s)? {
             Variant::Void => Ok(None),
             v => v.to_tjs_string().map(Some).map_err(|e| self.wrap(e)),
         }
     }
-    fn on_label(&mut self, e: LabelEvent<'_>) -> krkr_kag::Result<()> {
+    fn on_label(&mut self, e: LabelEvent<'_>) -> crysirror_kag::Result<()> {
         self.rt
             .host_mut()
             .parsers
@@ -489,7 +489,7 @@ impl KagHost for Bridge<'_> {
         )?;
         Ok(())
     }
-    fn on_script(&mut self, e: ScriptEvent<'_>) -> krkr_kag::Result<()> {
+    fn on_script(&mut self, e: ScriptEvent<'_>) -> crysirror_kag::Result<()> {
         let p = &state(self.rt, self.owner)
             .map_err(|e| KagError::host(e.to_string()))?
             .parser;
@@ -515,16 +515,16 @@ impl KagHost for Bridge<'_> {
         }
         Ok(())
     }
-    fn on_jump(&mut self, t: &Tag, _: Option<&str>, _: Option<&str>) -> krkr_kag::Result<bool> {
+    fn on_jump(&mut self, t: &Tag, _: Option<&str>, _: Option<&str>) -> crysirror_kag::Result<bool> {
         self.process("onJump", t)
     }
-    fn on_call(&mut self, t: &Tag, _: Option<&str>, _: Option<&str>) -> krkr_kag::Result<bool> {
+    fn on_call(&mut self, t: &Tag, _: Option<&str>, _: Option<&str>) -> crysirror_kag::Result<bool> {
         self.process("onCall", t)
     }
-    fn on_return(&mut self, t: &Tag, _: Option<&str>, _: Option<&str>) -> krkr_kag::Result<bool> {
+    fn on_return(&mut self, t: &Tag, _: Option<&str>, _: Option<&str>) -> crysirror_kag::Result<bool> {
         self.process("onReturn", t)
     }
-    fn on_after_return(&mut self, _: &CallFrame) -> krkr_kag::Result<()> {
+    fn on_after_return(&mut self, _: &CallFrame) -> crysirror_kag::Result<()> {
         self.call("onAfterReturn", vec![])?;
         Ok(())
     }

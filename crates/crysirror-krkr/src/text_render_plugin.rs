@@ -6,7 +6,7 @@
 //! (`onGetTextWidth`, `onFontChange`, `onEval`, `onLabel`) are its host.
 use crate::natives::{Rt, has_member, methods, need_int, object_arg, this_of};
 use crysirror_text::markup::{self, Apply, FIELDS, MarkupHost, MarkupLayout, OPTIONS};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, Variant},
 };
@@ -406,4 +406,17 @@ fn apply(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>, op: Apply) -> Re
         l.apply(op, |name| Ok(values.get(name).cloned()), host)
     })?;
     Ok(Variant::Void)
+}
+
+impl State {
+    pub(crate) fn invalidate(&mut self, object: usize) {
+        self.layouts.remove(&object);
+    }
+
+    pub(crate) fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
+        // Layouts are owned by script instances; only one inside a layout
+        // operation is pinned. A collected instance drops its layout via
+        // `invalidate`.
+        out.extend(self.busy.iter().map(|k| ObjectHandle(*k)));
+    }
 }

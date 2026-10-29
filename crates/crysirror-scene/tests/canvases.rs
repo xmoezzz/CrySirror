@@ -27,7 +27,7 @@ fn copy(rect: [f32; 4], position: [f32; 2], replace: bool) -> C {
         position,
         opacity: 255,
         replace,
-        clip: None,
+        clip: None, atop: None
     }
 }
 fn setup() -> (CanvasSystem, LayerSystem) {
@@ -44,7 +44,7 @@ fn setup() -> (CanvasSystem, LayerSystem) {
             },
             C::Draw {
                 id: 1,
-                layer: draw([0, 255, 0, 255]),
+                layer: draw([0, 255, 0, 255]), atop: None
             },
             C::Present {
                 id: 2,
@@ -180,16 +180,16 @@ fn errors_roll_back_canvas_and_generated_layers_atomically() {
             position: [0., 0.],
             opacity: 255,
             replace: false,
-            clip: None,
+            clip: None, atop: None
         },
         C::Copy {
             source: 1,
             destination: 2,
             rect: [0., 0., 10., 10.],
             position: [0., 0.],
-            opacity: 128,
-            replace: false,
-            clip: None,
+            opacity: 255,
+            replace: true,
+            clip: None, atop: Some(crysirror_scene::canvas::AtopMode::Normal)
         },
     ] {
         assert!(
@@ -217,7 +217,7 @@ fn dynamic_reveal_is_rejected_in_commands_and_restored_groups() {
     for command in [
         C::Draw {
             id: 1,
-            layer: layer.clone(),
+            layer: layer.clone(), atop: None
         },
         C::Set {
             id: 1,
@@ -325,7 +325,7 @@ fn transform_copy_rotates_and_scales_onto_exact_bounds() {
             rect: [0., 0., 4., 2.],
             matrix: [0., 1., -1., 0., 5., 1.],
             replace: true,
-            clip: None,
+            clip: None, opacity: 255,
         }],
         &mut l,
     )
@@ -350,7 +350,7 @@ fn transform_copy_rotates_and_scales_onto_exact_bounds() {
                 rect: [0., 0., 4., 2.],
                 matrix: [1., 0., 0.5, 1., 0., 0.],
                 replace: false,
-                clip: None,
+                clip: None, opacity: 255,
             }],
             &mut l,
         )
@@ -364,11 +364,42 @@ fn transform_copy_rotates_and_scales_onto_exact_bounds() {
             rect: [0., 0., 2., 2.],
             matrix: [2., 0., 0., 1., 0., 6.],
             replace: true,
-            clip: None,
+            clip: None, opacity: 255,
         }],
         &mut l,
     )
     .unwrap();
+}
+
+#[test]
+fn transform_copy_opacity_blends_the_group_over_the_destination() {
+    let (mut c, mut l) = setup();
+    let blend = |opacity, replace| C::TransformCopy {
+        source: 1,
+        destination: 2,
+        rect: [0., 0., 2., 2.],
+        matrix: [2., 0., 0., 2., 1., 1.],
+        replace,
+        clip: None,
+        opacity,
+    };
+    let before = c.surface(ClientId(1), 2).unwrap().nodes.len();
+    // Opacity 0 draws nothing; replace must be opaque.
+    c.apply_batch(ClientId(1), &[blend(0, false)], &mut l).unwrap();
+    assert_eq!(c.surface(ClientId(1), 2).unwrap().nodes.len(), before);
+    assert!(c.apply_batch(ClientId(1), &[blend(128, true)], &mut l).is_err());
+    c.apply_batch(ClientId(1), &[blend(128, false)], &mut l).unwrap();
+    // Overlapping source draws: one isolated snapshot draw over the covered
+    // destination region carries the opacity.
+    match c.surface(ClientId(1), 2).unwrap().nodes.last() {
+        Some(crysirror_scene::canvas::CanvasNode::Draw { layer }) => {
+            assert_eq!(layer.opacity, 128);
+            assert_eq!(layer.rect, [1., 1., 4., 4.]);
+            assert!(matches!(layer.paint, crysirror_scene::layer::Paint::Snapshot { .. }));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!l.frame([10, 10]).unwrap().is_empty());
 }
 
 #[test]
@@ -382,7 +413,7 @@ fn many_partial_replaces_stay_within_the_node_budget() {
             big(1),
             big(2),
             C::Clear { id: 1, color: [0, 0, 0, 0] },
-            C::Draw { id: 1, layer: draw([0, 255, 0, 255]) },
+            C::Draw { id: 1, layer: draw([0, 255, 0, 255]), atop: None },
             C::Clear { id: 2, color: [255, 255, 255, 0] },
         ],
         &mut l,
@@ -400,7 +431,7 @@ fn many_partial_replaces_stay_within_the_node_budget() {
                 position: [x, y],
                 opacity: 255,
                 replace: true,
-                clip: None,
+                clip: None, atop: None
             }],
             &mut l,
         )
@@ -423,6 +454,7 @@ fn draw_clip_and_replace_fill() {
             opacity: 255,
             replace: true,
             clip: Some([2., 2., 3., 3.]),
+            atop: None,
         }],
         &mut l,
     )
@@ -514,8 +546,8 @@ fn restoring_an_unchanged_saved_region_is_a_no_op() {
             &[
                 // Save the cell into a cleared scratch surface, restore it, redraw.
                 C::Fill { id: 9, rect: [0., 0., 10., 10.], color: [0; 4], replace: true, keep_alpha: false },
-                C::Copy { source: 1, destination: 9, rect: [2., 2., 4., 4.], position: [0., 0.], opacity: 255, replace: false, clip: None },
-                C::Copy { source: 9, destination: 1, rect: [0., 0., 4., 4.], position: [2., 2.], opacity: 255, replace: true, clip: None },
+                C::Copy { source: 1, destination: 9, rect: [2., 2., 4., 4.], position: [0., 0.], opacity: 255, replace: false, clip: None , atop: None},
+                C::Copy { source: 9, destination: 1, rect: [0., 0., 4., 4.], position: [2., 2.], opacity: 255, replace: true, clip: None , atop: None},
                 C::Fill { id: 1, rect: [2., 2., 4., 4.], color: [9, 9, 9, 40], replace: false, keep_alpha: false },
             ],
             &mut l,
@@ -527,3 +559,27 @@ fn restoring_an_unchanged_saved_region_is_a_no_op() {
     assert_eq!(sizes[19] - sizes[18], sizes[1] - sizes[0]);
     c.validate().unwrap();
 }
+
+#[test]
+fn atop_copy_keeps_destination_alpha_in_one_isolated_snapshot() {
+    use crysirror_scene::canvas::AtopMode;
+    let (mut c, mut l) = setup();
+    c.apply_batch(
+        ClientId(1),
+        &[
+            C::Fill { id: 2, rect: [0., 0., 6., 6.], color: [9, 9, 9, 128], replace: true, keep_alpha: false },
+            C::Copy { source: 1, destination: 2, rect: [0., 0., 4., 4.], position: [1., 1.], opacity: 255, replace: false, clip: None, atop: Some(AtopMode::Normal) },
+            // A second clipped draw over the same region inlines the first snapshot.
+            C::Copy { source: 1, destination: 2, rect: [0., 0., 4., 4.], position: [1., 1.], opacity: 255, replace: false, clip: None, atop: Some(AtopMode::Normal) },
+        ],
+        &mut l,
+    )
+    .unwrap();
+    let s = c.surface(ClientId(1), 2).unwrap();
+    let Some(CanvasNode::Draw { layer }) = s.nodes.last() else { panic!() };
+    let crysirror_scene::layer::Paint::Snapshot { layers, .. } = &layer.paint else { panic!() };
+    assert!(layers.iter().any(|l| l.blend == crysirror_scene::layer::Blend::Atop));
+    assert!(!layers.iter().any(|l| matches!(l.paint, crysirror_scene::layer::Paint::Snapshot { .. })));
+    c.validate().unwrap();
+}
+

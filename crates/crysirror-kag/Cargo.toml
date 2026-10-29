@@ -1,0 +1,15 @@
+[package]
+name = "crysirror-kag"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "KAG scenario parser for the optional KiriKiri adapter (derived from liulifox233/Kirakira, AGPL-3.0-or-later; see LICENSE)"
+autoexamples = false
+autobenches = false
+
+[lib]
+doctest = false
+
+[lints.rust]
+warnings = "allow"

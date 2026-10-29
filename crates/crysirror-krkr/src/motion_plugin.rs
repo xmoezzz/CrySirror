@@ -13,10 +13,11 @@ use crate::natives::{methods, string, this_of, unsupported, Rt};
 use crysirror_core::{service::HostServices, state::ClientId};
 use crysirror_puppet::PuppetFrame;
 use crysirror_puppet_eluna::motion::{
-    MotionClock, MotionJob, MotionModel, MotionSample, MotionTiming, MotionWorkers,
+    MotionClock, MotionJob, MotionModel, MotionSample, MotionStep, MotionTiming, MotionWorkers,
 };
+use eluna::EmoteStaticScene;
 use eluna::psb::PsbValue;
-use krkr_tjs2::{
+use crysirror_tjs2::{
     runtime::{Closure, ObjectHandle, Variant},
     Result, TjsError,
 };
@@ -106,6 +107,13 @@ struct Player {
     opacity: f32,
     visible: bool,
     completion: i64,
+    /// The last native step of this player and what it stepped (model,
+    /// object, animation); the next sample continues from it.
+    step: Option<(StepKey, Arc<EmoteStaticScene>)>,
+}
+type StepKey = (usize, String, String);
+fn step_key(model: &Arc<MotionModel>, object: &str, animation: &str) -> StepKey {
+    (Arc::as_ptr(model) as usize, object.to_owned(), animation.to_owned())
 }
 struct PendingLoad {
     manager: usize,
@@ -115,8 +123,10 @@ struct PendingLoad {
 }
 struct DrawJob {
     target: ObjectHandle,
+    player: usize,
+    key: StepKey,
     resource: Arc<Resource>,
-    job: MotionJob<PuppetFrame>,
+    job: MotionJob<MotionStep>,
 }
 #[derive(Default)]
 pub struct State {
@@ -125,7 +135,8 @@ pub struct State {
     adaptors: BTreeMap<usize, usize>,
     workers: Option<MotionWorkers>,
     loading: Option<PendingLoad>,
-    requested: BTreeMap<usize, (ObjectHandle, Arc<Resource>, MotionSample)>,
+    /// Target layer → (target, player, resource, sample).
+    requested: BTreeMap<usize, (ObjectHandle, usize, Arc<Resource>, MotionSample)>,
     drawing: BTreeMap<usize, DrawJob>,
     published: std::collections::BTreeSet<usize>,
     clears: BTreeMap<usize, [f32; 2]>,
@@ -310,6 +321,7 @@ pub fn install(rt: &mut Rt) {
                     opacity: 1.,
                     visible: true,
                     completion: 0,
+                    step: None,
                 },
             );
             Ok(Variant::Void)
@@ -618,6 +630,8 @@ fn install_player(rt: &mut Rt, c: ObjectHandle) {
                 p.resource = Some(resource);
                 p.animation = animation;
                 p.object = object;
+                // A new play starts a new step sequence.
+                p.step = None;
                 Ok(Variant::Void)
             }),
             ("stop", |rt, t, _| {
@@ -773,12 +787,21 @@ fn draw(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant
         affine: p.affine,
         size,
         opacity: if p.visible { p.opacity } else { 0. },
+        // Filled when the job launches, from the player's latest step.
+        previous: None,
     };
+    if std::env::var_os("CRYSIRROR_KRKR_TRACE_MOTION").is_some() {
+        eprintln!(
+            "[motion] sample layer={} {}/{} tick={:.1} dur={:.1} loop={:?} playing={} opacity={} vars={:?} affine={:?} size={:?}",
+            target.0, sample.object, sample.animation, sample.tick, p.clock.timing.duration,
+            p.clock.timing.loop_start, p.clock.playing, sample.opacity, sample.variables, sample.affine, sample.size
+        );
+    }
     rt.host_mut().motion.clears.remove(&target.0);
     rt.host_mut()
         .motion
         .requested
-        .insert(target.0, (target, resource, sample));
+        .insert(target.0, (target, h.0, resource, sample));
     let l = rt.host_mut().layer_mut(target)?;
     l.has_image = true;
     l.blank = false;
@@ -839,6 +862,23 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                         .to_owned(),
                     );
                 }
+                if let Some(dir) = std::env::var_os("CRYSIRROR_KRKR_DUMP_MOTION") {
+                    fn json(v: &PsbValue) -> serde_json::Value {
+                        match v {
+                            PsbValue::Object(o) => o.iter().map(|(k, v)| (k.clone(), json(v))).collect::<serde_json::Map<_, _>>().into(),
+                            PsbValue::List(l) => l.iter().map(json).collect::<Vec<_>>().into(),
+                            PsbValue::Int(i) => (*i).into(),
+                            PsbValue::Float(f) => (*f).into(),
+                            PsbValue::Double(f) => (*f).into(),
+                            PsbValue::Bool(b) => (*b).into(),
+                            PsbValue::String(s) => s.clone().into(),
+                            other => format!("{other:?}").chars().take(64).collect::<String>().into(),
+                        }
+                    }
+                    let name = pending.name.replace(['/', '>'], "_");
+                    let path = std::path::Path::new(&dir).join(format!("model-{name}.json"));
+                    let _ = std::fs::write(path, serde_json::to_vec(&json(&model.psb().root))?);
+                }
                 let metadata = model
                     .psb()
                     .root
@@ -882,7 +922,11 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
         if !rt.host().layers.contains_key(&target) {
             continue;
         }
-        if let Some(mut frame) = job.job.try_take()? {
+        if let Some(step) = job.job.try_take()? {
+            if let Some(p) = rt.host_mut().motion.players.get_mut(&job.player) {
+                p.step = Some((job.key.clone(), step.scene));
+            }
+            let mut frame = step.frame;
             frame.textures = job.resource.textures.clone();
             frame.validate()?;
             let layer = rt
@@ -896,6 +940,12 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                     frame.parts.len(),
                     frame.size
                 );
+            }
+            // Diagnostic: CRYSIRROR_KRKR_DUMP_MOTION=<dir> keeps the latest
+            // published frame of each target layer as JSON.
+            if let Some(dir) = std::env::var_os("CRYSIRROR_KRKR_DUMP_MOTION") {
+                let path = std::path::Path::new(&dir).join(format!("motion-{target}.json"));
+                let _ = std::fs::write(path, serde_json::to_vec(&frame)?);
             }
             if layer.attached {
                 host.present_puppet_frame(
@@ -914,7 +964,17 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
         if rt.host().motion.drawing.contains_key(&target) {
             continue;
         }
-        let (handle, resource, sample) = rt.host_mut().motion.requested.remove(&target).unwrap();
+        let (handle, player, resource, mut sample) =
+            rt.host_mut().motion.requested.remove(&target).unwrap();
+        let key = step_key(&sample.model, &sample.object, &sample.animation);
+        sample.previous = rt
+            .host()
+            .motion
+            .players
+            .get(&player)
+            .and_then(|p| p.step.as_ref())
+            .filter(|(k, _)| *k == key)
+            .map(|(_, scene)| scene.clone());
         let job = rt
             .host_mut()
             .motion
@@ -925,10 +985,28 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
             target,
             DrawJob {
                 target: handle,
+                player,
+                key,
                 resource,
                 job,
             },
         );
     }
     Ok(!loading)
+}
+
+impl State {
+    /// Managers, players, adaptors and in-flight loads/draws.
+    pub(crate) fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
+        out.extend(self.managers.keys().map(|k| ObjectHandle(*k)));
+        out.extend(self.players.iter().flat_map(|(k, p)| [ObjectHandle(*k), ObjectHandle(p.manager)]));
+        out.extend(self.adaptors.iter().flat_map(|(k, v)| [ObjectHandle(*k), ObjectHandle(*v)]));
+        if let Some(l) = &self.loading {
+            out.extend([ObjectHandle(l.manager), l.result]);
+        }
+        out.extend(self.requested.iter().flat_map(|(k, (h, ..))| [ObjectHandle(*k), *h]));
+        out.extend(self.drawing.iter().flat_map(|(k, j)| [ObjectHandle(*k), j.target]));
+        out.extend(self.published.iter().map(|k| ObjectHandle(*k)));
+        out.extend(self.clears.keys().map(|k| ObjectHandle(*k)));
+    }
 }

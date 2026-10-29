@@ -55,7 +55,7 @@
 //! only turn a silent short call into the reference's error.
 
 use crate::host::KrkrHost;
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{NativeArgCount, ObjectHandle, Runtime, Variant},
 };
@@ -412,17 +412,93 @@ fn install_dialog_statics(runtime: &mut Runtime<KrkrHost>, class: ObjectHandle) 
     runtime.register_object_native(class, "chooseColor", native_void);
 }
 
-// Pretend the user pressed the default button of the message box.
+/// `MessageBox(window, text, caption, type)` (`:1127`) on the engine's modal
+/// dialog (CrySirror change: engine-drawn on every platform instead of the
+/// Win32 box). The caller suspends until a button is chosen and receives the
+/// Win32 result (IDOK=1 .. IDCONTINUE=11). Button sets, default button
+/// (`MB_DEFBUTTONn`) and Escape follow Win32: Escape answers IDCANCEL when
+/// the box has a Cancel button, IDOK for a lone OK, and nothing otherwise.
+/// Labels are the Japanese Windows captions without mnemonics; icon flags
+/// are not drawn. MB_HELP and an unknown button set fail visibly.
 fn message_box(
-    _runtime: &mut Runtime<KrkrHost>,
+    rt: &mut Runtime<KrkrHost>,
     _this_obj: Option<ObjectHandle>,
     args: Vec<Variant>,
 ) -> Result<Variant> {
-    // CrySirror change: the reference shows a modal box and returns the
-    // pressed button; without a dialog service it fails visibly instead of
-    // answering the default button.
-    let _ = (_runtime, _this_obj, args);
-    Err(crate::natives::unsupported("WIN32Dialog.messageBox", "a modal dialog service"))
+    const M: &str = "WIN32Dialog.messageBox";
+    let text = |i: usize| -> Result<String> {
+        match args.get(i) {
+            None | Some(Variant::Void) => Ok(String::new()),
+            Some(v) => v.to_tjs_string(),
+        }
+    };
+    let (message, caption) = (text(1)?, text(2)?);
+    let kind = args.get(3).map(Variant::to_integer).transpose()?.unwrap_or(0);
+    let (ok, cancel, abort, retry, ignore, yes, no, again, cont) = (
+        (1, "OK"), (2, "キャンセル"), (3, "中止"), (4, "再試行"), (5, "無視"),
+        (6, "はい"), (7, "いいえ"), (10, "再実行"), (11, "続行"),
+    );
+    let (buttons, escape): (Vec<(i64, &str)>, Option<i64>) = match kind & 0xF {
+        0 => (vec![ok], Some(1)),
+        1 => (vec![ok, cancel], Some(2)),
+        2 => (vec![abort, retry, ignore], None),
+        3 => (vec![yes, no, cancel], Some(2)),
+        4 => (vec![yes, no], None),
+        5 => (vec![retry, cancel], Some(2)),
+        6 => (vec![cancel, again, cont], Some(2)),
+        other => {
+            return Err(crate::natives::unsupported(
+                &format!("{M} button set {other}"),
+                "Win32 message box button sets 0..=6",
+            ))
+        }
+    };
+    if kind & 0x4000 != 0 {
+        return Err(crate::natives::unsupported(&format!("{M} MB_HELP"), "a dialog help callback"));
+    }
+    // MB_DEFBUTTON1..4; an index past the last button selects the first.
+    let default = buttons.get(((kind >> 8) & 0xF) as usize).unwrap_or(&buttons[0]).0;
+    if !rt.host().can_suspend {
+        return Err(crate::natives::unsupported(&format!("{M} in this callback"), "a resumable TJS boundary"));
+    }
+    let host = rt.host_mut();
+    if host.dialog_pending.is_some() {
+        return Err(TjsError::runtime(format!("{M}: a message box is already open")));
+    }
+    host.dialog_serial = host.dialog_serial % 65535 + 1;
+    let id = host.dialog_serial;
+    let spec = serde_json::json!({
+        "id": id, "title": caption, "message": message, "default": default, "cancel": escape,
+        "buttons": buttons.iter().map(|(id, label)| serde_json::json!({"id": id, "label": label})).collect::<Vec<_>>(),
+        "font": host.font,
+    });
+    host.ui_op(serde_json::json!({"op": "open_dialog", "dialog": spec}));
+    host.dialog_pending = Some(id);
+    rt.request_suspend();
+    // Replaced by the chosen button's id when the caller resumes.
+    Ok(Variant::Integer(0))
+}
+
+/// Resume a caller waiting in `messageBox` once its dialog has a result.
+/// `Ok(false)` while it is still open.
+pub fn poll(
+    rt: &mut Runtime<KrkrHost>,
+    host: &mut dyn crysirror_core::service::HostServices,
+    client: crysirror_core::state::ClientId,
+) -> anyhow::Result<bool> {
+    let Some(id) = rt.host().dialog_pending else {
+        return Ok(true);
+    };
+    let bytes = host
+        .query_engine(client, crysirror_core::service::EngineQuery::DialogEvents)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let events: Vec<crysirror_scene::ui::UiEvent> = serde_json::from_slice(&bytes)?;
+    let Some(event) = events.iter().find(|e| e.widget.id == id) else {
+        return Ok(false);
+    };
+    rt.host_mut().dialog_pending = None;
+    rt.set_resume_value(Variant::Integer(event.value as i64));
+    Ok(true)
 }
 
 // -------------------------------------------------------------

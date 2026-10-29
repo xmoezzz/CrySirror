@@ -177,3 +177,16 @@ cases were rerun and passed. The reviewed corpus is in `tools/bitmap_reference.r
 the guard and command are the same `tools/compare_bitmap_upstream.py` above.
 The actual log is `target/associated-upstream.log`; no game, font or device was
 used. These results cover those byte operations, not full AVG32 VM compatibility.
+
+## AVG32 raster device (2026-10-30)
+
+`avg32/{buffer,bank,effect}.rs` are siglus_rs `crates/avg32/src/{buffer,
+pdtmgr,effect}.rs` at 5f358ef1360b0439e92aed2b749e8f25d8721954 (MPL-2.0),
+moved out of the AVG32 interpreter so the 32-buffer RGB+mask bank, its copy,
+mask, colour-key, swap, fill, fade, monochrome, invert, stretch and get/put
+primitives and every native screen transition are shared CrySirror code
+usable without the VM. Changes: module paths; buffer-0 write damage
+(`mark_damage`/`take_damage`) recorded by `after_draw`, `copy_back_buffer`
+and the effect runner; a present `revision` counter; three unneeded `mut`
+bindings. Upstream unit tests are retained. Not yet exposed through the
+script `Bitmap` API.

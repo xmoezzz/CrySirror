@@ -22,8 +22,8 @@ The bare Runtime registers the first two; hosts explicitly register other VMs.
 `siglus` is the independent subset in crysirror-siglus-vm; it is not a full
 Siglus integration. Explicit `message_window` configuration enables the plain
 TEXT/NAME profile described below. Unconfigured or unmapped text fails visibly.
-`avg32` executes the original upstream Scenario library's portable profile;
-it does not link the original System or renderer.
+`avg32` runs an installed AVG32 game with the vendored original interpreter
+(ADR 0095); raster work is the shared `crysirror_image::avg32` device.
 
 ## Acceptance
 
@@ -126,6 +126,20 @@ Only opaque full-size image loads and the documented plain text profile are
 mapped initially. Other drawing/effect/layout/movie operations and both native
 saves and framework snapshots fail visibly. No commercial AVG32 game is
 claimed complete. See [ADR 0062](adr/0062-avg32-portable-vm-engine-apis.md).
+
+## AVG32 installed games (2026-10-30)
+
+Superseding the runtime above: `crysirror-avg32` vendors the original
+interpreter from siglus_rs 5f358ef (`src/vm`, `SOURCE.json`) and runs an
+installed game given `{root, font, encoding?}`. PDT buffers, copies and all
+transitions are `crysirror_image::avg32`; the presented screen is one engine
+surface layer; text that the original rasterised onto buffer 0 is a retained
+GlyphRun layer that drops where buffer 0 is next overwritten; menus, backlog
+and name entry are engine solid/GlyphRun layers; audio uses engine channels;
+`SAVE.INI` is read/written in the original layout on the client save mount.
+Text into other PDT buffers and Cinepak movies are reported as warnings in
+diagnostics; framework snapshots fail. See
+[ADR 0095](adr/0095-avg32-installed-games-shared-raster.md).
 
 ## Shared modular effects (2026-10-26)
 

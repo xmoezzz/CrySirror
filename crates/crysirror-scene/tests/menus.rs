@@ -45,7 +45,7 @@ fn native_free_menu_layout_activation_and_radio_state_are_engine_owned() {
     }
     assert_eq!(ui.events.len(), 256);
     ui.validate().unwrap();
-    assert_eq!(ui.drain_events(1, true).len(), 256);
+    assert_eq!(ui.drain_events(1, Some("menu_activate")).len(), 256);
     assert!(ui.events.is_empty());
 }
 #[test]
@@ -163,4 +163,31 @@ fn dismissing_a_menu_does_not_synthesize_a_second_press_from_a_held_button() {
     .unwrap();
     assert_eq!(ui.frame([640, 480]).unwrap().len(), 2);
     assert!(ui.events.is_empty());
+}
+#[test]
+fn native_bar_presentation_keeps_trees_radio_state_and_events_engine_owned() {
+    let mut ui = UiSystem::default();
+    ui.apply_batch(ClientId(1), &[UiCommand::SetMenu { menu: menu() }])
+        .unwrap();
+    ui.menus.set_native_bars(true);
+    // The host draws the bar: no engine primitives and no pointer capture.
+    assert!(ui.frame([640, 480]).unwrap().is_empty());
+    click(&mut ui, 20, 10);
+    assert!(ui.events.is_empty());
+    let bars: Vec<_> = ui.menus.bars().map(|(owner, spec)| (owner, spec.id)).collect();
+    assert_eq!(bars, vec![(1, 1)]);
+    // A native selection is the same activation a pointer would make.
+    ui.activate_menu_item(1, 1, 4).unwrap();
+    let event = ui.events.last().unwrap();
+    assert_eq!((event.kind.as_str(), event.widget.id, event.menu_bar), ("menu_activate", 4, Some(1)));
+    let spec = ui.menus.get(1, 1).unwrap();
+    assert!(!spec.items[0].children[0].checked && spec.items[0].children[1].checked);
+    // Disabled items, branches, unknown ids and other clients fail visibly.
+    assert!(ui.activate_menu_item(1, 1, 5).is_err());
+    assert!(ui.activate_menu_item(1, 1, 2).is_err());
+    assert!(ui.activate_menu_item(1, 1, 99).is_err());
+    assert!(ui.activate_menu_item(2, 1, 4).is_err());
+    assert_eq!(ui.events.len(), 1);
+    ui.menus.set_native_bars(false);
+    assert_eq!(ui.frame([640, 480]).unwrap().len(), 2);
 }

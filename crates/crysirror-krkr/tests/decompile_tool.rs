@@ -5,8 +5,8 @@
 fn decompile_files() {
     for path in std::env::var("DECOMPILE").unwrap().split(',') {
         let bytes = std::fs::read(path).unwrap();
-        let file = krkr_tjs2::bytecode::BytecodeFile::parse(&bytes).unwrap();
-        let out = krkr_tjs2::decompile::decompile(&file, &Default::default()).unwrap();
+        let file = crysirror_tjs2::bytecode::BytecodeFile::parse(&bytes).unwrap();
+        let out = crysirror_tjs2::decompile::decompile(&file, &Default::default()).unwrap();
         let text: String = out.sources.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("\n");
         std::fs::write(format!("{path}.decompiled.tjs"), text).unwrap();
         println!("DECOMPILED {path}");
@@ -20,8 +20,8 @@ fn decompile_files() {
 fn disassemble_files() {
     for path in std::env::var("DISASM").unwrap().split(',') {
         let bytes = std::fs::read(path).unwrap();
-        let file = krkr_tjs2::bytecode::BytecodeFile::parse(&bytes).unwrap();
-        let text = file.disassemble(&krkr_tjs2::bytecode::DisasmOptions::full()).unwrap();
+        let file = crysirror_tjs2::bytecode::BytecodeFile::parse(&bytes).unwrap();
+        let text = file.disassemble(&crysirror_tjs2::bytecode::DisasmOptions::full()).unwrap();
         std::fs::write(format!("{path}.disasm.txt"), text).unwrap();
         println!("DISASSEMBLED {path}");
     }

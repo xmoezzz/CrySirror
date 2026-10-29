@@ -207,6 +207,9 @@ pub mod surface;
 
 /// Shared MPL PDT10/PDT11 image codec; native cut/pattern metadata stays in adapters.
 pub mod pdt;
+pub mod avg32;
+pub mod g00;
+pub mod reallive_wipe;
 
 pub mod cbg;
 

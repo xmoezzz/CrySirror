@@ -18,6 +18,7 @@ avg32 = ["dep:crysirror-avg32"]
 # a binary built with it is distributed under the AGPL. Pair with `arc-formats`
 # for TLG images.
 krkr = ["dep:crysirror-krkr"]
+rfvp = ["dep:crysirror-rfvp"]
 audio = ["crysirror-audio/cpal-output"]
 gamepad = ["dep:gilrs", "scripting"]
 siglus-resources = ["dep:crysirror-siglus"]
@@ -31,6 +32,7 @@ arc-formats = ["scripting", "crysirror-engine/arc-formats"]
 crysirror-reallive = {workspace=true,optional=true}
 crysirror-avg32 = {workspace=true,optional=true}
 crysirror-krkr = {workspace=true,optional=true}
+crysirror-rfvp = {workspace=true,optional=true}
 crysirror-core.workspace = true
 crysirror-runtime.workspace = true
 crysirror-wgpu.workspace = true
@@ -52,6 +54,12 @@ log = "0.4"
 env_logger = "0.11"
 cap-std.workspace = true
 gilrs = { version = "=0.11.2", optional = true }
+crysirror-scene.workspace = true
+
+# Native menu bar (Apache-2.0 OR MIT). macOS only: the Windows/Linux entry
+# points need unsafe window handles or GTK, so those keep the engine-drawn bar.
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "=0.19.3", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.12"

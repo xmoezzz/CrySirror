@@ -4,7 +4,7 @@
 //! Native action naming over the shared device-free owner dispatch queue.
 use crate::natives::*;
 use crysirror_core::deferred_dispatch::DispatchPhase;
-use krkr_tjs2::{TjsError, runtime::Variant};
+use crysirror_tjs2::{TjsError, runtime::Variant};
 pub(crate) fn target(handle: usize, kind: u64) -> u64 {
     ((handle as u64) << 2) | kind
 }
@@ -63,9 +63,9 @@ pub fn install(rt: &mut Rt) {
 }
 fn cancel(
     rt: &mut Rt,
-    t: Option<krkr_tjs2::runtime::ObjectHandle>,
+    t: Option<crysirror_tjs2::runtime::ObjectHandle>,
     _: Vec<Variant>,
-) -> krkr_tjs2::Result<Variant> {
+) -> crysirror_tjs2::Result<Variant> {
     let h = this_of(rt, t, "AsyncTrigger.cancel")?;
     let client = rt.host().client;
     rt.host_mut().deferred.cancel(client, target(h.0, 0));

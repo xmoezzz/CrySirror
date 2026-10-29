@@ -1,0 +1,28 @@
+# Vendored from xmoezzz/siglus_rs 5f358ef1360b0439e92aed2b749e8f25d8721954
+# (crates/reallive: dll.rs, pt00/, dt00/), MPL-2.0. See ../UPSTREAM.md.
+[package]
+name = "reallive-dll"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+publish = false
+autotests = false
+autobenches = false
+autoexamples = false
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+encoding_rs = "0.8"
+
+[dev-dependencies]
+# Test-only stand-in so the unmodified upstream tests compile (see test-shim/).
+game_fs = { path = "test-shim/game_fs" }
+
+[lints.rust]
+unused = "allow"
+dead_code = "allow"
+nonstandard_style = "allow"
+unexpected_cfgs = "allow"

@@ -4,6 +4,96 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `c6204fad405840ca` (2026-10-30): AVG32 installed-game adapter config
+
+- **Breaking** (AVG32 adapter config): the `plain-adv-v1` profile fields
+  (`profile`, `scenes`, `start_scene`, `version`, `message_rect`, `font_size`,
+  `cell_step`, `message_interval_ms`, `resources`, `sound_effects`, `voices`,
+  `message_icon`) are removed. The adapter now runs an installed game:
+  `{root, font, encoding?}`, where `root` holds `Gameexe.ini` and the
+  original interpreter reads its own routing, metrics, SE table and
+  `SAVE.INI` through client storage.
+- Rust-only: `crysirror_image::avg32` (PDT bank, copy/mask/fade/stretch
+  primitives and all transitions, from siglus_rs 5f358ef).
+- Also in this fingerprint, from earlier uncommitted work already in the tree:
+  Canvas adds `restore` {id, surface: CanvasSurface}, replacing (or creating)
+  a surface from a previously queried state.
+
+## `0a86cec0fc22dca2` (2026-10-29): canvas region filter, RealLive images and transitions
+
+- Canvas adds `filter` {id, rect, filter: LayerFilter, opacity?}: the region's
+  existing content is redrawn through a layer filter (mono, invert,
+  bright/dark, colour mix), over the original by `opacity` (default 255
+  replaces the region). The region is frozen as one isolated snapshot, like
+  `fade`.
+- Snapshots may include plain project images in self-contained formats (PNG,
+  JPEG, BMP, g00); each is pinned by content on first use and a later change
+  fails the frame instead of reusing a stale snapshot.
+- Rust-only: `crysirror_image::g00` (RealLive g00 atlas + pattern regions,
+  from siglus_rs 5f358ef) and `crysirror_image::reallive_wipe::reveal_rule`
+  (`#SEL` reveal styles as rule images). The shared `g00` decoders return a
+  multi-pattern file as that atlas (previously refused). Raw-PCM NWA accepts
+  an unset packed size (0). No breaking changes.
+
+## `4936e7b23cc5a98a` (2026-10-29): modal dialogs, pointer warp, external crossfade clock, nested snapshots
+
+- Ui adds `openDialog` / `closeDialog` (UiCommand `open_dialog` / `close_dialog`):
+  an engine-drawn modal message dialog {id, title?, message, buttons, default,
+  cancel?, font, text_size?}. While open it takes all UI input; a choice queues
+  one `dialog_result` event (value = button id). EngineQuery adds
+  `DialogEvents`.
+- Ui adds `warpPointer` (`warp_pointer`): a one-shot request for the presenting
+  host to move the OS pointer to a canvas position.
+- Layers `beginCrossfade` adds `external` and `setCrossfadeElapsed`
+  (`set_crossfade_elapsed`): progress set by the client instead of the engine
+  clock. Rule wipes accept `vague` 0 (hard edge).
+- Paint::Snapshot payloads may contain snapshot draws up to
+  `MAX_SNAPSHOT_NESTING` (3) levels; renderers rasterize inner payloads first
+  (previously any nesting was refused).
+- Rust-only: VmAdapter::request_close, Runtime::request_close /
+  vm_sessions_halted, UiSystem::drain_events takes an event kind. **Breaking**
+  for Rust callers of `drain_events` (bool → Option<&str>).
+- Rust-only: HostServices::release_surface drops a `present_surface` slot
+  after the tick; the per-client surface slot limit is 4096 (was 16), still
+  inside the 256 MiB surface budget. Not breaking (default method).
+- Rust-only: the `.sli` loop-information parser moved from
+  `crysirror_audio::sli` to `crysirror_resource::sli` (device-free). **Breaking**
+  for Rust callers of the old path.
+
+## `3a2df66087609087` (2026-10-29): transformed copy opacity, native menu bars
+
+- Canvas `transform_copy` adds `opacity` (default 255): the transformed copy
+  is blended over the destination (KiriKiri `operateStretch`). Copy and
+  transform-copy opacity below 255 over several overlapping source draws is
+  now accepted: the group is frozen into one isolated snapshot draw that
+  carries the opacity (previously refused). `replace` with opacity below 255
+  is refused.
+- Rust-only: MenuSystem::set_native_bars / native_bars / bars /
+  activate_item and UiSystem::activate_menu_item (a host presenting menu bars
+  natively takes them out of engine layout, drawing and input; trees, radio
+  state and events stay engine-owned); LayerSystem::transaction (atomic
+  multi-batch layer changes without cloning the tree); EngineSystems::submit
+  stages only the touched systems. No breaking changes.
+
+## `5023cd13cee161c7` (2026-10-29): keep-alpha blends, rule wipes, nested crossfades
+
+- Blend adds `atop`, `atop_multiply`, `atop_screen` (destination alpha kept:
+  KiriKiri holdAlpha draws and Photoshop multiply/screen `_HDA` kernels).
+- Canvas `copy` and `draw` add `atop` (`normal`/`multiply`/`screen`): the
+  touched region and the draw are frozen into one isolated snapshot; earlier
+  region snapshots are inlined, not nested. Copy `opacity` below 255 is now
+  accepted when one source draw is copied (it folds into that draw).
+- Layers `begin_crossfade` adds optional `rule` {asset, vague}: KiriKiri
+  `universal` wipe (krkrz TVPInitUnivTransBlendTable). Strictly nested
+  crossfades are composed inside-out; an active crossfade inside a captured
+  subtree is frozen at its nearest endpoint.
+- Paint::Snapshot `layers` is shared (`Arc`); serialization is unchanged.
+  Snapshots admit images served by mounted containers (immutable while
+  mounted); plain project files remain refused.
+- Rust-only: ClientStorage::served_by_container, Assets::container_backed,
+  crysirror_resource::krkr_pbd (TJS/ns0 and TJS/4s0 data packs, ported from
+  xp3-brute), Renderer::read_texture. No breaking changes.
+
 ## `94359a5460ac7b99` (2026-10-28): canvas fade, copy provenance, glyph blur
 
 - Canvas adds `fade` {id, rect, opacity}: the region's alpha is scaled by

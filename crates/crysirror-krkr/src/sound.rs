@@ -8,7 +8,7 @@ use crysirror_core::{
     service::*,
     state::ClientId,
 };
-use krkr_tjs2::{
+use crysirror_tjs2::{
     TjsError,
     runtime::{ObjectHandle, Variant},
 };
@@ -28,7 +28,7 @@ pub struct Buffer {
     pub fading: bool,
     installed_gain: f32,
     /// `<storage>.sli` loop information, read at open (WaveLoopManager).
-    sli: Option<crysirror_audio::sli::LoopInfo>,
+    sli: Option<crysirror_resource::sli::LoopInfo>,
     /// An open queued from a non-resumable callback whose preparation has not
     /// completed; metadata reads fail visibly until it has.
     opening: bool,
@@ -78,7 +78,7 @@ impl Sounds {
 fn err(e: impl std::fmt::Display) -> TjsError {
     TjsError::runtime(e.to_string())
 }
-fn buffer(rt: &Rt, t: Option<ObjectHandle>) -> krkr_tjs2::Result<(ObjectHandle, Buffer)> {
+fn buffer(rt: &Rt, t: Option<ObjectHandle>) -> crysirror_tjs2::Result<(ObjectHandle, Buffer)> {
     let h = this_of(rt, t, "WaveSoundBuffer")?;
     Ok((
         h,
@@ -90,7 +90,7 @@ fn buffer(rt: &Rt, t: Option<ObjectHandle>) -> krkr_tjs2::Result<(ObjectHandle, 
             .ok_or_else(|| err("WaveSoundBuffer not constructed"))?,
     ))
 }
-fn control(rt: &mut Rt, r: AudioRequest) -> krkr_tjs2::Result<()> {
+fn control(rt: &mut Rt, r: AudioRequest) -> crysirror_tjs2::Result<()> {
     let s = &mut rt.host_mut().sounds;
     if s.ops.len() >= 4096 {
         return Err(err("native audio operation budget"));
@@ -101,7 +101,7 @@ fn control(rt: &mut Rt, r: AudioRequest) -> krkr_tjs2::Result<()> {
 /// Queue an operation that needs host completion. At a resumable boundary the
 /// VM waits for it; inside a non-resumable callback (input events) it is
 /// queued in order and completes after the callback returns.
-fn park(rt: &mut Rt, op: Op) -> krkr_tjs2::Result<Variant> {
+fn park(rt: &mut Rt, op: Op) -> crysirror_tjs2::Result<Variant> {
     let suspend = rt.host().can_suspend;
     let s = &mut rt.host_mut().sounds;
     if s.ops.len() >= 4096 {
@@ -118,7 +118,7 @@ fn park(rt: &mut Rt, op: Op) -> krkr_tjs2::Result<Variant> {
     }
     Ok(Variant::Void)
 }
-fn notify(rt: &mut Rt, t: Option<ObjectHandle>, name: &str) -> krkr_tjs2::Result<Variant> {
+fn notify(rt: &mut Rt, t: Option<ObjectHandle>, name: &str) -> crysirror_tjs2::Result<Variant> {
     let h = this_of(rt, t, name)?;
     let member = rt.resolve_object_member(h, name)?;
     if rt.variant_is_native_function(&member) && rt.call_secondary_class_method(h, name, vec![])? {
@@ -128,7 +128,7 @@ fn notify(rt: &mut Rt, t: Option<ObjectHandle>, name: &str) -> krkr_tjs2::Result
 }
 /// Filters change the decoded signal; one that is not an identity must be
 /// applied by a shared DSP stage, which is not mapped yet.
-fn active_filter_check(rt: &Rt, h: krkr_tjs2::runtime::ObjectHandle) -> krkr_tjs2::Result<()> {
+fn active_filter_check(rt: &Rt, h: crysirror_tjs2::runtime::ObjectHandle) -> crysirror_tjs2::Result<()> {
     let Some(list) = rt.object_member(h, "filters").object_handle() else {
         return Ok(());
     };
@@ -148,8 +148,8 @@ fn active_filter_check(rt: &Rt, h: krkr_tjs2::runtime::ObjectHandle) -> krkr_tjs
 }
 
 /// `WaveSoundBuffer.PhaseVocoder`: krkrz's built-in WaveFilter parameters.
-fn install_phase_vocoder(rt: &mut Rt, wave: krkr_tjs2::runtime::ObjectHandle) {
-    let c = rt.alloc_native_constructor(|rt: &mut Rt, this: Option<krkr_tjs2::runtime::ObjectHandle>, _| {
+fn install_phase_vocoder(rt: &mut Rt, wave: crysirror_tjs2::runtime::ObjectHandle) {
+    let c = rt.alloc_native_constructor(|rt: &mut Rt, this: Option<crysirror_tjs2::runtime::ObjectHandle>, _| {
         let h = this
             .map(|h| rt.bound_this(h).unwrap_or(h))
             .filter(|h| *h != rt.global_handle())
@@ -237,7 +237,7 @@ pub fn install(rt: &mut Rt) {
         let filters = rt.alloc_array_object(vec![]);
         rt.set_object_member(h, "filters", Variant::Object(filters));
         // WaveSoundBuffer.flags: the loop-link condition flags (16 slots).
-        let flags = rt.alloc_array_object(vec![Variant::Integer(0); crysirror_audio::sli::MAX_FLAGS]);
+        let flags = rt.alloc_array_object(vec![Variant::Integer(0); crysirror_resource::sli::MAX_FLAGS]);
         rt.set_object_member(h, "flags", Variant::Object(flags));
         control(
             rt,
@@ -282,7 +282,7 @@ pub fn install(rt: &mut Rt) {
                     Some(sli) => {
                         let bytes = storage.read(&sli).map_err(err)?;
                         let text = String::from_utf8(bytes).map_err(|e| err(format!("{sli}: {e}")))?;
-                        Some(crysirror_audio::sli::parse(&text).map_err(|e| err(format!("{sli}: {e:#}")))?)
+                        Some(crysirror_resource::sli::parse(&text).map_err(|e| err(format!("{sli}: {e:#}")))?)
                     }
                     None => None,
                 };
@@ -664,7 +664,7 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                 rt.host_mut().sounds.pending = Some(Pending::Resource { object, ticket });
             }
             Op::Play(object) => {
-                let mut flags = [0; crysirror_audio::sli::MAX_FLAGS];
+                let mut flags = [0; crysirror_resource::sli::MAX_FLAGS];
                 if let Some(f) = rt.object_member(ObjectHandle(object), "flags").object_handle() {
                     for (v, e) in flags.iter_mut().zip(rt.array_elements(f).unwrap_or_default()) {
                         *v = e.to_integer().unwrap_or(0);
@@ -761,7 +761,7 @@ pub fn observations(
 /// backward, non-smooth link becomes the shared loop range. Flag changes
 /// during playback take effect at the next play (krkrz re-evaluates links
 /// live). Other link profiles fail visibly.
-fn sli_loop(b: &Buffer, flags: &[i64; crysirror_audio::sli::MAX_FLAGS]) -> anyhow::Result<Option<(u64, u64)>> {
+fn sli_loop(b: &Buffer, flags: &[i64; crysirror_resource::sli::MAX_FLAGS]) -> anyhow::Result<Option<(u64, u64)>> {
     let Some(info) = &b.sli else { return Ok(None) };
     let taken: Vec<_> = info.links.iter().filter(|l| l.taken(flags)).collect();
     match taken.as_slice() {
@@ -771,5 +771,21 @@ fn sli_loop(b: &Buffer, flags: &[i64; crysirror_audio::sli::MAX_FLAGS]) -> anyho
             "WaveSoundBuffer .sli link profile is not supported by the CrySirror KiriKiri adapter: \
              requires one backward non-smooth link"
         ),
+    }
+}
+
+impl Sounds {
+    /// Objects with live native sound state or queued operations.
+    pub(crate) fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
+        out.extend(self.buffers.keys().map(|k| ObjectHandle(*k)));
+        for op in &self.ops {
+            match op {
+                Op::Open { object, .. } | Op::Play(object) | Op::Release(object) => out.push(ObjectHandle(*object)),
+                Op::Control(_) => {}
+            }
+        }
+        if let Some(Pending::Resource { object, .. } | Pending::Voice { object, .. }) = &self.pending {
+            out.push(ObjectHandle(*object));
+        }
     }
 }

@@ -83,6 +83,13 @@ fn metadata(bytes: &[u8], encoded_len: u64) -> Result<Option<NwaSpec>> {
         original_bytes == samples * u64::from(bits / 8),
         "NWA original size/sample count mismatch"
     );
+    // Raw-PCM files (pack -1) may leave the packed size unset (0), as
+    // RealLive's AIR SE BGM does; the reference reader never consults it.
+    let packed_bytes = if pack == -1 && packed_bytes == 0 {
+        encoded_len
+    } else {
+        packed_bytes
+    };
     ensure!(
         packed_bytes == encoded_len,
         "NWA packed size differs from encoded input"

@@ -176,7 +176,11 @@ fn part_id(s: &EmoteStaticSprite) -> String {
 }
 fn corner_color(s: &EmoteStaticSprite, packed: u32) -> [f32; 4] {
     let c = |shift: u32| ((packed >> shift) & 0xff) as f32 / 255.;
-    [c(24), c(16), c(8), (c(0) * s.opacity).clamp(0., 1.)]
+    // E-mote MODULATE2X (`bm & 0xF0 == 0x10`, the default blend): the
+    // texture is multiplied by twice the vertex colour, so 0x80 is neutral
+    // (eluna's frame decoder defaults such frames to 0x808080FF).
+    let gain = if s.blend_mode & 0xF0 == 0x10 { 255. / 128. } else { 1. };
+    [c(24) * gain, c(16) * gain, c(8) * gain, (c(0) * s.opacity).clamp(0., 1.)]
 }
 fn bilerp(c: &[[f32; 4]; 4], u: f32, v: f32) -> [f32; 4] {
     let mut out = [0.; 4];

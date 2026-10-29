@@ -4,74 +4,19 @@
       "adapter": "avg32",
       "config": [
         {
-          "doc": "Explicit native profile: non-novel, no custom frame/effects, plain text.",
-          "name": "profile",
+          "doc": "Asset-relative directory of the installed game (holds `Gameexe.ini`).",
+          "name": "root",
           "rust_type": "String"
         },
         {
-          "doc": "Native scene number to capability-relative TPC32 file.",
-          "name": "scenes",
-          "rust_type": "BTreeMap<i32, String>"
-        },
-        {
-          "doc": "Scene number used by the original Scenario at boot.",
-          "name": "start_scene",
-          "rust_type": "i32"
-        },
-        {
-          "doc": "Original opcode revision; choose explicitly for the title being adapted.",
-          "name": "version",
-          "rust_type": "i32"
-        },
-        {
-          "doc": "Native string codec accepted by the original NLS parser (default sjis).",
-          "name": "encoding",
-          "rust_type": "String"
-        },
-        {
-          "doc": "Installed engine font alias; no font file or native font is bundled.",
+          "doc": "Project font alias for message, choice and menu text.",
           "name": "font",
           "rust_type": "String"
         },
         {
-          "doc": "Absolute position and cell-layout width/height in logical pixels.",
-          "name": "message_rect",
-          "rust_type": "[i32; 4]"
-        },
-        {
-          "doc": "Native nominal glyph size in logical pixels (1..256).",
-          "name": "font_size",
-          "rust_type": "u16"
-        },
-        {
-          "doc": "Native horizontal half-cell and line pitch in pixels; never inferred from font metrics.",
-          "name": "cell_step",
-          "rust_type": "[i32; 2]"
-        },
-        {
-          "doc": "Original interpreter print interval in milliseconds (0 displays immediately).",
-          "name": "message_interval_ms",
-          "rust_type": "i32"
-        },
-        {
-          "doc": "Native resource names to engine image/audio paths. No filesystem bypass.",
-          "name": "resources",
-          "rust_type": "BTreeMap<String, String>"
-        },
-        {
-          "doc": "Explicit native SE table; a referenced missing entry fails visibly.",
-          "name": "sound_effects",
-          "rust_type": "BTreeMap<i32, String>"
-        },
-        {
-          "doc": "Native voice IDs mapped to shared supported audio containers.",
-          "name": "voices",
-          "rust_type": "BTreeMap<i32, String>"
-        },
-        {
-          "doc": "Explicit engine image used for native message-wait icons.",
-          "name": "message_icon",
-          "rust_type": "Option<String>"
+          "doc": "Native string codec (`sjis`, `gbk`, `big5`, `utf8`).",
+          "name": "encoding",
+          "rust_type": "String"
         }
       ]
     },
@@ -3399,6 +3344,21 @@
           "returns": "void"
         },
         {
+          "doc": "Set an externally clocked crossfade's progress (clamped to its duration).",
+          "name": "setCrossfadeElapsed",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "elapsedMs",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Finish this client's transition now (skip).",
           "name": "endTransition",
           "params": [],
@@ -4593,6 +4553,39 @@
           "returns": "void"
         },
         {
+          "doc": "Open an engine-drawn modal message dialog {id, title?, message, buttons:[{id,label}], default, cancel?, font, text_size?}; the choice arrives as a dialog_result event (value = button id).",
+          "name": "openDialog",
+          "params": [
+            {
+              "name": "dialog",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Close this client's open dialog without a result.",
+          "name": "closeDialog",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Ask the presenting host to move the OS pointer to a canvas position.",
+          "name": "warpPointer",
+          "params": [
+            {
+              "name": "position",
+              "type": "number[]"
+            }
+          ],
+          "returns": "void"
+        },
+        {
           "doc": "Update checked state with shared sibling radio-group semantics.",
           "name": "setMenuChecked",
           "params": [
@@ -5515,6 +5508,11 @@
       "system": "layer"
     },
     {
+      "api": "Layers.setCrossfadeElapsed",
+      "op": "set_crossfade_elapsed",
+      "system": "layer"
+    },
+    {
       "api": "Puppets.setParameter",
       "op": "puppet",
       "system": "layer"
@@ -5571,6 +5569,16 @@
     },
     {
       "api": "Canvases.apply",
+      "op": "filter",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
+      "op": "restore",
+      "system": "canvas"
+    },
+    {
+      "api": "Canvases.apply",
       "op": "present",
       "system": "canvas"
     },
@@ -5592,6 +5600,21 @@
     {
       "api": "Ui.openMenu",
       "op": "open_menu",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.openDialog",
+      "op": "open_dialog",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.closeDialog",
+      "op": "close_dialog",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.warpPointer",
+      "op": "warp_pointer",
       "system": "ui"
     },
     {
@@ -12545,7 +12568,7 @@
           "default": null,
           "doc": "Frozen, source-local static scene, rasterized once at `size` before the outer Layer's transform, opacity, UV crop and filter are applied. Inputs contain no nested snapshots, external parents or dynamic state.",
           "name": "snapshot",
-          "rust_type": "size: [u32; 2], layers: Vec<LayerSpec>"
+          "rust_type": "size: [u32; 2], layers: Arc<Vec<LayerSpec>>"
         },
         {
           "default": null,
@@ -12745,9 +12768,9 @@
         },
         {
           "default": null,
-          "doc": "",
+          "doc": "Append a draw; with `atop` it is drawn source-atop (see Copy).",
           "name": "draw",
-          "rust_type": "id: u32, layer: LayerSpec"
+          "rust_type": "id: u32, layer: LayerSpec, atop: Option<AtopMode>"
         },
         {
           "default": null,
@@ -12759,7 +12782,7 @@
           "default": null,
           "doc": "",
           "name": "copy",
-          "rust_type": "source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool, clip: Option<[f32; 4]>"
+          "rust_type": "source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], opacity: u8, replace: bool, clip: Option<[f32; 4]>, atop: Option<AtopMode>"
         },
         {
           "default": null,
@@ -12775,15 +12798,27 @@
         },
         {
           "default": null,
+          "doc": "Recolour `rect`'s existing content through a layer filter (mono, invert, bright/dark, colour mix), blended over the original by `opacity`/255 (RealLive `grpMono`/`grpInvert`/`grpLight`). The region is frozen as one isolated snapshot, like `fade`.",
+          "name": "filter",
+          "rust_type": "id: u32, rect: [f32; 4], filter: crate::layer::LayerFilter, opacity: u8"
+        },
+        {
+          "default": null,
           "doc": "Copy `rect` of `source` through an affine map of source-surface coordinates (`[a, b, c, d, tx, ty]`: x' = a·x + c·y + tx, y' = b·x + d·y + ty) without skew. `replace` replaces the covered destination region; it requires an axis-aligned result.",
           "name": "transform_copy",
-          "rust_type": "source: u32, destination: u32, rect: [f32; 4], matrix: [f32; 6], replace: bool, clip: Option<[f32; 4]>"
+          "rust_type": "source: u32, destination: u32, rect: [f32; 4], matrix: [f32; 6], replace: bool, clip: Option<[f32; 4]>, opacity: u8"
         },
         {
           "default": null,
           "doc": "Freeze a visible, static, normal-alpha Layer subtree as one snapshot draw. The renderer rasterizes it at its original size before later effects. `rect` is source-root-local; `position` and `clip` are destination-space. The region is replaced, including alpha. Root placement/visibility/opacity and inheritance from outside the subtree do not enter the snapshot.",
           "name": "copy_subtree",
           "rust_type": "source: u32, destination: u32, rect: [f32; 4], position: [f32; 2], clip: Option<[f32; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "Replace (or create) a surface with a previously queried state (`EngineQuery::Canvas`), e.g. a native game's saved DCs.",
+          "name": "restore",
+          "rust_type": "id: u32, surface: CanvasSurface"
         },
         {
           "default": null,
@@ -13148,6 +13183,24 @@
           "default": null,
           "doc": "Screen.",
           "name": "screen",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Source-atop: drawn only where the destination has alpha, which it keeps (KiriKiri holdAlpha draws). Meaningful in isolated canvas snapshots, where the destination is the surface's own content.",
+          "name": "atop",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Photoshop multiply keeping the destination alpha (KiriKiri omPsMultiplicative with holdAlpha): D·(1 - a + a·S).",
+          "name": "atop_multiply",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Photoshop screen keeping the destination alpha (omPsScreen with holdAlpha): D·(1 - a·S) + a·S·Da.",
+          "name": "atop_screen",
           "rust_type": ""
         }
       ],
@@ -14506,9 +14559,15 @@
         },
         {
           "default": null,
-          "doc": "Crossfade two equally sized sibling subtrees using isolated engine targets.",
+          "doc": "Crossfade two equally sized sibling subtrees using isolated engine targets; with `rule`, each pixel's progress follows a grayscale rule image.",
           "name": "begin_crossfade",
-          "rust_type": "id: u32, source: u32, duration_ms: u64"
+          "rust_type": "id: u32, source: u32, duration_ms: u64, rule: Option<RuleWipe>, external: bool"
+        },
+        {
+          "default": null,
+          "doc": "Progress of an `external` crossfade, in ms of its duration.",
+          "name": "set_crossfade_elapsed",
+          "rust_type": "id: u32, elapsed_ms: u64"
         },
         {
           "default": null,
@@ -14534,6 +14593,18 @@
           "doc": "",
           "name": "set_menu",
           "rust_type": "menu: menu::MenuSpec"
+        },
+        {
+          "default": null,
+          "doc": "Open a modal message dialog; its choice arrives as `dialog_result`.",
+          "name": "open_dialog",
+          "rust_type": "dialog: dialog::DialogSpec"
+        },
+        {
+          "default": null,
+          "doc": "Close an open dialog without a result.",
+          "name": "close_dialog",
+          "rust_type": "id: u32"
         },
         {
           "default": null,
@@ -14582,6 +14653,12 @@
           "doc": "",
           "name": "set_cursor_visible",
           "rust_type": "visible: bool"
+        },
+        {
+          "default": null,
+          "doc": "Move the OS pointer to a canvas position.",
+          "name": "warp_pointer",
+          "rust_type": "position: [i32; 2]"
         },
         {
           "default": null,
@@ -14887,7 +14964,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "94359a5460ac7b99",
+  "fingerprint": "c6204fad405840ca",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

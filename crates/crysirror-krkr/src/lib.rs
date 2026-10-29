@@ -2,7 +2,7 @@
 // (at your option) any later version, https://www.gnu.org/licenses/agpl-3.0.html.
 //! Optional KiriKiri (吉里吉里) adapter (ADR 0053).
 //!
-//! Original TJS2 scripts run on the vendored Kirakira VM (`krkr-tjs2`,
+//! Original TJS2 scripts run on the vendored Kirakira VM (`crysirror-tjs2`,
 //! AGPL-3.0-or-later). KiriKiri's native classes are translated onto engine
 //! Layer/Canvas services, the engine clock and capability storage; there is
 //! no KiriKiri renderer, compositor or mixer in this crate. Because of the

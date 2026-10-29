@@ -7,7 +7,10 @@ use crate::layer::{
 use anyhow::{Context, Result, ensure};
 use crysirror_core::state::ClientId;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 /// Per-client surface budget; native layer trees keep one surface per layer.
 pub const MAX_SURFACES: usize = 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,9 +67,12 @@ pub enum CanvasCommand {
         width: u32,
         height: u32,
     },
+    /// Append a draw; with `atop` it is drawn source-atop (see Copy).
     Draw {
         id: u32,
         layer: LayerSpec,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        atop: Option<AtopMode>,
     },
     /// Atomically replace this surface's contents with one logical resource draw.
     Set {
@@ -84,6 +90,11 @@ pub enum CanvasCommand {
         /// Destination-space draw clip (krkr `Layer.setClip`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clip: Option<[f32; 4]>,
+        /// Draw keeping the destination alpha (krkr holdAlpha): source-atop or
+        /// a Photoshop multiply/screen. The touched region becomes one
+        /// isolated snapshot.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        atop: Option<AtopMode>,
     },
     /// Fill `rect` with a solid colour; `replace` replaces the region's pixels
     /// (transparent colours included) instead of drawing over them.
@@ -107,6 +118,17 @@ pub enum CanvasCommand {
         rect: [f32; 4],
         opacity: u8,
     },
+    /// Recolour `rect`'s existing content through a layer filter (mono,
+    /// invert, bright/dark, colour mix), blended over the original by
+    /// `opacity`/255 (RealLive `grpMono`/`grpInvert`/`grpLight`). The region
+    /// is frozen as one isolated snapshot, like `fade`.
+    Filter {
+        id: u32,
+        rect: [f32; 4],
+        filter: crate::layer::LayerFilter,
+        #[serde(default = "opaque", skip_serializing_if = "is_opaque")]
+        opacity: u8,
+    },
     /// Copy `rect` of `source` through an affine map of source-surface
     /// coordinates (`[a, b, c, d, tx, ty]`: x' = a·x + c·y + tx,
     /// y' = b·x + d·y + ty) without skew. `replace` replaces the covered
@@ -121,6 +143,10 @@ pub enum CanvasCommand {
         /// Destination-space draw clip (krkr `Layer.setClip`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clip: Option<[f32; 4]>,
+        /// Group opacity of the transformed copy, drawn over the destination
+        /// (krkr `operateStretch`/`operateAffine` opacity); 255 by default.
+        #[serde(default = "opaque", skip_serializing_if = "is_opaque")]
+        opacity: u8,
     },
     /// Freeze a visible, static, normal-alpha Layer subtree as one snapshot draw.
     /// The renderer rasterizes it at its original size before later effects.
@@ -134,6 +160,12 @@ pub enum CanvasCommand {
         position: [f32; 2],
         #[serde(default, skip_serializing_if = "Option::is_none")]
         clip: Option<[f32; 4]>,
+    },
+    /// Replace (or create) a surface with a previously queried state
+    /// (`EngineQuery::Canvas`), e.g. a native game's saved DCs.
+    Restore {
+        id: u32,
+        surface: CanvasSurface,
     },
     Present {
         id: u32,
@@ -165,7 +197,8 @@ struct Presentation {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanvasSystem {
-    clients: BTreeMap<u32, BTreeMap<u32, CanvasSurface>>,
+    /// Copy-on-write surfaces: a staged clone shares them until written.
+    clients: BTreeMap<u32, BTreeMap<u32, Arc<CanvasSurface>>>,
     presentations: BTreeMap<u32, BTreeMap<u32, Presentation>>,
     #[serde(default)]
     serial: BTreeMap<u32, u32>,
@@ -186,6 +219,12 @@ struct Provenance {
     region: [f32; 4],
     offset: [f32; 2],
     base: usize,
+}
+fn opaque() -> u8 {
+    255
+}
+fn is_opaque(v: &u8) -> bool {
+    *v == 255
 }
 fn contains(outer: [f32; 4], inner: [f32; 4]) -> bool {
     inner[0] >= outer[0]
@@ -211,7 +250,7 @@ fn spec(id: u32, rect: [f32; 4], paint: Paint) -> LayerSpec {
 }
 impl CanvasSystem {
     pub fn surface(&self, client: ClientId, id: u32) -> Option<&CanvasSurface> {
-        self.clients.get(&client.0)?.get(&id)
+        self.clients.get(&client.0)?.get(&id).map(|s| &**s)
     }
     pub fn client_ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.clients.keys().copied()
@@ -236,6 +275,7 @@ impl CanvasSystem {
         self.clients
             .get_mut(&c.0)
             .and_then(|x| x.get_mut(&id))
+            .map(Arc::make_mut)
             .context("canvas absent")
     }
     pub fn apply_batch(
@@ -245,8 +285,22 @@ impl CanvasSystem {
         layers: &mut LayerSystem,
     ) -> Result<()> {
         ensure!(commands.len() <= 4096, "canvas batch limit");
+        // Surfaces are copy-on-write, so staging clones only the touched
+        // ones; layer changes are journaled by one layer transaction.
         let mut next = self.clone();
-        let mut next_layers = layers.clone();
+        layers.transaction(|next_layers| {
+            next.apply_commands(c, commands, next_layers)
+        })?;
+        *self = next;
+        Ok(())
+    }
+    fn apply_commands(
+        &mut self,
+        c: ClientId,
+        commands: &[CanvasCommand],
+        next_layers: &mut LayerSystem,
+    ) -> Result<()> {
+        let next = self;
         let mut changed = false;
         let mut dirty_sources = BTreeSet::new();
         let mut dirty_presentations = BTreeSet::new();
@@ -260,7 +314,7 @@ impl CanvasSystem {
                     );
                     next.clients.entry(c.0).or_default().insert(
                         *id,
-                        CanvasSurface {
+                        Arc::new(CanvasSurface {
                             width: *width,
                             height: *height,
                             nodes: vec![CanvasNode::Draw {
@@ -272,8 +326,17 @@ impl CanvasSystem {
                                     },
                                 ),
                             }],
-                        },
+                        }),
                     );
+                }
+                CanvasCommand::Restore { id, surface } => {
+                    ensure!(
+                        surface.width > 0 && surface.height > 0 && surface.width <= 8192 && surface.height <= 8192,
+                        "canvas dimensions"
+                    );
+                    let mut count = 0;
+                    validate_nodes(&surface.nodes, 0, &mut count)?;
+                    next.clients.entry(c.0).or_default().insert(*id, Arc::new(surface.clone()));
                 }
                 CanvasCommand::Clear { id, color } => {
                     let s = next.get_mut(c, *id)?;
@@ -294,10 +357,17 @@ impl CanvasSystem {
                     s.width = *width;
                     s.height = *height;
                 }
-                CanvasCommand::Draw { id, layer } => {
-                    next.get_mut(c, *id)?.nodes.push(CanvasNode::Draw {
-                        layer: layer.clone(),
-                    })
+                CanvasCommand::Draw { id, layer, atop } => {
+                    let node = CanvasNode::Draw { layer: layer.clone() };
+                    let s = next.get_mut(c, *id)?;
+                    if let Some(mode) = atop {
+                        let Some(bounds) = node_bounds(&node) else { continue };
+                        let full = [0., 0., s.width as f32, s.height as f32];
+                        let Some(region) = intersect(bounds, full) else { continue };
+                        draw_atop(s, region, node, *mode)?;
+                    } else {
+                        s.nodes.push(node);
+                    }
                 }
                 CanvasCommand::Set { id, layer } => {
                     next.get_mut(c, *id)?.nodes = vec![CanvasNode::Draw {
@@ -350,17 +420,38 @@ impl CanvasSystem {
                     let inside = clip_to_band(&nodes, r, true);
                     s.nodes = exclude_region(nodes, full, r);
                     if *opacity != 0 && !inside.is_empty() {
-                        let size = [s.width, s.height];
-                        let mut layers = vec![spec(1, full, Paint::Solid { color: [0; 4] })];
-                        let mut next_id = 1;
-                        snapshot_specs(&inside, 1, &mut next_id, &mut layers)?;
-                        let paint = Paint::Snapshot { size, layers };
-                        paint.validate()?;
+                        let (paint, uv) = region_paint(&inside, r)?;
                         let mut draw = spec(0, r, paint);
-                        draw.uv = Some([r[0] / full[2], r[1] / full[3], (r[0] + r[2]) / full[2], (r[1] + r[3]) / full[3]]);
+                        draw.uv = Some(uv);
                         draw.opacity = *opacity;
                         s.nodes.push(CanvasNode::Draw { layer: draw });
                     }
+                }
+                CanvasCommand::Filter { id, rect, filter, opacity } => {
+                    ensure!(
+                        rect.iter().all(|v| v.is_finite() && v.abs() <= 1_000_000.),
+                        "canvas filter bounds"
+                    );
+                    filter.validate()?;
+                    let s = next.get_mut(c, *id)?;
+                    let full = [0., 0., s.width as f32, s.height as f32];
+                    let Some(r) = intersect(*rect, full) else {
+                        continue;
+                    };
+                    if *opacity == 0 {
+                        continue;
+                    }
+                    let nodes = std::mem::take(&mut s.nodes);
+                    let inside = clip_to_band(&nodes, r, true);
+                    let (paint, uv) = region_paint(&inside, r)?;
+                    let uv = Some(uv);
+                    // Below opacity 255 the original stays under the filtered copy.
+                    s.nodes = if *opacity == 255 { exclude_region(nodes, full, r) } else { nodes };
+                    let mut draw = spec(0, r, paint);
+                    draw.uv = uv;
+                    draw.opacity = *opacity;
+                    draw.filter = Some(filter.clone());
+                    s.nodes.push(CanvasNode::Draw { layer: draw });
                 }
                 CanvasCommand::Copy {
                     source,
@@ -370,6 +461,7 @@ impl CanvasSystem {
                     opacity,
                     replace,
                     clip: draw_clip,
+                    atop,
                 } => {
                     ensure!(
                         rect.iter()
@@ -379,10 +471,7 @@ impl CanvasSystem {
                             && rect[3] > 0.,
                         "canvas copy bounds"
                     );
-                    ensure!(
-                        *opacity == 255,
-                        "isolated canvas copy opacity requires a render-target composition API"
-                    );
+                    ensure!(!(atop.is_some() && *replace), "canvas copy replace with atop");
                     let source_id = *source;
                     let source = next
                         .surface(c, *source)
@@ -471,14 +560,24 @@ impl CanvasSystem {
                             dst.nodes = exclude_region(std::mem::take(&mut dst.nodes), full, region);
                         }
                         // Only source content inside the copied rect is kept.
-                        dst.nodes.push(CanvasNode::Group {
+                        let nodes = clip_to_band(&source.nodes, clip, false);
+                        let group = CanvasNode::Group {
                             offset,
                             clip,
-                            opacity: *opacity,
-                            nodes: clip_to_band(&source.nodes, clip, false),
+                            opacity: 255,
+                            nodes,
                             rotate: 0.,
                             scale: [1., 1.],
-                        });
+                        };
+                        let region = [clip[0] + offset[0], clip[1] + offset[1], clip[2], clip[3]];
+                        let group = with_opacity(group, *opacity, region, [dst.width, dst.height])?;
+                        if let Some(mode) = atop {
+                            provenance = None;
+                            let region = [clip[0] + offset[0], clip[1] + offset[1], clip[2], clip[3]];
+                            draw_atop(dst, region, group, *mode)?;
+                        } else {
+                            dst.nodes.push(group);
+                        }
                     }
                 }
                 CanvasCommand::TransformCopy {
@@ -488,7 +587,15 @@ impl CanvasSystem {
                     matrix,
                     replace,
                     clip: draw_clip,
+                    opacity,
                 } => {
+                    ensure!(
+                        !*replace || *opacity == 255,
+                        "canvas transform copy: replace is opaque"
+                    );
+                    if *opacity == 0 {
+                        continue;
+                    }
                     ensure!(
                         rect.iter().chain(matrix).all(|v| v.is_finite() && v.abs() <= 1_000_000.)
                             && rect[2] > 0.
@@ -548,6 +655,7 @@ impl CanvasSystem {
                         rotate,
                         scale: [sx, sy],
                     };
+                    let group = with_opacity(group, *opacity, bounds, [dst.width, dst.height])?;
                     // The draw clip is destination-space: an outer plain group.
                     dst.nodes.push(match draw_clip {
                         Some(_) => CanvasNode::Group {
@@ -570,7 +678,7 @@ impl CanvasSystem {
                     }
                     // Commands are ordered: snapshot any preceding Canvas edits
                     // through their current engine-owned Layer presentations.
-                    next.rebuild(c, &mut next_layers, &dirty_sources, &dirty_presentations)?;
+                    next.rebuild(c, next_layers, &dirty_sources, &dirty_presentations)?;
                     dirty_sources.clear(); dirty_presentations.clear();
                     let specs = next_layers.snapshot_subtree_specs(c, *source)?;
                     let root = specs.iter().find(|s| s.id == *source).context("snapshot root missing")?;
@@ -584,7 +692,7 @@ impl CanvasSystem {
                         });
                     let Some(bounds) = bounds else { continue; };
                     let size = [root.rect[2].ceil() as u32, root.rect[3].ceil() as u32];
-                    let paint = Paint::Snapshot { size, layers: specs };
+                    let paint = Paint::Snapshot { size, layers: specs.into() };
                     paint.validate()?;
                     let dst = next.get_mut(c, *destination)?;
                     let region = [bounds[0] + offset[0], bounds[1] + offset[1], bounds[2], bounds[3]];
@@ -663,12 +771,14 @@ impl CanvasSystem {
             // copy), so it must not invalidate any presentation's derived IDs.
             let touched = match command {
                 CanvasCommand::Create { id, .. }
+                | CanvasCommand::Restore { id, .. }
                 | CanvasCommand::Clear { id, .. }
                 | CanvasCommand::Resize { id, .. }
                 | CanvasCommand::Draw { id, .. }
                 | CanvasCommand::Set { id, .. }
                 | CanvasCommand::Fill { id, .. }
-                | CanvasCommand::Fade { id, .. } => Some(*id),
+                | CanvasCommand::Fade { id, .. }
+                | CanvasCommand::Filter { id, .. } => Some(*id),
                 CanvasCommand::Copy { destination, .. }
                 | CanvasCommand::TransformCopy { destination, .. }
                 | CanvasCommand::CopySubtree { destination, .. } => Some(*destination),
@@ -691,10 +801,28 @@ impl CanvasSystem {
         if !changed {
             return Ok(());
         }
-        next.validate()?;
-        next.rebuild(c, &mut next_layers, &dirty_sources, &dirty_presentations)?;
-        *self = next;
-        *layers = next_layers;
+        next.validate_touched(c, &dirty_sources)?;
+        next.rebuild(c, next_layers, &dirty_sources, &dirty_presentations)?;
+        Ok(())
+    }
+    /// [`CanvasSystem::validate`] restricted to the surfaces a batch wrote.
+    fn validate_touched(&self, c: ClientId, ids: &BTreeSet<u32>) -> Result<()> {
+        let Some(owner) = self.clients.get(&c.0) else {
+            return Ok(());
+        };
+        ensure!(owner.len() <= MAX_SURFACES, "canvas surface limit");
+        for id in ids {
+            if let Some(s) = owner.get(id) {
+                ensure!(
+                    s.width > 0 && s.height > 0 && s.width <= 8192 && s.height <= 8192,
+                    "canvas dimensions"
+                );
+                let mut count = 0;
+                validate_nodes(&s.nodes, 0, &mut count).map_err(|e| {
+                    anyhow::anyhow!("{e:#} (canvas {}x{}, {} top-level nodes)", s.width, s.height, s.nodes.len())
+                })?;
+            }
+        }
         Ok(())
     }
     fn prune_missing_parents(&mut self, c: ClientId, layers: &LayerSystem) {
@@ -1000,12 +1128,183 @@ fn validate_nodes(nodes: &[CanvasNode], depth: usize, count: &mut usize) -> Resu
     }
     Ok(())
 }
+/// How an atop draw combines with the destination it keeps the alpha of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AtopMode {
+    Normal,
+    Multiply,
+    Screen,
+}
+/// Visible leaf draws (mutable), depth first.
+fn leaf_draws(nodes: &mut [CanvasNode]) -> Vec<&mut LayerSpec> {
+    let mut out = Vec::new();
+    for n in nodes {
+        match n {
+            CanvasNode::Group { nodes, .. } => out.extend(leaf_draws(nodes)),
+            CanvasNode::Draw { layer } => {
+                if layer.visible && layer.opacity != 0 && !matches!(layer.paint, Paint::Solid { color } if color[3] == 0) {
+                    out.push(layer)
+                }
+            }
+        }
+    }
+    out
+}
+/// `group` drawn at `opacity` over a surface of `size`. Exact without a
+/// render target when the group holds one draw (the opacity folds into it);
+/// overlapping draws are frozen into one isolated snapshot draw over the
+/// destination-space `region` they cover, and that draw carries the opacity.
+fn with_opacity(group: CanvasNode, opacity: u8, region: [f32; 4], size: [u32; 2]) -> Result<CanvasNode> {
+    if opacity == 255 {
+        return Ok(group);
+    }
+    let mut probe = vec![group];
+    {
+        let mut leaves = leaf_draws(&mut probe);
+        if leaves.len() <= 1 {
+            if let Some(leaf) = leaves.pop() {
+                leaf.opacity = ((u16::from(leaf.opacity) * u16::from(opacity) + 127) / 255) as u8;
+            }
+            return Ok(probe.pop().expect("probe group"));
+        }
+    }
+    let full = [0., 0., size[0] as f32, size[1] as f32];
+    let Some(region) = intersect(region, full) else {
+        return Ok(probe.pop().expect("probe group"));
+    };
+    let clipped = CanvasNode::Group {
+        offset: [0., 0.],
+        clip: region,
+        opacity: 255,
+        nodes: probe,
+        rotate: 0.,
+        scale: [1., 1.],
+    };
+    let (paint, uv) = region_paint(&[clipped], region)?;
+    let mut draw = spec(0, region, paint);
+    draw.uv = Some(uv);
+    draw.opacity = opacity;
+    Ok(CanvasNode::Draw { layer: draw })
+}
+/// Draw `node` source-atop over `region` of `s`: the region's content and the
+/// draw (every leaf marked Atop) are frozen into one isolated snapshot, so the
+/// destination of the atop blend is exactly this surface's own content.
+fn draw_atop(s: &mut CanvasSurface, region: [f32; 4], mut node: CanvasNode, mode: AtopMode) -> Result<()> {
+    use crate::layer::Blend;
+    let blend = match mode {
+        AtopMode::Normal => Blend::Atop,
+        AtopMode::Multiply => Blend::AtopMultiply,
+        AtopMode::Screen => Blend::AtopScreen,
+    };
+    fn mark(n: &mut CanvasNode, blend: Blend) -> Result<()> {
+        match n {
+            CanvasNode::Group { nodes, .. } => nodes.iter_mut().try_for_each(|n| mark(n, blend)),
+            CanvasNode::Draw { layer } => {
+                ensure!(matches!(layer.blend, Blend::Normal), "atop draw of a non-normal blend");
+                layer.blend = blend;
+                Ok(())
+            }
+        }
+    }
+    // Sequential per-draw application equals the composite only for atop;
+    // multiply/screen of overlapping source draws would need isolation.
+    if mode != AtopMode::Normal {
+        let mut probe = vec![node.clone()];
+        ensure!(leaf_draws(&mut probe).len() <= 1, "atop multiply/screen of overlapping source draws");
+    }
+    mark(&mut node, blend)?;
+    let full = [0., 0., s.width as f32, s.height as f32];
+    let nodes = std::mem::take(&mut s.nodes);
+    let mut inside = clip_to_band(&nodes, region, true);
+    s.nodes = exclude_region(nodes, full, region);
+    inside.push(CanvasNode::Group {
+        offset: [0., 0.],
+        clip: region,
+        opacity: 255,
+        nodes: vec![node],
+        rotate: 0.,
+        scale: [1., 1.],
+    });
+    let (paint, uv) = region_paint(&inside, region)?;
+    let mut draw = spec(0, region, paint);
+    draw.uv = Some(uv);
+    s.nodes.push(CanvasNode::Draw { layer: draw });
+    Ok(())
+}
+/// A frozen region: `nodes` (surface coordinates) rasterized into a texture
+/// the size of `region` only, under a root translated by `-region.xy`.
+/// Returns the snapshot paint and the uv of `region` in it.
+fn region_paint(nodes: &[CanvasNode], region: [f32; 4]) -> Result<(Paint, [f32; 4])> {
+    let size = [region[2].ceil().max(1.) as u32, region[3].ceil().max(1.) as u32];
+    let root = [-region[0], -region[1], region[0] + size[0] as f32, region[1] + size[1] as f32];
+    let mut layers = vec![spec(1, root, Paint::Solid { color: [0; 4] })];
+    let mut next_id = 1;
+    snapshot_specs(nodes, 1, &mut next_id, &mut layers)?;
+    let paint = Paint::Snapshot { size, layers: layers.into() };
+    paint.validate()?;
+    Ok((paint, [0., 0., region[2] / size[0] as f32, region[3] / size[1] as f32]))
+}
+/// A region snapshot made by this module (full-surface frozen tree shown
+/// through a pixel crop equal to its rect): inlinable as a clipped subtree.
+fn region_snapshot(layer: &LayerSpec) -> Option<&[LayerSpec]> {
+    let Paint::Snapshot { size, layers } = &layer.paint else { return None };
+    let [w, h] = [size[0] as f32, size[1] as f32];
+    let r = layer.rect;
+    // `region_paint` shape: a region-sized texture under a root at -region.xy.
+    let crop = [0., 0., r[2] / w, r[3] / h];
+    let t = &layer.transform;
+    let root_full = layers
+        .iter()
+        .find(|l| l.parent.is_none())
+        .is_some_and(|l| l.rect[0] == -r[0] && l.rect[1] == -r[1] && [w, h] == [r[2].ceil().max(1.), r[3].ceil().max(1.)]);
+    (root_full
+        && layer.uv.is_some_and(|uv| uv.iter().zip(crop).all(|(a, b)| (a - b).abs() < 1e-6))
+        && layer.opacity == 255
+        && layer.visible
+        && layer.clip.is_none()
+        && layer.filter.is_none()
+        && matches!(layer.blend, crate::layer::Blend::Normal)
+        && t.rotate == 0.
+        && t.scale_x == 1.
+        && t.scale_y == 1.)
+        .then_some(layers.as_slice())
+}
 /// Canvas nodes as snapshot-local LayerSpecs under `parent` (ids from 2).
 fn snapshot_specs(nodes: &[CanvasNode], parent: u32, next_id: &mut u32, out: &mut Vec<LayerSpec>) -> Result<()> {
     for (i, node) in nodes.iter().enumerate() {
         *next_id += 1;
         ensure!(*next_id <= 4096, "canvas snapshot node budget");
         let id = *next_id;
+        if let CanvasNode::Draw { layer } = node {
+            if let Some(inner) = region_snapshot(layer) {
+                // Inline instead of nesting: remap ids, hang the frozen root
+                // under `parent`, clipped to the region it showed.
+                let mut map = std::collections::BTreeMap::new();
+                for l in inner {
+                    *next_id += 1;
+                    ensure!(*next_id <= 4096, "canvas snapshot node budget");
+                    map.insert(l.id, *next_id);
+                }
+                for l in inner {
+                    let mut l = l.clone();
+                    l.id = map[&l.id];
+                    match l.parent {
+                        Some(p) => l.parent = Some(map[&p]),
+                        None => {
+                            // Back in surface coordinates.
+                            l.rect[0] = 0.;
+                            l.rect[1] = 0.;
+                            l.parent = Some(parent);
+                            l.order = [0, i as i32];
+                            l.clip = Some(layer.rect);
+                        }
+                    }
+                    out.push(l);
+                }
+                continue;
+            }
+        }
         let mut s = match node {
             CanvasNode::Draw { layer } => layer.clone(),
             CanvasNode::Group { offset, clip, opacity, rotate, scale, .. } => {

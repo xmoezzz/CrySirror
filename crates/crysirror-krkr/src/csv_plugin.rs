@@ -4,7 +4,7 @@
 //! `csvParser.dll` CSVParser: TJS mapping onto shared `crysirror_runtime::csv`.
 use crate::natives::{Rt, methods, object_arg, read_only, string, this_of};
 use crysirror_runtime::csv::CsvReader;
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, Variant},
 };
@@ -137,4 +137,16 @@ pub fn install(rt: &mut Rt) {
         },
         read_only,
     );
+}
+
+impl State {
+    pub(crate) fn invalidate(&mut self, object: usize) {
+        self.readers.remove(&object);
+    }
+
+    pub(crate) fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
+        // Readers are owned by scripts (a collected one drops its entry via
+        // `invalidate`); a live reader keeps its callback target.
+        out.extend(self.readers.values().filter_map(|(_, target)| *target));
+    }
 }

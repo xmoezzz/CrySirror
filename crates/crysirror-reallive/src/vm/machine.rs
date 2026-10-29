@@ -143,6 +143,8 @@ pub struct Machine {
     pub skip_mode: bool,
     pub savepoint_serial: u64,
     pub instructions: u64,
+    /// VM-state part of the original System (settings, RNG, DLL slots).
+    pub sys: crate::vm::sys_state::Sys,
 }
 
 impl std::fmt::Debug for Machine {
@@ -164,7 +166,9 @@ impl Machine {
             .ok_or_else(|| anyhow!("reallive: the archive has no scenarios"))?;
         let scenario = archive.scenario(start)?;
         let selpoint_auto = gameexe.int("INIT_SELPOINT_USE").unwrap_or(1) != 0;
+        let sys = crate::vm::sys_state::Sys::new(&gameexe);
         let mut machine = Self {
+            sys,
             archive,
             gameexe,
             memory: Memory::new(),

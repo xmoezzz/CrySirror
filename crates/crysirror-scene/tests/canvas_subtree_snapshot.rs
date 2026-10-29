@@ -357,6 +357,7 @@ fn unsupported_blend_group_opacity_and_active_composite_fail_explicitly() {
                         source: 200,
                         duration_ms: 500,
                         rule: None,
+                        external: false,
                     }],
                 )
                 .unwrap();
@@ -449,30 +450,32 @@ fn later_opacity_and_scale_apply_once_to_single_snapshot_not_frozen_inputs() {
 }
 
 #[test]
-fn serialized_snapshot_rejects_nested_external_duplicate_and_oversized_inputs() {
+fn serialized_snapshot_bounds_nesting_and_rejects_external_duplicate_and_oversized_inputs() {
     let root = solid(1, None, [0., 0., 16., 16.], [255; 4], 0);
     let inner = Paint::Snapshot {
         size: [16, 16],
-        layers: vec![root.clone()],
+        layers: vec![root.clone()].into(),
     };
     assert!(inner.validate().is_ok());
-    let mut nested = root.clone();
-    nested.paint = inner;
-    assert!(
-        Paint::Snapshot {
-            size: [16, 16],
-            layers: vec![nested]
+    // Nesting is bounded: payloads within MAX_SNAPSHOT_NESTING levels are
+    // valid (renderers rasterize inner payloads first); deeper ones fail.
+    let mut paint = inner;
+    for level in 1..=crysirror_scene::layer::MAX_SNAPSHOT_NESTING {
+        let mut nested = root.clone();
+        nested.paint = paint;
+        paint = Paint::Snapshot { size: [16, 16], layers: vec![nested].into() };
+        let result = paint.validate();
+        if level < crysirror_scene::layer::MAX_SNAPSHOT_NESTING {
+            assert!(result.is_ok(), "level {level}: {result:?}");
+        } else {
+            assert!(result.unwrap_err().to_string().contains("nesting"), "level {level}");
         }
-        .validate()
-        .unwrap_err()
-        .to_string()
-        .contains("nested")
-    );
+    }
     let external = solid(2, Some(999), [0., 0., 2., 2.], [255; 4], 0);
     assert!(
         Paint::Snapshot {
             size: [16, 16],
-            layers: vec![root.clone(), external]
+            layers: vec![root.clone(), external].into()
         }
         .validate()
         .is_err()
@@ -480,7 +483,7 @@ fn serialized_snapshot_rejects_nested_external_duplicate_and_oversized_inputs() 
     assert!(
         Paint::Snapshot {
             size: [16, 16],
-            layers: vec![root.clone(), root.clone()]
+            layers: vec![root.clone(), root.clone()].into()
         }
         .validate()
         .is_err()
@@ -488,7 +491,7 @@ fn serialized_snapshot_rejects_nested_external_duplicate_and_oversized_inputs() 
     assert!(
         Paint::Snapshot {
             size: [16, 16],
-            layers: vec![root.clone(); 4097]
+            layers: vec![root.clone(); 4097].into()
         }
         .validate()
         .is_err()
@@ -496,7 +499,7 @@ fn serialized_snapshot_rejects_nested_external_duplicate_and_oversized_inputs() 
     assert!(
         Paint::Snapshot {
             size: [8193, 16],
-            layers: vec![root]
+            layers: vec![root].into()
         }
         .validate()
         .is_err()

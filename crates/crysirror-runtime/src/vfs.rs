@@ -346,6 +346,20 @@ impl ClientStorage for CapStorage {
             created_ms: millis(metadata.created()), modified_ms: millis(metadata.modified()), accessed_ms: millis(metadata.accessed()) }))
     }
 
+    fn served_by_container(&self, path: &VfsPath) -> bool {
+        if path.mount() != Mount::Asset {
+            return false;
+        }
+        // Same provider order as `read`: the first provider holding the path
+        // serves it.
+        for (point, provider) in provider_snapshot(&self.providers) {
+            let Some(rest) = strip_mount(&point, path.relative()) else { continue };
+            if provider.exists(rest) {
+                return provider.container_source().is_some();
+            }
+        }
+        false
+    }
     fn container_mount(&self,source:&str)->Result<Option<String>> {
         let path=VfsPath::new(Mount::Asset,source)?;
         if path.relative()!=source {return Err(Error::Invalid("container source path"))}

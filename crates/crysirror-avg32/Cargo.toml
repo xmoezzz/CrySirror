@@ -7,18 +7,16 @@ rust-version.workspace = true
 
 
 [dependencies]
-avg32 = { git = "https://github.com/xmoezzz/siglus_rs.git", rev = "256c398e06fbcbae8e956eb046c831b3d6c8a593", default-features = false, features = ["portable-vm"] }
 crysirror-core.workspace = true
+crysirror-image.workspace = true
 crysirror-runtime.workspace = true
 crysirror-scene.workspace = true
 crysirror-text.workspace = true
 anyhow.workspace = true
+encoding_rs = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-crysirror-acoustics.workspace = true
-crysirror-audio.workspace = true
-crysirror-tasks.workspace = true
 tempfile = "3.12"
-image.workspace = true

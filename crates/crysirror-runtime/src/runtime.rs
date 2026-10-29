@@ -106,7 +106,8 @@ pub struct SharedHost {
     clients: BTreeSet<ClientId>,
     pub trace: VecDeque<TraceEvent>,
     generated: Vec<(ClientId, String, Vec<u8>)>,
-    surfaces: Vec<(ClientId, u32, u32, u32, Vec<u8>)>,
+    /// Ordered surface writes (`Some`) and releases (`None`) of this tick.
+    surfaces: Vec<(ClientId, u32, Option<(u32, u32, Vec<u8>)>)>,
     pcm: BTreeMap<ClientId, Vec<[f32; 2]>>,
     pub channel_audio: crysirror_audio::channels::ChannelAudio,
     pub media: crate::media::MediaManager,
@@ -387,10 +388,15 @@ impl HostServices for SharedHost {
             Q::Layer(id) => serde_json::to_value(self.engine.layers.get(client, id)),
             Q::Canvas(id) => serde_json::to_value(self.engine.canvases.surface(client, id)),
             Q::UiWidget(id) => serde_json::to_value(self.engine.ui.get(client.0, id)),
-            Q::UiEvents | Q::MenuEvents => serde_json::to_value(
-                self.engine
-                    .ui
-                    .drain_events(client.0, matches!(query, Q::MenuEvents)),
+            Q::UiEvents | Q::MenuEvents | Q::DialogEvents => serde_json::to_value(
+                self.engine.ui.drain_events(
+                    client.0,
+                    match query {
+                        Q::MenuEvents => Some("menu_activate"),
+                        Q::DialogEvents => Some("dialog_result"),
+                        _ => None,
+                    },
+                ),
             ),
         }
         .map_err(|e| Error::Io(e.to_string()))?;
@@ -480,7 +486,7 @@ impl HostServices for SharedHost {
                         self.clock_ms,
                     )
                     .map_err(|e| Error::Io(e.to_string()))?;
-                self.surfaces.push((client, slot, 1, 1, vec![0, 0, 0, 255]));
+                self.surfaces.push((client, slot, Some((1, 1, vec![0, 0, 0, 255]))));
             }
             MediaRequest::Stop { .. } => self
                 .media
@@ -761,11 +767,18 @@ impl HostServices for SharedHost {
         // Last write in a tick wins; the asset store swaps it in after the tick.
         self.surfaces.retain(|s| !(s.0 == client && s.1 == slot));
         self.surfaces
-            .push((client, slot, width, height, rgba.to_vec()));
+            .push((client, slot, Some((width, height, rgba.to_vec()))));
         VfsPath::new(
             crysirror_core::path::Mount::Asset,
             &format!("{}{slot}", crate::assets::SURFACE_PREFIX),
         )
+    }    fn release_surface(&mut self, client: ClientId, slot: u32) -> crysirror_core::Result<()> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        self.surfaces.retain(|s| !(s.0 == client && s.1 == slot));
+        self.surfaces.push((client, slot, None));
+        Ok(())
     }
 }
 // Restore grants immutable uploads only. It cannot read/write files, submit
@@ -1286,8 +1299,15 @@ impl Runtime {
         for (client, path, bytes) in std::mem::take(&mut self.host.generated) {
             self.assets.register_generated(client, &path, bytes)?;
         }
-        for (client, slot, w, h, rgba) in std::mem::take(&mut self.host.surfaces) {
-            self.assets.put_surface(client, slot, w, h, rgba)?;
+        for (client, slot, surface) in std::mem::take(&mut self.host.surfaces) {
+            match surface {
+                Some((w, h, rgba)) => {
+                    self.assets.put_surface(client, slot, w, h, rgba)?;
+                }
+                None => {
+                    self.assets.remove_surface(client, slot);
+                }
+            }
         }
         let media = self.host.media.tick(self.host.clock_ms)?;
         for update in media.frames {
@@ -1413,6 +1433,22 @@ impl Runtime {
     }
     pub fn all_halted(&self) -> bool {
         self.sessions.iter().all(|s| s.yielded == VmYield::Halted)
+    }
+    /// Every VM session (at least one) has halted: the games are done.
+    pub fn vm_sessions_halted(&self) -> bool {
+        !self.sessions.is_empty() && self.all_halted()
+    }
+    /// Forward a user close request to the running VM sessions. `true` when
+    /// some game handles it (it halts once it agrees); `false` when the host
+    /// should close now.
+    pub fn request_close(&mut self) -> bool {
+        let mut handled = false;
+        for s in &mut self.sessions {
+            if s.yielded != VmYield::Halted {
+                handled |= s.vm.request_close();
+            }
+        }
+        handled
     }
     pub fn now_ms(&self) -> u64 {
         self.host.clock_ms

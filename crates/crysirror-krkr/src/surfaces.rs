@@ -10,7 +10,7 @@
 //! 2026-10-28; no code executed), cross-checked with Kirakira c451918
 //! `krkr-plugins` reference notes (window_ex.rs, win32_dialog.rs, k2compat.rs).
 use crate::natives::{Rt, unsupported};
-use krkr_tjs2::runtime::{Closure, ObjectHandle, Variant};
+use crysirror_tjs2::runtime::{Closure, ObjectHandle, Variant};
 
 #[derive(Clone, Copy)]
 pub enum Kind {

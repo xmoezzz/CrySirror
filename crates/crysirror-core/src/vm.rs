@@ -50,4 +50,11 @@ pub trait VmAdapter {
     fn original_save_import_is_transactional(&self) -> bool {
         false
     }
+    /// The user asked to close the game (window close button, OS quit).
+    /// An adapter whose game confirms or saves before closing returns `true`
+    /// and halts on its own once the game agrees; `false` (the default)
+    /// leaves closing to the host.
+    fn request_close(&mut self) -> bool {
+        false
+    }
 }

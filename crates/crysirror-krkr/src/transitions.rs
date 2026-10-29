@@ -6,16 +6,21 @@ use crysirror_core::{
     service::{EngineQuery, HostServices},
     state::ClientId,
 };
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result, TjsError,
     runtime::{Closure, ObjectHandle, Variant},
 };
 use serde_json::json;
 use std::collections::BTreeMap;
-/// Active transitions: destination → source, and the destinations whose
-/// transition excludes children (only the destination's own image changes).
+/// Active transitions: destination → source, the destinations whose
+/// transition excludes children (only the destination's own image changes),
+/// and destinations clocked by a script `callback` → (callback, time ms).
 #[derive(Default)]
-pub struct State(pub BTreeMap<usize, usize>, pub std::collections::BTreeSet<usize>);
+pub struct State(
+    pub BTreeMap<usize, usize>,
+    pub std::collections::BTreeSet<usize>,
+    pub BTreeMap<usize, (Variant, u64)>,
+);
 
 /// Engine layer id of the source image presented beside a destination's own
 /// image during a transition without children (below generated canvas ids).
@@ -68,15 +73,17 @@ fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Var
         .get(3)
         .and_then(object_arg)
         .ok_or_else(|| TjsError::runtime("transition options required"))?;
-    if rt.object_member(options, "selfupdate").is_truthy()
-        || !matches!(
-            rt.object_member(options, "callback"),
-            Variant::Void | Variant::Null
-        )
-    {
+    // krkrz `callback`: the transition's tick source (GetTransTick calls it
+    // each update; the handler phase is tick / time, starting at tick 0).
+    // `selfupdate` alone (updates only on script Update calls) is not mapped.
+    let callback = match rt.object_member(options, "callback") {
+        Variant::Void | Variant::Null => None,
+        v => Some(v),
+    };
+    if rt.object_member(options, "selfupdate").is_truthy() && callback.is_none() {
         return Err(unsupported(
-            "transition callback/selfupdate",
-            "external transition clocks",
+            &format!("transition {name} selfupdate without callback"),
+            "script-driven transition updates",
         ));
     }
     // krkrz tTVPUniversalTransHandlerProvider: `rule` (required image) and
@@ -96,10 +103,11 @@ fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Var
             Variant::Void => 64,
             v => v.to_integer()?,
         };
-        if !(1..=4096).contains(&vague) {
+        // vague 0 is a hard edge (TVPInitUnivTransBlendTable has no blend band).
+        if !(0..=4096).contains(&vague) {
             return Err(unsupported(
                 &format!("universal transition vague {vague}"),
-                "a vague of 1..=4096",
+                "a vague of 0..=4096",
             ));
         }
         Some(json!({"asset": asset, "vague": vague}))
@@ -112,16 +120,22 @@ fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Var
     }
     let a = rt.host().layer(dest)?.clone();
     let b = rt.host().layer(source)?.clone();
+    // krkrz allows endpoints anywhere in the tree (KAG transitions a fore
+    // page layer with its back page twin under another parent).
     if with_children
         && (dest == source
             || a.parent.is_none()
-            || a.parent != b.parent
+            || b.parent.is_none()
             || a.width != b.width
             || a.height != b.height)
     {
+        let label = |h: ObjectHandle| rt.object_member(h, "name").to_tjs_string().unwrap_or_default();
         return Err(unsupported(
-            "Layer.beginTransition",
-            "equally sized sibling subtree endpoints",
+            &format!(
+                "Layer.beginTransition({name}) dest `{}` {}x{} parent {:?} / source `{}` {}x{} parent {:?}",
+                label(dest), a.width, a.height, a.parent, label(source), b.width, b.height, b.parent
+            ),
+            "equally sized non-primary subtree endpoints",
         ));
     }
     // krkrz: without children both layers must have an image; only the
@@ -164,14 +178,19 @@ fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Var
         (a.presentation(), temp)
     };
     rt.host_mut().transitions.0.insert(dest.0, source.0);
-    rt.host_mut()
-        .layer_op(json!({"op":"begin_crossfade","id":id,"source":src,"duration_ms":duration,"rule":rule}));
+    let external = callback.is_some();
+    if let Some(cb) = callback {
+        rt.host_mut().transitions.2.insert(dest.0, (cb, duration as u64));
+    }
+    rt.host_mut().layer_op(json!({"op":"begin_crossfade","id":id,"source":src,
+        "duration_ms":duration,"rule":rule,"external":external}));
     Ok(Variant::Void)
 }
 fn finish(rt: &mut Rt, dest: ObjectHandle) -> Result<()> {
     let Some(source) = rt.host_mut().transitions.0.remove(&dest.0) else {
         return Ok(());
     };
+    rt.host_mut().transitions.2.remove(&dest.0);
     let source = ObjectHandle(source);
     let a = rt.host().layer(dest)?.clone();
     let b = rt.host().layer(source)?.clone();
@@ -181,21 +200,38 @@ fn finish(rt: &mut Rt, dest: ObjectHandle) -> Result<()> {
         swap_keep_children(rt, dest, source)?;
         return completed(rt, dest, source, &a, &b);
     }
-    if a.parent != b.parent {
-        return Err(TjsError::runtime("transition endpoints reparented"));
-    }
     rt.host_mut()
         .layer_op(json!({"op":"end_crossfade","id":a.container()}));
-    if let Some(parent) = a.parent {
+    // krkrz Exchange (InternalStopTransition, without keepchildren): the two
+    // layers trade places in the tree, across parents when they differ.
+    let (pa, pb) = (a.parent, b.parent);
+    for (parent, from, to) in [(pa, dest.0, source.0), (pb, source.0, dest.0)] {
+        let Some(parent) = parent else { continue };
         let p = rt.host_mut().layer_mut(ObjectHandle(parent))?;
-        for child in &mut p.children {
-            if *child == dest.0 {
-                *child = source.0
-            } else if *child == source.0 {
-                *child = dest.0
+        if pa == pb {
+            for child in &mut p.children {
+                if *child == dest.0 {
+                    *child = source.0
+                } else if *child == source.0 {
+                    *child = dest.0
+                }
             }
+            p.dirty = true;
+            break;
+        }
+        if let Some(c) = p.children.iter_mut().find(|c| **c == from) {
+            *c = to;
         }
         p.dirty = true;
+    }
+    if pa != pb {
+        rt.host_mut().layer_mut(dest)?.parent = pb;
+        rt.host_mut().layer_mut(source)?.parent = pa;
+        for h in [dest, source] {
+            let l = rt.host_mut().layer_mut(h)?;
+            l.dirty = true;
+            l.presented = None;
+        }
     }
     completed(rt, dest, source, &a, &b)
 }
@@ -284,6 +320,20 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
         } else {
             layer.container()
         };
+        if let Some((callback, time)) = rt.host().transitions.2.get(&dest).cloned() {
+            let tick = rt
+                .call_function(callback, vec![])
+                .and_then(|v| v.to_integer())
+                .map_err(|e| anyhow::anyhow!("transition callback: {e}"))?;
+            let elapsed = u64::try_from(tick).unwrap_or(0).min(time);
+            rt.host_mut()
+                .layer_op(json!({"op":"set_crossfade_elapsed","id":id,"elapsed_ms":elapsed}));
+            if elapsed >= time {
+                finish(rt, ObjectHandle(dest))
+                    .map_err(|e| anyhow::anyhow!("transition completion: {e}"))?;
+            }
+            continue;
+        }
         let bytes = host.query_engine(client, EngineQuery::LayerCrossfade(id))?;
         let status: serde_json::Value = serde_json::from_slice(&bytes)?;
         if let (Some(elapsed), Some(duration)) = (

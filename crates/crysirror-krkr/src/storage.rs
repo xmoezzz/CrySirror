@@ -450,6 +450,36 @@ impl Storage {
             .with_context(|| format!("read storage `{path}`"))
     }
 
+    /// fstat `deleteFile`: only the scoped save mount is writable; a missing
+    /// file or an asset path (read-only, like an archive) answers false.
+    pub fn delete_save(&self, name: &str) -> Result<bool> {
+        let Some(path) = save_path(name)? else { return Ok(false) };
+        if !self.files.exists(&path) {
+            return Ok(false);
+        }
+        self.files.remove(&path).map_err(err)?;
+        Ok(true)
+    }
+    /// fstat `moveFile` within the save mount (replaces the destination).
+    pub fn move_save(&self, from: &str, to: &str) -> Result<bool> {
+        let (Some(src), Some(dst)) = (save_path(from)?, save_path(to)?) else {
+            return Ok(false);
+        };
+        if !self.files.exists(&src) {
+            return Ok(false);
+        }
+        let data = self.files.read(&src).map_err(err)?;
+        self.files.write_atomic(&dst, &data).map_err(err)?;
+        self.files.remove(&src).map_err(err)?;
+        Ok(true)
+    }
+    /// fstat `copyFile` from any readable storage into the save mount.
+    pub fn copy_to_save(&self, from: &str, to: &str) -> Result<bool> {
+        let Some(dst) = save_path(to)? else { return Ok(false) };
+        let Ok(data) = self.read_named(from) else { return Ok(false) };
+        self.files.write_atomic(&dst, &data).map_err(err)?;
+        Ok(true)
+    }
     pub fn read_named(&self, name: &str) -> Result<Vec<u8>> {
         if let Some(path) = save_path(name)? {
             return self.files.read(&path).map_err(err);

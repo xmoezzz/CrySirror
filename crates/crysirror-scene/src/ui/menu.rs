@@ -23,7 +23,7 @@ fn popup() -> f32 {
 fn size() -> u16 {
     18
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 /// One logical menu item; children and radio groups are engine-owned.
 pub struct MenuItemSpec {
@@ -88,7 +88,7 @@ impl MenuItemSpec {
         None
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 /// A retained menu bar or context menu, scoped to its owning client.
 pub struct MenuSpec {
@@ -197,6 +197,9 @@ pub struct MenuSystem {
     focus: Option<(u32, u32, u32)>,
     #[serde(skip)]
     down: bool,
+    /// The host presents menu bars natively (see [`MenuSystem::set_native_bars`]).
+    #[serde(skip)]
+    native_bars: bool,
 }
 struct Cell {
     owner: u32,
@@ -337,7 +340,10 @@ impl MenuSystem {
         let mut cells = vec![];
         for (owner, bars) in &self.clients {
             for (bar, menu) in bars {
-                if !menu.spec.visible || menu.spec.context && menu.position.is_none() {
+                if !menu.spec.visible
+                    || menu.spec.context && menu.position.is_none()
+                    || !menu.spec.context && self.native_bars
+                {
                     continue;
                 }
                 let s = &menu.spec;
@@ -414,6 +420,75 @@ impl MenuSystem {
             }
         }
         cells
+    }
+    /// A presentation host that draws menu bars itself (a native OS menu bar)
+    /// takes them out of engine layout, drawing and pointer input; trees,
+    /// radio state and activation events stay here.
+    pub fn set_native_bars(&mut self, native: bool) {
+        if self.native_bars != native {
+            self.native_bars = native;
+            self.reset_input();
+        }
+    }
+    pub fn native_bars(&self) -> bool {
+        self.native_bars
+    }
+    /// Visible menu bars (not context menus) in owner, then id order.
+    pub fn bars(&self) -> impl Iterator<Item = (u32, &MenuSpec)> + '_ {
+        self.clients.iter().flat_map(|(owner, bars)| {
+            bars.values()
+                .filter(|m| m.spec.visible && !m.spec.context)
+                .map(move |m| (*owner, &m.spec))
+        })
+    }
+    /// Activate a leaf item chosen outside engine input (a native menu).
+    /// Same radio rule and event as a pointer activation; a disabled,
+    /// hidden, separator or branch item, or one whose ancestors are not all
+    /// visible and enabled, is refused.
+    pub fn activate_item(&mut self, owner: u32, bar: u32, item: u32) -> Result<UiEvent> {
+        let menu = self
+            .clients
+            .get(&owner)
+            .and_then(|bars| bars.get(&bar))
+            .context("menu missing")?;
+        ensure!(menu.spec.visible, "menu is hidden");
+        fn path(items: &[MenuItemSpec], id: u32, out: &mut Vec<u32>) -> Option<bool> {
+            for item in items {
+                if !item.visible || !item.enabled {
+                    if item.id == id {
+                        return Some(false);
+                    }
+                    continue;
+                }
+                out.push(item.id);
+                if item.id == id {
+                    return Some(!item.separator && item.children.is_empty());
+                }
+                if let Some(found) = path(&item.children, id, out) {
+                    return Some(found);
+                }
+                out.pop();
+            }
+            None
+        }
+        let mut branch = vec![];
+        ensure!(
+            path(&menu.spec.items, item, &mut branch) == Some(true),
+            "menu item {item} is not an active leaf"
+        );
+        let cell = Cell {
+            owner,
+            bar,
+            item,
+            rect: [0.; 4],
+            path: branch,
+            enabled: true,
+            label: String::new(),
+            checked: false,
+            children: false,
+            separator: false,
+        };
+        self.activate(&cell)?.context("menu item not activated")
     }
     fn activate(&mut self, cell: &Cell) -> Result<Option<UiEvent>> {
         if !cell.enabled || cell.separator {

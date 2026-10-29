@@ -129,6 +129,9 @@ pub struct App {
     remainder: Duration,
     presented: u64,
     error: Option<anyhow::Error>,
+    /// OS menu bar mirroring engine menu bars (opt-in,
+    /// `CRYSIRROR_NATIVE_MENU=1`); otherwise the engine-drawn bar is used.
+    native_menu: Option<crate::native_menu::NativeMenu>,
 }
 
 pub fn load_fonts(rt: &mut Runtime, override_font: Option<&Path>) -> Result<()> {
@@ -185,7 +188,15 @@ pub fn movie_on(
     rendering_path: RenderingPath,
 ) -> Result<serde_json::Value> {
     std::fs::create_dir_all(dir)?;
-    let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut renderer = Renderer::new(
+        gpu,
+        // Developer diagnostic: the BGRA surface format of macOS windows.
+        if std::env::var_os("CRYSIRROR_CAPTURE_BGRA").is_some() {
+            wgpu::TextureFormat::Bgra8UnormSrgb
+        } else {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        },
+    );
     renderer.set_rendering_path(rendering_path)?;
     load_fonts(source.runtime(), font)?;
     let mut last = None;
@@ -253,7 +264,15 @@ fn capture_ready(
     path: &Path,
     rendering_path: RenderingPath,
 ) -> Result<serde_json::Value> {
-    let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut renderer = Renderer::new(
+        gpu,
+        // Developer diagnostic: the BGRA surface format of macOS windows.
+        if std::env::var_os("CRYSIRROR_CAPTURE_BGRA").is_some() {
+            wgpu::TextureFormat::Bgra8UnormSrgb
+        } else {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        },
+    );
     renderer.set_rendering_path(rendering_path)?;
     capture_ready_with_renderer(&mut renderer, rt, font, path)
 }
@@ -349,6 +368,7 @@ impl App {
             last_tick: Instant::now(),
             remainder: Duration::ZERO,
             presented: 0,
+            native_menu: None,
             error: None,
         };
         let event_result = event_loop.run_app(&mut app);
@@ -425,6 +445,11 @@ impl App {
             )?,
         );
         window.set_ime_allowed(true);
+        // The engine-drawn menu bar inside the window is the default on every
+        // platform; CRYSIRROR_NATIVE_MENU=1 mirrors it into the OS menu bar.
+        if std::env::var_os("CRYSIRROR_NATIVE_MENU").is_some_and(|v| v == "1") {
+            self.native_menu = Some(crate::native_menu::NativeMenu::new(&self.core.rt().project.name));
+        }
         let surface = self.instance.create_surface(window.clone())?;
         let gpu = Arc::new(pollster::block_on(Gpu::request_for(
             &self.instance,
@@ -440,17 +465,41 @@ impl App {
             .find(|format| format.is_srgb())
             .context("surface has no sRGB format")?;
         let size = window.inner_size();
+        // Developer diagnostic: CRYSIRROR_SURFACE_CAPTURE=<png> saves the last
+        // presented swapchain image of a `--frames` run.
+        let surface_capture = std::env::var_os("CRYSIRROR_SURFACE_CAPTURE").is_some();
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: if surface_capture {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC
+            } else {
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+            },
             format,
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::AutoVsync,
-            alpha_mode: *caps.alpha_modes.first().context("surface alpha modes")?,
+            // The engine frame is the window's final image: never let its
+            // alpha composite with the desktop (krkr base layers carry alpha 0).
+            alpha_mode: if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) {
+                wgpu::CompositeAlphaMode::Opaque
+            } else {
+                *caps.alpha_modes.first().context("surface alpha modes")?
+            },
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&gpu.device, &config);
+        log::info!(
+            "window: inner {}x{} scale {} surface {}x{} {:?} alpha {:?} (alpha modes {:?})",
+            size.width,
+            size.height,
+            window.scale_factor(),
+            config.width,
+            config.height,
+            format,
+            config.alpha_mode,
+            caps.alpha_modes
+        );
         let mut renderer = Renderer::new(gpu, format);
         renderer.set_scene3d(self.core.rt().render_scene3d()?.as_ref())?;
         renderer.set_pbr_scene(self.core.rt().render_pbr()?)?;
@@ -540,6 +589,12 @@ impl App {
             } else {
                 delta - Duration::from_millis(ms)
             };
+            if let Some(menu) = &mut self.native_menu {
+                if menu.drain(&mut self.core.rt().host.engine.ui)?.quit && !self.core.rt().request_close() {
+                    el.exit();
+                    return Ok(());
+                }
+            }
             #[allow(unused_mut)]
             let mut frame_input = self.input;
             #[cfg(feature = "gamepad")]
@@ -578,8 +633,21 @@ impl App {
             w.window.request_redraw();
             return Ok(());
         }
-        if self.core.quit_requested() {
+        if self.core.quit_requested() || self.core.rt().vm_sessions_halted() {
             el.exit();
+        }
+        if let Some(menu) = &mut self.native_menu {
+            menu.sync(&mut self.core.rt().host.engine.ui)?;
+        }
+        // KiriKiri setCursorPos: move the OS pointer to a canvas position.
+        if let Some((_, [x, y])) = self.core.rt().host.engine.ui.pointer_warp.take() {
+            let canvas = self.core.rt().project.canvas;
+            let vp = Viewport::fit(canvas, [w.config.width, w.config.height]);
+            let wx = f64::from(vp.x) + f64::from(x) / f64::from(canvas[0]) * f64::from(vp.width);
+            let wy = f64::from(vp.y) + f64::from(y) / f64::from(canvas[1]) * f64::from(vp.height);
+            if let Err(e) = w.window.set_cursor_position(winit::dpi::PhysicalPosition::new(wx, wy)) {
+                log::warn!("pointer warp: {e}");
+            }
         }
         if let Some((_, visible)) = self.core.rt().host.engine.ui.cursor {
             w.window.set_cursor_visible(visible);
@@ -652,12 +720,22 @@ impl App {
                     rt.project.background,
                 )
             })?;
+        if self.options.frames.is_some_and(|limit| self.presented + 1 >= limit) {
+            if let Some(path) = std::env::var_os("CRYSIRROR_SURFACE_CAPTURE") {
+                w.renderer
+                    .read_texture(&frame.texture, w.config.width, w.config.height)?
+                    .save_with_format(&path, image::ImageFormat::Png)?;
+            }
+        }
         w.window.pre_present_notify();
         frame.present();
         if reconfigure {
             w.surface.configure(&w.renderer.gpu.device, &w.config);
         }
         self.presented += 1;
+        if self.presented % 120 == 0 {
+            log::debug!("presented {} frames", self.presented);
+        }
         if self
             .options
             .frames
@@ -677,7 +755,12 @@ impl App {
     }
     fn event(&mut self, el: &ActiveEventLoop, event: WindowEvent) -> Result<()> {
         match event {
-            WindowEvent::CloseRequested => el.exit(),
+            // A running game may confirm or save first; it halts when done.
+            WindowEvent::CloseRequested => {
+                if !self.core.rt().request_close() {
+                    el.exit();
+                }
+            }
             WindowEvent::RedrawRequested => self.redraw(el)?,
             WindowEvent::Resized(size) => {
                 if let Some(w) = self.window.as_mut() {
@@ -692,6 +775,12 @@ impl App {
                         w.config.width = size.width;
                         w.config.height = size.height;
                         w.surface.configure(&w.renderer.gpu.device, &w.config);
+                        log::info!(
+                            "window resized: {}x{} scale {}",
+                            size.width,
+                            size.height,
+                            w.window.scale_factor()
+                        );
                     }
                 }
                 self.last_tick = Instant::now();

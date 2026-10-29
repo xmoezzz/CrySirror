@@ -34,6 +34,15 @@ pub trait ImageResource: Send + Sync + core::fmt::Debug {
     fn size(&self) -> [u32; 2];
     fn rgba(&self) -> Arc<[u8]>;
     fn opaque(&self) -> bool;
+    /// Read one stored coverage byte. This does not apply display opacity,
+    /// filters or a VM's hit policy. Out-of-bounds/malformed resources return None.
+    fn alpha_at(&self, point: [u32; 2]) -> Option<u8> {
+        let [w,h]=self.size();
+        if point[0]>=w || point[1]>=h { return None; }
+        let index=u64::from(point[1]).checked_mul(u64::from(w))?
+            .checked_add(u64::from(point[0]))?.checked_mul(4)?.checked_add(3)?;
+        self.rgba().get(usize::try_from(index).ok()?).copied()
+    }
 }
 #[derive(Clone, Debug)]
 pub enum ImageInput {

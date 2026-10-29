@@ -9,7 +9,7 @@
 //! submitted in order by the adapter after each script entry point returns.
 use crate::storage::{Storage, decode_text};
 use crysirror_core::service::{ImageMetadata, TextMeasurement};
-use krkr_tjs2::{
+use crysirror_tjs2::{
     Result as TjsResult, TjsError,
     runtime::{ObjectHandle, TjsHost},
 };
@@ -128,11 +128,28 @@ pub struct KrkrHost {
     pub menus: BTreeMap<usize, crate::menus::MenuState>,
     pub menus_last: Option<Value>,
     pub menu_popups: Vec<(usize, [f32; 2])>,
+    /// Bumped by every menu state change; `menus::sync` rebuilds specs only
+    /// when it (or a menu window's visibility/canvas) changed.
+    pub menus_revision: u64,
+    /// WIN32Dialog.messageBox waiting on an engine dialog: (dialog id).
+    pub dialog_pending: Option<u32>,
+    pub dialog_serial: u32,
+    pub menus_synced: Option<(u64, Vec<(usize, bool)>, [u32; 2])>,
     pub loaded_plugins: BTreeSet<String>,
     pub plugin_shells: BTreeSet<String>,
     free_slots: BTreeSet<u32>,
     next_slot: u32,
     pub exit_requested: bool,
+    /// krkrz `ModalLayerVector`: layers made modal by `Layer.setMode`, the
+    /// last one current.
+    pub modal_layers: Vec<usize>,
+    /// krkrz `CanCloseWork`: the answer `Window.onCloseQuery` gives to a
+    /// script `close()` (set by the native handler, `super.onCloseQuery`).
+    pub close_decision: bool,
+    /// A user close (window close button) waiting for its onCloseQuery.
+    pub user_close_pending: bool,
+    /// The onCloseQuery being answered is a user close (`!ProgramClosing`).
+    pub closing_by_user: bool,
     pub api_calls: u64,
 }
 
@@ -172,11 +189,19 @@ impl KrkrHost {
             menus: BTreeMap::new(),
             menus_last: None,
             menu_popups: vec![],
+            menus_revision: 0,
+            dialog_pending: None,
+            dialog_serial: 0,
+            menus_synced: None,
             loaded_plugins: BTreeSet::new(),
             plugin_shells: BTreeSet::new(),
             free_slots: BTreeSet::new(),
             next_slot: 1,
             exit_requested: false,
+            modal_layers: Vec::new(),
+            close_decision: false,
+            user_close_pending: false,
+            closing_by_user: false,
             api_calls: 0,
         }
     }
@@ -269,6 +294,28 @@ impl KrkrHost {
             .ok_or_else(|| TjsError::runtime("KiriKiri storage is not mounted yet"))
     }
 
+    /// krkrz `IsAncestorOrSelf(ancestor)`: `ancestor` is `h` or above it.
+    pub fn is_ancestor_or_self(&self, h: usize, ancestor: usize) -> bool {
+        let mut node = Some(h);
+        let mut depth = 0;
+        while let Some(id) = node {
+            if id == ancestor {
+                return true;
+            }
+            depth += 1;
+            if depth > 256 {
+                return false;
+            }
+            node = self.layers.get(&id).and_then(|l| l.parent);
+        }
+        false
+    }
+    /// krkrz `IsDisabledByMode`: outside the current modal layer's subtree.
+    pub fn disabled_by_mode(&self, h: usize) -> bool {
+        self.modal_layers
+            .last()
+            .is_some_and(|current| !self.is_ancestor_or_self(h, *current))
+    }
     pub fn layer(&self, h: ObjectHandle) -> TjsResult<&LayerState> {
         self.layers
             .get(&h.0)
@@ -436,6 +483,7 @@ impl KrkrHost {
             .map(|(&dest, _)| dest).collect();
         for dest in cancelled {
             self.transitions.0.remove(&dest);
+            self.transitions.2.remove(&dest);
             let surface_only = self.transitions.1.remove(&dest);
             if let Some(layer) = self.layers.get(&dest) {
                 let (id, temp) = (
@@ -561,11 +609,19 @@ impl KrkrHost {
             let spec = container_spec(l, major, parent_container, shown);
             let l = self.layers.get_mut(&h).unwrap();
             let placement = (major + 1, [l.image_left, l.image_top]);
-            let present = (l.presented != Some(placement)).then(|| {
-                l.presented = Some(placement);
-                json!({"op":"present","id":l.slot,"layer":l.presentation(),"order":placement.0,
-                    "parent":l.container(),"position":placement.1})
-            });
+            // krkrz ltBinder (type 0) blits nothing of its own; its children
+            // draw straight into the parent's target (LayerIntf.cpp
+            // `case ltBinder: // no action`). Hiding is idempotent.
+            let present = if l.kind == 0 {
+                l.presented = None;
+                Some(json!({"op":"hide","layer":l.presentation()}))
+            } else {
+                (l.presented != Some(placement)).then(|| {
+                    l.presented = Some(placement);
+                    json!({"op":"present","id":l.slot,"layer":l.presentation(),"order":placement.0,
+                        "parent":l.container(),"position":placement.1})
+                })
+            };
             self.layer_op(json!({"op":"put","layer":spec}));
             if let Some(p) = present {
                 self.canvas_op(p);
@@ -629,10 +685,48 @@ pub fn container_spec(l: &LayerState, major: i32, parent: Option<u32>, shown: bo
 }
 
 impl TjsHost for KrkrHost {
+    /// Everything with native state or queued work keyed by an object.
+    fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
+        let ids = self.layers.keys()
+            .chain(self.windows.keys())
+            .chain(self.timers.keys())
+            .chain(self.parsers.keys())
+            .chain(self.menus.keys())
+            .chain(self.transitions.0.keys())
+            .chain(self.transitions.0.values())
+            .chain(self.menu_popups.iter().map(|(h, _)| h))
+            .chain(self.image_job.iter().map(|(h, ..)| h));
+        out.extend(ids.map(|h| ObjectHandle(*h)));
+        out.extend(self.deferred.targets(self.client).map(|t| ObjectHandle((t >> 2) as usize)));
+        self.sounds.gc_roots(out);
+        self.motion.gc_roots(out);
+        for (callback, _) in self.transitions.2.values() {
+            match callback {
+                crysirror_tjs2::runtime::Variant::Object(h) => out.push(*h),
+                crysirror_tjs2::runtime::Variant::Closure(c) => out.extend(std::iter::once(c.object).chain(c.this_obj)),
+                _ => {}
+            }
+        }
+        self.csv.gc_roots(out);
+        self.text_render.gc_roots(out);
+        self.psbfile.gc_roots(out);
+        self.draws.gc_roots(out);
+        self.protect.gc_roots(out);
+    }
+
+    fn object_collected(&mut self, handle: ObjectHandle) {
+        // Registries that do not root their instances (see gc_roots).
+        self.psbfile.invalidate(handle.0);
+        self.csv.invalidate(handle.0);
+        self.text_render.invalidate(handle.0);
+    }
+
     fn invalidate_object(&mut self, handle: ObjectHandle) {
+        self.modal_layers.retain(|l| *l != handle.0);
         self.motion.invalidate(handle.0);
         self.sounds.invalidate(handle.0);
         self.draws.invalidate(handle.0);
+        self.object_collected(handle);
         self.timers.remove(&handle.0);
         self.parsers.remove(&handle.0);
         for kind in 0..4 {
@@ -647,6 +741,7 @@ impl TjsHost for KrkrHost {
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
         for id in menus {
+            self.menus_revision += 1;
             if let Some(menu) = self.menus.remove(&id) {
                 if let Some(parent) = menu.parent.and_then(|p| self.menus.get_mut(&p)) {
                     parent.children.retain(|child| *child != id);

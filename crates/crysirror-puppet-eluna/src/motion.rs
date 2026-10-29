@@ -8,7 +8,9 @@
 //! the returned textures and PuppetFrame. No VM, filesystem or device is owned here.
 use anyhow::{bail, ensure, Context, Result};
 use crysirror_puppet::{PuppetFrame, MAX_PARTS, MAX_VERTICES};
-use eluna::{EmoteDrawPass, EmoteModelSchema, PsbFile, PsbNormalizeOptions, PsbValue};
+use eluna::{
+    EmoteDrawPass, EmoteModelSchema, EmoteStaticScene, PsbFile, PsbNormalizeOptions, PsbValue,
+};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -113,6 +115,8 @@ impl MotionModel {
     }
     /// Sample meshes in model coordinates; affine and viewport conversion happen
     /// here, leaving native adapters responsible only for argument mapping.
+    /// Stateless: a serialized type-0 HOLD keyframe has no previous step to
+    /// hold here; players use [`MotionModel::step`].
     pub fn frame(
         &self,
         object: &str,
@@ -123,6 +127,25 @@ impl MotionModel {
         size: [f32; 2],
         opacity: f32,
     ) -> Result<PuppetFrame> {
+        self.step(object, animation, tick, variables, affine, size, opacity, None)
+            .map(|(frame, _)| frame)
+    }
+    /// One native StepFrame: like [`MotionModel::frame`], continuing from the
+    /// player's previous step so type-0 HOLD keyframes keep the decoded layer
+    /// state (MMotionPlayer sub_1032FB00, eluna's previous-scene path). The
+    /// returned scene is the next step's `previous`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn step(
+        &self,
+        object: &str,
+        animation: &str,
+        tick: f64,
+        variables: &BTreeMap<String, f32>,
+        affine: [f32; 6],
+        size: [f32; 2],
+        opacity: f32,
+        previous: Option<&EmoteStaticScene>,
+    ) -> Result<(PuppetFrame, EmoteStaticScene)> {
         self.timing(object, animation)?;
         ensure!(
             tick.is_finite()
@@ -134,13 +157,23 @@ impl MotionModel {
         );
         let mut schema = self.schema.clone();
         schema.base_object = object.to_owned();
-        let scene = schema.build_motion_scene_at_with_resources_and_variables(
-            &self.psb,
-            &self.bytes,
-            animation,
-            tick as f32,
-            variables,
-        )?;
+        let scene = match previous {
+            Some(previous) => schema.build_motion_scene_at_with_resources_variables_and_previous_scene(
+                &self.psb,
+                &self.bytes,
+                animation,
+                tick as f32,
+                variables,
+                previous,
+            )?,
+            None => schema.build_motion_scene_at_with_resources_and_variables(
+                &self.psb,
+                &self.bytes,
+                animation,
+                tick as f32,
+                variables,
+            )?,
+        };
         ensure!(
             scene.sprites.len() <= MAX_PARTS,
             "motion part limit exceeded"
@@ -159,6 +192,15 @@ impl MotionModel {
         let mut parts = Vec::new();
         let mut masks = Vec::new();
         let mut keys = HashMap::new();
+        if std::env::var_os("CRYSIRROR_MOTION_TRACE_PARTS").is_some() {
+            for s in &scene.sprites {
+                eprintln!(
+                    "[motion-sprite] {object}/{animation} tick={tick:.1} label={:?} tex={} visible={} opacity={:.2} pass={:?} blend={} mask_key={:?}",
+                    s.label, s.texture_resource_index, s.visible, s.opacity, s.draw_frame_info.pass, s.blend_mode,
+                    s.draw_frame_info.native_draw_key
+                );
+            }
+        }
         for sprite in scene.sprites.iter().filter(|s| s.visible && s.opacity > 0.) {
             ensure!(
                 !sprite.feedback_history,
@@ -203,6 +245,16 @@ impl MotionModel {
                 sprite.draw_frame_info.pass,
                 EmoteDrawPass::MaskGeneration | EmoteDrawPass::StencilCompositeMask
             );
+            if std::env::var_os("CRYSIRROR_MOTION_TRACE_PARTS").is_some() {
+                let xs = part.positions.iter().map(|p| p[0]);
+                let ys = part.positions.iter().map(|p| p[1]);
+                eprintln!(
+                    "[motion-part] {object}/{animation} tick={tick:.1} key={:?} left={} top={} w={} h={} raw=[{:.0},{:.0}..{:.0},{:.0}]",
+                    sprite.draw_frame_info.native_draw_key, sprite.left(), sprite.top(), sprite.width, sprite.height,
+                    xs.clone().fold(f32::INFINITY, f32::min), ys.clone().fold(f32::INFINITY, f32::min),
+                    xs.fold(f32::NEG_INFINITY, f32::max), ys.fold(f32::NEG_INFINITY, f32::max),
+                );
+            }
             for point in &mut part.positions {
                 let [x, y] = *point;
                 *point = [
@@ -226,7 +278,7 @@ impl MotionModel {
             parts.iter().map(|p| p.positions.len()).sum::<usize>() <= MAX_VERTICES,
             "motion total vertex limit exceeded"
         );
-        Ok(PuppetFrame {
+        let frame = PuppetFrame {
             size,
             parts,
             textures: self
@@ -234,7 +286,8 @@ impl MotionModel {
                 .iter()
                 .map(|t| format!("motion-texture-{}", t.resource))
                 .collect(),
-        })
+        };
+        Ok((frame, scene))
     }
 }
 /// An independent 60 Hz motion clock. Completion is an edge, delivered once.
@@ -368,6 +421,7 @@ fn normalize(root: &mut PsbValue) -> Result<()> {
                 continue;
             }
             let Some(resource) = icon.field_u32("pixel") else {
+                log::warn!("motion icon {reference} has no pixel resource: {icon:?}");
                 continue;
             };
             let width = dimension(icon, "width")?;
@@ -444,11 +498,19 @@ fn rewrite(value: &mut PsbValue, aliases: &BTreeMap<String, (String, String)>) -
                 } else {
                     format!("{src}/{}", explicit_icon.context("motion src lacks icon")?)
                 };
-                let (texture, icon) = aliases
-                    .get(&reference)
-                    .with_context(|| format!("unresolved motion icon {reference}"))?;
-                put(fields, "src", PsbValue::String(texture.clone()));
-                put(fields, "icon", PsbValue::String(icon.clone()));
+                match aliases.get(&reference) {
+                    Some((texture, icon)) => {
+                        put(fields, "src", PsbValue::String(texture.clone()));
+                        put(fields, "icon", PsbValue::String(icon.clone()));
+                    }
+                    None => {
+                        // An icon without decodable pixels (logged with its
+                        // structure under CRYSIRROR_KRKR_TRACE_MOTION): the
+                        // frame draws nothing, as eluna does for an empty src.
+                        log::warn!("motion icon {reference} has no texture; its frames are not drawn");
+                        put(fields, "src", PsbValue::String(String::new()));
+                    }
+                }
             }
             for (_, v) in fields {
                 rewrite(v, aliases)?
@@ -471,6 +533,10 @@ fn texture_resources(psb: &PsbFile, plain: &[u8]) -> Result<Vec<MotionTexture>> 
         .context("motion source missing")?;
     let mut textures = BTreeMap::new();
     let mut total = 0usize;
+    // KiriKiri/Windows PSBs (`spec` "krkr"/"win") keep 32-bit pixels in the
+    // engine's in-memory BGRA order, like their ARGB palettes; other specs
+    // store R, G, B, A.
+    let bgra = matches!(psb.root.field_str("spec"), Some("krkr" | "win"));
     for (_, source) in sources {
         let entries: Vec<&PsbValue> = if let Some(t) = source.field("texture") {
             vec![t]
@@ -504,7 +570,18 @@ fn texture_resources(psb: &PsbFile, plain: &[u8]) -> Result<Vec<MotionTexture>> 
                         .context("missing motion palette")
                 })
                 .transpose()?;
-            let rgba = decode_pixels(raw, palette, width, height, icon.field_str("compress"))?;
+            let mut rgba = decode_pixels(raw, palette, width, height, icon.field_str("compress"))?;
+            if bgra && palette.is_none() {
+                for p in rgba.chunks_exact_mut(4) {
+                    p.swap(0, 2);
+                }
+            }
+            // Diagnostic: CRYSIRROR_MOTION_DUMP_TEXTURES=<dir> writes each
+            // decoded texture as raw bytes (`<resource>-<w>x<h>.rgba`).
+            if let Some(dir) = std::env::var_os("CRYSIRROR_MOTION_DUMP_TEXTURES") {
+                let path = std::path::Path::new(&dir).join(format!("{resource}-{width}x{height}.rgba"));
+                let _ = std::fs::write(path, &rgba);
+            }
             textures.insert(
                 resource,
                 MotionTexture {
@@ -669,6 +746,13 @@ pub struct MotionSample {
     pub affine: [f32; 6],
     pub size: [f32; 2],
     pub opacity: f32,
+    /// The player's previous step (same model, object and animation).
+    pub previous: Option<Arc<EmoteStaticScene>>,
+}
+/// A sampled frame and the step state that continues it.
+pub struct MotionStep {
+    pub frame: PuppetFrame,
+    pub scene: Arc<EmoteStaticScene>,
 }
 impl MotionWorkers {
     pub fn new() -> Result<Self> {
@@ -682,10 +766,10 @@ impl MotionWorkers {
             Ok(Arc::new(model))
         })
     }
-    pub fn sample(&self, sample: MotionSample) -> Result<MotionJob<PuppetFrame>> {
+    pub fn sample(&self, sample: MotionSample) -> Result<MotionJob<MotionStep>> {
         self.0.spawn(move |cancel| {
             cancel.check()?;
-            let frame = sample.model.frame(
+            let (frame, scene) = sample.model.step(
                 &sample.object,
                 &sample.animation,
                 sample.tick,
@@ -693,10 +777,11 @@ impl MotionWorkers {
                 sample.affine,
                 sample.size,
                 sample.opacity,
+                sample.previous.as_deref(),
             )?;
             frame.validate()?;
             cancel.check()?;
-            Ok(frame)
+            Ok(MotionStep { frame, scene: Arc::new(scene) })
         })
     }
 }

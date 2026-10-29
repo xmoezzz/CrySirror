@@ -28,8 +28,8 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-text | Engine CPU fonts, shaping/bidi, rich layout/ruby/vertical text, fixed-cell layout, synchronous font-resource measurement handles, reveal and CPU SDF data |
 | crysirror-scene | Safe CPU World/Layer/UI state, migrated input/animation/projection, transactional mutations and frame extraction |
 | crysirror-reallive | Original RealLive bytecode VM and thin semantic/syscall adapter; retained Canvas/Layer/GlyphRun/UI and engine audio/Media services, no hosted renderer |
-| crysirror-krkr | Optional AGPL KiriKiri adapter: vendored Kirakira TJS2 VM (crates/krkr-upstream) and KAG parser with native KAG3 classes translated onto shared Layer/Canvas/Text/UI/audio/clock/storage (ADR 0053/0088); not in default builds |
-| crysirror-avg32 | Original AVG32 Scenario library at a pinned siglus_rs Git revision, portable-vm only; semantic events call engine Canvas/GlyphRun/UI/audio, without the old System/renderer (ADR 0062) |
+| crysirror-krkr | Optional AGPL KiriKiri adapter: first-party TJS2 VM (crysirror-tjs2) and KAG parser (crysirror-kag), derived from Kirakira with native KAG3 classes translated onto shared Layer/Canvas/Text/UI/audio/clock/storage (ADR 0053/0088); not in default builds |
+| crysirror-avg32 | Vendored original AVG32 interpreter (siglus_rs 5f358ef) running installed games; PDT raster on shared `crysirror_image::avg32`, text/menus as engine GlyphRun/solid layers, audio channels, storage and save mount (ADR 0095) |
 | crysirror-siglus-vm | Independent original SceneVm subset registered as `siglus`; native operations call shared engine services, including the explicit plain TEXT/NAME profile (ADR 0061) |
 | crysirror-engine | Unity-style public API: reflective classes/objects, App lifecycle, behaviours, plugins, ScriptHost contract (ADR 0004/0005) |
 | crysirror-script-js | Default JS/TS script host (Boa + Oxc) bound to the class registry; desktop feature `scripting` (ADR 0005) |
@@ -175,8 +175,8 @@ Text API uses shared shaping/bidi, rich styles, ruby/vertical layout and reveal
 to publish client-scoped RGBA surfaces (ADR 0031/0033). CPU SDF atlas data exists;
 its GPU/3D sampling path remains pending. Native windows require explicit
 mapping: Siglus supports bounded plain TEXT/NAME through shared grid layout,
-GlyphRun and reveal state, while the independent AVG32 portable VM maps its
-documented plain ADV slice (ADR 0061–0062). Unmapped native page/read/wait/save
+GlyphRun and reveal state, while AVG32 keeps the characters its original
+interpreter draws onto buffer 0 as a retained GlyphRun (ADR 0061, 0095). Unmapped native page/read/wait/save
 policies fail visibly. See NATIVE_ADAPTERS.md for executable coverage.
 
 Textures and assets are bounded. Unsupported dimensions/formats/layouts report

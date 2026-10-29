@@ -503,6 +503,8 @@ declare class Layers {
   beginCrossfade(id: number, source: number, durationMs: number): void;
   /** Release a subtree crossfade; leaves original nodes intact. */
   endCrossfade(id: number): void;
+  /** Set an externally clocked crossfade's progress (clamped to its duration). */
+  setCrossfadeElapsed(id: number, elapsedMs: number): void;
   /** Finish this client's transition now (skip). */
   endTransition(): void;
 }
@@ -713,6 +715,12 @@ declare class Ui {
   openMenu(id: number, item: number | null, position: number[] | null): void;
   /** Close this client's menu popups. */
   closeMenu(id: number): void;
+  /** Open an engine-drawn modal message dialog {id, title?, message, buttons:[{id,label}], default, cancel?, font, text_size?}; the choice arrives as a dialog_result event (value = button id). */
+  openDialog(dialog: Record<string, any>): void;
+  /** Close this client's open dialog without a result. */
+  closeDialog(id: number): void;
+  /** Ask the presenting host to move the OS pointer to a canvas position. */
+  warpPointer(position: number[]): void;
   /** Update checked state with shared sibling radio-group semantics. */
   setMenuChecked(id: number, item: number, checked: boolean): void;
   /** Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}. */
