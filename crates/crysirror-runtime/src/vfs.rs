@@ -360,6 +360,18 @@ impl ClientStorage for CapStorage {
         }
         false
     }
+    fn serving_container(&self, path: &VfsPath) -> Option<(String, String)> {
+        if path.mount() != Mount::Asset {
+            return None;
+        }
+        for (point, provider) in provider_snapshot(&self.providers) {
+            let Some(rest) = strip_mount(&point, path.relative()) else { continue };
+            if provider.exists(rest) {
+                return provider.container_source().map(|source| (source.to_owned(), point));
+            }
+        }
+        None
+    }
     fn container_mount(&self,source:&str)->Result<Option<String>> {
         let path=VfsPath::new(Mount::Asset,source)?;
         if path.relative()!=source {return Err(Error::Invalid("container source path"))}

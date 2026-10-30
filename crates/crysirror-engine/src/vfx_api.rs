@@ -5,6 +5,7 @@ use crate::{
     EngineContext, Value,
 };
 use anyhow::{bail, Context, Result};
+use crysirror_core::service::{EngineQuery, HostServices};
 use std::sync::{Arc, OnceLock};
 pub fn register(r: &mut ClassRegistry) -> Result<()> {
     r.register(Arc::new(VfxClass))
@@ -21,6 +22,7 @@ impl Class for VfxClass {
             MethodInfo{name:"stop",params:vec![("entity",T::Object("Entity"))],returns:T::Void,doc:"Stop emission while existing particles finish."},
             MethodInfo{name:"restart",params:vec![("entity",T::Object("Entity"))],returns:T::Void,doc:"Restart an effect from its seed using a new logical revision."},
             MethodInfo{name:"stats",params:vec![],returns:T::Map,doc:"Read this client's published CPU counts, GPU timeline pressure and pending worker status. GPU capacity is not reported as a measured live count."},
+            MethodInfo{name:"sequenceStatus",params:vec![("entity",T::Object("Entity")),("revision",T::Any),("completedTick",T::Any),("exchangeEpoch",T::Any)],returns:T::Map,doc:"Query a completed worker RNG receipt for a live owned entity/revision. Counters accept exact nonnegative integers or decimal strings; large returned counters use decimal strings. Pending work never exposes the declared seed as completed state."},
             MethodInfo{name:"drainEvents",params:vec![],returns:T::List(Box::new(T::Map)),doc:"Drain this client's bounded CPU birth, death and collision event queue. GPU event records remain on device; they are not fabricated as CPU callbacks."},
         ]})
     }
@@ -71,6 +73,38 @@ impl Class for VfxClass {
             "stats" => {
                 let s = cx.state()?;
                 Ok(Value::from_json(s.runtime.vfx.inspect(Some(s.client.0))))
+            }
+            "sequenceStatus" => {
+                let entity = crate::builtin::handle(cx, args.first().context("VFX entity")?.as_object()?)?;
+                let counter = |index: usize| -> Result<u64> {
+                    let value = args.get(index).context("VFX sequence counter")?;
+                    if let Value::Str(text) = value {
+                        return Ok(text.parse().context("decimal u64 VFX counter")?);
+                    }
+                    let n = value.as_i64()?;
+                    anyhow::ensure!((0..=9_007_199_254_740_991).contains(&n), "VFX counter requires an exact integer or decimal string");
+                    Ok(n as u64)
+                };
+                let query = EngineQuery::VfxSequence {
+                    entity: entity.id,
+                    revision: counter(1)?,
+                    completed_tick: counter(2)?,
+                    exchange_epoch: counter(3)?,
+                };
+                let state = cx.state()?;
+                let bytes = state.runtime.host.query_engine(state.client, query)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                let mut result: serde_json::Value = serde_json::from_slice(&bytes)?;
+                if let Some(fields) = result.as_object_mut() {
+                    for key in ["system_key", "revision", "completed_tick", "exchange_epoch", "requested_tick", "requested_exchange_epoch"] {
+                        if let Some(value) = fields.get_mut(key) {
+                            if let Some(n) = value.as_u64().filter(|n| *n > 9_007_199_254_740_991) {
+                                *value = n.to_string().into();
+                            }
+                        }
+                    }
+                }
+                Ok(Value::from_json(result))
             }
             "drainEvents" => {
                 let s = cx.state()?;

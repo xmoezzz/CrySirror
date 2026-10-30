@@ -1,7 +1,7 @@
 @group(0) @binding(0) var before: texture_2d<f32>;
 @group(0) @binding(1) var after: texture_2d<f32>;
 struct Params {
-    // x progress 0..1, y rule vague, z 1 when a rule wipe is active.
+    // x progress; y vague; z 0=crossfade/1=rule/2=blur/3=dim; w=dim phase.
     a: vec4<f32>,
     // Destination root rect in canvas pixels [x, y, w, h].
     rect: vec4<f32>,
@@ -28,12 +28,16 @@ fn rule_weight(pos: vec2<f32>) -> f32 {
     let uv = (pos - params.rect.xy) / params.rect.zw;
     if (any(uv < vec2<f32>(0.0)) || any(uv >= vec2<f32>(1.0))) { return progress; }
     let dims = vec2<f32>(textureDimensions(rule));
-    let rp = vec2<i32>(clamp(floor(uv * dims), vec2<f32>(0.0), dims - 1.0));
+    var rp = vec2<i32>(clamp(floor(uv * dims), vec2<f32>(0.0), dims - 1.0));
+    if(params.a.z>2.5) {rp=vec2<i32>(clamp(floor(pos),vec2<f32>(0.),dims-1.));}
     // Rule textures are sRGB-decoded on load; recover the stored 8-bit level.
-    let g = gamma(textureLoad(rule, rp, 0).rgb);
-    let level = floor((g.r + g.g + g.b) / 3.0 * 255.0 + 0.5);
+    let value=textureLoad(rule,rp,0).rgb;
+    let g = gamma(value);
+    var level = floor((g.r + g.g + g.b) / 3.0 * 255.0 + 0.5);
+    if(params.a.z>2.5) { level=floor(value.r*255.+0.5); }
     let vague = params.a.y;
-    let phasemax = floor(progress * (255.0 + vague));
+    var phasemax = floor(progress * (255.0 + vague));
+    if(params.a.z>2.5) { phasemax=params.a.w; }
     let phase = phasemax - vague;
     var t = 0.0;
     if (level < phase) {
@@ -44,13 +48,18 @@ fn rule_weight(pos: vec2<f32>) -> f32 {
     return t / 256.0;
 }
 @fragment fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let a=textureLoad(before,vec2<i32>(pos.xy),0);
-    let b=textureLoad(after,vec2<i32>(pos.xy),0);
+    var a=textureLoad(before,vec2<i32>(pos.xy),0);
+    var b=textureLoad(after,vec2<i32>(pos.xy),0);
     var w = params.a.x;
-    if (params.a.z > 0.5) { w = rule_weight(pos.xy); }
+    if(params.a.z>1.5 && params.a.z<2.5) {
+        // Recover exact bytes from the half-float carrier before integer blend.
+        a=floor(a*255.+0.5)/255.;b=floor(b*255.+0.5)/255.;
+        w=select(floor(w*255.)/256.,1.,w>=1.);
+    } else if (params.a.z > 0.5) { w = rule_weight(pos.xy); }
     let alpha=mix(a.a,b.a,w);
     // Inputs are renderer-composited premultiplied linear pixels. Mix the
     // isolated gamma-space colors and output straight alpha for normal layers.
-    let color=mix(gamma(a.rgb/max(a.a,0.000001))*a.a,gamma(b.rgb/max(b.a,0.000001))*b.a,w);
+    var color=mix(gamma(a.rgb/max(a.a,0.000001))*a.a,gamma(b.rgb/max(b.a,0.000001))*b.a,w);
+    if(params.a.z>1.5 && params.a.z<2.5) { color=floor(mix(a.rgb,b.rgb,w)*255.+0.0001)/255.; }
     return vec4<f32>(linear(color/max(alpha,0.000001)),alpha);
 }

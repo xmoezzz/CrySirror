@@ -4,5 +4,7 @@
 #![forbid(unsafe_code)]
 mod schema;
 mod simulation;
+pub mod screen;
+pub mod falling_atlas;
 pub use schema::*;
 pub use simulation::*;

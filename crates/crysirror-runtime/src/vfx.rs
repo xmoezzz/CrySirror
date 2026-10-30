@@ -18,6 +18,13 @@ use std::{
         Arc, Mutex,
     },
 };
+#[derive(Clone)]
+struct ScreenPublication {
+    system: u64,
+    emitter: String,
+    declaration: serde_json::Value,
+    frame: Arc<crysirror_puppet::PuppetFrame>,
+}
 
 static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
 const MAX_GPU_PACKETS: usize = 65536;
@@ -111,6 +118,9 @@ struct InputSample {
     bytes: usize,
 }
 pub struct VfxRuntime {
+    pending_screen: bool,
+    screen_layers: BTreeMap<(u32, u32), ScreenPublication>,
+    screen_frame: Option<Arc<FrameSnapshot>>,
     world: Option<CpuWorld>,
     pending: Option<Task<Completed>>,
     frame: Arc<FrameSnapshot>,
@@ -134,6 +144,9 @@ pub struct VfxRuntime {
 impl Default for VfxRuntime {
     fn default() -> Self {
         Self {
+            pending_screen: false,
+            screen_layers: BTreeMap::new(),
+            screen_frame: None,
             world: Some(CpuWorld::default()),
             pending: None,
             frame: Arc::new(FrameSnapshot::default()),
@@ -157,10 +170,271 @@ impl Default for VfxRuntime {
     }
 }
 impl VfxRuntime {
+    /// Completed single-stream receipts mapped to the current client/entity
+    /// lifetime. No entry is produced from declarations or worker admission.
+    /// The fingerprint lets a host reject a cached receipt if a same-revision
+    /// declaration was edited before its worker acknowledgement arrives.
+    pub fn sequence_receipts(
+        &self,
+        world: &World,
+    ) -> Result<BTreeMap<(u32, u32), serde_json::Value>> {
+        let mut out = BTreeMap::new();
+        for client in world.client_ids() {
+            for (entity, generation, spec) in world.entities(ClientId(client)) {
+                let Some(system) = &spec.vfx else { continue };
+                if system.sequence_rng.is_none() {
+                    continue;
+                }
+                let Some(key) = self.owners.get(&(client, entity, generation)) else {
+                    continue;
+                };
+                let Some(accepted) = self
+                    .accepted_inputs
+                    .iter()
+                    .find(|input| input.client == client && input.key == *key)
+                else {
+                    continue;
+                };
+                let mut normalized = system.clone();
+                normalized.paused |= world.client_paused(client);
+                normalized.max_steps_per_advance = normalized.max_steps_per_advance.min(32);
+                if accepted.spec != normalized {
+                    continue;
+                }
+                let Some(receipt) = self.frame.sequence_states.iter().find(|receipt| {
+                    receipt.client == client
+                        && receipt.system_key == *key
+                        && receipt.revision == system.revision
+                }) else {
+                    continue;
+                };
+                let fingerprint = blake3::hash(&serde_json::to_vec(system)?)
+                    .to_hex()
+                    .to_string();
+                out.insert((client,entity),serde_json::json!({"phase":"ready","system_key":key,"entity_generation":generation,"revision":receipt.revision,"completed_tick":receipt.completed_tick,"exchange_epoch":receipt.exchange_epoch,"sequence_rng":receipt.sequence_rng,"source_fingerprint":fingerprint}));
+            }
+        }
+        Ok(out)
+    }
+    /// Sequence exchanges require worker-state reconstruction, even without a
+    /// screen target. A declared seed cannot restore a completed borrowed stream.
+    pub fn has_sequence_state(&self, world: &World) -> bool {
+        let needs = |spec: &SystemSpec| spec.sequence_rng.is_some() || spec.sequence_exchange.is_some();
+        let contains = |inputs: &[SystemInstance]| inputs.iter().any(|input| needs(&input.spec));
+        !self.frame.sequence_states.is_empty()
+            || contains(&self.inputs) || contains(&self.accepted_inputs) || contains(&self.recorded_inputs)
+            || self.input_history.iter().any(|sample| contains(&sample.inputs))
+            || world.client_ids().any(|client| world.entities(ClientId(client)).into_iter()
+                .any(|(_, _, entity)| entity.vfx.as_ref().is_some_and(needs)))
+    }
+    /// True when an active, queued or declared screen producer requires
+    /// explicit producer/resource reconstruction to support a snapshot.
+    /// A transparent layer shape never acts as a producer identity.
+    pub fn has_screen_state(&self, world: &World) -> bool {
+        let contains = |inputs: &[SystemInstance]| {
+            inputs.iter().any(|system| {
+                system
+                    .spec
+                    .emitters
+                    .iter()
+                    .any(|emitter| emitter.screen.is_some())
+            })
+        };
+        !self.screen_layers.is_empty()
+            || self.pending_screen
+            || contains(&self.inputs)
+            || contains(&self.accepted_inputs)
+            || contains(&self.recorded_inputs)
+            || self
+                .input_history
+                .iter()
+                .any(|sample| contains(&sample.inputs))
+            || self
+                .frame
+                .emitters
+                .iter()
+                .any(|emitter| emitter.screen.is_some())
+            || world.client_ids().any(|client| {
+                world
+                    .entities(ClientId(client))
+                    .into_iter()
+                    .any(|(_, _, entity)| {
+                        entity.vfx.as_ref().is_some_and(|system| {
+                            system
+                                .emitters
+                                .iter()
+                                .any(|emitter| emitter.screen.is_some())
+                        })
+                    })
+            })
+    }
+
+    /// Publish completed CPU screen sprites through ordinary owner-scoped
+    /// dynamic mesh layers. An unchanged frame/visibility set is idempotent.
+    /// Declarations are leases: foreign/existing layers and foreign geometry
+    /// are never overwritten or removed, including during cleanup/reset.
+    pub fn publish_screen(
+        &mut self,
+        layers: &mut crysirror_scene::layer::LayerSystem,
+    ) -> Result<()> {
+        use crysirror_scene::layer::{LayerCommand as C, LayerSpec, Paint, SpriteTransform};
+        let mut desired = BTreeMap::new();
+        for system in &self.inputs {
+            for emitter in &system.spec.emitters {
+                if let Some(target) = &emitter.screen {
+                    target.validate()?;
+                    ensure!(
+                        desired
+                            .insert(
+                                (system.client, target.layer),
+                                (
+                                    system.key,
+                                    emitter.id.clone(),
+                                    target.clone(),
+                                    emitter.render.clone()
+                                )
+                            )
+                            .is_none(),
+                        "VFX screen target declared by multiple emitters"
+                    );
+                }
+            }
+        }
+        if desired.is_empty() && self.screen_layers.is_empty() {
+            self.screen_frame = Some(self.frame.clone());
+            return Ok(());
+        }
+        let same_frame = self
+            .screen_frame
+            .as_ref()
+            .is_some_and(|old| Arc::ptr_eq(old, &self.frame));
+        let mut staged = layers.clone();
+        let mut publications = self.screen_layers.clone();
+        for (&(owner, id), old) in &self.screen_layers {
+            let declaration_matches =
+                desired
+                    .get(&(owner, id))
+                    .is_some_and(|(system, emitter, _, _)| {
+                        *system == old.system && emitter == &old.emitter
+                    });
+            let current = staged.get(ClientId(owner), id);
+            let current_missing = current.is_none();
+            if let Some(current) = current {
+                ensure!(
+                    serde_json::to_value(current)? == old.declaration,
+                    "VFX screen layer was replaced or edited outside its declaration"
+                );
+                ensure!(
+                    staged
+                        .dynamic_puppet_frame(owner, id)
+                        .is_some_and(|frame| Arc::ptr_eq(frame, &old.frame)),
+                    "VFX screen layer mesh producer changed"
+                );
+                ensure!(
+                    !staged.has_children(ClientId(owner), id),
+                    "VFX screen target must remain a leaf layer"
+                );
+                if !declaration_matches {
+                    staged.apply_batch(ClientId(owner), &[C::Remove { id }])?;
+                }
+            }
+            if !declaration_matches || current_missing {
+                publications.remove(&(owner, id));
+            }
+        }
+        for (&(owner, id), _) in &desired {
+            ensure!(
+                staged.get(ClientId(owner), id).is_none()
+                    || publications.contains_key(&(owner, id)),
+                "VFX screen target conflicts with an existing layer"
+            );
+        }
+        for emitter in &self.frame.emitters {
+            let Some(target) = &emitter.screen else {
+                continue;
+            };
+            let Some((system, name, current, render)) =
+                desired.get(&(emitter.client, target.layer))
+            else {
+                continue;
+            };
+            if *system != emitter.system_key
+                || name != &emitter.emitter_id
+                || current != target
+                || render != &emitter.render
+            {
+                continue;
+            }
+            let key = (emitter.client, target.layer);
+            if same_frame && publications.contains_key(&key) {
+                continue;
+            }
+            let frame = Arc::new(crysirror_vfx::screen::pack_screen_emitter(
+                emitter.client,
+                emitter,
+                &crysirror_vfx::screen::ScreenSpriteOptions {
+                    canvas: target.canvas,
+                    anchor: target.anchor,
+                },
+                emitter.screen_uvs.as_deref(),
+            )?);
+            let spec = LayerSpec {
+                id: target.layer,
+                parent: target.parent,
+                rect: [0., 0., target.canvas[0] as f32, target.canvas[1] as f32],
+                paint: Paint::Solid { color: [0; 4] },
+                transform: SpriteTransform::default(),
+                order: target.order,
+                clip: Some([0., 0., target.canvas[0] as f32, target.canvas[1] as f32]),
+                opacity: 255,
+                visible: self.visible.contains(system),
+                blend: Default::default(),
+                uv: None,
+                sampling: Default::default(),
+                filter: None,
+            };
+            let declaration = serde_json::to_value(&spec)?;
+            staged.apply_batch(ClientId(emitter.client), &[C::Put { layer: spec }])?;
+            staged.set_dynamic_puppet(emitter.client, target.layer, frame.clone())?;
+            publications.insert(
+                key,
+                ScreenPublication {
+                    system: *system,
+                    emitter: name.clone(),
+                    declaration,
+                    frame,
+                },
+            );
+        }
+        // Visibility can change before worker completion; do not expose stale
+        // particles for a hidden/removed owner while awaiting the next frame.
+        for (&(owner, id), entry) in &mut publications {
+            let visible = self.visible.contains(&entry.system);
+            if staged
+                .get(ClientId(owner), id)
+                .is_some_and(|layer| layer.visible != visible)
+            {
+                staged.apply_batch(ClientId(owner), &[C::SetVisible { id, visible }])?;
+                entry.declaration = serde_json::to_value(
+                    staged
+                        .get(ClientId(owner), id)
+                        .context("VFX screen published layer missing")?,
+                )?;
+            }
+        }
+        *layers = staged;
+        self.screen_layers = publications;
+        self.screen_frame = Some(self.frame.clone());
+        Ok(())
+    }
     pub fn epoch(&self) -> u64 {
         self.epoch
     }
     pub fn reset(&mut self, now_ms: u64) {
+        self.pending_screen = false;
+        // Keep leases until publish_screen can clean them against the newly
+        // restored layer system. Reset must not leave orphan derived layers.
+        self.screen_frame = None;
         if let Some(task) = self.pending.take() {
             task.cancel();
         }
@@ -366,11 +640,13 @@ impl VfxRuntime {
             match task.try_take() {
                 Ok(Some(value)) => {
                     self.pending = None;
+                    self.pending_screen = false;
                     self.publish(value)?;
                 }
                 Ok(None) => {}
                 Err(e) => {
                     self.pending = None;
+                    self.pending_screen = false;
                     self.error = Some(format!("VFX worker failed; reset required: {e:#}"));
                     return Err(e).context("VFX worker failed; reset required");
                 }
@@ -485,6 +761,13 @@ impl VfxRuntime {
         let slot = Arc::new(Mutex::new(Some(cpu)));
         let work = slot.clone();
         let epoch = self.epoch;
+        let pending_screen = work_inputs.iter().any(|system| {
+            system
+                .spec
+                .emitters
+                .iter()
+                .any(|emitter| emitter.screen.is_some())
+        });
         match pool.spawn(move |cancel| {
             cancel.check()?;
             let mut world = work
@@ -504,6 +787,7 @@ impl VfxRuntime {
         }) {
             Ok(task) => {
                 self.pending = Some(task);
+                self.pending_screen = pending_screen;
                 if queued {
                     self.input_bytes -= self.input_history.pop_front().unwrap().bytes;
                 }
@@ -532,6 +816,7 @@ impl VfxRuntime {
                 && self.world.as_ref().is_some_and(CpuWorld::is_caught_up);
             self.update_inner(world, now_ms, pool, record)?;
             if let Some(task) = self.pending.take() {
+                self.pending_screen = false;
                 self.publish(task.wait()?)?;
                 continue;
             }

@@ -12,6 +12,16 @@ use crysirror_scene::layer::{
 };
 use crysirror_text::grid::{CellCursor, CellGlyph, CellLayoutOptions, layout_cells};
 use serde::{Deserialize, Serialize};
+pub(crate) mod buttons;
+mod config;
+mod decoration;
+mod frame;
+mod metadata;
+mod ops;
+pub(crate) use config::initialize as initialize_profile;
+pub(crate) use frame::project as project_frame;
+pub(crate) use ops::dispatch;
+pub(crate) use ops::{after_input, stock_flag};
 
 pub const MESSAGE_LAYER: u32 = 0x9000_0000;
 pub const NAME_LAYER: u32 = MESSAGE_LAYER + 1;
@@ -157,12 +167,36 @@ fn sync_native(ctx: &mut CommandContext) {
     native.indent_moji = ctx.ui.cursor.opening;
     native.indent_count = i64::from(ctx.ui.cursor.nesting);
     native.disp_moji_cnt = ctx.ui.visible_chars as i64;
-    native.open = true;
-    native.window_appear = true;
     native.msg_block_started = true;
 }
 fn begin_block(ctx: &mut CommandContext) {
     let family = super::runtime::forms::stage::current_stage_form_id(ctx);
+    let clear = ctx
+        .globals
+        .stage_forms
+        .get(&family)
+        .and_then(|stage| stage.mwnd_lists.get(&1))
+        .and_then(|windows| windows.first())
+        .is_some_and(|m| m.clear_ready);
+    if clear {
+        ctx.ui.message = None;
+        ctx.ui.name = None;
+        ctx.ui.glyphs.clear();
+        ctx.ui.name_glyphs.clear();
+        ctx.ui.cursor = CellCursor::at_start();
+        ctx.ui.visible_chars = 0;
+        ctx.ui.reveal = None;
+        let m = &mut ctx
+            .globals
+            .stage_forms
+            .get_mut(&family)
+            .unwrap()
+            .mwnd_lists
+            .get_mut(&1)
+            .unwrap()[0];
+        m.clear_ready = false;
+        m.msg_block_started = false;
+    }
     let begun = ctx
         .globals
         .stage_forms
@@ -173,16 +207,15 @@ fn begin_block(ctx: &mut CommandContext) {
     if !begun {
         ctx.request_message_auto_savepoint();
     }
+    ops::state_mut(ctx).msg_block_started = true;
 }
 pub fn append(ctx: &mut CommandContext, text: &str, read_flag: i64) -> Result<bool> {
+    config::initialize(ctx)?;
     let Some(window) = ctx.ui.window.as_ref() else {
         return Ok(false);
     };
     supported_target(ctx)?;
-    ensure!(
-        read_flag == -1,
-        "native MWND read-flag block commits are not implemented in the plain profile"
-    );
+    ensure!(read_flag >= -1, "invalid native MWND read flag");
     plain(text, false)?;
     if text.is_empty() {
         return Ok(true);
@@ -195,7 +228,8 @@ pub fn append(ctx: &mut CommandContext, text: &str, read_flag: i64) -> Result<bo
         ctx.ui.message.as_ref().map_or(0, String::len) + text.len() <= 65536,
         "native message text budget"
     );
-    let mut cursor = if ctx.ui.message.is_none() {
+    let clear = ops::state(ctx).is_some_and(|m| m.clear_ready);
+    let mut cursor = if ctx.ui.message.is_none() || clear {
         CellCursor::at_start()
     } else {
         ctx.ui.cursor.clone()
@@ -241,17 +275,32 @@ pub fn append(ctx: &mut CommandContext, text: &str, read_flag: i64) -> Result<bo
         ctx.request_proc_boundary(ProcKind::MessageWait);
     }
     sync_native(ctx);
+    let scene_no = ctx.current_scene_no.unwrap_or(-1);
+    if !ops::state(ctx).is_some_and(|m| m.open) {
+        ops::set_open(ctx, true, false)?;
+    }
+    let native = ops::state_mut(ctx);
+    if read_flag >= 0 && scene_no >= 0 {
+        native.read_flag_stock.push((scene_no, read_flag));
+    }
     Ok(true)
 }
 pub fn name(ctx: &mut CommandContext, text: &str) -> Result<bool> {
+    config::initialize(ctx)?;
     let Some(window) = ctx.ui.window.as_ref() else {
         return Ok(false);
     };
     supported_target(ctx)?;
     plain(text, true)?;
     // Native SET_NAME takes the first name in the active message block.
-    if ctx.ui.name.as_deref().is_none_or(str::is_empty) {
-        let result = layout_cells(text, &window.layout(true), &mut CellCursor::at_start())?;
+    if ctx.ui.name.as_deref().is_none_or(str::is_empty)
+        || ops::state(ctx).is_some_and(|m| m.clear_ready)
+    {
+        let mut layout = window.layout(true);
+        if let Some(spacing) = ctx.ui.name_spacing {
+            layout.spacing = spacing;
+        }
+        let result = layout_cells(text, &layout, &mut CellCursor::at_start())?;
         ensure!(result.consumed == text.len(), "native name overflow");
         ensure!(
             result.glyphs.iter().all(|glyph| glyph.position[1] == 0),
@@ -302,6 +351,33 @@ pub fn sync_progress(
 
 pub fn validate(ctx: &CommandContext) -> Result<()> {
     let ui = &ctx.ui;
+    if let Some(m) = ops::state(ctx) {
+        if let Some((x, y)) = m.window_pos {
+            ensure!(
+                (-32767..=32767).contains(&x) && (-32767..=32767).contains(&y),
+                "native frame position"
+            );
+        }
+        if let Some((w, h)) = m.window_size {
+            ensure!(
+                (1..=32767).contains(&w) && (1..=32767).contains(&h),
+                "native frame size"
+            );
+        }
+        ensure!(
+            m.waku_file.len() <= 4096 && m.filter_file.len() <= 4096,
+            "native frame filename budget"
+        );
+    }
+    if let Some(tween) = &ui.window_tween {
+        tween.validate()?;
+        ensure!(
+            (0. ..=1.).contains(&tween.start)
+                && (0. ..=1.).contains(&tween.end)
+                && (0..=5).contains(&ui.window_animation_type),
+            "native MWND animation snapshot state"
+        );
+    }
     if let Some(window) = &ui.window {
         window.validate()?;
         ensure!(
@@ -336,6 +412,22 @@ pub fn complete_on_decide(
     client: ClientId,
     host: &mut dyn HostServices,
 ) -> Result<bool> {
+    if ctx.ui.window.is_some() && ctx.wait.message_key_waiting() {
+        let keep_voice = ctx
+            .globals
+            .syscom
+            .config_int
+            .get(&crate::runtime::forms::codes::syscom_op::GET_KOE_DONT_STOP_ONOFF)
+            .copied()
+            .unwrap_or(0)
+            != 0
+            || ctx.globals.script.koe_dont_stop_on_flag;
+        if !keep_voice || ctx.globals.script.koe_dont_stop_off_flag {
+            ctx.koe.stop(None)?;
+        }
+        ctx.wait.finish_message_key_wait();
+        return Ok(true);
+    }
     if !ctx.wait.message_reveal_waiting() || ctx.ui.window.is_none() || !ctx.ui.published_message {
         return Ok(false);
     }
@@ -352,6 +444,7 @@ pub fn project(ctx: &CommandContext, host: &dyn HostServices) -> Result<Vec<Laye
         return Ok(vec![]);
     };
     let mut out = Vec::new();
+    let (offset, opacity) = ops::visual(ctx);
     for (name, cells, id, rect, size, color) in [
         (
             false,
@@ -386,10 +479,15 @@ pub fn project(ctx: &CommandContext, host: &dyn HostServices) -> Result<Vec<Laye
                 bold: None,
             })
             .collect();
-        out.push(LayerSpec {
+        let body = LayerSpec {
             id,
             parent: None,
-            rect: rect.map(|v| v as f32),
+            rect: [
+                rect[0] as f32 + offset[0],
+                rect[1] as f32 + offset[1],
+                rect[2] as f32,
+                rect[3] as f32,
+            ],
             paint: Paint::GlyphRun {
                 font: window.font.clone(),
                 size: f32::from(size),
@@ -400,14 +498,39 @@ pub fn project(ctx: &CommandContext, host: &dyn HostServices) -> Result<Vec<Laye
                 blur: None,
             },
             transform: SpriteTransform::default(),
-            order: [1, if name { 6 } else { 5 }],
+            order: [
+                i32::try_from(ctx.tables.mwnd_render.order)?,
+                i32::try_from(
+                    ctx.tables
+                        .mwnd_render
+                        .moji_layer_rep
+                        .checked_add(i64::from(name))
+                        .context("native glyph order overflow")?,
+                )?,
+            ],
             clip: None,
-            opacity: 255,
-            visible: true,
+            opacity,
+            visible: opacity > 0,
             blend: Blend::Normal,
             uv: None,
+            sampling: Default::default(),
             filter: None,
-        });
+        };
+        out.extend(decoration::layers(ctx, name, body)?);
     }
     Ok(out)
+}
+
+/// Native MWND presentation policy shared by its text/frame/embedded resources.
+pub(crate) fn embedded_window_visual(ctx: &CommandContext) -> ([f32; 2], u8) {
+    ops::visual(ctx)
+}
+
+pub(crate) fn query_metadata(
+    ctx: &mut CommandContext,
+    window: usize,
+    op: i32,
+    args: &[crate::runtime::Value],
+) -> Result<bool> {
+    metadata::query(ctx, window, op, args)
 }

@@ -65,8 +65,12 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("layer", "transition", "Layers.transition"),
     ("layer", "end_transition", "Layers.endTransition"),
     ("layer", "begin_crossfade", "Layers.beginCrossfade"),
+    ("layer", "begin_crossfade_effect", "Layers.beginCrossfadeEffect"),
     ("layer", "end_crossfade", "Layers.endCrossfade"),
     ("layer", "set_crossfade_elapsed", "Layers.setCrossfadeElapsed"),
+    ("layer", "begin_motion", "Layers.beginMotion"),
+    ("layer", "set_motion_elapsed", "Layers.setMotionElapsed"),
+    ("layer", "end_motion", "Layers.endMotion"),
     ("layer", "puppet", "Puppets.setParameter"),
     ("canvas", "create", "Canvases.apply"),
     ("canvas", "clear", "Canvases.apply"),
@@ -90,19 +94,26 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("ui", "warp_pointer", "Ui.warpPointer"),
     ("ui", "close_menu", "Ui.closeMenu"),
     ("ui", "set_menu_checked", "Ui.setMenuChecked"),
+    ("ui", "set_menu_enabled", "Ui.setMenuEnabled"),
     ("ui", "put", "Ui.put"),
     ("ui", "remove", "Ui.remove"),
     ("ui", "set_visible", "Ui.setVisible"),
     ("ui", "set_enabled", "Ui.setEnabled"),
     ("ui", "set_value", "Ui.setValue"),
+    ("ui", "set_hit_mask", "Ui.setHitMask"),
     ("ui", "set_text", "Ui.setText"),
     ("ui", "set_title", "Ui.setTitle"),
     ("ui", "set_window_policy", "Ui.setWindowPolicy"),
     ("ui", "set_fullscreen", "Ui.setFullscreen"),
     ("ui", "set_cursor_visible", "Ui.setCursorVisible"),
+    ("ui", "define_cursor", "Ui.defineCursor"),
+    ("ui", "set_cursor", "Ui.setCursor"),
     ("ui", "insert_text", "Ui.insertText"),
     ("ui", "backspace", "Ui.backspace"),
     ("ui", "focus", "Ui.focusTextField"),
+    ("ui", "begin_motion", "Ui.beginMotion"),
+    ("ui", "set_motion_elapsed", "Ui.setMotionElapsed"),
+    ("ui", "end_motion", "Ui.endMotion"),
     ("media", "play", "Media.play"),
     ("media", "stop", "Media.stop"),
     ("service", "media_status", "Media.status"),
@@ -182,9 +193,14 @@ fn layers_info() -> &'static ClassInfo {
                 "Screen transition from the last presented frame: {effect:{kind:'crossfade'|'mask'{asset,fade}|'slide'{direction}|'mosaic'{size}|'ordered_dither'{cell:[x,y],diagonal?,steps}|'siglus'{code,options?,mask?}}, duration_ms, easing?:'linear'|'ease_in'|'ease_out'|'smooth'}."),
             m("crossfadeStatus", vec![("id", T::Int)], T::Optional(Box::new(T::Map)), "Owned subtree transition {source, duration_ms, elapsed_ms}, or null."),
             m("beginCrossfade", vec![("id", T::Int), ("source", T::Int), ("durationMs", T::Int)], T::Void, "Crossfade two isolated sibling subtrees using the engine clock."),
+            m("beginCrossfadeEffect", vec![("id", T::Int), ("source", T::Int), ("durationMs", T::Int), ("effect", T::Map)], T::Void, "Isolated subtree effect: blur {before:[x,y],after:[x,y],dynamic?}, or dim {rule:{asset,vague},blur:[x,y],negative?,acceleration?}; engine-owned time and GPU resources."),
             m("endCrossfade", vec![("id", T::Int)], T::Void, "Release a subtree crossfade; leaves original nodes intact."),
             m("setCrossfadeElapsed", vec![("id", T::Int), ("elapsedMs", T::Int)], T::Void, "Set an externally clocked crossfade's progress (clamped to its duration)."),
             m("endTransition", vec![], T::Void, "Finish this client's transition now (skip)."),
+            m("beginMotion", vec![("id", T::Int), ("track", T::Map)], T::Void, "Animate x/y/scale_x/scale_y with a shared MotionTrackSpec; engine duration uses milliseconds, external duration uses caller units."),
+            m("setMotionElapsed", vec![("id", T::Int), ("property", T::String), ("elapsed", T::Int)], T::Void, "Sample an externally clocked motion track at caller elapsed units."),
+            m("endMotion", vec![("id", T::Int), ("property", T::Optional(Box::new(T::String))), ("finish", T::Bool)], T::Void, "Cancel one track or all tracks; finish optionally applies the target before removal."),
+            m("motionStatus", vec![("id", T::Int)], T::Map, "Current owned motion tracks and completion; a missing target fails."),
         ],
     })
 }
@@ -223,6 +239,13 @@ impl Class for LayersClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if method == "motionStatus" {
+            let target = id(args)?;
+            let state = cx.state()?;
+            return Ok(Value::from_json(serde_json::to_value(
+                state.runtime.host.engine.layers.motion_status(state.client, target)?
+            )?));
+        }
         if method == "crossfadeStatus" {
             let id = id(args)?;
             let state = cx.state()?;
@@ -278,7 +301,15 @@ impl Class for LayersClass {
                 transition: json(arg(args, 0, "transition")?, "transition")?,
             },
             "endTransition" => LayerCommand::EndTransition,
+            "beginMotion" => LayerCommand::BeginMotion { id: id(args)?, track: json(arg(args,1,"track")?,"motion track")? },
+            "setMotionElapsed" => LayerCommand::SetMotionElapsed { id:id(args)?, property:json(arg(args,1,"property")?,"motion property")?, elapsed:u64::try_from(arg(args,2,"elapsed")?.as_i64()?)? },
+            "endMotion" => LayerCommand::EndMotion { id:id(args)?, property:json(args.get(1).unwrap_or(&Value::Null),"motion property")?, finish:arg(args,2,"finish")?.as_bool()? },
             "beginCrossfade" => LayerCommand::BeginCrossfade { id: id(args)?, source: u32::try_from(arg(args, 1, "source")?.as_i64()?)?, duration_ms: u64::try_from(arg(args, 2, "durationMs")?.as_i64()?)?, rule: None, external: false },
+            "beginCrossfadeEffect" => LayerCommand::BeginCrossfadeEffect {
+                id: id(args)?, source: u32::try_from(arg(args,1,"source")?.as_i64()?)?,
+                duration_ms: u64::try_from(arg(args,2,"durationMs")?.as_i64()?)?,
+                effect: json(arg(args,3,"effect")?,"subtree transition effect")?, external: false,
+            },
             "endCrossfade" => LayerCommand::EndCrossfade { id: id(args)? },
             "setCrossfadeElapsed" => LayerCommand::SetCrossfadeElapsed { id: id(args)?, elapsed_ms: u64::try_from(arg(args, 1, "elapsedMs")?.as_i64()?)? },
             _ => unreachable!(),
@@ -307,6 +338,7 @@ fn ui_info() -> &'static ClassInfo {
         ],
         methods: vec![
             m("drainEvents",vec![],T::List(Box::new(T::Map)),"Consume this client's retained events once, preserving other clients' events. Use this for action dispatch; events only reads a snapshot of the queue."),
+            m("snapshotLayers",vec![("root",T::Optional(Box::new(T::Int)))],T::List(Box::new(T::Map)),"Freeze owned UI into independent logical LayerSpec records on the project canvas. Pass null for all owned UI, or a widget id for its subtree; current values, style and clip are preserved."),
             m("setMenu",vec![("menu",T::Map)],T::Void,"Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state."),
             m("removeMenu",vec![("id",T::Int)],T::Void,"Remove a client menu tree."),
             m("openMenu",vec![("id",T::Int),("item",T::Optional(Box::new(T::Int))),("position",T::Optional(Box::new(T::List(Box::new(T::Number)))))],T::Void,"Open a root submenu or a context popup at a logical canvas position."),
@@ -315,19 +347,27 @@ fn ui_info() -> &'static ClassInfo {
             m("closeDialog",vec![("id",T::Int)],T::Void,"Close this client's open dialog without a result."),
             m("warpPointer",vec![("position",T::List(Box::new(T::Int)))],T::Void,"Ask the presenting host to move the OS pointer to a canvas position."),
             m("setMenuChecked",vec![("id",T::Int),("item",T::Int),("checked",T::Bool)],T::Void,"Update checked state with shared sibling radio-group semantics."),
+            m("setMenuEnabled",vec![("id",T::Int),("item",T::Int),("enabled",T::Bool)],T::Void,"Enable or disable an owned menu item, closing invalid popup branches and canceling ineligible gestures."),
             m("put", vec![("widget", T::Map)], T::Void, "Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}."),
             m("remove", vec![("id", T::Int)], T::Void, "Remove a widget and its children."),
             m("setVisible", vec![("id", T::Int), ("visible", T::Bool)], T::Void, "Show/hide."),
             m("setEnabled", vec![("id", T::Int), ("enabled", T::Bool)], T::Void, "Enable/disable input."),
             m("setValue", vec![("id", T::Int), ("value", T::Number)], T::Void, "Toggle/slider value."),
+            m("setHitMask", vec![("id", T::Int), ("mask", T::Optional(Box::new(T::Map)))], T::Void, "Bind an immutable WidgetHitMask coverage grid to pointer input, or clear it with null; keyboard focus remains independent."),
             m("setCursorVisible",vec![("visible",T::Bool)],T::Void,"Set engine cursor presentation visibility."),
+            m("defineCursor",vec![("id",T::Int),("cursor",T::Map)],T::Void,"Define or replace a client cursor {frames:[{width,height,hotspot:[x,y],rgba:[bytes]}], steps:[[frame,ms]]} (edges 1..256, straight RGBA8; one 0 ms step for a still cursor)."),
+            m("setCursor",vec![("cursor",T::Map)],T::Void,"Select the pointer shape: {kind:'standard', shape:'default'|'pointer'|'text'|'wait'|...} or {kind:'custom', id} for a cursor this client defined."),
             m("setFullscreen",vec![("enabled",T::Bool)],T::Void,"Request borderless desktop fullscreen. Headless hosts retain client-owned state; the desktop applies it at frame publication."),
             m("setWindowPolicy",vec![("decorated",T::Bool),("resizable",T::Bool)],T::Void,"Request desktop decorations and resizing through engine-owned client state. Headless hosts retain the request; the desktop applies it at frame publication."),
             m("setTitle",vec![("text",T::String)],T::Void,"Set engine presentation title."),
             m("focusTextField", vec![("id", T::Int)], T::Void, "Focus an enabled, visible text field owned by this client."),
             m("insertText", vec![("text", T::String)], T::Void, "Append committed single-line Unicode to the focused text field, up to max_length Unicode scalars."),
             m("backspace", vec![("id", T::Int)], T::Void, "Remove the final Unicode scalar from a client-owned text field."),
-            m("setText", vec![("id", T::Int), ("text", T::String), ("font", T::Optional(Box::new(T::String)))], T::Void, "Label/button text and font alias."),
+            m("setText", vec![("id", T::Int), ("text", T::String), ("font", T::Optional(Box::new(T::String)))], T::Void, "Label/button text and optional font alias; null preserves the existing font."),
+            m("beginMotion", vec![("id", T::Int), ("track", T::Map)], T::Void, "Animate widget x/y using a shared MotionTrackSpec; engine duration uses milliseconds, external duration uses caller units."),
+            m("setMotionElapsed", vec![("id", T::Int), ("property", T::String), ("elapsed", T::Int)], T::Void, "Sample an external widget motion before engine hit testing."),
+            m("endMotion", vec![("id", T::Int), ("property", T::Optional(Box::new(T::String))), ("finish", T::Bool)], T::Void, "Cancel one or all widget motion tracks, optionally applying their targets."),
+            m("motionStatus", vec![("id", T::Int)], T::Map, "Current owned widget motion tracks and completion; a missing target fails."),
         ],
     })
 }
@@ -357,6 +397,19 @@ impl Class for UiClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if method == "snapshotLayers" {
+            let root=args.first().filter(|v|!matches!(v,Value::Null)).map(|v|u32::try_from(v.as_i64()?).map_err(anyhow::Error::from)).transpose()?;
+            let state=cx.state()?;
+            let layers=state.runtime.host.engine.ui.snapshot_layers(state.client.0,state.runtime.project.canvas,root)?;
+            return Ok(Value::from_json(serde_json::to_value(layers)?));
+        }
+        if method == "motionStatus" {
+            let target = id(args)?;
+            let state = cx.state()?;
+            return Ok(Value::from_json(serde_json::to_value(
+                state.runtime.host.engine.ui.motion_status(state.client, target)?
+            )?));
+        }
         if method == "drainEvents" {
             let state = cx.state()?;
             return Ok(Value::from_json(serde_json::to_value(
@@ -399,10 +452,18 @@ impl Class for UiClass {
                 item: u32::try_from(arg(args, 1, "item")?.as_i64()?)?,
                 checked: arg(args, 2, "checked")?.as_bool()?,
             },
+            "setMenuEnabled" => UiCommand::SetMenuEnabled {
+                id: id(args)?,
+                item: u32::try_from(arg(args,1,"item")?.as_i64()?)?,
+                enabled: arg(args,2,"enabled")?.as_bool()?,
+            },
             "put" => UiCommand::Put {
                 widget: json(arg(args, 0, "widget")?, "widget spec")?,
             },
             "remove" => UiCommand::Remove { id: id(args)? },
+            "beginMotion" => UiCommand::BeginMotion { id: id(args)?, track: json(arg(args,1,"track")?,"motion track")? },
+            "setMotionElapsed" => UiCommand::SetMotionElapsed { id:id(args)?, property:json(arg(args,1,"property")?,"motion property")?, elapsed:u64::try_from(arg(args,2,"elapsed")?.as_i64()?)? },
+            "endMotion" => UiCommand::EndMotion { id:id(args)?, property:json(args.get(1).unwrap_or(&Value::Null),"motion property")?, finish:arg(args,2,"finish")?.as_bool()? },
             "setVisible" => UiCommand::SetVisible {
                 id: id(args)?,
                 visible: arg(args, 1, "visible")?.as_bool()?,
@@ -414,6 +475,17 @@ impl Class for UiClass {
             "setValue" => UiCommand::SetValue {
                 id: id(args)?,
                 value: arg(args, 1, "value")?.as_f32()?,
+            },
+            "setHitMask" => UiCommand::SetHitMask {
+                id: id(args)?,
+                mask: json(arg(args,1,"mask")?,"widget hit mask")?,
+            },
+            "defineCursor" => UiCommand::DefineCursor {
+                id: id(args)?,
+                cursor: json(arg(args, 1, "cursor")?, "cursor spec")?,
+            },
+            "setCursor" => UiCommand::SetCursor {
+                cursor: json(arg(args, 0, "cursor")?, "cursor selection")?,
             },
             "setCursorVisible" => UiCommand::SetCursorVisible {
                 visible: arg(args, 0, "visible")?.as_bool()?,

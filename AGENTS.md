@@ -12,6 +12,16 @@ Read STATUS.md, docs/ARCHITECTURE.md and docs/NATIVE_ADAPTERS.md before editing.
   that VM. A running game, matching screenshot or registered factory alone
   does not establish capability extraction or completed integration.
 
+- Owner requirement (2026-10-30): adopted VM and adapter source must be
+  maintained as first-class CrySirror workspace crates. Do not use an
+  `*-upstream` engine package, an engine Git dependency or an embedded original
+  engine core as the integration boundary. Existing such dependencies are
+  migration debt, not accepted completed integrations. Renaming/moving the
+  package alone does not satisfy this requirement: extract reusable image,
+  text, UI, composition, effects and audio mechanisms into shared engine APIs;
+  retain only original VM and native semantic/resource/wait/save policy in
+  the adapter. Preserve source provenance and applicable licence notices.
+
 - Async/multithreaded execution is an engine-wide requirement (ADR 0050).
   Asset loading and pose workers in ADR 0049 are only stage one; every subsystem
   needs explicit task/dependency, completion and ownership boundaries.

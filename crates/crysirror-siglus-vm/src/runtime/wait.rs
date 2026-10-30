@@ -910,6 +910,14 @@ pub struct VmWait {
 }
 
 impl VmWait {
+    /// Read-only native scheduling diagnostics; never poll/consume wait edges.
+    pub(crate) fn diagnostics(&self) -> serde_json::Value {
+        serde_json::json!({"until_ms":self.until.map(|t|t.0),"until_frame":self.until_frame,
+            "key":self.waiting_for_key,"message_reveal":self.message_reveal,"audio":self.audio,
+            "event":self.event,"object_movie":self.movie,"global_movie":self.global_movie,
+            "global_movie_key_skip":self.global_movie_key_skip,"system_modal":self.system_modal,
+            "wipe":self.wipe,"selection":self.selbtn,"object_group_selection":self.group_selection})
+    }
     pub fn block_generation(&self) -> u64 {
         self.block_generation
     }

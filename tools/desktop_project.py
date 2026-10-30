@@ -85,7 +85,7 @@ def action(a: Any) -> None:
         raise ProjectError(f"unsupported action: {op}")
 
 def siglus_config(config: Any) -> dict:
-    config = obj(config, {"scene"}, {"format", "string_codec", "scene_name", "gameexe", "resources", "message_window"})
+    config = obj(config, {"scene"}, {"format", "string_codec", "scene_name", "gameexe", "key_file", "resources", "message_window"})
     def path(value):
         require(logical_path(value) == value, "non-canonical native config path")
     path(config["scene"])
@@ -93,6 +93,8 @@ def siglus_config(config: Any) -> dict:
     require(config.get("string_codec", "xor") in ("plain", "xor"), "unsupported native string codec")
     name = config.get("scene_name")
     require(name is None or isinstance(name, str) and 0 < len(name.encode()) <= 256 and not any(ord(c) < 32 or 127 <= ord(c) < 160 for c in name), "native scene name")
+    if config.get("key_file") is not None:
+        path(config["key_file"])
     if config.get("gameexe") is not None:
         path(config["gameexe"])
     resources = config.get("resources", {})
@@ -101,7 +103,6 @@ def siglus_config(config: Any) -> dict:
         path(alias)
         path(source)
     if config.get("message_window") is not None:
-        require(config.get("gameexe") is None, "native Gameexe MWND conversion is not implemented")
         window = obj(config["message_window"], {"font", "rect", "name_rect", "size", "name_size", "spacing", "color", "name_color"})
         require(isinstance(window["font"], str) and 0 < len(window["font"].encode()) <= 256
                 and not any(ord(c) < 32 or 127 <= ord(c) < 160 for c in window["font"]), "native message font alias")
@@ -131,6 +132,44 @@ def reallive_config(config: Any) -> dict:
     return config
 
 
+def rfvp_config(config: Any) -> dict:
+    config = obj(config, {"default_font"}, {"root", "nls", "screen"})
+    require(logical_path(config["default_font"]) == config["default_font"], "non-canonical RFVP font path")
+    root = config.get("root", "")
+    require(isinstance(root, str), "RFVP root")
+    if root:
+        require(logical_path(root) == root, "non-canonical RFVP root")
+    require(config.get("nls", "sjis") in ("sjis", "gbk", "utf8"), "RFVP encoding")
+    require(config.get("screen") is None or vector(config["screen"], 2, lambda n: integer(n, 1, 8192)), "RFVP screen")
+    return config
+
+def bgi_config(config: Any) -> dict:
+    config = obj(config, {"script"}, {"root", "font"})
+    require(logical_path(config["script"]) == config["script"] and config["script"].lower().endswith("._bp"), "BGI native BP script")
+    root = config.get("root", "")
+    require(isinstance(root, str), "BGI root")
+    if root:
+        require(logical_path(root) == root, "non-canonical BGI root")
+    require(config.get("font") is None or isinstance(config["font"], str) and 0 < len(config["font"]) <= 256 and not any(ord(c) < 32 for c in config["font"]), "BGI font alias")
+    return config
+
+def nscripter_config(config: Any) -> dict:
+    config = obj(config, {"script", "font"}, {"encoding", "canvas", "text", "archives"})
+    require(logical_path(config["script"]) == config["script"], "non-canonical NScripter script")
+    require(config.get("encoding", "sjis") in ("sjis", "utf8"), "NScripter encoding")
+    require(isinstance(config["font"], str) and 0 < len(config["font"]) <= 256 and not any(ord(c) < 32 for c in config["font"]), "NScripter font alias")
+    require(vector(config.get("canvas", [640, 480]), 2, lambda n: integer(n, 1, 8192)), "NScripter canvas")
+    archives = config.get("archives", [])
+    require(isinstance(archives, list) and len(archives) <= 128, "NScripter archive prefix count")
+    for prefix in archives:
+        require(logical_path(prefix) == prefix, "non-canonical NScripter archive prefix")
+    if "text" in config:
+        text = obj(config["text"], set(), {"rect", "size", "color"})
+        rect = text.get("rect", [0, 320, 640, 160])
+        require(vector(rect, 4, lambda n: integer(n, -32767, 32767)) and min(rect[2:]) > 0, "NScripter text rectangle")
+        require(integer(text.get("size", 24), 1, 512) and color(text.get("color", [255]*4)), "NScripter text style")
+    return config
+
 def validate(p: Any) -> dict:
     obj(p, {"schema", "name", "content_revision", "canvas", "assets", "clients"}, {"background", "fonts", "scene3d"})
     require(type(p["schema"]) is int and p["schema"] == 2, "expected schema 2")
@@ -158,7 +197,10 @@ def validate(p: Any) -> dict:
         if c["adapter"] == "reallive":
             require(not program, "RealLive uses original bytecode, not data VM actions")
             reallive_config(c.get("config"))
-        require(c["adapter"] not in ("bgi", "rfvp"), "hosted engine adapter removed; CrySirror API bridge required")
+        native_validators = {"rfvp": rfvp_config, "bgi": bgi_config, "nscripter": nscripter_config}
+        if c["adapter"] in native_validators:
+            require(not program, "native adapter uses original scripts, not data VM actions")
+            native_validators[c["adapter"]](c.get("config"))
         for a in program:
             action(a)
         if c.get("systems") is not None:
@@ -225,7 +267,7 @@ def asset_inventory(path: Path, p: dict, *, require_fonts: bool = True) -> dict[
     require(assets.is_relative_to(root) and assets.is_dir(), "asset directory escapes project")
     wanted = set(p.get("fonts", {}).values())
     for c in p["clients"]:
-        require(c["adapter"] in ("crysirror-script-v1", "siglus", "reallive"), "native asset enumeration is not implemented")
+        require(c["adapter"] in ("crysirror-script-v1", "siglus", "reallive", "rfvp", "bgi", "nscripter"), "native asset enumeration is not implemented")
         if c["adapter"] == "crysirror-script-v1":
             require(c.get("config") is None, "built-in data script does not accept native config")
         prefix = c.get("asset_prefix", "")
@@ -233,9 +275,19 @@ def asset_inventory(path: Path, p: dict, *, require_fonts: bool = True) -> dict[
         if prefix:
             base = (assets/logical_path(prefix)).resolve(strict=True)
             require(base.is_relative_to(assets) and base.is_dir(), "client asset prefix escapes root")
+        if c["adapter"] in ("rfvp", "bgi", "nscripter"):
+            config = {"rfvp": rfvp_config, "bgi": bgi_config, "nscripter": nscripter_config}[c["adapter"]](c.get("config"))
+            file = config["default_font"] if c["adapter"] == "rfvp" else "/".join(x for x in (config.get("root", ""), config["script"]) if x)
+            source = (base / logical_path(file)).resolve(strict=True)
+            require(source.is_relative_to(base), "native bootstrap escapes client root")
+            wanted.add("/".join(x for x in (prefix, file) if x))
+            font = config.get("font")
+            if require_fonts and font:
+                require(font in p.get("fonts", {}), "native adapter requires a licensed project font alias")
         if c["adapter"] == "siglus":
             config = siglus_config(c.get("config"))
             native_files = [config["scene"], *config.get("resources", {}).values()]
+            # Private decode material is a local capability input, excluded from distribution inventory.
             if config.get("gameexe") is not None:
                 native_files.append(config["gameexe"])
             for file in native_files:

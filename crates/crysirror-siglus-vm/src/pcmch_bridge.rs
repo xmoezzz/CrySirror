@@ -12,7 +12,6 @@ use crate::{
         globals::PcmChPersistentState,
         wait::AudioWait,
     },
-    sfx_bridge::PCM_GROUP,
 };
 use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::service::{
@@ -74,7 +73,8 @@ impl Slot {
             channel: channel(ch),
             key: key.into(),
             parameters: AudioParameters {
-                mix_group: Some(PCM_GROUP.into()),
+                // PCMCH script volume is independent of GLOBAL.PCM volume.
+                mix_group: None,
                 gain: if fade_ms > 0. && !ready {
                     0.
                 } else {
@@ -315,7 +315,7 @@ fn stored(ctx: &mut CommandContext, ch: usize) -> &mut PcmChPersistentState {
 }
 fn routing(ctx: &CommandContext, s: &PcmChPersistentState) -> Result<()> {
     ensure!(
-        s.volume_type == 2
+        matches!(s.volume_type, 2 | 3)
             && s.chara_no < 0
             && !s.bgm_fade_target_flag
             && !s.bgm_fade2_target_flag
@@ -326,8 +326,8 @@ fn routing(ctx: &CommandContext, s: &PcmChPersistentState) -> Result<()> {
     ensure!(
         cfg.play_all_sound_check
             && cfg.all_sound_user_volume == 255
-            && cfg.play_sound_check[2]
-            && cfg.sound_user_volume[2] == 255,
+            && cfg.play_sound_check[s.volume_type as usize]
+            && cfg.sound_user_volume[s.volume_type as usize] == 255,
         "Siglus PCMCH nondefault native system volume routing unsupported"
     );
     Ok(())
@@ -670,10 +670,47 @@ mod tests {
         assert_eq!(ctx.pcm.slot_resume_delay_ms(0), 0);
     }
     #[test]
+    fn pcmch_se_category_keeps_channel_volume_independent_of_global_pcm_group() {
+        let mut ctx = CommandContext::new(".".into());
+        ctx.pcm
+            .set_volume_raw(&mut crate::audio::AudioHub, 0)
+            .unwrap();
+        ctx.pcm.channels.set_volume(0, 128, 0).unwrap();
+        let state = PcmChPersistentState {
+            pcm_name: "cue".into(),
+            volume_type: 3,
+            ready_flag: true,
+            ..Default::default()
+        };
+        start(&mut ctx, 0, &state).unwrap();
+        let queue = ctx.pcm.take().entries();
+        let params = queue
+            .iter()
+            .find_map(|(_, op)| match op {
+                Operation::Channel { parameters, .. } => Some(parameters),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(params.gain, 128. / 255.);
+        assert!(params.paused);
+        assert_eq!(
+            params.mix_group, None,
+            "GLOBAL.PCM script gain must not alter a PCMCH source"
+        );
+        ctx.globals.syscom.original_config.sound_user_volume[3] = 128;
+        assert!(
+            start(&mut ctx, 0, &state)
+                .unwrap_err()
+                .to_string()
+                .contains("nondefault"),
+            "an unmapped system-volume factor is never discarded"
+        );
+    }
+    #[test]
     fn sparse_bgm_indices_are_bounded_before_native_alias_lookup() {
         let mut ctx = CommandContext::new(".".into());
-        ctx.tables.gameexe = Some(siglus_assets::gameexe::GameexeConfig::from_text(
-            "#BGM.99999=\"song\",\"cue\",0,1,0\n",
+        ctx.tables.gameexe = Some(std::sync::Arc::new(
+            siglus_assets::gameexe::GameexeConfig::from_text("#BGM.99999=\"song\",\"cue\",0,1,0\n"),
         ));
         let state = PcmChPersistentState {
             bgm_name: "song".into(),

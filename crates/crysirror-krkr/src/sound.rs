@@ -60,10 +60,11 @@ pub struct Sounds {
     ops: VecDeque<Op>,
     pending: Option<Pending>,
     global: i64,
+    smooth_logged: bool,
 }
 impl Sounds {
     /// Native instance cleanup also runs when a script overrides finalize
-    /// without calling its base. At most the 64 owned buffers can be retired.
+    /// without calling its base. At most the bounded owned buffers can retire.
     pub fn invalidate(&mut self, object: usize) {
         if self.buffers.contains_key(&object)
             && !self
@@ -211,7 +212,10 @@ pub fn install(rt: &mut Rt) {
         if rt.host().sounds.buffers.contains_key(&h.0) {
             return Ok(Variant::Void);
         }
-        let channel = (0..64)
+        // Logical native buffers are not simultaneous playing voices. Keep
+        // them bounded within the common 128-groups-per-client budget (one root) while allowing
+        // ordinary KAG configurations with 100 SE slots plus music buffers.
+        let channel = (0..127)
             .find(|n| !rt.host().sounds.buffers.values().any(|b| b.channel == *n))
             .ok_or_else(|| err("native sound buffer limit"))?;
         let b = Buffer {
@@ -579,6 +583,10 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                             let info = status.info.ok_or_else(|| {
                                 anyhow::anyhow!("ready native audio preparation has no metadata")
                             })?;
+                            if rt.host().loaded_plugins.contains("wuvorbis.dll") && info.has_replay_gain {
+                                h.release_audio_resource(client,resource)?;
+                                anyhow::bail!("wuvorbis ReplayGain-tagged audio requires a shared explicit metadata gain policy; playback refused");
+                            }
                             let s = rt
                                 .host_mut()
                                 .sounds
@@ -672,6 +680,14 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                 }
                 let b = &rt.host().sounds.buffers[&object];
                 let sli_loop = sli_loop(b, &flags)?;
+                let smooth = b.sli.as_ref().is_some_and(|i| i.links.iter().any(|l| l.taken(&flags) && l.smooth));
+                if smooth && !rt.host().sounds.smooth_logged {
+                    rt.host_mut().sounds.smooth_logged = true;
+                    rt.host_mut().push_log(
+                        "WaveSoundBuffer: .sli smooth link loops without its 50 ms junction crossfade".into(),
+                    );
+                }
+                let b = &rt.host().sounds.buffers[&object];
                 let rate = match (b.frequency, b.info) {
                     (None, _) => 1.,
                     (Some(f), Some(i)) => {
@@ -758,7 +774,8 @@ pub fn observations(
 }
 
 /// The loop a `.sli` file applies with the flag values at play time: one
-/// backward, non-smooth link becomes the shared loop range. Flag changes
+/// backward link becomes the shared loop range (a smooth link's 50 ms
+/// junction crossfade is not reproduced and is logged). Flag changes
 /// during playback take effect at the next play (krkrz re-evaluates links
 /// live). Other link profiles fail visibly.
 fn sli_loop(b: &Buffer, flags: &[i64; crysirror_resource::sli::MAX_FLAGS]) -> anyhow::Result<Option<(u64, u64)>> {
@@ -767,9 +784,14 @@ fn sli_loop(b: &Buffer, flags: &[i64; crysirror_resource::sli::MAX_FLAGS]) -> an
     match taken.as_slice() {
         [] => Ok(None),
         [l] if l.to < l.from && !l.smooth => Ok(Some((l.to, l.from))),
+        // krkrz crossfades a smooth link over TVP_WL_SMOOTH_TIME (50 ms)
+        // around the junction; the shared voice loops at the same points
+        // without that crossfade (logged by the caller).
+        [l] if l.to < l.from => Ok(Some((l.to, l.from))),
         _ => anyhow::bail!(
             "WaveSoundBuffer .sli link profile is not supported by the CrySirror KiriKiri adapter: \
-             requires one backward non-smooth link"
+             requires one backward non-smooth link (taken: {:?})",
+            taken
         ),
     }
 }

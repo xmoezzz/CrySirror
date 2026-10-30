@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Standalone native audio resources over the engine's streaming-source API.
-//! NWA uses the pinned siglus_assets codec, not a VM or original sound engine.
+//! NWA uses the engine-owned codec reader, not a VM or original sound engine.
 //! KOEPAC PCM math is from siglus_rs/reallive/src/sound.rs at
 //! 5f358ef1360b0439e92aed2b749e8f25d8721954 (MPL-2.0).
 use crate::decoder::{AudioSource, MAX_PACKET_FRAMES, StereoFrame};
 use anyhow::{Context, Result, ensure};
-use siglus_assets::nwa::NwaReader;
+use crate::nwa::NwaReader;
 use std::{io::Cursor, sync::Arc};
 
 pub const MAX_ENCODED_BYTES: usize = 64 * 1024 * 1024;
@@ -481,7 +481,7 @@ mod tests {
     fn nwa_compressed_units_and_frame_seeks_preserve_original_predictors() {
         let bytes = compressed();
         let mut source = open_if_native(bytes.clone()).unwrap().unwrap();
-        let mut original = NwaReader::open_from_bytes(bytes.to_vec()).unwrap();
+        let mut original = NwaReader::open_from_reader(Cursor::new(bytes.clone())).unwrap();
         let expected = original.read_samples(4).unwrap();
         let mut out = [[0.; 2]; 4];
         assert_eq!(source.read(&mut out).unwrap(), 4);

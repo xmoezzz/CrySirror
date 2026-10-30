@@ -1835,3 +1835,50 @@ fn member_read_keeps_a_stored_values_own_this() {
         "#);
     assert_eq!(value, Variant::Integer(7));
 }
+
+/// Replacing Native.Native must affect the later named constructor call,
+/// while an extends expression still calls Native's class body. In particular
+/// a primary base has to copy its hooked constructor just like a later mixin.
+#[test]
+fn native_primary_base_constructor_hook_is_not_the_extends_operand() {
+    let mut runtime = Runtime::new();
+    let class = runtime.alloc_native_constructor(
+        |rt: &mut Runtime<NoHost>, this: Option<ObjectHandle>, args: Vec<Variant>| {
+            let object = this.unwrap_or_else(|| rt.alloc_ordinary_object());
+            if args.is_empty() {
+                let n = rt.global_member("bodies").to_integer().unwrap_or(0);
+                rt.set_global_member("bodies", Variant::Integer(n + 1));
+                rt.set_object_member(object, "nativeReady", Variant::Integer(1));
+            } else {
+                rt.set_object_member(object, "nativeValue", args[0].clone());
+            }
+            Ok(Variant::Object(object))
+        },
+    );
+    runtime.add_object_class_info(class, "Native");
+    runtime.set_object_member(class, "Native", Variant::Closure(crate::runtime::Closure::new(class, None)));
+    runtime.set_object_member(class, "CONSTANT", Variant::Integer(7));
+    runtime.set_global_member("Native", Variant::Object(class));
+    let file = compile_source_to_bytecode(
+        "native-constructor-hook.tjs",
+        r#"
+        global.calls=0;global.original=Native.Native;
+        Native.Native=function(*) {
+            global.calls++;
+            if(this.nativeReady!=1)throw new Exception('native body has not run');
+            var r=(global.original incontextof this)(*);
+            if(this.nativeValue!=42)throw new Exception('hook before constructor');
+            return r;
+        } incontextof null;
+        class Parent extends Native {var constant=CONSTANT;function Parent(v){super.Native(v);}}
+        class Child extends Parent {function Child(v){super.Parent(v);}}
+        var object=new Child(42);
+        return global.calls+':'+global.bodies+':'+object.constant+':'+object.nativeValue;
+    "#,
+    )
+    .unwrap();
+    assert_eq!(
+        runtime.execute_file(&file).unwrap(),
+        Variant::String("1:1:7:42".into())
+    );
+}

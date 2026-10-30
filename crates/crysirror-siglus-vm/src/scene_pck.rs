@@ -835,14 +835,10 @@ impl ScenePck {
                 if header.scn_data_exe_angou_mod != 0
                     && let Some(exe) = opt.exe_angou_element.as_deref().filter(|k| !k.is_empty())
                 {
-                    for (i, b) in chunk.iter_mut().enumerate() {
-                        *b ^= exe[i % exe.len()];
-                    }
+                    crate::angou::xor_cycle_in_place(&mut chunk[..], exe);
                 }
                 if let Some(easy) = opt.easy_angou_code.as_deref().filter(|k| !k.is_empty()) {
-                    for (i, b) in chunk.iter_mut().enumerate() {
-                        *b ^= easy[i % easy.len()];
-                    }
+                    crate::angou::xor_cycle_in_place(&mut chunk[..], easy);
                 }
             }
             ranges.push(start..end);

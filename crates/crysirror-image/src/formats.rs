@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Content-recognized CPU image plugins, with scoped dependency reads.
 use crate::{DecoderRegistry, ImageSurface, MAX_DECODED_BYTES};
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
-    path::{Mount, VfsPath},
     Error,
+    path::{Mount, VfsPath},
 };
 use crysirror_resource::{ArchiveEntry, DecodeContext};
 use std::{cell::Cell, sync::Arc};
@@ -250,8 +250,18 @@ impl DecoderRegistry {
                 .rsplit_once('.')
                 .map(|(_, e)| e.to_ascii_lowercase())
                 .unwrap_or_default();
-            self.decoders
-                .get(&extension)
+            // Native memory resources need not carry a filename extension.
+            // Standard codec magic is pure Rust and bounded by the encoded
+            // byte limit above; proprietary format probes retain priority.
+            let guessed = image::guess_format(bytes).ok();
+            let content_decoder = guessed.as_ref().and_then(|format| {
+                format
+                    .extensions_str()
+                    .iter()
+                    .find_map(|extension| self.decoders.get(*extension))
+            });
+            content_decoder
+                .or_else(|| self.decoders.get(&extension))
                 .with_context(|| format!("unsupported image format: {extension}"))?
                 .decode(bytes)
                 .with_context(|| format!("decode {}", context.path))?
@@ -270,5 +280,30 @@ impl DecoderRegistry {
             work.decoded.set(n);
         }
         Ok(surface)
+    }
+}
+
+#[cfg(test)]
+mod memory_codec_tests {
+    use super::*;
+    #[test]
+    fn standard_image_magic_decodes_extensionless_and_misnamed_resources() {
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(2, 1, image::Rgba([17, 31, 99, 255]))
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        let registry = DecoderRegistry::default();
+        for name in ["memory-octet", "wrong.jpg"] {
+            let surface = registry
+                .decode_with(name, encoded.get_ref(), None, None, None)
+                .unwrap();
+            assert_eq!([surface.width, surface.height], [2, 1]);
+            assert_eq!(&surface.rgba[..4], &[17, 31, 99, 255]);
+        }
+        assert!(
+            registry
+                .decode_with("memory-octet", b"not an image", None, None, None)
+                .is_err()
+        );
     }
 }

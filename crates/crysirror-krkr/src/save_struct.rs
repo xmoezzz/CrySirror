@@ -15,24 +15,32 @@ pub fn install(rt: &mut Rt) {
             continue;
         };
         rt.set_object_member(class, "__crysirror_original_saveStruct", original);
-        rt.register_object_native(class, "saveStruct", move |rt: &mut Rt, t, a| {
-            if !rt.host().can_suspend {
-                return Err(unsupported(
-                    "saveStruct in this callback",
-                    "native file continuation boundary",
-                ));
-            }
-            let target = this_of(rt, t, "saveStruct")?;
-            rt.host_mut().io_barrier = true;
-            let result =
-                rt.call_function(Variant::Closure(Closure::new(function, Some(target))), a);
-            rt.host_mut().io_barrier = false;
-            let value = result?;
-            if !rt.host().writes.is_empty() {
-                rt.request_suspend();
-            }
-            Ok(value)
-        });
+        rt.register_object_native(
+            class,
+            "saveStruct",
+            move |rt: &mut Rt, t, a: Vec<Variant>| {
+                let memory = a
+                    .first()
+                    .and_then(|v| v.to_tjs_string().ok())
+                    .is_some_and(|name| crate::varfile_plugin::is_uri(&name));
+                if !rt.host().can_suspend && !memory {
+                    return Err(unsupported(
+                        "saveStruct in this callback",
+                        "native file continuation boundary",
+                    ));
+                }
+                let target = this_of(rt, t, "saveStruct")?;
+                rt.host_mut().io_barrier = true;
+                let result =
+                    rt.call_function(Variant::Closure(Closure::new(function, Some(target))), a);
+                rt.host_mut().io_barrier = false;
+                let value = result?;
+                if !rt.host().writes.is_empty() {
+                    rt.request_suspend();
+                }
+                Ok(value)
+            },
+        );
     }
 }
 pub fn poll(rt: &mut Rt) -> anyhow::Result<bool> {

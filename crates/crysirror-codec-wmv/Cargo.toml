@@ -1,0 +1,31 @@
+[package]
+license.workspace = true
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+name = "crysirror-codec-wmv"
+version = "0.2.0"
+edition = "2024"
+
+[lib]
+name = "wmv_decoder"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+test = false
+doctest = false
+
+[dependencies]
+byteorder = "1.5"
+thiserror = "1.0"
+log = "0.4"
+
+
+[features]
+default = ["audio"]
+audio = []
+video-only = []
+
+[lints.rust]
+warnings = "allow"

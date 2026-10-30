@@ -122,6 +122,34 @@ fn ticks(r: &mut Runtime, count: usize, input: InputFrame) {
     }
 }
 
+#[test]
+fn native_cur16m_uses_shared_pointer_and_area_clear_restores_os_default() {
+    let mut code = vec![0x6c,0x02];
+    code.extend(b"FEATHER\0MAP\0");
+    code.extend([0x01,0x6c,0x03,0x60,0x20]);
+    let (temp, mut r) = fixture(&code);
+    let mut cursor = b"CUR16M\0\0".to_vec();
+    cursor.extend(2u32.to_le_bytes()); cursor.extend(6408u32.to_le_bytes()); cursor.extend([0;16]);
+    cursor.extend(1u32.to_le_bytes()); cursor.extend(2u32.to_le_bytes());
+    cursor.extend(vec![0;6400]);
+    std::fs::write(temp.path().join("assets/game/DAT/FEATHER.CUR"), cursor).unwrap();
+    let mut map = vec![0;0x121];
+    map[8..12].copy_from_slice(&1u32.to_le_bytes()); map[12..16].copy_from_slice(&1u32.to_le_bytes());
+    std::fs::write(temp.path().join("assets/game/DAT/MAP.ARD"), map).unwrap();
+    ticks(&mut r,30,InputFrame::default());
+    let selection = serde_json::to_value(r.host.engine.ui.cursors.selected).unwrap();
+    assert_eq!(selection[1]["kind"],"custom");
+    let id = selection[1]["id"].as_u64().unwrap() as u32;
+    let defined = r.host.engine.ui.cursors.get(1,id).unwrap();
+    assert_eq!(defined.frames[0].hotspot,[1,2]);
+    assert_eq!(defined.steps,[[0,150],[1,150]]);
+    assert_eq!(r.host.engine.ui.cursor,Some((1,true)));
+    ticks(&mut r,2,InputFrame {buttons_down:buttons::MOUSE_LEFT,..Default::default()});
+    ticks(&mut r,30,InputFrame::default());
+    assert_eq!(serde_json::to_value(r.host.engine.ui.cursors.selected).unwrap(),
+        json!([1,{"kind":"standard","shape":"default"}]));
+}
+
 /// `0x0b:09 "BG" 0` load into buffer 0, `0x0e:01 "002"` loop BGM, a text
 /// packet, `0x01` click wait, then `0x3b` sets value 1 to 7.
 fn story() -> Vec<u8> {

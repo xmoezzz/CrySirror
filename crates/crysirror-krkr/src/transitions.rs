@@ -57,13 +57,19 @@ pub fn install(rt: &mut Rt) {
 fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Variant> {
     let dest = this_of(rt, t, "Layer.beginTransition")?;
     let name = string(&args, 0, "Layer.beginTransition")?;
-    if name != "crossfade" && name != "universal" {
+    let kaicho=matches!(name.as_str(),"blur"|"dim");
+    if name != "crossfade" && name != "universal" && !kaicho {
         return Err(unsupported(
             &format!("transition {name}"),
             "an engine transition implementation",
         ));
     }
-    let with_children = args.get(1).is_some_and(Variant::is_truthy);
+    // krkrz LayerIntf.cpp:7795-7797: `withchildren` defaults to true when
+    // omitted or void.
+    let with_children = match args.get(1) {
+        None | Some(Variant::Void) => true,
+        Some(v) => v.is_truthy(),
+    };
     let source = args
         .get(2)
         .and_then(object_arg)
@@ -73,6 +79,7 @@ fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Var
         .get(3)
         .and_then(object_arg)
         .ok_or_else(|| TjsError::runtime("transition options required"))?;
+    let effect=if kaicho {Some(crate::kaicho_plugin::effect(rt,&name,options)?)}else{None};
     // krkrz `callback`: the transition's tick source (GetTransTick calls it
     // each update; the handler phase is tick / time, starting at tick 0).
     // `selfupdate` alone (updates only on script Update calls) is not mapped.
@@ -114,7 +121,9 @@ fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Var
     } else {
         None
     };
-    let duration = rt.object_member(options, "time").to_integer()?;
+    let requested_duration = rt.resolve_object_member(options, "time")?.to_integer()?;
+    if kaicho && requested_duration<0 {return Err(TjsError::runtime("negative Kaicho transition duration"));}
+    let duration=if kaicho {requested_duration.max(2)}else{requested_duration};
     if !(1..=600_000).contains(&duration) {
         return Err(TjsError::runtime("transition time must be 1..600000 ms"));
     }
@@ -182,8 +191,12 @@ fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Var
     if let Some(cb) = callback {
         rt.host_mut().transitions.2.insert(dest.0, (cb, duration as u64));
     }
+    if let Some(effect)=effect {
+        rt.host_mut().layer_op(json!({"op":"begin_crossfade_effect","id":id,"source":src,"duration_ms":duration,"effect":effect,"external":external}));
+    } else {
     rt.host_mut().layer_op(json!({"op":"begin_crossfade","id":id,"source":src,
-        "duration_ms":duration,"rule":rule,"external":external}));
+        "duration_ms":duration,"rule":rule,"external":external}));    }
+
     Ok(Variant::Void)
 }
 fn finish(rt: &mut Rt, dest: ObjectHandle) -> Result<()> {

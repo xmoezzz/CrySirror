@@ -116,10 +116,10 @@ impl Avg32Engine {
         &self.sys.window_title
     }
 
-    /// Whether the host should show its own pointer (hidden while the game
-    /// hides the cursor or draws its own `CUR16M` cursor).
+    /// Native pointer visibility. CrySirror presents CUR16M resources through
+    /// the same OS cursor service as standard pointers.
     pub fn cursor_visible(&self) -> bool {
-        self.sys.mouse.visible && self.sys.cursor.is_none()
+        self.sys.mouse.visible
     }
 
     pub fn mouse_move(&mut self, x: i32, y: i32) {

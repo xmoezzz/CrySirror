@@ -14,7 +14,7 @@ use symphonia::core::{
     errors::Error,
     formats::{FormatOptions, FormatReader, SeekMode, SeekTo},
     io::MediaSourceStream,
-    meta::MetadataOptions,
+    meta::{MetadataOptions, StandardTagKey},
     probe::Hint,
 };
 
@@ -24,6 +24,26 @@ pub use symphonia::core::io::MediaSource;
 pub type StereoFrame = [f32; 2];
 pub const MAX_PACKET_FRAMES: usize = 65536;
 pub const MAX_CLIP_FRAMES: usize = 4_194_304;
+
+/// Query the same decoder registry used by `Stream::open`. Names identify a
+/// codec, not a container: Ogg may carry several different codecs.
+pub fn codec_supported(codec: &str) -> bool {
+    let codec = match codec {
+        "opus" => symphonia::core::codecs::CODEC_TYPE_OPUS,
+        "vorbis" => symphonia::core::codecs::CODEC_TYPE_VORBIS,
+        _ => return false,
+    };
+    crate::opus::codecs().get_codec(codec).is_some()
+}
+fn replay_gain_tags(metadata: &symphonia::core::meta::MetadataRevision) -> bool {
+    metadata.tags().iter().any(|tag| {
+        matches!(
+            tag.std_key,
+            Some(StandardTagKey::ReplayGainAlbumGain | StandardTagKey::ReplayGainTrackGain)
+        ) || tag.key.eq_ignore_ascii_case("replaygain_track_gain")
+            || tag.key.eq_ignore_ascii_case("replaygain_album_gain")
+    })
+}
 
 /// A nonblocking source distinguishes temporary starvation from actual EOF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +69,11 @@ pub struct SourceBufferStatus {
     pub error: Option<String>,
 }
 pub trait AudioSource: Send {
+    /// Whether source metadata requests ReplayGain adjustment. Decoders expose
+    /// this fact without applying an implicit playback policy.
+    fn has_replay_gain(&self) -> bool {
+        false
+    }
     /// Encoded channel layout before the stereo projection, when known.
     fn channel_count(&self) -> Option<u16> {
         None
@@ -91,7 +116,12 @@ pub trait AudioSource: Send {
 /// Unified resident-resource decoder used by channels, data-VM playback and
 /// engine Audio APIs. Native codecs share the same AudioSource/mixer contract.
 pub fn open_memory(bytes: Arc<[u8]>, extension: Option<&str>) -> Result<Box<dyn AudioSource>> {
-    if let Some(source)=crate::synth::open(bytes.clone(),extension)?{return Ok(source)}
+    if bytes.starts_with(b"XPCM") {
+        return crate::circus::open_reader(Box::new(Cursor::new(bytes)));
+    }
+    if let Some(source) = crate::synth::open(bytes.clone(), extension)? {
+        return Ok(source);
+    }
     if let Some(source) = crate::native::open_if_native(bytes.clone())? {
         return Ok(source);
     }
@@ -106,9 +136,10 @@ pub fn open_reader(
     extension: Option<&str>,
 ) -> Result<Box<dyn AudioSource>> {
     use std::io::Read;
-    if crate::synth::is_extension(extension){
-        let mut bytes=Vec::new();reader.take(8*1024*1024+1).read_to_end(&mut bytes)?;
-        return crate::synth::open(Arc::from(bytes),extension)?.context("synth decoder absent");
+    if crate::synth::is_extension(extension) {
+        let mut bytes = Vec::new();
+        reader.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+        return crate::synth::open(Arc::from(bytes), extension)?.context("synth decoder absent");
     }
     if reader.is_seekable() {
         let start = reader.stream_position()?;
@@ -122,6 +153,9 @@ pub fn open_reader(
             count += n;
         }
         reader.seek(SeekFrom::Start(start))?;
+        if prefix[..count].starts_with(b"XPCM") {
+            return crate::circus::open_reader(reader);
+        }
         if crate::native::may_be_nwa(&prefix[..count]) {
             return crate::native::open_reader(reader);
         }
@@ -272,6 +306,7 @@ pub struct Stream {
     eof: bool,
     startup_delay: u64,
     trim_start: u64,
+    has_replay_gain: bool,
 }
 impl Stream {
     pub fn open(source: Box<dyn MediaSource>, extension: Option<&str>) -> Result<Self> {
@@ -280,7 +315,7 @@ impl Stream {
             hint.with_extension(ext);
         }
         let mss = MediaSourceStream::new(source, Default::default());
-        let format = symphonia::default::get_probe()
+        let mut probed = symphonia::default::get_probe()
             .format(
                 &hint,
                 mss,
@@ -290,8 +325,14 @@ impl Stream {
                 },
                 &MetadataOptions::default(),
             )
-            .context("probe audio stream")?
-            .format;
+            .context("probe audio stream")?;
+        let mut has_replay_gain = probed
+            .metadata
+            .get()
+            .and_then(|m| m.current().map(replay_gain_tags))
+            .unwrap_or(false);
+        let mut format = probed.format;
+        has_replay_gain |= format.metadata().current().is_some_and(replay_gain_tags);
         let track = format
             .default_track()
             .context("audio stream has no default track")?;
@@ -312,14 +353,16 @@ impl Stream {
             .make(&track.codec_params, &DecoderOptions::default())
             .context("audio codec")?;
         let (id, frames) = (track.id, track.codec_params.n_frames);
-        let startup_delay =
-            if [symphonia::core::codecs::CODEC_TYPE_VORBIS, symphonia::core::codecs::CODEC_TYPE_OPUS]
-                .contains(&track.codec_params.codec)
-            {
-                track.codec_params.delay.unwrap_or(0) as u64
-            } else {
-                0
-            };
+        let startup_delay = if [
+            symphonia::core::codecs::CODEC_TYPE_VORBIS,
+            symphonia::core::codecs::CODEC_TYPE_OPUS,
+        ]
+        .contains(&track.codec_params.codec)
+        {
+            track.codec_params.delay.unwrap_or(0) as u64
+        } else {
+            0
+        };
         Ok(Self {
             format: Some(format),
             decoder,
@@ -333,6 +376,7 @@ impl Stream {
             eof: false,
             startup_delay,
             trim_start: startup_delay,
+            has_replay_gain,
         })
     }
     pub fn from_bytes(bytes: Arc<[u8]>, extension: Option<&str>) -> Result<Self> {
@@ -360,6 +404,17 @@ impl Stream {
                 }
                 Err(e) => return Err(anyhow::anyhow!("audio packet: {e}")),
             };
+            let late_gain = self
+                .format
+                .as_mut()
+                .context("audio reader unavailable")?
+                .metadata()
+                .current()
+                .is_some_and(replay_gain_tags);
+            ensure!(
+                !late_gain || self.has_replay_gain,
+                "ReplayGain metadata introduced after decoder preparation is unsupported"
+            );
             if packet.track_id() != self.track {
                 continue;
             }
@@ -427,6 +482,9 @@ impl Stream {
     }
 }
 impl AudioSource for Stream {
+    fn has_replay_gain(&self) -> bool {
+        self.has_replay_gain
+    }
     fn channel_count(&self) -> Option<u16> {
         Some(self.channels as u16)
     }
@@ -478,8 +536,8 @@ impl AudioSource for Stream {
             )?
             .format;
         let track = format.default_track().context("audio track disappeared")?;
-        self.decoder = crate::opus::codecs()
-            .make(&track.codec_params, &DecoderOptions::default())?;
+        self.decoder =
+            crate::opus::codecs().make(&track.codec_params, &DecoderOptions::default())?;
         self.track = track.id;
         self.format = Some(format);
         // Seek timestamps are in the track time base; Symphonia audio sample

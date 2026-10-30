@@ -26,12 +26,20 @@ fn kind(rt: &Rt, name: &str) -> Option<&'static str> {
             // krmovie.dll is VideoOverlay's decoder module and exports no TJS
             // members; the core VideoOverlay class maps onto engine video.
             | "krmovie.dll"
+            // AlphaMovie class over the shared media service (AJPM decoder).
+            | "alphamovie.dll"
             | "layereximage.dll"
             | "kagparserex.dll"
+            | "extkagparser.dll"
+            | "kropus.dll"
+            | "wuvorbis.dll"
             | "textrender.dll"
             | "motionplayer.dll"
             | "motionplayer_nod3d.dll"
             | "csvparser.dll"
+            | "lineparser.dll"
+            | "dirlist.dll"
+            | "varfile.dll"
             | "psbfile.dll"
             | "toml.dll"
             // msdfrender.dll: its members are feature-detected by the scripts
@@ -47,6 +55,7 @@ fn kind(rt: &Rt, name: &str) -> Option<&'static str> {
             // the requested method and rejects unimplemented ones.
             | "extrans.dll"
             | "extnagano.dll"
+            | "kaichotrans.dll"
     ) {
         Some("engine_facade")
     } else if crate::surfaces::known(name) {
@@ -81,6 +90,9 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                 if name == "kagparser.dll" && !rt.host().loaded_plugins.contains(&name) {
                     crate::kag::install(rt);
                 }
+                if name == "alphamovie.dll" && !rt.host().loaded_plugins.contains(&name) {
+                    crate::alpha_movie::install(rt);
+                }
                 if name == "layerexraster.dll" && !rt.host().loaded_plugins.contains(&name) {
                     crate::image_api::install_raster(rt);
                 }
@@ -102,6 +114,16 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                 if name == "scriptsex.dll" && !rt.host().loaded_plugins.contains(&name) {
                     crate::kirakira::scripts_ex::install_scripts_ex(rt);
                 }
+                if name == "dirlist.dll" && !rt.host().loaded_plugins.contains(&name) {
+                    crate::storage_plugins::install_dirlist(rt);
+                }
+                if matches!(name.as_str(),"kropus.dll"|"wuvorbis.dll") && !rt.host().loaded_plugins.contains(&name) {crate::audio_plugin::link(rt,&name)?;}
+                if name == "varfile.dll" && !rt.host().loaded_plugins.contains(&name) {
+                    crate::varfile_plugin::install(rt)?;
+                }
+                if name == "lineparser.dll" && !rt.host().loaded_plugins.contains(&name) {
+                    crate::line_plugin::install(rt);
+                }
                 if name == "csvparser.dll" && !rt.host().loaded_plugins.contains(&name) {
                     crate::csv_plugin::install(rt);
                 }
@@ -114,6 +136,7 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                 if name == "textrender.dll" && !rt.host().loaded_plugins.contains(&name) {
                     crate::text_render_plugin::install(rt);
                 }
+                if name == "extkagparser.dll" && !rt.host().loaded_plugins.contains(&name) { crate::kag::install_ext(rt); }
                 if name == "kagparserex.dll" && !rt.host().loaded_plugins.contains(&name) {
                     crate::kag::install_ex(rt);
                 }
@@ -145,12 +168,19 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                         | "json.dll"
                         | "layerexdraw.dll"
                         | "krmovie.dll"
+                        | "alphamovie.dll"
             | "layereximage.dll"
             | "kagparserex.dll"
+            | "extkagparser.dll"
+            | "kropus.dll"
+            | "wuvorbis.dll"
             | "textrender.dll"
             | "motionplayer.dll"
             | "motionplayer_nod3d.dll"
             | "csvparser.dll"
+            | "lineparser.dll"
+            | "dirlist.dll"
+            | "varfile.dll"
             | "psbfile.dll"
             | "toml.dll"
             // msdfrender.dll: its members are feature-detected by the scripts
@@ -166,6 +196,7 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
             // the requested method and rejects unimplemented ones.
             | "extrans.dll"
             | "extnagano.dll"
+            | "kaichotrans.dll"
                 ) && rt.host().loaded_plugins.contains(&name)
                 {
                     return Ok(Variant::Integer(0));
@@ -207,9 +238,17 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                         } else if name.starts_with("motionplayer") {
                             "shared M2 motion workers, immutable textures and dynamic PuppetFrame; single-timeline profile"
                         } else if name == "addfont.dll" {
-                            "System.addFont validated by the shared text loader"
+                            "System.addFont asynchronous shared client font registration, portable outline measurement and rendering"
                         } else if name == "scriptsex.dll" {
                             "Scripts reflection/struct helpers (Kirakira scriptsEx)"
+                        } else if name == "kaichotrans.dll" {
+                            "shared GPU subtree byte-domain blur and grayscale/blur/negative rule dim transitions"
+                        } else if name == "dirlist.dll" {
+                            "getDirList through shared client-scoped directory metadata/listing"
+                        } else if name == "varfile.dll" {
+                            "dynamic global octet namespace through portable storage media and shared image decoding"
+                        } else if name == "lineparser.dll" {
+                            "shared crysirror_resource::text_stream::LineCursor"
                         } else if name == "csvparser.dll" {
                             "shared crysirror_runtime::csv reader"
                         } else if name == "msdfrender.dll" {
@@ -220,10 +259,16 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                             "PSB via shared eluna_rs; psb:// images via the shared decoder registry"
                         } else if name == "textrender.dll" {
                             "shared crysirror_text::markup layout"
+                        } else if matches!(name.as_str(),"kropus.dll"|"wuvorbis.dll") {
+                            "shared worker decoder registry, immutable audio resources, exact seek and common channel mixer; tagged ReplayGain is explicitly unsupported"
+                        } else if name == "extkagparser.dll" {
+                            "native ExtKAGParser VM while/local dictionary/multiline/parameter macro profile; unsupported save/fuzzy modes fail explicitly"
                         } else if name == "kagparserex.dll" {
                             "native KAG scenario VM, KAGParserEx taglist profile"
                         } else if name == "layereximage.dll" {
                             "shared ImageEffect CxImage colour/noise/blur profile"
+                        } else if name == "alphamovie.dll" {
+                            "AlphaMovie (AJPM) through the shared media service"
                         } else if name == "krmovie.dll" {
                             "VideoOverlay decoder module (engine video service)"
                         } else if name == "json.dll" {

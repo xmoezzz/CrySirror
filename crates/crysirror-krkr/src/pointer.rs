@@ -1,8 +1,10 @@
 // Copyright (c) 2026 CrySirror contributors.
 // Distributed under the GNU Affero General Public License, version 3 or
 // (at your option) any later version, https://www.gnu.org/licenses/agpl-3.0.html.
-//! Coordinate/key naming over logical engine input. This profile supports the
-//! host default arrow and hidden cursor; custom cursor resources fail visibly.
+//! Coordinate/key naming over logical engine input, and krkr mouse cursors
+//! over the shared UI cursor service: the `cr*` constants select standard
+//! shapes, cursor files (`.cur`/`.ani`) are decoded by the shared image
+//! cursor decoder and defined as client cursors.
 use crate::natives::*;
 use crysirror_tjs2::{
     TjsError,
@@ -73,21 +75,15 @@ pub fn install(rt: &mut Rt) {
             },
             |rt, t, v| {
                 let h = this_of(rt, t, "cursor")?;
-                // Standard krkr cursor constants (crDefault..crHandPoint) are
-                // kept per layer; the host does not yet switch its cursor
-                // shape on hover. Cursor resources (strings) need a shared
-                // cursor-image service and fail visibly.
-                if matches!(v, Variant::String(_)) {
-                    return Err(unsupported("cursor resource", "shared custom cursor image mapping"));
-                }
-                let v = v.to_integer()?;
-                if !(-22..=0).contains(&v) {
-                    return Err(unsupported(
-                        "cursor shape",
-                        "shared custom cursor shape/resource mapping",
-                    ));
-                }
-                rt.set_object_member(h, "__cursor", Variant::Integer(v));
+                // krkrz tTJSNI_BaseLayer::SetCursorByStorage/SetCursorByNumber
+                // (LayerIntf.cpp:2710): a string loads a cursor file through
+                // storage (TVPGetCursor caches it per placed path and
+                // returns its MouseCursor index); a number is a cursor index.
+                let v = match v {
+                    Variant::String(name) => Variant::Integer(load_cursor(rt, &name.to_string())?),
+                    v => Variant::Integer(v.to_integer()?),
+                };
+                rt.set_object_member(h, "__cursor", v);
                 Ok(())
             },
         );
@@ -171,25 +167,118 @@ pub fn install(rt: &mut Rt) {
         );
     }
 }
+/// Cursor files loaded through `Layer/Window.cursor = "file"`.
+#[derive(Default)]
+pub(crate) struct Cursors {
+    /// Resolved storage path → krkr cursor index (2, 3, ...).
+    by_path: std::collections::BTreeMap<String, i64>,
+    /// Last (visible, index) sent to the UI service.
+    applied: Option<(bool, i64)>,
+}
+
+/// krkrz MouseCursor::AddCursor: custom cursors follow the 24 built-in
+/// indices (crSizeAll = -22 .. crHBeam = 1), so the first is 2.
+const FIRST_CUSTOM_CURSOR: i64 = 2;
+/// The shared UI service keeps at most this many cursors per client.
+const MAX_CUSTOM_CURSORS: usize = crysirror_scene::ui::cursor::MAX_CURSORS;
+
+fn load_cursor(rt: &mut Rt, name: &str) -> crysirror_tjs2::Result<i64> {
+    let storage = rt.host().storage()?;
+    let path = storage
+        .resolve(name)
+        .ok_or_else(|| TjsError::runtime(format!("cannot load cursor `{name}`: storage not found")))?;
+    if let Some(id) = rt.host().cursors.by_path.get(&path) {
+        return Ok(*id);
+    }
+    let bytes = storage
+        .read(&path)
+        .map_err(|e| TjsError::runtime(format!("cannot load cursor `{name}`: {e}")))?;
+    let cursor = crysirror_image::cursor::decode_cursor(&bytes)
+        .map_err(|e| TjsError::runtime(format!("cannot load cursor `{name}`: {e:#}")))?;
+    let host = rt.host_mut();
+    if host.cursors.by_path.len() >= MAX_CUSTOM_CURSORS {
+        return Err(TjsError::runtime("custom cursor limit reached"));
+    }
+    let id = FIRST_CUSTOM_CURSOR + host.cursors.by_path.len() as i64;
+    host.cursors.by_path.insert(path, id);
+    let frames: Vec<_> = cursor
+        .frames
+        .iter()
+        .map(|f| {
+            json!({"width": f.image.width, "height": f.image.height,
+                   "hotspot": f.hotspot, "rgba": f.image.rgba})
+        })
+        .collect();
+    let steps: Vec<_> = cursor.steps.iter().map(|(i, ms)| [*i as u32, *ms]).collect();
+    host.ui_op(json!({"op": "define_cursor", "id": id, "cursor": {"frames": frames, "steps": steps}}));
+    host.cursors.applied = None;
+    Ok(id)
+}
+
+/// krkrz MouseCursor::CURSOR_INDEXES (win32): the OS shape behind each
+/// built-in cursor index. Indices the Windows build shows as the arrow map
+/// to the default shape; `None` is crNone (hidden).
+fn standard_shape(index: i64) -> Option<&'static str> {
+    Some(match index {
+        -22 | -5 => "move",
+        -21 => "pointer",
+        -20 => "help",
+        -18 => "not_allowed",
+        -11 => "wait",
+        -9 => "ew_resize",
+        -8 => "nwse_resize",
+        -7 => "ns_resize",
+        -6 => "nesw_resize",
+        -4 => "text",
+        -3 => "crosshair",
+        -1 => return None,
+        // crUpArrow (-10) has no portable shape; like the remaining
+        // indices krkrz shows the arrow for, it uses the default.
+        _ => "default",
+    })
+}
+
 pub fn apply(rt: &mut Rt, target: ObjectHandle) {
-    if let Some(w) = rt.host().windows.keys().next().copied() {
-        if rt
-            .object_member(ObjectHandle(w), "__temporary_cursor_hide")
-            .is_truthy()
+    let window = rt.host().windows.keys().next().copied().map(ObjectHandle);
+    let hidden = window.is_some_and(|w| rt.object_member(w, "__temporary_cursor_hide").is_truthy());
+    // tTJSNI_BaseLayer::GetLayerActiveCursor: crDefault (0) defers to the
+    // parent layer; the window's own cursor applies when no layer sets one.
+    let mut index = 0;
+    let mut node = Some(target.0);
+    let mut depth = 0;
+    while let Some(id) = node {
+        if let Variant::Integer(v) = rt.object_member(ObjectHandle(id), "__cursor")
+            && v != 0
         {
-            rt.host_mut()
-                .ui_op(json!({"op":"set_cursor_visible","visible":false}));
-            return;
+            index = v;
+            break;
+        }
+        node = rt.host().layers.get(&id).and_then(|l| l.parent);
+        depth += 1;
+        if depth > 64 {
+            break;
         }
     }
-    let mut shape = rt.object_member(target, "__cursor");
-    if matches!(shape, Variant::Void | Variant::Integer(0)) {
-        if let Some(w) = rt.host().windows.keys().next().copied() {
-            shape = rt.object_member(ObjectHandle(w), "__cursor");
-        }
+    if index == 0
+        && let Some(w) = window
+        && let Variant::Integer(v) = rt.object_member(w, "__cursor")
+    {
+        index = v;
     }
-    rt.host_mut()
-        .ui_op(json!({"op":"set_cursor_visible","visible":!matches!(shape,Variant::Integer(-1))}));
+    let visible = !hidden && index != -1;
+    let host = rt.host_mut();
+    if host.cursors.applied == Some((visible, index)) {
+        return;
+    }
+    host.cursors.applied = Some((visible, index));
+    host.ui_op(json!({"op":"set_cursor_visible","visible":visible}));
+    let custom = index >= FIRST_CUSTOM_CURSOR && host.cursors.by_path.values().any(|v| *v == index);
+    let select = if custom {
+        json!({"kind": "custom", "id": index})
+    } else {
+        json!({"kind": "standard", "shape": standard_shape(index).unwrap_or("default")})
+    };
+    host.ui_op(json!({"op": "set_cursor", "cursor": select}));
 }
 
 /// Request an OS pointer warp to canvas `(x, y)` and report it immediately.

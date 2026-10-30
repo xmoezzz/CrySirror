@@ -135,8 +135,14 @@ impl Class for MediaClass {
                 method("play",vec![("id",T::Int),("asset",T::String),("options",T::Optional(Box::new(T::Map)))],T::String,
                     "Start a scoped media resource; options {loop?:false,audio?:true,gain?:1}. Returns its logical image resource path for Layer/Canvas/Material APIs; inspect status for loading, playback and errors."),
                 method("stop",vec![("id",T::Int)],T::Void,"Stop only this client's media resource."),
+                method("remove",vec![("id",T::Int)],T::Void,"Release this client's media resource and decoded surface after detaching its image references."),
+                method("pause",vec![("id",T::Int)],T::Void,"Freeze the media clock; audio stops and the current picture stays."),
+                method("resume",vec![("id",T::Int)],T::Void,"Continue a paused media clock; audio restarts at the matching offset."),
+                method("setClock",vec![("id",T::Int),("nowMs",T::Any)],T::Void,"Select a monotonic external video clock before first playback, then supply clock samples. Exact nonnegative integers or decimal strings are accepted. The engine owns pause/seek/loop offsets; decoded audio tracks require audio-master mapping and currently fail explicitly."),
+                method("seek",vec![("id",T::Int),("position_ms",T::Int)],T::Void,
+                    "Restart decoding and present the picture due at position_ms (stream time); earlier pictures are decoded but not published. A paused resource stays paused there."),
                 method("status",vec![("id",T::Int)],T::Optional(Box::new(T::Map)),
-                    "Media state, position_ms, frame_pts_ms, published/decoded frames, audio_started, loops_completed and error, or null when absent."),
+                    "Media state, position_ms, frame_pts_ms, published/decoded frames, audio_started, loops_completed, paused, validated size, declared duration_ms and error, or null when absent. Size/duration remain null while pending or unknown."),
             ],
         })
     }
@@ -180,12 +186,41 @@ impl Class for MediaClass {
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
                 Ok(path.relative().to_owned().into())
             }
-            "stop" => {
+            "stop" | "remove" => {
                 let state = cx.state()?;
                 state
                     .runtime
                     .host
-                    .media_request(state.client, MediaRequest::Stop { id })
+                    .media_request(state.client, if name == "remove" { MediaRequest::Remove { id } } else { MediaRequest::Stop { id } })
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                Ok(Value::Null)
+            }
+            "pause" | "resume" | "seek" | "setClock" => {
+                let request = match name {
+                    "pause" => MediaRequest::Pause { id },
+                    "resume" => MediaRequest::Resume { id },
+                    "setClock" => {
+                        let value = arg(args, 1, "nowMs")?;
+                        let now_ms = if let Value::Str(text) = value {
+                            text.parse::<u64>().context("decimal media clock")?
+                        } else {
+                            let n = value.as_i64()?;
+                            ensure!((0..=9_007_199_254_740_991).contains(&n), "media clock requires an exact nonnegative integer or decimal string");
+                            n as u64
+                        };
+                        MediaRequest::SetClock { id, now_ms }
+                    }
+                    _ => MediaRequest::Seek {
+                        id,
+                        position_ms: u64::try_from(arg(args, 1, "position_ms")?.as_i64()?)
+                            .context("media seek position must be non-negative")?,
+                    },
+                };
+                let state = cx.state()?;
+                state
+                    .runtime
+                    .host
+                    .media_request(state.client, request)
                     .map_err(|e| anyhow::anyhow!("{e}"))?;
                 Ok(Value::Null)
             }

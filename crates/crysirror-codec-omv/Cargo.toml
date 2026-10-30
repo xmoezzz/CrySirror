@@ -1,0 +1,25 @@
+[package]
+license.workspace = true
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+name = "crysirror-codec-omv"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+test = false
+doctest = false
+name = "siglus_omv_decoder"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { version = "1", default-features = false }
+theora-rs = { package = "crysirror-codec-theora", path = "../crysirror-codec-theora" }
+ogg = "0.9.2"
+lewton = "0.10.2"
+
+[lints.rust]
+warnings = "allow"

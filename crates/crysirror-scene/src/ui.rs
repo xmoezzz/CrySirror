@@ -2,14 +2,19 @@
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Retained widgets/layout/focus/input and rendering. Button capture/release and
 //! letterbox mapping are ported from RFVP exit_confirm_ui.rs (see UPSTREAM.md).
+pub mod cursor;
 pub mod dialog;
 pub mod menu;
+pub mod snapshot;
+pub mod hit_mask;
+pub use hit_mask::WidgetHitMask;
+use crate::layer::motion::{MotionProperty,MotionTrackSpec,MotionStatus,MotionTracks};
 use crate::{
     input::{InputState, VmKey, VmMouseButton},
-    layer::{Paint, Primitive, intersect, rect_valid, rectangle},
+    layer::{intersect, rect_valid, rectangle, Paint, Primitive},
     world::WorldCommand,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use crysirror_core::{service::InputFrame, state::ClientId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,6 +23,12 @@ fn yes() -> bool {
 }
 fn color() -> [u8; 4] {
     [52, 66, 88, 255]
+}
+fn text_color() -> [u8; 4] {
+    [245, 245, 245, 255]
+}
+fn text_inset() -> [u16; 2] {
+    [6, 4]
 }
 fn max_length() -> u32 {
     1024
@@ -78,12 +89,23 @@ pub struct WidgetSpec {
     /// Draw order among siblings.
     #[serde(default)]
     pub z: i32,
+    /// Optional immutable local pointer coverage; ordinary rectangular input is the default.
+    #[serde(default)]
+    pub hit_mask:Option<WidgetHitMask>,
     /// Inherited visibility.
     #[serde(default = "yes")]
     pub visible: bool,
     /// Accepts focus and input.
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Receives pointer input without emitting widget paint primitives. Image
+    /// layers or other engine resources can supply the visual independently.
+    #[serde(default)]
+    pub interaction_only: bool,
+    /// Participates in keyboard focus/navigation and takes focus on pointer
+    /// press. Pointer hover/press/activation still works when false.
+    #[serde(default = "yes")]
+    pub keyboard_focusable: bool,
     /// Clip children to this widget.
     #[serde(default)]
     pub clip_children: bool,
@@ -99,9 +121,19 @@ pub struct WidgetSpec {
     /// Maximum Unicode scalar count for TextField committed text.
     #[serde(default = "max_length")]
     pub max_length: u32,
+    /// A Button activates on pointer press instead of matching release.
+    /// Keyboard activation keeps its normal semantics; other kinds reject it.
+    #[serde(default)]
+    pub activate_on_press: bool,
     /// Explicit licensed project font alias.
     #[serde(default)]
     pub font: Option<String>,
+    /// RGBA8 text paint, independent of the control fill.
+    #[serde(default = "text_color")]
+    pub text_color: [u8; 4],
+    /// Horizontal and vertical text inset in canvas pixels.
+    #[serde(default = "text_inset")]
+    pub text_inset: [u16; 2],
     /// Text pixel size.
     #[serde(default = "size")]
     pub text_size: u16,
@@ -135,6 +167,25 @@ pub struct UiEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub menu_bar: Option<u32>,
 }
+/// Transient engine-owned widget interaction, independent of rendering or a VM.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WidgetInteraction {
+    /// The engine's topmost eligible pointer hit is this widget.
+    pub hovered: bool,
+    /// Keyboard/controller navigation currently focuses this widget.
+    pub focused: bool,
+    /// A pointer-down gesture began on this widget and has not been released.
+    pub pressed: bool,
+    /// Activated (or changed value) during the current engine input tick.
+    /// This edge clears on the next tick and is never replayed by a save.
+    #[serde(default)]
+    pub activated: bool,
+    /// Nonzero identifier for this tick's activation; repeated observations
+    /// return the same value. Zero means no activation in this tick.
+    #[serde(default)]
+    pub activation_serial: u32,
+}
 /// Requested desktop decorations and resizing, owned by the submitting client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -152,6 +203,9 @@ pub struct UiSystem {
     pub dialogs: dialog::DialogSystem,
     #[serde(default)]
     pub cursor: Option<(u32, bool)>,
+    /// Pointer shape selection and client cursor images.
+    #[serde(default, skip_serializing_if = "cursor::CursorSystem::is_empty")]
+    pub cursors: cursor::CursorSystem,
     /// One-shot request to move the OS pointer to a canvas position
     /// (KiriKiri `setCursorPos`); a presenting host takes and applies it.
     #[serde(skip)]
@@ -161,8 +215,10 @@ pub struct UiSystem {
     #[serde(default)]
     pub window_policy: Option<(u32, WindowPolicy)>,
     #[serde(default)]
-    pub fullscreen: Option<(u32,bool)>,
+    pub fullscreen: Option<(u32, bool)>,
     clients: BTreeMap<u32, BTreeMap<u32, Widget>>,
+    #[serde(default)]
+    motions:MotionTracks,
     pub focus: Option<WidgetId>,
     pub events: Vec<UiEvent>,
     #[serde(skip)]
@@ -173,6 +229,10 @@ pub struct UiSystem {
     hover: Option<WidgetId>,
     #[serde(skip)]
     pressed: Option<WidgetId>,
+    #[serde(skip)]
+    activated: Option<WidgetId>,
+    #[serde(default)]
+    activation_serial: u32,
 }
 struct Layout {
     id: WidgetId,
@@ -186,6 +246,12 @@ struct Layout {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiCommand {
+    /// Start or replace a local X/Y rectangle track on an owned widget.
+    BeginMotion {id:u32,track:MotionTrackSpec},
+    /// Advance one external widget track in caller-declared units.
+    SetMotionElapsed {id:u32,property:MotionProperty,elapsed:u64},
+    /// Cancel selected/all tracks, optionally applying their final positions.
+    EndMotion {id:u32,#[serde(default)] property:Option<MotionProperty>,#[serde(default)] finish:bool},
     SetMenu {
         menu: menu::MenuSpec,
     },
@@ -215,6 +281,12 @@ pub enum UiCommand {
         item: u32,
         checked: bool,
     },
+    /// Enable/disable an owned menu item and close invalid open branches.
+    SetMenuEnabled {
+        id: u32,
+        item: u32,
+        enabled: bool,
+    },
     /// Append committed Unicode text to this client's focused TextField.
     InsertText {
         text: String,
@@ -229,6 +301,15 @@ pub enum UiCommand {
     SetCursorVisible {
         visible: bool,
     },
+    /// Define (or replace) a client cursor image for `SetCursor`.
+    DefineCursor {
+        id: u32,
+        cursor: cursor::CursorSpec,
+    },
+    /// Select the pointer shape shown over the canvas.
+    SetCursor {
+        cursor: cursor::CursorSelect,
+    },
     /// Move the OS pointer to a canvas position.
     WarpPointer {
         position: [i32; 2],
@@ -236,14 +317,21 @@ pub enum UiCommand {
     SetTitle {
         text: String,
     },
-    SetWindowPolicy { decorated: bool, resizable: bool },
-    SetFullscreen { enabled: bool },
+    SetWindowPolicy {
+        decorated: bool,
+        resizable: bool,
+    },
+    SetFullscreen {
+        enabled: bool,
+    },
     Put {
         widget: WidgetSpec,
     },
     Remove {
         id: u32,
     },
+    /// Replace or clear one owned widget's pointer coverage without repainting it.
+    SetHitMask {id:u32,mask:Option<WidgetHitMask>},
     SetVisible {
         id: u32,
         visible: bool,
@@ -263,14 +351,49 @@ pub enum UiCommand {
     },
 }
 impl UiSystem {
+    /// Owner-scoped widget motion state; an unknown widget is an error.
+    pub fn motion_status(&self,client:ClientId,id:u32)->Result<MotionStatus>{
+        ensure!(self.get(client.0,id).is_some(),"motion widget missing");
+        Ok(self.motions.status(client.0,id))
+    }
+    /// Advance only automatic widget tracks before input layout is evaluated.
+    pub fn advance_motions(&mut self,delta_ms:u64){
+        for(owner,id,property,value)in self.motions.tick(delta_ms){
+            if let Some(widget)=self.clients.get_mut(&owner).and_then(|o|o.get_mut(&id)){property.set_rect(&mut widget.spec.rect,value);}
+        }
+    }
+
     pub fn apply_batch(&mut self, client: ClientId, commands: &[UiCommand]) -> Result<()> {
         ensure!(commands.len() <= 4096, "UI command limit");
         let mut staged = self.clone();
         let owner = staged.clients.entry(client.0).or_default();
         for command in commands {
             match command {
+                UiCommand::SetHitMask{id,mask}=>{
+                    let widget=owner.get_mut(id).context("hit mask widget missing")?;
+                    if let Some(mask)=mask{mask.validate(widget.spec.rect)?;}
+                    widget.spec.hit_mask=mask.clone();
+                }
+                UiCommand::BeginMotion{id,track}=>{
+                    let widget=owner.get_mut(id).context("motion widget missing")?;
+                    let current=track.property.rect_value(widget.spec.rect)?;
+                    let value=staged.motions.begin(client.0,*id,track,current,false)?;
+                    track.property.set_rect(&mut widget.spec.rect,value);
+                }
+                UiCommand::SetMotionElapsed{id,property,elapsed}=>{
+                    let widget=owner.get_mut(id).context("motion widget missing")?;
+                    property.rect_value(widget.spec.rect)?;
+                    let value=staged.motions.advance(client.0,*id,*property,*elapsed)?;
+                    property.set_rect(&mut widget.spec.rect,value);
+                }
+                UiCommand::EndMotion{id,property,finish}=>{
+                    let widget=owner.get_mut(id).context("motion widget missing")?;
+                    for(p,value)in staged.motions.end(client.0,*id,*property,*finish)?{p.set_rect(&mut widget.spec.rect,value);}
+                }
                 UiCommand::SetMenu { menu } => staged.menus.put(client.0, menu.clone())?,
-                UiCommand::OpenDialog { dialog } => staged.dialogs.open(client.0, dialog.clone())?,
+                UiCommand::OpenDialog { dialog } => {
+                    staged.dialogs.open(client.0, dialog.clone())?
+                }
                 UiCommand::CloseDialog { id } => staged.dialogs.close(client.0, *id)?,
                 UiCommand::RemoveMenu { id } => staged.menus.remove(client.0, *id)?,
                 UiCommand::OpenMenu { id, item, position } => {
@@ -279,6 +402,9 @@ impl UiSystem {
                 UiCommand::CloseMenu { id } => staged.menus.close(client.0, *id)?,
                 UiCommand::SetMenuChecked { id, item, checked } => {
                     staged.menus.checked(client.0, *id, *item, *checked)?
+                }
+                UiCommand::SetMenuEnabled { id, item, enabled } => {
+                    staged.menus.enabled(client.0, *id, *item, *enabled)?
                 }
                 UiCommand::InsertText { text } => {
                     ensure!(
@@ -314,12 +440,32 @@ impl UiSystem {
                 UiCommand::SetCursorVisible { visible } => {
                     staged.cursor = Some((client.0, *visible))
                 }
+                UiCommand::DefineCursor { id, cursor } => {
+                    staged.cursors.define(client.0, *id, cursor.clone())?
+                }
+                UiCommand::SetCursor { cursor } => staged.cursors.select(client.0, *cursor)?,
                 UiCommand::WarpPointer { position } => {
-                    ensure!(position.iter().all(|v| v.abs() <= 65536), "pointer warp range");
+                    ensure!(
+                        position.iter().all(|v| v.abs() <= 65536),
+                        "pointer warp range"
+                    );
                     staged.pointer_warp = Some((client.0, *position));
                 }
-                UiCommand::SetFullscreen{enabled}=>{staged.fullscreen=Some((client.0,*enabled));}
-                UiCommand::SetWindowPolicy{decorated,resizable} => {staged.window_policy=Some((client.0,WindowPolicy{decorated:*decorated,resizable:*resizable}));}
+                UiCommand::SetFullscreen { enabled } => {
+                    staged.fullscreen = Some((client.0, *enabled));
+                }
+                UiCommand::SetWindowPolicy {
+                    decorated,
+                    resizable,
+                } => {
+                    staged.window_policy = Some((
+                        client.0,
+                        WindowPolicy {
+                            decorated: *decorated,
+                            resizable: *resizable,
+                        },
+                    ));
+                }
                 UiCommand::SetTitle { text } => {
                     ensure!(
                         text.len() <= 1024 && !text.chars().any(char::is_control),
@@ -328,6 +474,7 @@ impl UiSystem {
                     staged.title = Some((client.0, text.clone()));
                 }
                 UiCommand::Put { widget } => {
+                    staged.motions.cancel(client.0,widget.id);
                     owner.insert(
                         widget.id,
                         Widget {
@@ -351,6 +498,7 @@ impl UiSystem {
                             break;
                         }
                     }
+                    for id in &remove{staged.motions.cancel(client.0,*id);}
                     owner.retain(|id, _| !remove.contains(id));
                 }
                 other => {
@@ -371,7 +519,9 @@ impl UiSystem {
                         }
                         UiCommand::SetText { text, font, .. } => {
                             w.spec.text = text.clone();
-                            w.spec.font = font.clone();
+                            if let Some(font) = font {
+                                w.spec.font = Some(font.clone());
+                            }
                         }
                         _ => unreachable!(),
                     }
@@ -387,11 +537,28 @@ impl UiSystem {
         staged.focus = staged.focus.filter(|id| exists(*id));
         staged.pressed = staged.pressed.filter(|id| exists(*id));
         staged.hover = staged.hover.filter(|id| exists(*id));
+        staged.activated = staged.activated.filter(|id| exists(*id));
         staged.validate()?;
         *self = staged;
         Ok(())
     }
     /// Inspect engine-owned state using a client-local handle.
+    /// Inspect interaction only for a widget belonging to this client.
+    pub fn interaction(&self, client: u32, id: u32) -> Option<WidgetInteraction> {
+        self.clients.get(&client)?.get(&id)?;
+        let widget = WidgetId { owner: client, id };
+        Some(WidgetInteraction {
+            hovered: self.hover == Some(widget),
+            focused: self.focus == Some(widget),
+            pressed: self.pressed == Some(widget),
+            activated: self.activated == Some(widget),
+            activation_serial: if self.activated == Some(widget) {
+                self.activation_serial
+            } else {
+                0
+            },
+        })
+    }
     pub fn get(&self, client: u32, id: u32) -> Option<&WidgetSpec> {
         Some(&self.clients.get(&client)?.get(&id)?.spec)
     }
@@ -418,7 +585,7 @@ impl UiSystem {
             .chain(self.cursor.map(|v| v.0))
             .chain(self.title.as_ref().map(|v| v.0))
             .chain(self.window_policy.as_ref().map(|v| v.0))
-            .chain(self.fullscreen.as_ref().map(|v|v.0))
+            .chain(self.fullscreen.as_ref().map(|v| v.0))
             .chain(self.menus.client_ids())
             .chain(self.dialogs.client_ids())
             .chain(self.focus.map(|v| v.owner))
@@ -458,6 +625,7 @@ impl UiSystem {
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {
+        self.motions.validate(false,|owner,id|self.clients.get(&owner).is_some_and(|o|o.contains_key(&id)))?;
         self.menus.validate()?;
         self.dialogs.validate()?;
         ensure!(
@@ -466,14 +634,24 @@ impl UiSystem {
                 && self.events.len() <= 256,
             "UI size limit"
         );
+        let total_mask_bytes=self.clients.values().flat_map(|o|o.values()).filter_map(|w|w.spec.hit_mask.as_ref()).map(|m|m.coverage.len() as u64).sum::<u64>();
+        ensure!(total_mask_bytes<=128*1024*1024,"UI total hit coverage limit");
         for owner in self.clients.values() {
+            let mask_bytes=owner.values().filter_map(|w|w.spec.hit_mask.as_ref()).map(|m|m.coverage.len() as u64).sum::<u64>();
+            ensure!(mask_bytes<=64*1024*1024,"UI owner hit coverage limit");
             for (id, widget) in owner {
                 let s = &widget.spec;
+                if let Some(mask)=&s.hit_mask{mask.validate(s.rect)?;}
+                ensure!(
+                    !s.activate_on_press || s.kind == WidgetKind::Button,
+                    "press activation requires a Button"
+                );
                 ensure!(
                     *id == s.id
                         && rect_valid(s.rect)
                         && s.padding <= 8192
                         && s.gap <= 8192
+                        && s.text_inset.iter().all(|&n| n <= 8192)
                         && s.text.len() <= 1024 * 1024
                         && (1..=512).contains(&s.text_size),
                     "invalid widget/bounds/text"
@@ -621,6 +799,7 @@ impl UiSystem {
         mut frame: InputFrame,
         canvas: [u32; 2],
     ) -> Result<(Vec<(u32, Vec<WorldCommand>)>, bool)> {
+        self.activated = None;
         if self.ignore_held {
             if frame.buttons_down == 0 {
                 self.ignore_held = false;
@@ -722,7 +901,9 @@ impl UiSystem {
         };
         let focusable = layouts
             .iter()
-            .filter(|l| interactive(l))
+            .filter(|l| {
+                interactive(l) && self.clients[&l.id.owner][&l.id.id].spec.keyboard_focusable
+            })
             .map(|l| l.id)
             .collect::<Vec<_>>();
         if self.focus.is_none_or(|f| !focusable.contains(&f)) {
@@ -743,25 +924,37 @@ impl UiSystem {
             .rev()
             .find(|l| {
                 interactive(l)
-                    && hit(frame.pointer_x, frame.pointer_y, l.rect)
+                    && self.clients[&l.id.owner][&l.id.id].spec.hit_mask.as_ref().map_or_else(||hit(frame.pointer_x,frame.pointer_y,l.rect),|m|m.hit(frame.pointer_x,frame.pointer_y,l.rect))
                     && hit(frame.pointer_x, frame.pointer_y, l.clip)
             })
             .map(|l| l.id);
         let hit_ui = layouts.iter().rev().any(|l| {
             allowed(l)
-                && hit(frame.pointer_x, frame.pointer_y, l.rect)
+                && self.clients[&l.id.owner][&l.id.id].spec.hit_mask.as_ref().map_or_else(||hit(frame.pointer_x,frame.pointer_y,l.rect),|m|m.hit(frame.pointer_x,frame.pointer_y,l.rect))
                 && hit(frame.pointer_x, frame.pointer_y, l.clip)
         });
         let mut activate = None;
         if self.input.vk_down_stock(0x01) {
             self.pressed = self.hover;
-            if self.hover.is_some() {
+            if self
+                .hover
+                .is_some_and(|id| self.clients[&id.owner][&id.id].spec.keyboard_focusable)
+            {
                 self.focus = self.hover;
+            }
+            if let Some(id) = self
+                .hover
+                .filter(|id| self.clients[&id.owner][&id.id].spec.activate_on_press)
+            {
+                activate = Some(id);
             }
         }
         if self.input.vk_up_stock(0x01) {
             let pressed = self.pressed.take();
-            if pressed.is_some() && pressed == self.hover {
+            if pressed.is_some()
+                && pressed == self.hover
+                && !pressed.is_some_and(|id| self.clients[&id.owner][&id.id].spec.activate_on_press)
+            {
                 activate = pressed;
             }
         }
@@ -844,6 +1037,11 @@ impl UiSystem {
             }
         }
         if let Some(id) = activate {
+            self.activation_serial = self
+                .activation_serial
+                .checked_add(1)
+                .context("UI activation serial exhausted")?;
+            self.activated = Some(id);
             let w = self
                 .clients
                 .get_mut(&id.owner)
@@ -881,11 +1079,17 @@ impl UiSystem {
             modal.is_some() || hit_ui || self.pressed.is_some() || keyboard,
         ))
     }
-    pub fn frame(&self, canvas: [u32; 2]) -> Result<Vec<Primitive>> {
+    fn frame_widgets(&self, canvas: [u32; 2], owner: Option<u32>) -> Result<Vec<Primitive>> {
         let mut out = Vec::new();
         for l in self.layout(canvas)? {
+            if owner.is_some_and(|owner| l.id.owner != owner) {
+                continue;
+            }
             let w = &self.clients[&l.id.owner][&l.id.id];
             let s = &w.spec;
+            if s.interaction_only {
+                continue;
+            }
             let order = [2_000_000_000 + i32::from(l.modal), l.z];
             let mut color = s.color;
             if !l.enabled {
@@ -947,10 +1151,10 @@ impl UiSystem {
             }
             if !s.text.is_empty() {
                 let mut r = l.rect;
-                r[0] += 6.;
-                r[1] += 4.;
-                r[2] = (r[2] - 12.).max(1.);
-                r[3] = (r[3] - 8.).max(1.);
+                r[0] += f32::from(s.text_inset[0]);
+                r[1] += f32::from(s.text_inset[1]);
+                r[2] = (r[2] - 2. * f32::from(s.text_inset[0])).max(1.);
+                r[3] = (r[3] - 2. * f32::from(s.text_inset[1])).max(1.);
                 let text = if s.kind == WidgetKind::TextField {
                     s.text.clone()
                 } else {
@@ -965,7 +1169,7 @@ impl UiSystem {
                         text,
                         font: s.font.clone().context("UI font missing")?,
                         size: s.text_size,
-                        color: [245, 245, 245, 255],
+                        color: s.text_color,
                         layout: crysirror_core::service::SIMPLE_TEXT_LAYOUT.into(),
                     },
                     Some(if s.kind == WidgetKind::TextField {
@@ -977,6 +1181,10 @@ impl UiSystem {
                 ));
             }
         }
+        Ok(out)
+    }
+    pub fn frame(&self, canvas: [u32; 2]) -> Result<Vec<Primitive>> {
+        let mut out = self.frame_widgets(canvas, None)?;
         out.extend(self.menus.frame(canvas)?);
         out.extend(self.dialogs.frame(canvas)?);
         Ok(out)
@@ -986,7 +1194,7 @@ fn editable(owner: &BTreeMap<u32, Widget>, id: u32) -> bool {
     let Some(w) = owner.get(&id) else {
         return false;
     };
-    if w.spec.kind != WidgetKind::TextField {
+    if w.spec.kind != WidgetKind::TextField || !w.spec.keyboard_focusable {
         return false;
     }
     let mut current = Some(id);

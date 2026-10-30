@@ -221,7 +221,7 @@ impl TextSystem {
     pub(crate) fn rich_glyph_mask(&self, g: &GlyphPlacement) -> Result<GlyphMask> {
         let font = self.font(&g.font)?;
         ensure!(
-            self.fonts[&g.font].1 == g.font_digest,
+            self.font_digest(&g.font)? == g.font_digest,
             "stale shaped font resource; rebuild the layout"
         );
         ensure!(

@@ -197,6 +197,7 @@ impl SiglusVm {
                                 resource,
                                 parameters: AudioParameters {
                                     bus: PcmBus::Voice,
+                                    gain: crate::character_voice::voice_gain(&pending.after.ctx)?,
                                     mix_group: Some(crate::koe_bridge::GROUP.into()),
                                     ..Default::default()
                                 },
@@ -381,7 +382,9 @@ impl SiglusVm {
             };
             let retain = matches!(&operation, Operation::Retain(_));
             match operation {
-                Operation::EventInvalidate {form,index} => self.release_event(host,(form,index))?,
+                Operation::EventInvalidate { form, index } => {
+                    self.release_event(host, (form, index))?
+                }
                 Operation::Speech { number, percent } => {
                     if let Some(&resource) = pending.after.ctx.koe.bindings.get(&(number, percent))
                     {
@@ -393,6 +396,9 @@ impl SiglusVm {
                                     resource,
                                     parameters: AudioParameters {
                                         bus: PcmBus::Voice,
+                                        gain: crate::character_voice::voice_gain(
+                                            &pending.after.ctx,
+                                        )?,
                                         mix_group: Some(crate::koe_bridge::GROUP.into()),
                                         ..Default::default()
                                     },
@@ -415,7 +421,7 @@ impl SiglusVm {
                             .begin_transformed_audio_resource(
                                 client,
                                 AudioAsset {
-                                    path: VfsPath::new(Mount::Asset, asset).map_err(err)?,
+                                    path: VfsPath::new(Mount::Asset, &asset).map_err(err)?,
                                     frame_limit: None,
                                 },
                                 crysirror_core::service::AudioResourceTransform::SiglusJitan {
@@ -435,11 +441,9 @@ impl SiglusVm {
                     key,
                     group,
                 } => {
-                    let asset = self.state.config.resources.get(&key).with_context(|| {
-                        format!("Siglus sound requires config.resources alias for {key:?}")
-                    })?;
+                    let asset = self.audio_asset(host, &key, "wav")?;
                     let source = AudioAsset {
-                        path: VfsPath::new(Mount::Asset, asset).map_err(err)?,
+                        path: VfsPath::new(Mount::Asset, &asset).map_err(err)?,
                         frame_limit: None,
                     };
                     let ticket = host
@@ -460,14 +464,32 @@ impl SiglusVm {
                     key,
                     parameters,
                 } => {
-                    let asset = self.state.config.resources.get(&key).with_context(|| {
-                        format!("Siglus PCMCH requires config.resources alias for {key:?}")
-                    })?;
+                    let directory = if let Some(state) = channel
+                        .checked_sub(4)
+                        .and_then(|n| pending.after.ctx.globals.pcmch_persistent.get(n as usize))
+                    {
+                        ensure!(
+                            state.pcm_name.is_empty()
+                                || state.bgm_name.is_empty()
+                                || self.state.config.resources.contains_key(&key),
+                            "native dual PCM/BGM source reconstruction needs explicit resource aliases"
+                        );
+                        if !state.pcm_name.is_empty() && state.pcm_name == key {
+                            "wav"
+                        } else if !state.bgm_name.is_empty() {
+                            "bgm"
+                        } else {
+                            "wav"
+                        }
+                    } else {
+                        "wav"
+                    };
+                    let asset = self.audio_asset(host, &key, directory)?;
                     let ticket = host
                         .begin_audio_resource(
                             client,
                             AudioAsset {
-                                path: VfsPath::new(Mount::Asset, asset).map_err(err)?,
+                                path: VfsPath::new(Mount::Asset, &asset).map_err(err)?,
                                 frame_limit: None,
                             },
                             true,
@@ -494,7 +516,8 @@ impl SiglusVm {
                 Operation::Play(play) | Operation::Retain(play) => {
                     // Retain is only queued while reconstructing a stopped slot.
                     let only = retain;
-                    let (asset, parameters) = self.bgm_request(&mut pending.after, &play, !only)?;
+                    let (asset, parameters) =
+                        self.bgm_request(host, &mut pending.after, &play, !only)?;
                     let ticket = host
                         .begin_audio_resource(client, asset, true)
                         .map_err(err)?;
@@ -550,6 +573,7 @@ impl SiglusVm {
     }
     fn bgm_request(
         &self,
+        host: &mut dyn HostServices,
         vm: &mut SceneVm<'static>,
         play: &Play,
         mark_listened: bool,
@@ -596,13 +620,10 @@ impl SiglusVm {
                 break;
             }
         }
-        let asset =
-            self.state.config.resources.get(&file).with_context(|| {
-                format!("Siglus BGM requires config.resources alias for {file:?}")
-            })?;
+        let asset = self.audio_asset(host, &file, "bgm")?;
         Ok((
             AudioAsset {
-                path: VfsPath::new(Mount::Asset, asset).map_err(err)?,
+                path: VfsPath::new(Mount::Asset, &asset).map_err(err)?,
                 frame_limit: (end >= 0).then_some(end.max(0) as u64),
             },
             AudioParameters {

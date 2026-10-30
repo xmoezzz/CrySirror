@@ -8,7 +8,7 @@ use anyhow::{Context, Result, ensure};
 use crysirror_core::service::{AudioMixGroupInfo, AudioMixGroupSettings};
 use std::collections::BTreeMap;
 const GROUPS: usize = 256;
-const CLIENT_GROUPS: usize = 64;
+const CLIENT_GROUPS: usize = 128;
 const DEPTH: usize = 8;
 pub(crate) fn name(s: &str) -> Result<()> {
     ensure!(
@@ -188,5 +188,77 @@ impl MixGroups {
     }
     pub(crate) fn output(&self, id: Option<usize>) -> f32 {
         id.map_or(1., |i| self.slots[i].as_ref().unwrap().output)
+    }
+}
+
+#[cfg(test)]
+mod capacity_tests {
+    use super::*;
+    #[test]
+    fn shared_group_budget_is_scoped_bounded_reclaimable_and_isolated() {
+        let mut groups = MixGroups::default();
+        for client in [1, 2] {
+            for i in 0..128 {
+                groups
+                    .set(
+                        client,
+                        &format!("g{i}"),
+                        AudioMixGroupSettings::default(),
+                        0,
+                    )
+                    .unwrap();
+            }
+        }
+        assert!(
+            groups
+                .set(1, "overflow", AudioMixGroupSettings::default(), 0)
+                .is_err()
+        );
+        assert!(
+            groups
+                .set(3, "global-overflow", AudioMixGroupSettings::default(), 0)
+                .is_err()
+        );
+        assert!(groups.info(3, "g0", 48000).unwrap().is_none());
+        groups.remove(1, "g0").unwrap();
+        groups
+            .set(
+                3,
+                "reclaimed",
+                AudioMixGroupSettings {
+                    gain: 0.25,
+                    ..Default::default()
+                },
+                0,
+            )
+            .unwrap();
+        assert!(groups.info(1, "g0", 48000).unwrap().is_none());
+        assert_eq!(
+            groups.info(2, "g0", 48000).unwrap().unwrap().effective_gain,
+            1.0
+        );
+        assert_eq!(
+            groups
+                .info(3, "reclaimed", 48000)
+                .unwrap()
+                .unwrap()
+                .effective_gain,
+            0.25
+        );
+        groups.remove(1, "g1").unwrap();
+        // A foreign parent's name cannot confer cross-client authority.
+        assert!(
+            groups
+                .set(
+                    1,
+                    "foreign-parent",
+                    AudioMixGroupSettings {
+                        parent: Some("reclaimed".into()),
+                        ..Default::default()
+                    },
+                    0
+                )
+                .is_err()
+        );
     }
 }

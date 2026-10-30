@@ -9,7 +9,7 @@ use crysirror_core::{
     state::ClientId,
 };
 use crysirror_video::{
-    isobmff,
+    amv, asf, isobmff, theora,
     mpeg::{self, VideoFrame},
 };
 use serde::{Deserialize, Serialize};
@@ -24,13 +24,23 @@ use std::{
     },
 };
 
-pub const MAX_MEDIA_RESOURCES: usize = 8;
-pub const MAX_MEDIA_PER_CLIENT: usize = 4;
+pub const MAX_MEDIA_RESOURCES: usize = 32;
+pub const MAX_MEDIA_PER_CLIENT: usize = 16;
 pub const VIDEO_QUEUE_FRAMES: usize = 4;
 pub const MAX_ENCODED_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_QUEUED_VIDEO_BYTES: usize = 128 * 1024 * 1024;
 pub const MAX_AUDIO_SAMPLES: usize = 16 * 1024 * 1024;
 pub const MAX_RETAINED_AUDIO_BYTES: usize = 128 * 1024 * 1024;
+
+/// Presentation time source. External samples select a caller-owned monotonic
+/// time domain; the engine still owns playback and pause/seek/loop state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MediaClock {
+    #[default]
+    Engine,
+    External { now_ms: u64 },
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -40,6 +50,10 @@ pub struct MediaOptions {
     pub gain: f32,
     /// The host reserves this channel within the same client's audio namespace.
     pub audio_channel: u32,
+    /// External clocks currently require no decoded audio track. Audio-master
+    /// clock mapping must be implemented before accelerated game time can be
+    /// used with PCM; mismatched rates never silently desynchronize.
+    pub clock: MediaClock,
 }
 impl Default for MediaOptions {
     fn default() -> Self {
@@ -48,6 +62,7 @@ impl Default for MediaOptions {
             audio: true,
             gain: 1.,
             audio_channel: 0x7000_0000,
+            clock: MediaClock::Engine,
         }
     }
 }
@@ -79,6 +94,16 @@ pub struct MediaStatus {
     pub audio_started: bool,
     pub loops_completed: u64,
     pub error: Option<String>,
+    /// The presentation clock is frozen by `pause`.
+    #[serde(default)]
+    pub paused: bool,
+    /// Picture duration reported by the decoder; 0 until it is known.
+    #[serde(default)]
+    pub frame_ms: u64,
+    /// Display geometry from a validated decoder header, pending until ready.
+    pub size: Option<[u32; 2]>,
+    /// Declared container duration; absent metadata is never inferred from queues.
+    pub duration_ms: Option<u64>,
 }
 pub struct MediaFrameUpdate {
     pub client: ClientId,
@@ -205,6 +230,13 @@ struct AudioTrack {
     pcm: PcmAudio,
     first_pts_ms: i64,
 }
+enum DecodedSamples {I16(Vec<i16>), F32(Vec<f32>)}
+impl DecodedSamples {
+    fn len(&self)->usize {match self {Self::I16(v)=>v.len(),Self::F32(v)=>v.len()}}
+    fn append(&self, builder:&mut crysirror_audio::pcm::PcmBuilder)->Result<()> {
+        match self {Self::I16(v)=>builder.append_i16(v),Self::F32(v)=>builder.append_f32(v)}
+    }
+}
 #[derive(Default)]
 struct Journal {
     errors: Vec<String>,
@@ -253,6 +285,7 @@ struct Workers {
     journal: Arc<Mutex<Journal>>,
     decoded: Arc<AtomicUsize>,
     frame_ms: Arc<AtomicU64>,
+    metadata: Arc<Mutex<Option<crysirror_video::VideoMetadata>>>,
 }
 impl Drop for Workers {
     fn drop(&mut self) {
@@ -289,6 +322,8 @@ impl Workers {
         let counter = decoded.clone();
         let frame_ms = Arc::new(AtomicU64::new(34));
         let frame_duration = frame_ms.clone();
+        let metadata = Arc::new(Mutex::new(None));
+        let stream_metadata = metadata.clone();
         std::thread::Builder::new()
             .name("crysirror-media-video".into())
             .spawn(move || {
@@ -302,6 +337,15 @@ impl Workers {
                     }
                     let mut video_reader = AssetCursor::new(video_input.reader()?)?;
                     let mp4 = mp4_input(&mut video_reader)?;
+                    let publish_metadata = |info: crysirror_video::VideoMetadata| -> Result<()> {
+                        crysirror_image::rgba_len(info.size[0], info.size[1])?;
+                        if let Some(ms) = info.frame_ms {
+                            ensure!(ms.is_finite() && ms > 0. && ms <= 10000., "media header frame duration");
+                            frame_duration.store(ms.round().max(1.) as u64, Ordering::Release);
+                        }
+                        *stream_metadata.lock().unwrap_or_else(|e| e.into_inner()) = Some(info);
+                        Ok(())
+                    };
                     let publish = |frame: VideoFrame| -> Result<bool> {
                         if stop.load(Ordering::Acquire) {
                             return Ok(false);
@@ -317,10 +361,11 @@ impl Workers {
                     };
                     if mp4 {
                         let mut decoder = isobmff::Mp4Stream::new(video_reader)?;
-                        if let Some(fps) = decoder.info().fps {
-                            frame_duration
-                                .store((1000. / fps).round().max(1.) as u64, Ordering::Release);
-                        }
+                        publish_metadata(crysirror_video::VideoMetadata {
+                            size: [decoder.info().width, decoder.info().height],
+                            duration_ms: None,
+                            frame_ms: decoder.info().fps.map(|fps| 1000. / fps),
+                        })?;
                         while let Some(frame) =
                             decoder.next_frame(|| stop.load(Ordering::Acquire))?
                         {
@@ -328,10 +373,27 @@ impl Workers {
                                 break;
                             }
                         }
+                    } else if asf::is_asf(&mut video_reader)? {
+                        asf::decode_video_with_metadata(video_reader, || stop.load(Ordering::Acquire), publish_metadata, publish)?;
+                    } else if theora::is_input(&mut video_reader)? {
+                        theora::decode_video_with_metadata(video_reader, || stop.load(Ordering::Acquire), publish_metadata, publish)?;
+                    } else if amv::is_input(&mut video_reader)? {
+                        let info = amv::info(&mut video_reader)?;
+                        let numerator = u128::from(info.frames) * u128::from(info.scale) * 1000;
+                        let denominator = u128::from(info.rate);
+                        publish_metadata(crysirror_video::VideoMetadata {
+                            size: [info.width, info.height],
+                            duration_ms: Some(u64::try_from((numerator + denominator / 2) / denominator)?),
+                            frame_ms: Some(info.frame_ms),
+                        })?;
+                        amv::decode_video(video_reader, || stop.load(Ordering::Acquire), publish)?;
                     } else {
                         if let Some(info) = mpeg::sequence_info(&mut video_reader)? {
-                            frame_duration
-                                .store(info.frame_ms.round().max(1.) as u64, Ordering::Release);
+                            publish_metadata(crysirror_video::VideoMetadata {
+                                size: [info.width, info.height],
+                                duration_ms: None,
+                                frame_ms: Some(info.frame_ms),
+                            })?;
                         }
                         mpeg::decode_video(video_reader, || stop.load(Ordering::Acquire), publish)?;
                     }
@@ -346,6 +408,7 @@ impl Workers {
             journal,
             decoded,
             frame_ms,
+            metadata,
         };
         if let Some(audio_lease) = audio_lease {
             let (tx, rx) = mpsc::sync_channel(1);
@@ -368,35 +431,47 @@ impl Workers {
                             let _ = tx.send(None);
                             return Ok(());
                         }
+                        if amv::is_input(&mut reader)? {
+                            // AlphaMovie carries no audio stream.
+                            let _ = tx.send(None);
+                            return Ok(());
+                        }
                         let mut builder = None;
                         let mut input_samples = 0usize;
                         let mut reservation = audio_budget.reserve(0)?;
                         let mut format = None;
                         let mut first_pts_ms = 0;
-                        mpeg::decode_audio(reader, || stop.load(Ordering::Acquire), |chunk| {
+                        let mut accept = |pts_ms, sample_rate, channels, samples: DecodedSamples| {
                             if stop.load(Ordering::Acquire) {
                                 return Ok(false);
                             }
                             if let Some(current) = format {
-                                ensure!(current == (chunk.sample_rate, chunk.channels),
+                                ensure!(current == (sample_rate, channels),
                                     "media audio format changed within a track");
                             } else {
-                                format = Some((chunk.sample_rate, chunk.channels));
-                                first_pts_ms = chunk.pts_ms;
+                                format = Some((sample_rate, channels));
+                                first_pts_ms = pts_ms;
                                 builder = Some(crysirror_audio::pcm::PcmBuilder::new(
-                                    chunk.sample_rate, chunk.channels,
+                                    sample_rate, channels,
                                     crysirror_core::service::MAX_PCM_FRAMES)?);
                             }
-                            input_samples = input_samples.checked_add(chunk.samples.len())
+                            input_samples = input_samples.checked_add(samples.len())
                                 .context("media audio sample counter")?;
                             ensure!(input_samples <= MAX_AUDIO_SAMPLES,
                                 "media full-track audio sample budget exceeded; streaming audio required for longer tracks");
-                            ensure!(chunk.samples.len() % chunk.channels as usize == 0,
+                            ensure!(samples.len() % channels as usize == 0,
                                 "media partial audio frame");
-                            reservation.grow(chunk.samples.len() / chunk.channels as usize * 8)?;
-                            builder.as_mut().unwrap().append_i16(&chunk.samples)?;
+                            reservation.grow(samples.len() / channels as usize * 8)?;
+                            samples.append(builder.as_mut().unwrap())?;
                             Ok(true)
-                        })?;
+                        };
+                        if asf::is_asf(&mut reader)? {
+                            asf::decode_audio(reader, || stop.load(Ordering::Acquire), |c| accept(c.pts_ms,c.sample_rate,c.channels,DecodedSamples::F32(c.samples)))?;
+                        } else if theora::is_input(&mut reader)? {
+                            theora::decode_audio(reader, || stop.load(Ordering::Acquire), |c| accept(c.pts_ms,c.sample_rate,c.channels,DecodedSamples::F32(c.samples)))?;
+                        } else {
+                            mpeg::decode_audio(reader, || stop.load(Ordering::Acquire), |c| accept(c.pts_ms,c.sample_rate,c.channels,DecodedSamples::I16(c.samples)))?;
+                        }
                         if stop.load(Ordering::Acquire) {
                             return Ok(());
                         }
@@ -442,8 +517,28 @@ struct Slot {
     first_pts_ms: Option<i64>,
     last_duration_ms: u64,
     eof: bool,
+    current: Option<crysirror_core::service::MediaFrame>,
+    /// Engine clock time at which `pause` froze the presentation clock.
+    paused_at: Option<u64>,
+    /// Stream position the next decode run starts presenting at (`seek`).
+    seek_ms: u64,
+    /// After a seek, pictures already behind the clock are decoded but not
+    /// published, so the target appears without a fast-forward flash.
+    catching_up: bool,
 }
 impl Slot {
+    fn clock_ms(&self, engine_ms: u64) -> u64 {
+        match self.options.clock {
+            MediaClock::Engine => engine_ms,
+            MediaClock::External { now_ms } => now_ms,
+        }
+    }
+    fn refresh_metadata(&mut self) {
+        if let Some(info) = self.workers.as_ref().and_then(|w| *w.metadata.lock().unwrap_or_else(|e| e.into_inner())) {
+            self.status.size = Some(info.size);
+            self.status.duration_ms = info.duration_ms;
+        }
+    }
     fn new(source: Arc<MediaInput>, options: MediaOptions, workers: Workers) -> Self {
         let audio_ready = !options.audio;
         Self {
@@ -459,6 +554,10 @@ impl Slot {
                 audio_started: false,
                 loops_completed: 0,
                 error: None,
+                paused: false,
+                frame_ms: 0,
+                size: None,
+                duration_ms: None,
             },
             pending: None,
             track: None,
@@ -468,6 +567,10 @@ impl Slot {
             first_pts_ms: None,
             last_duration_ms: 1,
             eof: false,
+            current: None,
+            paused_at: None,
+            seek_ms: 0,
+            catching_up: false,
         }
     }
     fn fail(&mut self, error: String) -> anyhow::Error {
@@ -575,6 +678,7 @@ impl MediaManager {
             .slots
             .get_mut(&(client, id))
             .context("media handle not found in client scope")?;
+        slot.refresh_metadata();
         if slot.audio_sent {
             self.pending_audio.push(MediaAudioUpdate {
                 client,
@@ -586,10 +690,95 @@ impl MediaManager {
         }
         slot.workers = None;
         slot.pending = None;
+        slot.current = None;
         slot.track = None;
         slot.audio_sent = false;
         slot.status.state = MediaState::Stopped;
         slot.status.audio_started = false;
+        Ok(())
+    }
+    /// Freeze the presentation clock. Audio stops and is restarted at the
+    /// matching offset on `resume`; decoded pictures stay queued.
+    pub fn pause(&mut self, client: ClientId, id: u32, now_ms: u64) -> Result<()> {
+        let slot = self
+            .slots
+            .get_mut(&(client, id))
+            .context("media handle not found in client scope")?;
+        if slot.paused_at.is_some() {
+            return Ok(());
+        }
+        slot.paused_at = Some(slot.clock_ms(now_ms));
+        slot.status.paused = true;
+        if slot.audio_sent {
+            self.pending_audio.push(MediaAudioUpdate {
+                client,
+                request: AudioRequest::Stop {
+                    channel: slot.options.audio_channel,
+                    fade_ms: 0.,
+                },
+            });
+            slot.audio_sent = false;
+            slot.status.audio_started = false;
+        }
+        Ok(())
+    }
+    pub fn resume(&mut self, client: ClientId, id: u32, now_ms: u64) -> Result<()> {
+        let slot = self
+            .slots
+            .get_mut(&(client, id))
+            .context("media handle not found in client scope")?;
+        let now_ms = slot.clock_ms(now_ms);
+        if let Some(paused) = slot.paused_at.take() {
+            if let Some(start) = &mut slot.start_ms {
+                *start = start.saturating_add(now_ms.saturating_sub(paused));
+            }
+        }
+        slot.status.paused = false;
+        Ok(())
+    }
+    /// Restart decoding from the beginning and present from `position_ms`;
+    /// earlier pictures are decoded and dropped. Stopped and ended media
+    /// restart; a paused resource stays paused at the new position.
+    pub fn seek(&mut self, client: ClientId, id: u32, position_ms: u64, now_ms: u64) -> Result<()> {
+        let slot = self
+            .slots
+            .get_mut(&(client, id))
+            .context("media handle not found in client scope")?;
+        let now_ms = slot.clock_ms(now_ms);
+        ensure!(position_ms <= 24 * 3600 * 1000, "media seek position");
+        if slot.audio_sent {
+            self.pending_audio.push(MediaAudioUpdate {
+                client,
+                request: AudioRequest::Stop {
+                    channel: slot.options.audio_channel,
+                    fade_ms: 0.,
+                },
+            });
+        }
+        slot.workers = None;
+        slot.workers = Some(Workers::new(
+            slot.source.clone(),
+            slot.options.audio,
+            self.video_budget.clone(),
+            self.audio_budget.clone(),
+            self.worker_budget.clone(),
+        )?);
+        slot.status.state = MediaState::Loading;
+        slot.status.audio_started = false;
+        slot.status.error = None;
+        slot.pending = None;
+        slot.track = None;
+        slot.audio_ready = !slot.options.audio;
+        slot.audio_sent = false;
+        slot.start_ms = None;
+        slot.first_pts_ms = None;
+        slot.status.frame_pts_ms = None;
+        slot.eof = false;
+        slot.seek_ms = position_ms;
+        slot.catching_up = position_ms > 0;
+        if slot.paused_at.is_some() {
+            slot.paused_at = Some(now_ms);
+        }
         Ok(())
     }
     pub fn remove(&mut self, client: ClientId, id: u32) -> Result<()> {
@@ -597,8 +786,43 @@ impl MediaManager {
         self.slots.remove(&(client, id));
         Ok(())
     }
+    /// Select external time before anchoring playback, then admit monotonic
+    /// samples without touching position or manufacturing a decoder frame.
+    pub fn set_clock(&mut self, client: ClientId, id: u32, now_ms: u64) -> Result<()> {
+        let slot = self.slots.get_mut(&(client, id)).context("media handle not found in client scope")?;
+        ensure!(slot.track.is_none(), "external media clock with decoded audio requires audio-master clock mapping");
+        match slot.options.clock {
+            MediaClock::Engine => {
+                ensure!(slot.start_ms.is_none(), "select external media clock before first playback");
+                if slot.paused_at.is_some() { slot.paused_at = Some(now_ms); }
+            }
+            MediaClock::External { now_ms: previous } => {
+                ensure!(now_ms >= previous, "external media clock moved backwards");
+            }
+        }
+        slot.options.clock = MediaClock::External { now_ms };
+        Ok(())
+    }
     pub fn status(&self, client: ClientId, id: u32) -> Option<MediaStatus> {
-        self.slots.get(&(client, id)).map(|s| s.status.clone())
+        self.slots.get(&(client, id)).map(|s| {
+            let mut status = s.status.clone();
+            if let Some(info) = s.workers.as_ref().and_then(|w| *w.metadata.lock().unwrap_or_else(|e| e.into_inner())) {
+                status.size = Some(info.size);
+                status.duration_ms = info.duration_ms;
+            }
+            if let (MediaClock::External { now_ms }, Some(start), MediaState::Playing) =
+                (s.options.clock, s.start_ms, status.state)
+            {
+                // Clock queries observe an admitted sample immediately. Frame
+                // publication remains owner-tick work and has its own PTS.
+                status.position_ms = s.paused_at.unwrap_or(now_ms)
+                    .saturating_sub(start).saturating_add(s.seek_ms);
+            }
+            status
+        })
+    }
+    pub fn frame(&self, client: ClientId, id: u32) -> Option<crysirror_core::service::MediaFrame> {
+        self.slots.get(&(client,id)).and_then(|s|s.current.clone())
     }
     pub fn take_audio(&mut self) -> Vec<MediaAudioUpdate> {
         std::mem::take(&mut self.pending_audio)
@@ -619,10 +843,18 @@ impl MediaManager {
             audio: self.take_audio(),
         };
         for ((client, id), slot) in &mut self.slots {
+            let now_ms = slot.clock_ms(now_ms);
             let Some(workers) = &mut slot.workers else {
                 continue;
             };
+            if let Some(info) = *workers.metadata.lock().unwrap_or_else(|e| e.into_inner()) {
+                slot.status.size = Some(info.size);
+                slot.status.duration_ms = info.duration_ms;
+            }
             slot.status.decoded_frames = workers.decoded.load(Ordering::Relaxed) as u64;
+            if slot.start_ms.is_some() {
+                slot.status.frame_ms = slot.last_duration_ms;
+            }
             if !slot.audio_ready {
                 if let Some(rx) = &workers.audio {
                     match rx.try_recv() {
@@ -653,16 +885,25 @@ impl MediaManager {
                     }
                 }
             }
+            if matches!(slot.options.clock, MediaClock::External { .. }) && slot.track.is_some() {
+                return Err(slot.fail("external media clock with decoded audio requires audio-master clock mapping".into()));
+            }
             if slot.start_ms.is_none() && slot.audio_ready && slot.pending.is_some() {
-                slot.start_ms = Some(now_ms);
+                // A paused (seeking) resource anchors its clock at the pause
+                // instant; `seek_ms` offsets the stream position below.
+                slot.start_ms = Some(slot.paused_at.unwrap_or(now_ms));
                 slot.last_duration_ms = workers.frame_ms.load(Ordering::Acquire);
                 slot.first_pts_ms = slot.pending.as_ref().map(|f| f.frame.pts_ms);
                 slot.status.state = MediaState::Playing;
             }
             let Some(start) = slot.start_ms else { continue };
-            let elapsed = now_ms.saturating_sub(start);
+            let elapsed = slot
+                .paused_at
+                .unwrap_or(now_ms)
+                .saturating_sub(start)
+                .saturating_add(slot.seek_ms);
             slot.status.position_ms = elapsed;
-            if !slot.audio_sent {
+            if !slot.audio_sent && slot.paused_at.is_none() {
                 if let Some(track) = &slot.track {
                     let relative = track
                         .first_pts_ms
@@ -728,8 +969,29 @@ impl MediaManager {
                 slot.status.frame_pts_ms = Some(frame.frame.pts_ms);
                 presented = Some(frame);
             }
+            let presented = presented.filter(|frame| {
+                if !slot.catching_up {
+                    return true;
+                }
+                let relative = frame
+                    .frame
+                    .pts_ms
+                    .saturating_sub(slot.first_pts_ms.unwrap_or(frame.frame.pts_ms))
+                    .max(0) as u64;
+                let behind = !slot.eof
+                    && slot.pending.is_none()
+                    && relative.saturating_add(slot.last_duration_ms) <= elapsed;
+                slot.catching_up = behind;
+                !behind
+            });
             if let Some(frame) = presented {
                 slot.status.published_frames += 1;
+                let lease=self.video_budget.reserve(frame.frame.rgba.len())?;
+                let mut retained=crysirror_core::service::MediaFrame::new(
+                    [frame.frame.width,frame.frame.height],frame.frame.rgba.clone(),
+                    slot.status.published_frames,frame.frame.pts_ms).map_err(|e|anyhow!("{e}"))?;
+                retained.retain_storage(Arc::new(lease));
+                slot.current=Some(retained);
                 updates.frames.push(MediaFrameUpdate {
                     client: *client,
                     id: *id,
@@ -782,6 +1044,7 @@ impl MediaManager {
                     slot.audio_ready = !slot.options.audio;
                     slot.start_ms = None;
                     slot.first_pts_ms = None;
+                    slot.seek_ms = 0;
                     slot.eof = false;
                 } else {
                     slot.workers = None;
@@ -842,6 +1105,35 @@ mod tests {
             assert!(Instant::now() < until, "decoder did not reach checkpoint");
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+    #[test]
+    fn validated_header_metadata_is_visible_before_first_tick_and_retained_on_stop() {
+        let mut manager = MediaManager::default();
+        manager.play(
+            ClientId(1), 31,
+            Arc::new(Storage(include_bytes!("../../crysirror-video/tests/fixtures/wmv_wma.asf").to_vec())),
+            &path(), options(), 0,
+        ).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        // Deliberately no manager.tick: metadata preparation must not require
+        // a presented frame or moving the presentation clock.
+        let status = loop {
+            let status = manager.status(ClientId(1), 31).unwrap();
+            if status.size.is_some() { break status; }
+            assert!(Instant::now() < deadline, "header worker did not publish metadata");
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        assert_eq!(status.size, Some([64, 48]));
+        assert!(status.duration_ms.is_some_and(|ms| ms > 0));
+        assert_eq!(status.state, MediaState::Loading);
+        assert_eq!((status.position_ms, status.published_frames), (0, 0));
+        assert!(manager.frame(ClientId(1), 31).is_none());
+        assert!(manager.status(ClientId(2), 31).is_none());
+        manager.stop(ClientId(1), 31).unwrap();
+        let stopped = manager.status(ClientId(1), 31).unwrap();
+        assert_eq!(stopped.state, MediaState::Stopped);
+        assert_eq!(stopped.size, status.size);
+        assert_eq!(stopped.duration_ms, status.duration_ms);
     }
     #[test]
     fn native_mp4_codecs_publish_through_shared_media_workers() {
@@ -951,6 +1243,42 @@ mod tests {
         }
     }
     #[test]
+    fn retained_movie_capacity_is_client_scoped_global_bounded_and_reusable() {
+        let mut manager = MediaManager::default();
+        for client in [ClientId(1), ClientId(2)] {
+            for id in 0..MAX_MEDIA_PER_CLIENT as u32 {
+                manager.play(client, id, fixture(), &path(), options(), 0).unwrap();
+            }
+            assert!(manager.play(client, MAX_MEDIA_PER_CLIENT as u32, fixture(), &path(), options(), 0).is_err());
+        }
+        assert_eq!(manager.slots.len(), MAX_MEDIA_RESOURCES);
+        assert!(manager.play(ClientId(3), 0, fixture(), &path(), options(), 0).is_err());
+        assert!(manager.remove(ClientId(3), 0).is_err());
+        manager.remove(ClientId(1), 0).unwrap();
+        manager.play(ClientId(3), 0, fixture(), &path(), options(), 0).unwrap();
+        assert_eq!(manager.slots.len(), MAX_MEDIA_RESOURCES);
+        assert!(manager.video_budget.used.load(Ordering::Acquire) <= MAX_QUEUED_VIDEO_BYTES);
+    }
+    #[test]
+    fn immutable_media_picture_is_scoped_and_retains_its_budget_past_stop() {
+        let mut manager=MediaManager::default();
+        manager.play(ClientId(1),3,fixture(),&path(),options(),0).unwrap();
+        wait(&mut manager,|m|m.status(ClientId(1),3).unwrap().published_frames>0);
+        assert!(manager.frame(ClientId(2),3).is_none());
+        let frame=manager.frame(ClientId(1),3).unwrap();
+        assert_eq!(frame.rgba().len(),frame.size()[0] as usize*frame.size()[1] as usize*4);
+        let retained=frame.rgba().len();
+        manager.stop(ClientId(1),3).unwrap();
+        assert!(manager.frame(ClientId(1),3).is_none());
+        let until=Instant::now()+Duration::from_secs(2);
+        while manager.video_budget.used.load(Ordering::Acquire)!=retained {
+            assert!(Instant::now()<until,"frame/queue lease accounting");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        drop(frame);
+        assert_eq!(manager.video_budget.used.load(Ordering::Acquire),0);
+    }
+    #[test]
     fn generic_media_clock_publishes_resources_then_eos_and_loop_are_explicit() {
         let mut manager = MediaManager::default();
         manager
@@ -991,6 +1319,100 @@ mod tests {
             manager.status(ClientId(1), 1).unwrap().state,
             MediaState::Ended
         );
+    }
+    #[test]
+    fn pause_freezes_the_clock_and_a_paused_seek_presents_only_the_target() {
+        // MP4 carries per-frame timestamps (the MPEG fixture repeats one PTS).
+        let storage: Arc<dyn ClientStorage> = Arc::new(Storage(
+            include_bytes!("../../crysirror-video/tests/fixtures/h264_main.mp4").to_vec(),
+        ));
+        let mut manager = MediaManager::default();
+        let (c, id) = (ClientId(1), 1);
+        manager.play(c, id, storage, &path(), options(), 0).unwrap();
+        wait(&mut manager, |m| m.status(c, id).unwrap().frame_pts_ms.is_some());
+        let first = manager.status(c, id).unwrap().frame_pts_ms.unwrap();
+        manager.pause(c, id, 0).unwrap();
+        let published = manager.status(c, id).unwrap().published_frames;
+        for now in [500, 1000] {
+            manager.tick(now).unwrap();
+        }
+        let status = manager.status(c, id).unwrap();
+        assert!(status.paused);
+        assert_eq!((status.position_ms, status.published_frames), (0, published));
+        manager.resume(c, id, 1000).unwrap();
+        manager.tick(1040).unwrap();
+        assert_eq!(manager.status(c, id).unwrap().position_ms, 40);
+        // Seek while paused: decoding restarts, the clock holds at 200 ms and
+        // exactly one picture (the one due at 200 ms) is published.
+        manager.pause(c, id, 1040).unwrap();
+        manager.seek(c, id, 200, 1040).unwrap();
+        let before = manager.status(c, id).unwrap().published_frames;
+        let until = Instant::now() + Duration::from_secs(5);
+        let mut pts = None;
+        while pts.is_none() {
+            let updates = manager.tick(1040).unwrap();
+            assert!(updates.frames.len() <= 1);
+            pts = updates.frames.first().map(|f| f.frame.pts_ms);
+            assert!(Instant::now() < until, "seek never presented");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let status = manager.status(c, id).unwrap();
+        assert_eq!(status.position_ms, 200);
+        assert_eq!(status.published_frames, before + 1, "intermediate pictures were published");
+        let pts = pts.unwrap() - first;
+        assert!((100..=200).contains(&pts), "picture at {pts} ms for a 200 ms seek");
+        for _ in 0..20 {
+            assert!(manager.tick(1040).unwrap().frames.is_empty());
+        }
+    }
+    #[test]
+    fn external_clock_owns_progress_and_pause_seek_compensation() {
+        let mut manager = MediaManager::default();
+        let c = ClientId(1);
+        manager.play(c, 21, Arc::new(Storage(include_bytes!("../../crysirror-video/tests/fixtures/h264_main.mp4").to_vec())),
+            &path(), options(), 0).unwrap();
+        manager.set_clock(c, 21, 500).unwrap();
+        wait(&mut manager, |m| m.status(c, 21).unwrap().published_frames > 0);
+        manager.set_clock(c, 21, 540).unwrap();
+        assert_eq!(manager.status(c, 21).unwrap().position_ms, 40);
+        manager.tick(999_999).unwrap();
+        assert_eq!(manager.status(c, 21).unwrap().position_ms, 40);
+        manager.pause(c, 21, 1_000_000).unwrap();
+        manager.set_clock(c, 21, 2000).unwrap();
+        manager.tick(2_000_000).unwrap();
+        assert_eq!(manager.status(c, 21).unwrap().position_ms, 40);
+        manager.resume(c, 21, 9_000_000).unwrap();
+        manager.set_clock(c, 21, 2040).unwrap();
+        manager.tick(3).unwrap();
+        assert_eq!(manager.status(c, 21).unwrap().position_ms, 80);
+        assert!(manager.set_clock(c, 21, 2039).is_err());
+        assert!(manager.set_clock(ClientId(2), 21, 2040).is_err());
+        manager.pause(c, 21, 4).unwrap();
+        manager.seek(c, 21, 200, 5).unwrap();
+        manager.set_clock(c, 21, 5000).unwrap();
+        wait(&mut manager, |m| m.status(c, 21).unwrap().state == MediaState::Playing);
+        assert_eq!(manager.status(c, 21).unwrap().position_ms, 200);
+        manager.resume(c, 21, 6).unwrap();
+        manager.set_clock(c, 21, 5016).unwrap();
+        manager.tick(7).unwrap();
+        assert_eq!(manager.status(c, 21).unwrap().position_ms, 216);
+    }
+    #[test]
+    fn external_clock_rejects_decoded_audio_before_pcm_or_picture_publication() {
+        let mut manager = MediaManager::default();
+        manager.play(ClientId(1), 22, Arc::new(Storage(include_bytes!("../../crysirror-video/tests/fixtures/media_av.mpg").to_vec())),
+            &path(), MediaOptions { clock: MediaClock::External { now_ms: 0 }, ..Default::default() }, 0).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match manager.tick(0) {
+                Ok(updates) => { assert!(updates.frames.is_empty() && updates.audio.is_empty()); }
+                Err(error) => { assert!(error.to_string().contains("audio-master clock mapping")); break; }
+            }
+            assert!(Instant::now() < deadline, "audio clock mismatch was not delivered");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(manager.status(ClientId(1), 22).unwrap().published_frames, 0);
+        assert_eq!(manager.status(ClientId(1), 22).unwrap().state, MediaState::Failed);
     }
     #[test]
     fn media_audio_enters_shared_channel_mixer_without_a_vm_or_output_device() {
@@ -1202,6 +1624,7 @@ mod tests {
                 journal: Arc::new(Mutex::new(Journal::default())),
                 decoded: Arc::new(AtomicUsize::new(1)),
                 frame_ms: Arc::new(AtomicU64::new(34)),
+                metadata: Arc::new(Mutex::new(None)),
             };
             let input = Arc::new(MediaInput {
                 storage: fixture(),

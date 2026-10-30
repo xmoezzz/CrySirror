@@ -2,18 +2,11 @@
   "repository": "https://github.com/xmoezzz/rfvp",
   "commit": "062fec82033b554b9eb3b5da069518c0c96a354e",
   "license": "MPL-2.0",
-  "source_files": {
-    "crates/rfvp/src/script/global.rs": "5e2f975183764a8db0e8cbaf18ccd0d315c869fc7f2087ea8b2976be6579ea17",
-    "crates/rfvp/src/script/opcode.rs": "2d58ddd3e9dbec48f7f31b947de0cf1981adaa3d352db3b490d90f3e4384e9ad",
-    "crates/rfvp/src/script/mod.rs": "a90b4eb034a021134047bba4bab4b88ca2604bfee143bc9b3eaa4ed5cc6625f4",
-    "crates/rfvp/src/script/parser.rs": "e2932aeb71662e3c4ea1ea2c93a1af8ee6e5fe82347b93ff35d09371d27598e9",
-    "crates/rfvp/src/script/context.rs": "301af59354983fd2ae8d252903536ab7d3f234a947ed4f6c7f6ea2236e707922"
-  },
   "patches": [
-    "Only original parser/value/opcode/Context modules retained; no engine/renderer/mixer/host imported.",
-    "Global data is per adapter, transferred to its Context at each ordered opcode boundary.",
-    "Syscall failures propagate; caller restores Context before reporting failure.",
-    "No process exit on unknown opcode.",
-    "Parser uses capability-owned bytes only; checked bounds, entry point and size limits."
-  ]
+    "Native original VM policy is first-class workspace source.",
+    "Shared text/font/reveal, image decode/conversion/tone/blit mechanisms are CrySirror engine APIs.",
+    "Files, images, puppet draw declarations and channel audio use client-scoped CrySirror services.",
+    "No original software renderer or software mixer is compiled or retained in the VM."
+  ],
+  "implementation": "Original native VM source is maintained in ../crysirror-rfvp-vm; see its SOURCE.json for origin hashes and patches."
 }

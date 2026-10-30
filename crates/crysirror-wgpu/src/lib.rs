@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! wgpu backend, independent of winit and native VM instruction sets.
 #![deny(unsafe_code)]
+mod composite;
+mod frame_history;
 pub mod geometry;
 mod glyph_run;
 mod hardware_rt;
@@ -14,14 +16,15 @@ mod ray_geometry;
 mod raytrace;
 pub mod rt_capabilities;
 mod rt_pbr;
+mod sampling;
 pub mod text;
 mod transition;
-mod composite;
 pub mod vfx_gpu;
 pub mod vfx_render;
 pub mod vsm;
 use anyhow::{ensure, Context, Result};
 pub use crysirror_core::graphics::{GraphicsCapabilities, RenderingPath};
+use crysirror_core::service::MeshFrameHistoryProvider;
 use crysirror_core::state::{ClientId, Color, Rect, SceneState, TextRun, Visual};
 use crysirror_runtime::{assets::Assets, model::Scene3d};
 use crysirror_scene::{
@@ -162,7 +165,7 @@ impl Gpu {
 struct Texture {
     bind: wgpu::BindGroup,
     view: wgpu::TextureView,
-    _texture: wgpu::Texture,
+    texture: wgpu::Texture,
     bytes: u64,
 }
 struct Depth {
@@ -237,6 +240,7 @@ fn filter_gpu(f: &crysirror_scene::layer::LayerFilter) -> FilterGpu {
     }
 }
 pub struct Renderer {
+    histories: Arc<frame_history::Provider>,
     profiler: crysirror_tasks::profile::Profiler,
     profile_frame: u64,
     gpu_timings: profile::GpuTimings,
@@ -383,6 +387,7 @@ impl Renderer {
             Blend::Atop,
             Blend::AtopMultiply,
             Blend::AtopScreen,
+            Blend::AtopCopy,
         ];
         let quad_pipeline = |blend: Blend, filtered: bool| {
             let color = match blend {
@@ -425,14 +430,22 @@ impl Renderer {
                     dst_factor: wgpu::BlendFactor::OneMinusSrc,
                     operation: wgpu::BlendOperation::Add,
                 },
+                // Straight colour replaced under the kept alpha: S·Da.
+                Blend::AtopCopy => wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::DstAlpha,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
             };
             // Atop keeps the destination alpha; every other mode is "over".
             let alpha = match blend {
-                Blend::Atop | Blend::AtopMultiply | Blend::AtopScreen => wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::Zero,
-                    dst_factor: wgpu::BlendFactor::One,
-                    operation: wgpu::BlendOperation::Add,
-                },
+                Blend::Atop | Blend::AtopMultiply | Blend::AtopScreen | Blend::AtopCopy => {
+                    wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::Zero,
+                        dst_factor: wgpu::BlendFactor::One,
+                        operation: wgpu::BlendOperation::Add,
+                    }
+                }
                 _ => wgpu::BlendComponent::OVER,
             };
             d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -456,7 +469,17 @@ impl Renderer {
                 fragment: Some(wgpu::FragmentState {
                     module: &quad_shader,
                     entry_point: Some(
-                        match (filtered, matches!(blend, Blend::Multiply | Blend::Screen | Blend::Atop | Blend::AtopMultiply | Blend::AtopScreen)) {
+                        match (
+                            filtered,
+                            matches!(
+                                blend,
+                                Blend::Multiply
+                                    | Blend::Screen
+                                    | Blend::Atop
+                                    | Blend::AtopMultiply
+                                    | Blend::AtopScreen
+                            ),
+                        ) {
                             (false, true) => "fs_premultiply",
                             (false, false) => "fs_main",
                             (true, true) => "fs_filtered_premultiply",
@@ -565,6 +588,7 @@ impl Renderer {
         let puppets =
             puppet::PuppetRenderer::new(d, &texture_layout, wgpu::TextureFormat::Rgba8UnormSrgb);
         Self {
+            histories: frame_history::Provider::new(gpu.clone()),
             gpu_timings: profile::GpuTimings::new(&gpu),
             profiler: Default::default(),
             profile_frame: 0,
@@ -686,7 +710,7 @@ impl Renderer {
     pub fn profile_report(&mut self) -> Result<serde_json::Value> {
         self.gpu_timings.poll(&self.gpu)?;
         Ok(
-            serde_json::json!({"timings":self.profiler.snapshot(),"cpu_trace":self.profiler.chrome_trace(),"gpu_timestamps_enabled":self.gpu_timings.enabled(),"gpu_samples_pending":self.gpu_timings.pending(),"gpu_samples_dropped":self.gpu_timings.dropped,"gpu_samples_failed":self.gpu_timings.failures,"snapshot_rasterizations":self.snapshot_rasterizations}),
+            serde_json::json!({"timings":self.profiler.snapshot(),"cpu_trace":self.profiler.chrome_trace(),"gpu_timestamps_enabled":self.gpu_timings.enabled(),"gpu_samples_pending":self.gpu_timings.pending(),"gpu_samples_dropped":self.gpu_timings.dropped,"gpu_samples_failed":self.gpu_timings.failures,"snapshot_rasterizations":self.snapshot_rasterizations,"frame_history":self.histories.stats()}),
         )
     }
     /// Explicit capture/shutdown completion; interactive frames use profile_report.
@@ -741,10 +765,53 @@ impl Renderer {
         self.scene3d = scene.cloned();
         Ok(())
     }
+    /// Install before VM boot; capabilities contain logical layer IDs only.
+    pub fn mesh_frame_history_provider(&self) -> Arc<dyn MeshFrameHistoryProvider> {
+        self.histories.clone()
+    }
+    /// Advance mesh feedback and isolated subtree input snapshots once per
+    /// logical frame, also offscreen. No final framebuffer readback is needed.
+    /// Queue submissions establish dependencies without a CPU readback fence.
+    pub fn advance_frame_histories(
+        &mut self,
+        assets: &mut Assets,
+        frame: Vec<Primitive>,
+        canvas: [u32; 2],
+    ) -> Result<()> {
+        let composites = frame.iter().any(|p| p.composite.is_some());
+        if !self.histories.active() && !composites {
+            return Ok(());
+        }
+        let frame = if composites {
+            frame
+        } else {
+            frame
+                .into_iter()
+                .filter(|p| {
+                    p.puppet.is_some() && self.histories.registered(ClientId(p.owner), p.id)
+                })
+                .collect()
+        };
+        let previous = std::mem::take(&mut self.engine_frame);
+        let result = self.set_engine_frame(frame).and_then(|()| {
+            self.prepare_composites(assets, canvas)?;
+            self.prepare_snapshots(assets)?;
+            self.prepare(&SceneState::default(), assets, canvas)
+                .map(|_| ())
+        });
+        self.engine_frame = previous;
+        result
+    }
     pub fn set_engine_frame(&mut self, frame: Vec<Primitive>) -> Result<()> {
         ensure!(frame.len() <= 32768, "extracted frame limit");
         for p in &frame {
             p.paint.validate()?;
+            if p.sampling != crysirror_scene::layer::ImageSampling::default() {
+                ensure!(
+                    matches!(p.paint, Paint::Image { .. }) && p.sampling.valid_uv(p.uv),
+                    "invalid extracted image sampling"
+                );
+            }
             ensure!(
                 p.size.iter().all(|v| *v > 0 && *v <= 16384)
                     && p.extent
@@ -833,7 +900,7 @@ impl Renderer {
             Texture {
                 bind,
                 view,
-                _texture: texture,
+                texture,
                 bytes,
             },
         );
@@ -863,7 +930,9 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
@@ -889,7 +958,7 @@ impl Renderer {
             Texture {
                 bind,
                 view,
-                _texture: texture,
+                texture,
                 bytes,
             },
         );
@@ -976,13 +1045,69 @@ impl Renderer {
         // not need a fictional rig asset merely to publish a worker result.
         for primitive in &mut frame {
             if primitive.puppet.is_some() && !matches!(primitive.paint, Paint::Puppet { .. }) {
-                primitive.paint = Paint::Puppet { asset: String::new(), tint: [255; 4] };
+                primitive.paint = Paint::Puppet {
+                    asset: String::new(),
+                    tint: [255; 4],
+                };
             }
         }
         frame.sort_by_key(|p| (p.order, p.owner, p.id, p.sub));
         // Retained runs remain logical engine state; only extraction expands
         // them to independent reusable glyph resources and transformed quads.
         let frame = self.expand_glyph_runs(frame, assets)?;
+        // Freeze all old pictures before any new layer is drawn, including
+        // mutual/cross-layer references. Duplicate extraction of one immutable
+        // declaration does not advance history a second time.
+        let mut history_render = std::collections::BTreeMap::new();
+        let mut history_dependencies = BTreeMap::new();
+        for p in &frame {
+            if self.histories.registered(ClientId(p.owner), p.id) {
+                if let Some(mesh) = &p.puppet {
+                    let size = Self::puppet_size(p);
+                    let key = format!("puppet:{}:{}:{}x{}", p.owner, p.id, size[0], size[1]);
+                    if !self.textures.contains_key(&key) {
+                        self.render_texture(key.clone(), size)?;
+                    }
+                    let dependencies = mesh
+                        .textures
+                        .iter()
+                        .map(|t| {
+                            if crysirror_core::service::frame_history_layer(t).is_some() {
+                                Ok(t.clone())
+                            } else {
+                                Self::image_key(assets, p.owner, t)
+                            }
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let needed = self.histories.begin(
+                        p.owner,
+                        p.id,
+                        size,
+                        mesh,
+                        &self.textures[&key].texture,
+                        &dependencies,
+                    )?;
+                    history_dependencies.insert((p.owner, p.id), dependencies);
+                    history_render.insert((p.owner, p.id), needed);
+                }
+            }
+        }
+        let mut sources = BTreeSet::new();
+        for p in &frame {
+            if history_render.get(&(p.owner, p.id)) == Some(&false) {
+                continue;
+            }
+            if let Some(mesh) = &p.puppet {
+                for texture in &mesh.textures {
+                    if let Some(layer) = crysirror_core::service::frame_history_layer(texture) {
+                        sources.insert((p.owner, layer));
+                    }
+                }
+            }
+        }
+        for (owner, layer) in sources {
+            self.histories.freeze(owner, layer)?;
+        }
         let text = |p: &Primitive| -> Option<TextRun> {
             if let Paint::Text {
                 text,
@@ -1013,18 +1138,14 @@ impl Renderer {
             .iter()
             .map(|p| match &p.paint {
                 Paint::Solid { .. } => Ok("solid:white".to_string()),
-                Paint::Snapshot { size, layers } => Self::snapshot_key(assets, p.owner, *size, layers),
-                Paint::Image { asset, .. } => match assets.surface(ClientId(p.owner), asset) {
-                    // Dynamic surfaces re-upload when their revision changes.
-                    Some(s) => Ok(format!(
-                        "surface:{}@{}",
-                        assets.key(ClientId(p.owner), asset)?,
-                        s.revision
-                    )),
-                    None => Ok(format!("image:{}", assets.key(ClientId(p.owner), asset)?)),
-                },
-                Paint::Text { .. } => assets.text.key(&text(p).expect("text paint")),
-                Paint::GlyphRun { .. } => glyph_run::key(assets, &p.paint),
+                Paint::Snapshot { size, layers } => {
+                    Self::snapshot_key(assets, p.owner, *size, layers)
+                }
+                Paint::Image { asset, .. } => {
+                    Self::sampled_image_key(assets, p.owner, asset, p.sampling)
+                }
+                Paint::Text { .. } => assets.text.for_client(crysirror_core::state::ClientId(p.owner)).key(&text(p).expect("text paint")),
+                Paint::GlyphRun { .. } => glyph_run::key(assets, p.owner, &p.paint),
                 Paint::Puppet { .. } => {
                     let [w, h] = Self::puppet_size(p);
                     Ok(format!("puppet:{}:{}:{w}x{h}", p.owner, p.id))
@@ -1048,13 +1169,29 @@ impl Renderer {
             })
             .collect::<Result<Vec<_>>>()?;
         let mut used: BTreeSet<String> = keys.iter().cloned().collect();
+        // Sampling aliases share the admitted image allocation. Keep its base
+        // key resident so alias creation never requires a second image upload.
+        for p in &frame {
+            if let Paint::Image { asset, .. } = &p.paint {
+                used.insert(Self::image_key(assets, p.owner, asset)?);
+            }
+        }
         let mut puppet_textures: Vec<Vec<String>> = Vec::new();
         for p in &frame {
             let names = match (&p.paint, &p.puppet) {
                 (Paint::Puppet { .. }, Some(f)) => f
                     .textures
                     .iter()
-                    .map(|t| Self::image_key(assets, p.owner, t))
+                    .map(|t| match crysirror_core::service::frame_history_layer(t) {
+                        Some(id) => {
+                            ensure!(
+                                self.histories.registered(ClientId(p.owner), id),
+                                "unreserved GPU frame history"
+                            );
+                            Ok(format!("history:{}:{id}", p.owner))
+                        }
+                        None => Self::image_key(assets, p.owner, t),
+                    })
                     .collect::<Result<Vec<_>>>()?,
                 _ => Vec::new(),
             };
@@ -1120,11 +1257,13 @@ impl Renderer {
                 }
                 Paint::Snapshot { .. } => {
                     // A pending immutable dependency has not published a texture.
-                    if !self.textures.contains_key(&key) { continue; }
+                    if !self.textures.contains_key(&key) {
+                        continue;
+                    }
                     [255; 4]
                 }
                 Paint::Image { asset, tint } => {
-                    if !self.ensure_image(assets, p.owner, asset, &key)? {
+                    if !self.ensure_sampled_image(assets, p.owner, asset, &key, p.sampling)? {
                         continue;
                     }
                     *tint
@@ -1137,35 +1276,83 @@ impl Renderer {
                     let mut ready = true;
                     if let Some(f) = &p.puppet {
                         for (t, k) in f.textures.iter().zip(&tex_keys) {
-                            ready &= self.ensure_image(assets, p.owner, t, k)?;
+                            if let Some(id) = crysirror_core::service::frame_history_layer(t) {
+                                let texture = self.histories.history(p.owner, id)?;
+                                let view = texture.create_view(&Default::default());
+                                let bind =
+                                    self.gpu
+                                        .device
+                                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                                            label: Some("frame history binding"),
+                                            layout: &self.texture_layout,
+                                            entries: &[
+                                                wgpu::BindGroupEntry {
+                                                    binding: 0,
+                                                    resource: wgpu::BindingResource::TextureView(
+                                                        &view,
+                                                    ),
+                                                },
+                                                wgpu::BindGroupEntry {
+                                                    binding: 1,
+                                                    resource: wgpu::BindingResource::Sampler(
+                                                        &self.sampler,
+                                                    ),
+                                                },
+                                            ],
+                                        });
+                                self.textures.insert(
+                                    k.clone(),
+                                    Texture {
+                                        texture,
+                                        view,
+                                        bind,
+                                        bytes: 0,
+                                    },
+                                );
+                            } else {
+                                ready &= self.ensure_image(assets, p.owner, t, k)?;
+                            }
                         }
                     }
                     if !ready {
                         continue;
                     }
                     let textures = &self.textures;
-                    self.puppets.render(
-                        &self.gpu.device,
-                        &self.gpu.queue,
-                        &self.texture_layout,
-                        &self.sampler,
-                        &key,
-                        size,
-                        p.puppet.as_deref(),
-                        &|i| {
-                            tex_keys
-                                .get(i as usize)
-                                .and_then(|k| textures.get(k))
-                                .map(|t| &t.bind)
-                        },
-                        &textures[&key].view,
-                    )?;
+                    if history_render.get(&(p.owner, p.id)) != Some(&false) {
+                        self.puppets.render(
+                            &self.gpu.device,
+                            &self.gpu.queue,
+                            &self.texture_layout,
+                            &self.sampler,
+                            &key,
+                            size,
+                            p.puppet.as_deref(),
+                            &|i| {
+                                tex_keys
+                                    .get(i as usize)
+                                    .and_then(|k| textures.get(k))
+                                    .map(|t| &t.bind)
+                            },
+                            &textures[&key].view,
+                        )?;
+                        if let Some(mesh) = &p.puppet {
+                            self.histories.complete(
+                                p.owner,
+                                p.id,
+                                mesh.clone(),
+                                textures[&key].texture.clone(),
+                                history_dependencies
+                                    .remove(&(p.owner, p.id))
+                                    .unwrap_or_default(),
+                            )?;
+                        }
+                    }
                     *tint
                 }
                 Paint::Text { color, .. } => {
                     if !self.textures.contains_key(&key) {
                         let run = text(p).expect("text paint");
-                        let pixels = assets.text.rasterize(&run)?;
+                        let pixels = assets.text.for_client(crysirror_core::state::ClientId(p.owner)).rasterize(&run)?;
                         self.upload(key.clone(), p.size[0], p.size[1], &pixels)?;
                     }
                     *color
@@ -1549,6 +1736,7 @@ impl Renderer {
                     Blend::Atop => 5,
                     Blend::AtopMultiply => 6,
                     Blend::AtopScreen => 7,
+                    Blend::AtopCopy => 8,
                 };
                 match &draw.filter {
                     Some(k) => {
@@ -1667,71 +1855,7 @@ impl Renderer {
         width: u32,
         height: u32,
     ) -> Result<image::RgbaImage> {
-        let stride = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
-            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let buffer = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("capture readback"),
-            size: u64::from(stride) * u64::from(height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(stride),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-        // Track this readback, rather than whichever submission another engine
-        // task may enqueue before this thread polls the shared device.
-        let submission = self.gpu.queue.submit(Some(encoder.finish()));
-        let slice = buffer.slice(..);
-        let (tx, rx) = mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |result| {
-            let _ = tx.send(result);
-        });
-        self.gpu
-            .device
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(submission),
-                timeout: Some(std::time::Duration::from_secs(20)),
-            })
-            .with_context(|| {
-                format!(
-                    "GPU capture {:?} did not finish within 20 seconds",
-                    self.path
-                )
-            })?;
-        rx.recv_timeout(std::time::Duration::from_secs(5))
-            .context("GPU capture map callback missing")??;
-        let data = slice.get_mapped_range();
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-        for row in data.chunks_exact(stride as usize).take(height as usize) {
-            pixels.extend_from_slice(&row[..(width * 4) as usize]);
-        }
-        drop(data);
-        buffer.unmap();
-        if self.format == wgpu::TextureFormat::Bgra8UnormSrgb {
-            for pixel in pixels.chunks_exact_mut(4) {
-                pixel.swap(0, 2);
-            }
-        }
-        image::RgbaImage::from_raw(width, height, pixels).context("invalid capture dimensions")
+        frame_history::read_texture(&self.gpu, texture, width, height)
     }
 }
 

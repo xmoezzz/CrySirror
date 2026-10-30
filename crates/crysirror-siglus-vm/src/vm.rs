@@ -3570,7 +3570,7 @@ impl<'a> SceneVm<'a> {
         // C_elm_frame_action::frame() performs the end check later in the same
         // frame.  Keep the same order here; otherwise callbacks such as the MWND
         // rotating circle animation repeatedly observe the previous count.
-        self.ctx.tick_frame();
+        self.ctx.tick_frame()?;
 
         if let Some(result) = self.ctx.take_pending_sel_point_result() {
             // Original decide(): push result, then tnm_set_sel_point().  Keep
@@ -8476,7 +8476,7 @@ impl<'a> SceneVm<'a> {
             .globals
             .int_lists
             .get(&(elm as u32))
-            .map(Vec::as_slice)
+            .map(|list| list.as_slice())
             .unwrap_or(&[])
     }
 
@@ -12274,34 +12274,34 @@ impl<'a> SceneVm<'a> {
         let i = rd.extend_i32_list()?;
         let j = rd.extend_i32_list()?;
         let namae_local = rd.fixed_str_list()?;
-        self.ctx
-            .globals
-            .int_lists
-            .insert(codes::ELM_GLOBAL_A as u32, resize_i64_vec(a, flag_cnt));
-        self.ctx
-            .globals
-            .int_lists
-            .insert(codes::ELM_GLOBAL_B as u32, resize_i64_vec(b, flag_cnt));
-        self.ctx
-            .globals
-            .int_lists
-            .insert(codes::ELM_GLOBAL_C as u32, resize_i64_vec(c, flag_cnt));
-        self.ctx
-            .globals
-            .int_lists
-            .insert(codes::ELM_GLOBAL_D as u32, resize_i64_vec(d, flag_cnt));
-        self.ctx
-            .globals
-            .int_lists
-            .insert(codes::ELM_GLOBAL_E as u32, resize_i64_vec(e, flag_cnt));
-        self.ctx
-            .globals
-            .int_lists
-            .insert(codes::ELM_GLOBAL_F as u32, resize_i64_vec(f, flag_cnt));
-        self.ctx
-            .globals
-            .int_lists
-            .insert(codes::ELM_GLOBAL_X as u32, resize_i64_vec(x, flag_cnt));
+        self.ctx.globals.int_lists.insert(
+            codes::ELM_GLOBAL_A as u32,
+            resize_i64_vec(a, flag_cnt).into(),
+        );
+        self.ctx.globals.int_lists.insert(
+            codes::ELM_GLOBAL_B as u32,
+            resize_i64_vec(b, flag_cnt).into(),
+        );
+        self.ctx.globals.int_lists.insert(
+            codes::ELM_GLOBAL_C as u32,
+            resize_i64_vec(c, flag_cnt).into(),
+        );
+        self.ctx.globals.int_lists.insert(
+            codes::ELM_GLOBAL_D as u32,
+            resize_i64_vec(d, flag_cnt).into(),
+        );
+        self.ctx.globals.int_lists.insert(
+            codes::ELM_GLOBAL_E as u32,
+            resize_i64_vec(e, flag_cnt).into(),
+        );
+        self.ctx.globals.int_lists.insert(
+            codes::ELM_GLOBAL_F as u32,
+            resize_i64_vec(f, flag_cnt).into(),
+        );
+        self.ctx.globals.int_lists.insert(
+            codes::ELM_GLOBAL_X as u32,
+            resize_i64_vec(x, flag_cnt).into(),
+        );
         self.ctx
             .globals
             .str_lists
@@ -13872,7 +13872,13 @@ impl SceneVm<'static> {
         Ok(())
     }
     pub fn engine_diagnostics(&self) -> serde_json::Value {
-        serde_json::json!({"vm":"original-siglus","pc":self.stream.pc,"scene":self.current_scene_name,"line":self.current_line_no,"halted":self.halted,"int_stack":self.int_stack,"str_stack":self.str_stack,"call_depth":self.call_stack.len(),"unknown_opcodes":self.unknown_opcodes,"unknown_forms":self.unknown_forms,"native_time_ms":self.ctx.globals.local_game_time})
+        let mut value = serde_json::json!({"vm":"original-siglus","pc":self.stream.pc,"scene":self.current_scene_name,"line":self.current_line_no,"halted":self.halted,"int_stack":self.int_stack,"str_stack":self.str_stack,"call_depth":self.call_stack.len(),"unknown_opcodes":self.unknown_opcodes,"unknown_forms":self.unknown_forms,"native_time_ms":self.ctx.globals.local_game_time});
+        value["wait"] = self.ctx.wait.diagnostics();
+        value["movie"] = serde_json::json!({"file":self.ctx.globals.mov.file_name,"playing":self.ctx.globals.mov.playing,"position_ms":self.ctx.globals.mov.timer_ms,"key_skip":self.ctx.globals.mov.key_skip_flag,"picture_ready":self.ctx.movie.ready});
+        value["native_real_time_ms"] = self.ctx.globals.local_real_time.into();
+        value["native_render_frame"] = self.ctx.globals.render_frame.into();
+        value["native_proc"] = format!("{:?}", self.ctx.last_proc_kind()).into();
+        value
     }
     pub fn engine_set_entry(&mut self, name: String) {
         self.current_scene_name = Some(name.clone());
@@ -13955,7 +13961,9 @@ mod pcmch_save_record_tests {
         for expected in [-1, -1, 2, -1, 255, 0] {
             assert_eq!(reader.i32().unwrap(), expected);
         }
-        for _ in 0..5 { assert!(!reader.bool().unwrap()); }
+        for _ in 0..5 {
+            assert!(!reader.bool().unwrap());
+        }
         assert_eq!(bytes.len(), 37);
     }
 }

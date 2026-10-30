@@ -574,6 +574,10 @@ pub struct EmitterSpec {
     pub initialize: InitSpec,
     pub update: Vec<Module>,
     pub render: RenderSpec,
+    /// Optional CPU pixel-plane mesh publication, independently of a native VM.
+    pub screen: Option<crate::screen::ScreenSpriteTarget>,
+    /// Optional CPU falling/periodic-drift/nonuniform-atlas node.
+    pub falling_atlas: Option<crate::falling_atlas::FallingAtlasSpec>,
     pub events: Vec<EventHandler>,
 }
 impl Default for EmitterSpec {
@@ -591,6 +595,8 @@ impl Default for EmitterSpec {
             initialize: Default::default(),
             update: vec![],
             render: Default::default(),
+            screen: None,
+            falling_atlas: None,
             events: vec![],
         }
     }
@@ -599,6 +605,12 @@ impl Default for EmitterSpec {
 #[serde(default, deny_unknown_fields)]
 /// A scoped multi-emitter effect with typed parameters and a fixed simulation clock.
 pub struct SystemSpec {
+    /// Explicit external render-tick/wall-clock source, or engine fixed time.
+    pub clock: crate::falling_atlas::SimulationClock,
+    /// Initial single-stream random state; changing it restarts this revision.
+    pub sequence_rng: Option<crate::falling_atlas::SequenceRng>,
+    /// Fenced stream replacement without particle-pool reinitialization.
+    pub sequence_exchange: Option<crate::falling_atlas::SequenceExchange>,
     /// Explicit restart epoch; parameter/control changes do not increment it.
     pub revision: u64,
     pub emitters: Vec<EmitterSpec>,
@@ -613,6 +625,9 @@ pub struct SystemSpec {
 impl Default for SystemSpec {
     fn default() -> Self {
         Self {
+            clock: Default::default(),
+            sequence_rng: None,
+            sequence_exchange: None,
             revision: 0,
             emitters: vec![EmitterSpec::default()],
             parameters: BTreeMap::new(),
@@ -946,7 +961,31 @@ impl EmitterSpec {
                 "VFX event handler"
             );
         }
-        self.render.validate()
+        self.render.validate()?;
+        if let Some(node) = &self.falling_atlas {
+            node.validate()?;
+            ensure!(self.target==SimulationTarget::Cpu&&self.screen.is_some()&&self.space==SimulationSpace::Local&&self.update.is_empty()&&self.events.is_empty(),"VFX falling node requires CPU local screen sprites without conflicting updates/events");
+        }
+        if let Some(screen) = &self.screen {
+            screen.validate()?;
+            ensure!(
+                self.target == SimulationTarget::Cpu && self.capacity <= 4096,
+                "VFX screen profile requires bounded CPU particles"
+            );
+            ensure!(
+                matches!(
+                    &self.render,
+                    RenderSpec::Sprite {
+                        texture: Some(_),
+                        facing: FacingMode::Camera,
+                        blend: BlendMode::Alpha | BlendMode::Additive | BlendMode::Multiply,
+                        ..
+                    }
+                ),
+                "VFX screen render profile unsupported"
+            );
+        }
+        Ok(())
     }
     pub fn compile(&self, parameters: &ParameterMap) -> Result<CompiledEmitter> {
         self.validate(parameters)?;
@@ -972,6 +1011,28 @@ pub fn validate_gpu_profile(spec: &EmitterSpec) -> Result<()> {
 }
 impl SystemSpec {
     pub fn compile(&self) -> Result<CompiledSystem> {
+        if let Some(rng) = &self.sequence_rng {
+            rng.validate()?;
+        }
+        if self.sequence_rng.is_some() {
+            ensure!(
+                matches!(
+                    self.clock,
+                    crate::falling_atlas::SimulationClock::External { .. }
+                ) && self
+                    .emitters
+                    .iter()
+                    .all(|e| e.target == SimulationTarget::Cpu),
+                "VFX sequence streams require explicit external CPU clock"
+            );
+        }
+        if let Some(exchange) = &self.sequence_exchange {
+            exchange.state.validate()?;
+            ensure!(
+                exchange.epoch > 0 && self.sequence_rng.is_some(),
+                "VFX sequence exchange requires an initialized stream and epoch"
+            );
+        }
         ensure!(
             !self.emitters.is_empty()
                 && self.emitters.len() <= 64
@@ -989,12 +1050,29 @@ impl SystemSpec {
             v.validate()?;
         }
         let mut names = std::collections::BTreeSet::new();
+        let mut screen_layers = std::collections::BTreeSet::new();
         for e in &self.emitters {
             ensure!(names.insert(e.id.clone()), "duplicate VFX emitter id");
             e.validate(&self.parameters)?;
+            if let Some(node) = &e.falling_atlas {
+                ensure!(matches!(self.clock,crate::falling_atlas::SimulationClock::External{..})&&self.sequence_rng.is_some()&&self.warmup_seconds==0.&&self.time_scale==1.&&node.tick_hz==self.fixed_step_hz,"VFX falling node requires explicit external clocks, one stream, matching fixed ticks and no warmup/time scaling");
+            }
+            if let Some(screen) = &e.screen {
+                ensure!(
+                    screen_layers.insert(screen.layer),
+                    "duplicate VFX screen target layer"
+                );
+            }
         }
         for e in &self.emitters {
             for h in &e.events {
+                ensure!(
+                    !self
+                        .emitters
+                        .iter()
+                        .any(|target| target.id == h.emitter && target.falling_atlas.is_some()),
+                    "VFX falling child event targets are not implemented"
+                );
                 ensure!(
                     names.contains(&h.emitter),
                     "VFX event target '{}' absent",

@@ -7,6 +7,10 @@ use super::*;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SubtreeCrossfade {
+    #[serde(default)]
+    pub serial: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<SubtreeTransitionEffect>,
     pub source: u32,
     pub duration_ms: u64,
     pub elapsed_ms: u64,
@@ -31,6 +35,9 @@ pub struct RuleWipe {
 }
 #[derive(Clone, Debug)]
 pub struct CompositeFrame {
+    pub serial: u64,
+    pub timing: [u64; 2],
+    pub effect: Option<(SubtreeTransitionEffect, [f32; 4])>,
     pub before: Vec<Primitive>,
     pub after: Vec<Primitive>,
     pub progress: f32,
@@ -72,8 +79,14 @@ impl LayerSystem {
         let b = owner.get(&source).context("crossfade source missing")?;
         // Endpoints may sit under different parents (KiriKiri fore/back page
         // layers): the source subtree is rendered in the destination's place.
-        ensure!(a.rect[2..] == b.rect[2..], "crossfade needs equally sized roots");
-        ensure!(a.parent.is_some() == b.parent.is_some(), "crossfade roots must both be children or both roots");
+        ensure!(
+            a.rect[2..] == b.rect[2..],
+            "crossfade needs equally sized roots"
+        );
+        ensure!(
+            a.parent.is_some() == b.parent.is_some(),
+            "crossfade roots must both be children or both roots"
+        );
         ensure!(
             a.blend == Blend::Normal && b.blend == Blend::Normal,
             "crossfade root blend"
@@ -91,9 +104,15 @@ impl LayerSystem {
             );
         }
         ensure!(aa.is_disjoint(&bb), "overlapping crossfade endpoints");
+        self.transition_serial = self
+            .transition_serial
+            .checked_add(1)
+            .context("transition serial overflow")?;
         self.crossfades.entry(client.0).or_default().insert(
             id,
             SubtreeCrossfade {
+                serial: self.transition_serial,
+                effect: None,
                 source,
                 duration_ms,
                 elapsed_ms: 0,
@@ -105,7 +124,12 @@ impl LayerSystem {
     }
     /// Set an externally clocked crossfade's progress (clamped to its
     /// duration; reaching it completes the crossfade).
-    pub(super) fn set_crossfade_elapsed(&mut self, client: ClientId, id: u32, elapsed_ms: u64) -> Result<()> {
+    pub(super) fn set_crossfade_elapsed(
+        &mut self,
+        client: ClientId,
+        id: u32,
+        elapsed_ms: u64,
+    ) -> Result<()> {
         let fade = self
             .crossfades
             .get_mut(&client.0)
@@ -126,6 +150,19 @@ impl LayerSystem {
                 .get(client)
                 .context("crossfade client missing")?;
             for (id, fade) in fades {
+                ensure!(fade.serial <= self.transition_serial, "crossfade serial");
+                if let Some(effect) = &fade.effect {
+                    effect.validate()?;
+                    let rect = absolute_rect(owner, *id)?;
+                    ensure!(
+                        rect[2] > 0. && rect[3] > 0.,
+                        "subtree filter needs positive root dimensions"
+                    );
+                    ensure!(
+                        fade.rule.is_none(),
+                        "effect and plain rule cannot both be present"
+                    );
+                }
                 ensure!(
                     *id != fade.source
                         && (1..=600_000).contains(&fade.duration_ms)
@@ -177,26 +214,38 @@ impl LayerSystem {
         let mut out = plain;
         // Top-level fades are not inside another listed fade's endpoints.
         let inside = |client: u32, inner: u32, outer: u32| -> bool {
-            let (Some(owner), Some(f)) = (self.clients.get(&client), self.crossfade(ClientId(client), outer)) else {
+            let (Some(owner), Some(f)) = (
+                self.clients.get(&client),
+                self.crossfade(ClientId(client), outer),
+            ) else {
                 return false;
             };
             inner != outer
-                && (descendants(owner, outer).contains(&inner) || descendants(owner, f.source).contains(&inner))
+                && (descendants(owner, outer).contains(&inner)
+                    || descendants(owner, f.source).contains(&inner))
         };
         for &(client, id) in fades {
-            if fades.iter().any(|&(c, o)| c == client && inside(client, id, o)) {
+            if fades
+                .iter()
+                .any(|&(c, o)| c == client && inside(client, id, o))
+            {
                 continue;
             }
             let owner = self
                 .clients
                 .get(&client)
                 .context("crossfade client missing")?;
-            let fade = self.crossfade(ClientId(client), id).context("crossfade missing")?;
+            let fade = self
+                .crossfade(ClientId(client), id)
+                .context("crossfade missing")?;
             let a = owner.get(&id).context("crossfade destination removed")?;
             let b = owner
                 .get(&fade.source)
                 .context("crossfade source removed")?;
-            ensure!(a.rect[2..] == b.rect[2..], "crossfade geometry changed incompatibly");
+            ensure!(
+                a.rect[2..] == b.rect[2..],
+                "crossfade geometry changed incompatibly"
+            );
             let aa = descendants(owner, id);
             let bb = descendants(owner, fade.source);
             let nested: Vec<(u32, u32)> = fades
@@ -212,13 +261,17 @@ impl LayerSystem {
                 .collect();
             if let (Some(first), Some(last)) = (positions.first(), positions.last()) {
                 ensure!(
-                    out[*first..=*last].iter().all(
-                        |p| p.owner == client && (aa.contains(&p.id) || bb.contains(&p.id))
-                    ),
+                    out[*first..=*last]
+                        .iter()
+                        .all(|p| p.owner == client && (aa.contains(&p.id) || bb.contains(&p.id))),
                     "crossfade subtree interleaves external layers"
                 );
             }
-            let inner_frame = if nested.is_empty() { None } else { Some(self.compose(canvas, &nested)?) };
+            let inner_frame = if nested.is_empty() {
+                None
+            } else {
+                Some(self.compose(canvas, &nested)?)
+            };
             let before: Vec<_> = inner_frame
                 .as_ref()
                 .unwrap_or(&out)
@@ -256,11 +309,23 @@ impl LayerSystem {
                 None,
                 a.order,
             );
-            let rule = match &fade.rule {
+            let effect = fade
+                .effect
+                .as_ref()
+                .map(|effect| absolute_rect(owner, id).map(|rect| (effect.clone(), rect)))
+                .transpose()?;
+            let rule_source = match fade.effect.as_ref() {
+                Some(SubtreeTransitionEffect::Dim { rule, .. }) => Some(rule),
+                _ => fade.rule.as_ref(),
+            };
+            let rule = match rule_source {
                 Some(r) => Some((r.clone(), absolute_rect(owner, id)?)),
                 None => None,
             };
             p.composite = Some(Arc::new(CompositeFrame {
+                serial: fade.serial,
+                timing: [fade.elapsed_ms, fade.duration_ms],
+                effect,
                 before,
                 after,
                 progress: fade.elapsed_ms as f32 / fade.duration_ms as f32,
@@ -302,6 +367,10 @@ fn absolute_rect(owner: &BTreeMap<u32, LayerSpec>, id: u32) -> Result<[f32; 4]> 
         x += cur.rect[0];
         y += cur.rect[1];
     }
+    ensure!(
+        [x, y, w, h].iter().all(|v| v.is_finite()),
+        "subtree effect rectangle is non-finite"
+    );
     Ok([x, y, w, h])
 }
 fn descendants(owner: &BTreeMap<u32, LayerSpec>, root: u32) -> BTreeSet<u32> {
@@ -351,7 +420,8 @@ mod tests {
                     id: 1,
                     source: 3,
                     duration_ms: 1000,
-                    rule: None, external: false,
+                    rule: None,
+                    external: false,
                 }],
             )
             .unwrap();
@@ -438,7 +508,8 @@ mod tests {
                         id: 3,
                         source: 1,
                         duration_ms: 1000,
-                        rule: None, external: false,
+                        rule: None,
+                        external: false,
                     }]
                 )
                 .is_err()
@@ -472,7 +543,8 @@ mod tests {
                     id: 1,
                     source: 2,
                     duration_ms: 10,
-                    rule: None, external: false,
+                    rule: None,
+                    external: false,
                 }],
             );
             assert_eq!(result.is_ok(), owner <= 8);

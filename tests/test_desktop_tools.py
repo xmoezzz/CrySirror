@@ -96,10 +96,28 @@ class ProjectTests(unittest.TestCase):
         with self.assertRaises(d.ProjectError):
             d.validate(self.project)
     def test_native_adapter_is_not_packaged_as_demo(self):
-        for adapter in ("rfvp", "bgi"):
+        for adapter in ("rfvp", "bgi", "nscripter"):
             self.project["clients"][0]["adapter"] = adapter
-            with self.subTest(adapter=adapter), self.assertRaisesRegex(d.ProjectError, "hosted engine adapter removed"):
+            with self.subTest(adapter=adapter), self.assertRaisesRegex(d.ProjectError, "original scripts, not data VM actions"):
                 d.validate(self.project)
+    def test_first_class_native_bootstraps_are_scoped_and_strict(self):
+        configs={"rfvp":{"default_font":"font.ttf"},"bgi":{"script":"start._bp"},
+                 "nscripter":{"script":"0.txt","font":"default"}}
+        for adapter,config in configs.items():
+            project=copy.deepcopy(self.project)
+            project['clients'][0].update(adapter=adapter,config=config,program=[])
+            d.validate(project)
+            project['clients'][0]['config']=dict(config,unexpected=True)
+            with self.subTest(adapter=adapter),self.assertRaises(d.ProjectError): d.validate(project)
+        for config,validator in [({'default_font':'../font.ttf'},d.rfvp_config),
+                                 ({'script':'../start._bp'},d.bgi_config),
+                                 ({'script':'../0.txt','font':'default'},d.nscripter_config)]:
+            with self.assertRaises(d.ProjectError):validator(config)
+        d.nscripter_config({'script':'nscript.dat','font':'default',
+                            'archives':['__nscript/arc1.nsa','__nscript/arc.sar']})
+        for archives in ['arc.nsa', ['../escape'], ['']]:
+            with self.subTest(archives=archives), self.assertRaises(d.ProjectError):
+                d.nscripter_config({'script':'0.txt','font':'default','archives':archives})
     def test_duplicate_clients(self):
         self.project["clients"].append(copy.deepcopy(self.project["clients"][0]))
         with self.assertRaises(d.ProjectError):
@@ -241,7 +259,7 @@ class McpTests(unittest.TestCase):
         data = json.loads(self.server().call("project_inspect", {})["content"][0]["text"])
         self.assertIsNone(data["registered_native_adapters"])
         self.assertFalse(data["registry_verified"])
-        self.assertEqual(data["source_native_adapters"], ["reallive", "siglus"])
+        self.assertEqual(data["source_native_adapters"], ["avg32", "bgi", "krkr", "nscripter", "reallive", "rfvp", "siglus"])
         self.assertEqual(len(data["sha256"]), 64)
     def test_validation_calls_actual_inventory(self):
         data = json.loads(self.server().call("project_validate", {})["content"][0]["text"])

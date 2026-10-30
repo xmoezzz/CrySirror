@@ -233,7 +233,7 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
     }
     state.rich_text.asynchronous.jobs.admit(owner)?;
     let pool = state.runtime.assets.cpu_tasks();
-    let text = state.runtime.assets.text.clone();
+    let text = state.runtime.assets.text.for_client(state.client);
     if method == "beginMeasure" {
         let font = required(args, 0)?.as_str()?.to_owned();
         let size = required(args, 1)?.as_f32()?;
@@ -375,6 +375,7 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
 }
 fn schedule(
     state: &EngineState,
+    owner: ClientId,
     block: &mut Block,
     previous: Option<RevealState>,
     events: Vec<RevealEvent>,
@@ -383,7 +384,7 @@ fn schedule(
         block.events.len() + events.len() <= 4096,
         "text event queue full; drainEvents before advancing"
     );
-    let text = state.runtime.assets.text.clone();
+    let text = state.runtime.assets.text.for_client(owner);
     let layout = block.layout.clone();
     let options = raster_options(block);
     let icons = block.icons.clone();
@@ -477,7 +478,7 @@ pub(crate) fn reveal(state: &mut EngineState, delta: u64) -> Result<()> {
                     .surface(ClientId(key.0), &format!("__surface/{}", block.slot))
                     .is_none()
             {
-                if let Err(error) = schedule(state, block, previous, events) {
+                if let Err(error) = schedule(state, ClientId(key.0), block, previous, events) {
                     if error.is::<crysirror_tasks::CapacityExceeded>() {
                         block.render.elapsed = elapsed;
                         continue;
@@ -512,5 +513,5 @@ pub(crate) fn finish(state: &mut EngineState, block: &mut Block) -> Result<()> {
             .context("text has no typewriter")?
             .finish(false),
     );
-    schedule(state, block, previous, events)
+    schedule(state, state.client, block, previous, events)
 }

@@ -3,9 +3,9 @@
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Engine-owned menu trees, popup layout, radio state and ordered activation.
 use super::{UiEvent, WidgetId};
-use crate::layer::{Paint, Primitive, rect_valid, rectangle};
-use anyhow::{Context, Result, ensure};
-use crysirror_core::service::{InputFrame, buttons};
+use crate::layer::{rect_valid, rectangle, Paint, Primitive};
+use anyhow::{ensure, Context, Result};
+use crysirror_core::service::{buttons, InputFrame};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 fn yes() -> bool {
@@ -86,6 +86,18 @@ impl MenuItemSpec {
             }
         }
         None
+    }
+    /// Mutable lookup within one already owner-scoped menu tree.
+    pub fn find_mut(items: &mut [Self], id: u32) -> Option<&mut Self> {
+        for item in items {
+            if item.id == id { return Some(item); }
+            if let Some(found) = Self::find_mut(&mut item.children, id) { return Some(found); }
+        }
+        None
+    }
+    fn reachable(items: &[Self], id: u32) -> bool {
+        items.iter().any(|item| item.visible && item.enabled &&
+            ((item.id == id && !item.separator) || Self::reachable(&item.children,id)))
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -301,6 +313,18 @@ impl MenuSystem {
             MenuItemSpec::set_checked(&mut menu.spec.items, item, checked),
             "menu item missing"
         );
+        Ok(())
+    }
+    /// Update an owned item and close any popup branch invalidated by disabling it.
+    pub fn enabled(&mut self, owner: u32, bar: u32, item: u32, enabled: bool) -> Result<()> {
+        let menu = self.clients.get_mut(&owner).and_then(|bars| bars.get_mut(&bar)).context("menu missing")?;
+        MenuItemSpec::find_mut(&mut menu.spec.items, item).context("menu item missing")?.enabled = enabled;
+        menu.open = Menu::valid_path(&menu.spec, &menu.open);
+        // Preserve unrelated eligible gestures; disabling their ancestor or
+        // target must prevent a delayed release from activating it.
+        let invalid = |(o,b,target)| o==owner && b==bar && !MenuItemSpec::reachable(&menu.spec.items,target);
+        if self.pressed.is_some_and(invalid) { self.pressed=None; }
+        if self.focus.is_some_and(invalid) { self.focus=None; }
         Ok(())
     }
     pub fn get(&self, owner: u32, bar: u32) -> Option<&MenuSpec> {

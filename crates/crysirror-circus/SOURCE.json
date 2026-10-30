@@ -1,0 +1,66 @@
+{
+  "repository": "https://github.com/cokkeijigen/MesTextTool",
+  "commit": "67a3dcc4ab932d6b1b14e40eaadc67c36fb0d738",
+  "license": "GPL-3.0-or-later",
+  "purpose": "MES offset2 layout and operand ranges reference; bounded Rust parser and independently authored native interpreter calling CrySirror services, no original engine runtime or renderer",
+  "files": [
+    {
+      "path": "MesTextTool/src/mes/script_view.cpp",
+      "sha256": "7db90b223030286c6fb0845c41971548f2cc78fdb57104a5793eb2dbb64f9a53"
+    },
+    {
+      "path": "MesTextTool/src/mes/script_info.cpp",
+      "sha256": "92fa7dbfd98e9c3fbbc2962efe1af9a01d47c510a8593b56ea8d5109d65f03fd"
+    },
+    {
+      "path": "MesTextTool/src/mes/mes.hpp",
+      "sha256": "094a57a6fc7480d80e25ee594f7bbdd47dab719b6d03c5c64a82fec7c805fc5a"
+    }
+  ],
+  "native_execution_evidence": {
+    "method": "Owner-authorized local static analysis with IDA 9.0/Hex-Rays; no native game binary is executed or distributed",
+    "functions": [
+      "0x4284b0 opcode dispatcher",
+      "0x438560 token decoder",
+      "0x438370 conditional scan",
+      "0x437fd0 native label and u16 metadata copying",
+      "0x40cc50 value getter",
+      "0x40d240 assignment",
+      "0x40c7b0 NAMES.DAT v7",
+      "0x417ad0 1280x720 logical clip",
+      "0x417a10 native UI button declarations",
+      "0x417b90 native image records",
+      "0x418200 button image states",
+      "0x40EC50 / 0x40E9C0 fresh system defaults",
+      "0x40EB40 / 0x40C1C0 system.dat two-block ABI",
+      "0x4030F0 / 0x402430 native read-range inline and overflow storage",
+      "0x41B390 / 0x41B820 playerinput edit controls and validation",
+      "0x41AE60 / 0x425EE0 playerinput frozen scene source",
+      "0x4502C0 / 0x4500E0 native GDI placement and destination clip",
+      "0x43C390 24-byte music loop metadata in decoded frames",
+      "0x43B4C0 DirectSound centibel gain",
+      "0x41032E MSVC srand(timeGetTime)",
+      "0x41F300 / 0x41DAC0 / 0x41C490 / 0x41D1F0 native falling declarations mapped to shared VFX pools/node/mesh/completion; ordinary type1 density0..5 only",
+      "0x42E55D / 0x402320 single CRT random result and bounded save/replay history; worker sequence exchange before VM assignment",
+      "0x40A2E0 selector19 / 0x40C620 native save availability: DC4PHDL%02d.dat prefix356324 bytes; no save restoration",
+      "0x412B50 / 0x412BE0 native group20-render-tick motion and member242 hover-scale declarations mapped onto shared Layer/UI motion",
+      "0x42B8B6 selector26 / 0x40EB40 explicit system.dat reload; missing-file0x40E9C0 first-block reset retains separate source-entry block; 0x40DAD0/0x43CE40 audio reset policy",
+      "0x429793 / 0x433E50 process11 finalize/wait and real label activation through41FB00/4381F0",
+      "0x414BC0 native button state99/1/2 and15-tick scale transitions; shared UI motion and retained event delivery",
+      "0x412FB0 normal-state source-cut coverage alpha!=0; ImageResource::alpha_region and shared WidgetHitMask own extraction/sampling",
+      "0x442D60 / 0x4428E0 native state4 release activation, matching shared Button capture/release",
+      "0x42AFC8 native49 ->0x425C20 clears current groups via41F2B0 and transition via407BC0/444020(0), mapped to ResetScene before background presentation"
+    ],
+    "exact_build_profiles": [
+      {
+        "sha256": "178ee9a5e34356b11942213e2e32a34afe4933c90d563bf5a3d6402250f54ab7",
+        "music_loop_table_va": "0x4b4ba0",
+        "record_bytes": 24,
+        "frame_units": "decoded source sample frames",
+        "execution": "never executed; read-only data",
+        "save_probe_prefix_bytes": 356324
+      }
+    ]
+  },
+  "limits": "Registered ABI0xabb6 native VM remains partial: unsupported opcodes, keyboard/controller/page menu navigation, nonempty native UI text/markup, complex image animation and original slot saves fail explicitly. Shared menu process/coverage/motion mapping is implemented, but installed title/story progression still requires its actual validation. ABI0xaab6 is parse-only. No complete game compatibility is claimed."
+}

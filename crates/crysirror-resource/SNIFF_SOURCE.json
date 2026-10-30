@@ -1,0 +1,50 @@
+{
+  "capability": "Bounded content identification, not file validation or decoder support",
+  "implementation": "src/sniff.rs",
+  "integration": "Pinned registry libraries through their safe slice API. No source copied, libmagic FFI, file(1) process, ambient file/mmap reader, external rules installation or filename hint.",
+  "dependencies": [
+    {
+      "package": "pure-magic",
+      "version": "0.4.1",
+      "repository": "https://github.com/qjerome/magic-rs",
+      "published_vcs_commit": "dbe089356df083d4f97367a08d01f76c2a647a07",
+      "path_in_vcs": "pure-magic",
+      "crate_archive_sha256": "41ada465d7ee72ebb09a4f3281cb54669dc4ef83a4b002c1d799d3878f65def5",
+      "source_url": "https://static.crates.io/crates/pure-magic/pure-magic-0.4.1.crate",
+      "licence": "BSD-2-Clause OR GPL-3.0, BSD-2-Clause selected for this dependency",
+      "reviewed": [
+        "src/lib.rs (database, verification, matching and fallback paths)",
+        "src/readers.rs (slice versus ambient file entry points)",
+        "Cargo.toml",
+        ".cargo_vcs_info.json"
+      ]
+    },
+    {
+      "package": "magic-db",
+      "version": "0.6.0",
+      "repository": "https://github.com/qjerome/magic-rs",
+      "published_vcs_commit": "ae485022f1d49bc874e6dfafaca3c807576202c6",
+      "path_in_vcs": "magic-db",
+      "crate_archive_sha256": "5733f71e8b369ae0936d1a40fa17aea9261166436ed38281c6c89feb4a573f12",
+      "source_url": "https://static.crates.io/crates/magic-db/magic-db-0.6.0.crate",
+      "licence": "BSD-2-Clause OR GPL-3.0, BSD-2-Clause selected for this dependency",
+      "reviewed": [
+        "src/lib.rs",
+        "build.rs",
+        "Cargo.toml",
+        ".cargo_vcs_info.json",
+        "src/magdir/images PNG rules"
+      ],
+      "database": "All precompiled rules provided by this pinned crate; its documented DER exclusion remains. This is not a promise of every libmagic feature or format."
+    }
+  ],
+  "bounds": {
+    "prefix_bytes": 65536,
+    "initialization": "One verified immutable embedded database per process; initialization failures cached visibly. PNG sentinel verifies peer rule/MIME dispatch. No user-supplied database is deserialized.",
+    "capability_reads": "At most the first 64KiB, exact partial-read loop; zero-before-prefix, overreported reads and changing source length fail. Tail reads are not attempted.",
+    "unknown": "Generic data/text/empty fallbacks return None. Truncating a large input is reported separately from unexpected capability EOF.",
+    "scheduling": "Synchronous CPU primitive intended for shared resource/boot workers; owner publishes the owned result.",
+    "limitations": "Prefix evidence cannot authenticate a resource, detect arbitrary same-size mutation, establish complete structural validity, or prove decoder/VM support."
+  },
+  "unsafe_policy": "This workspace crate and both direct library crates forbid unsafe code. Transitive libraries are not claimed to be universally unsafe-free. pure-magic includes safe file/mmap convenience readers, but this integration never calls them."
+}

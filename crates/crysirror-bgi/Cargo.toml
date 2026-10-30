@@ -1,0 +1,22 @@
+[package]
+name = "crysirror-bgi"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+crysirror-core.workspace = true
+crysirror-runtime.workspace = true
+crysirror-scene.workspace = true
+crysirror-tasks.workspace = true
+crysirror-text.workspace = true
+crysirror-bgi-vm = { path = "../crysirror-bgi-vm" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+crysirror-image.workspace = true
+tempfile = "3"

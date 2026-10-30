@@ -3,9 +3,42 @@
 //!
 //! These operations work on stored channel bytes. They do not convert color
 //! spaces or normalize associated RGB into straight-alpha display pixels.
-use crate::{ImageSurface, bitmap::BitmapRect};
-use anyhow::{Result, ensure};
+use crate::{bitmap::BitmapRect, ImageSurface};
+use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
+
+/// Stored associated-channel tone adjustment. Channel order is caller-defined;
+/// the three percentages address the first three bytes and alpha is byte four.
+/// Percent 100 is identity; other values clamp colour to coverage. This kernel
+/// preserves the RFVP 0..200 arithmetic without owning native texture IDs.
+pub fn tone_channels_percent(pixels: &mut [u8], percent: [i32; 3]) -> Result<()> {
+    ensure!(
+        pixels.len().is_multiple_of(4),
+        "tone requires four-channel pixels"
+    );
+    ensure!(pixels.len() <= crate::MAX_DECODED_BYTES, "tone byte budget");
+    let percent = percent.map(|p| p.clamp(0, 200) as u32);
+    if percent == [100; 3] {
+        return Ok(());
+    }
+    for p in pixels.chunks_exact_mut(4) {
+        let a = u32::from(p[3]);
+        for i in 0..3 {
+            let c = u32::from(p[i]);
+            let t = percent[i];
+            p[i] = (if t < 100 {
+                t * c / 100
+            } else if t == 100 {
+                c
+            } else {
+                c + a * (t - 100) / 255
+            })
+            .min(a)
+            .min(255) as u8;
+        }
+    }
+    Ok(())
+}
 
 /// A checked, tightly packed byte coverage plane, independent of RGBA alpha.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,20 +278,18 @@ mod tests {
         };
         let mut dst = ImageSurface::filled(2, 1, [1, 2, 3, 4]).unwrap();
         let before = dst.clone();
-        assert!(
-            dst.composite_associated(&src, None, options(AssociatedBlend::Copy, 257))
-                .is_err()
-        );
+        assert!(dst
+            .composite_associated(&src, None, options(AssociatedBlend::Copy, 257))
+            .is_err());
         assert_eq!(dst, before);
         let plane = CoveragePlane {
             width: 1,
             height: 1,
             bytes: vec![1],
         };
-        assert!(
-            dst.composite_associated(&src, Some(&plane), options(AssociatedBlend::Copy, 256))
-                .is_err()
-        );
+        assert!(dst
+            .composite_associated(&src, Some(&plane), options(AssociatedBlend::Copy, 256))
+            .is_err());
         assert_eq!(dst, before);
         let opt = AssociatedBlitOptions {
             source_rect: BitmapRect::new(-1, 0, 3, 1),
@@ -292,16 +323,96 @@ mod tests {
             .unwrap();
         assert_eq!(image.rgba, [254, 0, 0, 13]);
         let before = image.clone();
-        assert!(
-            image
-                .filter_rgb(
-                    BitmapRect::new(0, 0, 1, 1),
-                    RgbFilter::Multiply {
-                        factors: [257, 0, 0]
-                    }
-                )
-                .is_err()
-        );
+        assert!(image
+            .filter_rgb(
+                BitmapRect::new(0, 0, 1, 1),
+                RgbFilter::Multiply {
+                    factors: [257, 0, 0]
+                }
+            )
+            .is_err());
         assert_eq!(image, before);
+    }
+}
+
+impl CoveragePlane {
+    /// Resample byte coverage with nearest sampling anchored at the source origin.
+    pub fn resize_nearest(&self, size: [u32; 2]) -> Result<Self> {
+        self.validate()?;
+        let count = crate::rgba_len(size[0], size[1])? / 4;
+        let mut bytes = Vec::with_capacity(count);
+        for y in 0..size[1] {
+            let sy = (u64::from(y) * u64::from(self.height) / u64::from(size[1])) as usize;
+            for x in 0..size[0] {
+                let sx = (u64::from(x) * u64::from(self.width) / u64::from(size[0])) as usize;
+                bytes.push(self.bytes[sy * self.width as usize + sx]);
+            }
+        }
+        Ok(Self {
+            width: size[0],
+            height: size[1],
+            bytes,
+        })
+    }
+}
+
+/// Replace RGBA alpha using a byte lookup over independent coverage, preserving
+/// stored RGB. This supports hard/soft threshold wipes without a private painter.
+pub fn map_coverage_alpha(pixels: &mut [u8], coverage: &[u8], lookup: &[u8; 256]) -> Result<()> {
+    ensure!(
+        pixels.len().is_multiple_of(4) && pixels.len() / 4 == coverage.len(),
+        "coverage/pixel length mismatch"
+    );
+    ensure!(
+        pixels.len() <= crate::MAX_DECODED_BYTES,
+        "coverage byte budget"
+    );
+    for (pixel, value) in pixels.chunks_exact_mut(4).zip(coverage) {
+        pixel[3] = lookup[*value as usize];
+    }
+    Ok(())
+}
+
+/// Byte threshold or clamped offset lookup for alpha wipes.
+pub fn coverage_threshold_lut(hard: bool, phase: u16) -> [u8; 256] {
+    std::array::from_fn(|a| {
+        if hard {
+            if a as u16 >= (phase & 255) {
+                255
+            } else {
+                0
+            }
+        } else {
+            (a as i32 + i32::from(phase) - 255).clamp(0, 255) as u8
+        }
+    })
+}
+
+#[cfg(test)]
+mod coverage_mapping_tests {
+    use super::*;
+    #[test]
+    fn scaling_and_thresholds_preserve_rgb_and_exact_pixel_alignment() {
+        let mask = CoveragePlane {
+            width: 2,
+            height: 1,
+            bytes: vec![0, 255],
+        };
+        let scaled = mask.resize_nearest([4, 2]).unwrap();
+        assert_eq!(scaled.bytes, [0, 0, 255, 255, 0, 0, 255, 255]);
+        let mut pixels = [11, 22, 33, 44].repeat(8);
+        map_coverage_alpha(
+            &mut pixels,
+            &scaled.bytes,
+            &coverage_threshold_lut(true, 128),
+        )
+        .unwrap();
+        assert_eq!(
+            &pixels[..16],
+            &[11, 22, 33, 0, 11, 22, 33, 0, 11, 22, 33, 255, 11, 22, 33, 255]
+        );
+        assert_eq!(coverage_threshold_lut(false, 255)[128], 128);
+        assert!(map_coverage_alpha(&mut pixels, &[0], &[0; 256]).is_err());
+        assert!(mask.resize_nearest([0, 2]).is_err());
     }
 }

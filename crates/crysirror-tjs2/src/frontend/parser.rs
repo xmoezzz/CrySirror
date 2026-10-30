@@ -1,7 +1,7 @@
 use crate::error::{Result, Span, TjsError};
 
 use super::diagnostic::{Diagnostic, FrontendOptions, FrontendOutput, attach_source_locations};
-use super::lexer::{InterpolatedPart, Token, TokenKind, lex};
+use super::lexer::{InterpolatedPart, Token, TokenKind, lex, lex_with};
 use super::syntax::*;
 
 pub fn parse(source: &str) -> Result<Program> {
@@ -15,7 +15,7 @@ pub fn parse_script(
 ) -> FrontendOutput<Program> {
     let source_name = name.into();
     let source = source.as_ref();
-    let tokens = match lex(source) {
+    let tokens = match lex_with(source, options.pp_values.as_ref()) {
         Ok(tokens) => tokens,
         Err(error) => {
             return FrontendOutput::new(
@@ -2083,7 +2083,7 @@ mod tests {
         let output = parse_script(
             "foo.tjs",
             "var x = 1\nreturn;",
-            FrontendOptions { recover: false },
+            FrontendOptions { recover: false, ..Default::default() },
         );
         let diagnostic = output.diagnostics.first().expect("diagnostic");
         assert_eq!(diagnostic.source_name.as_deref(), Some("foo.tjs"));

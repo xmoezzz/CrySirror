@@ -46,6 +46,47 @@ fn particles(app: &App) -> Vec<crysirror_vfx::Particle> {
 }
 
 #[test]
+fn sequence_status_fences_real_worker_state_and_same_revision_edits() {
+    let (_dir, mut app) = app();
+    let vfx = app.context().singleton("Vfx").unwrap();
+    let mut system = effect();
+    system["clock"] = json!({"source":"external","tick":0,"wall_time_ms":0});
+    system["sequence_rng"] = json!({"algorithm":"lcg32","state":7,"multiplier":214013,
+        "increment":2531011,"output_shift":16,"output_mask":32767});
+    let entity = app.context().call(vfx, "play", &[Value::from_json(system.clone())]).unwrap();
+    let status = |app: &mut App, tick: i64, epoch: i64| {
+        app.context().call(vfx, "sequenceStatus", &[entity.clone(), Value::Str("0".into()),
+            Value::Int(tick), Value::Int(epoch)]).unwrap().to_json()
+    };
+    assert_eq!(status(&mut app, 0, 0)["phase"], "pending");
+    assert!(app.runtime().unwrap().snapshot().unwrap_err().to_string().contains("worker-state reconstruction"));
+    app.prepare_render_offline().unwrap();
+    let ready = status(&mut app, 0, 0);
+    assert_eq!(ready["phase"], "ready");
+    assert_eq!(ready["sequence_rng"]["state"], 7);
+    assert_eq!(ready["completed_tick"], 0);
+    // Default max_steps=64 is normalized internally; it cannot prevent receipt
+    // publication or make a declaration itself count as a completed tick.
+    system["clock"]["tick"] = 1.into();
+    app.context().call(entity.as_object().unwrap(), "setVfx", &[Value::from_json(system.clone())]).unwrap();
+    assert_eq!(status(&mut app, 0, 0)["phase"], "pending");
+    app.prepare_render_offline().unwrap();
+    assert_eq!(status(&mut app, 1, 0)["phase"], "ready");
+    let mut next = system["sequence_rng"].clone();
+    next["state"] = 999.into();
+    system["sequence_exchange"] = json!({"epoch":1,"base_tick":1,"state":next});
+    app.context().call(entity.as_object().unwrap(), "setVfx", &[Value::from_json(system)]).unwrap();
+    assert_eq!(status(&mut app, 1, 1)["phase"], "pending");
+    app.prepare_render_offline().unwrap();
+    let exchanged = status(&mut app, 1, 1);
+    assert_eq!(exchanged["phase"], "ready");
+    assert_eq!(exchanged["exchange_epoch"], 1);
+    assert_eq!(exchanged["sequence_rng"]["state"], 999);
+    assert!(app.runtime().unwrap().snapshot().unwrap_err().to_string().contains("worker-state reconstruction"));
+    assert!(app.context().call(vfx, "sequenceStatus", &[entity, Value::Int(-1), Value::Int(0), Value::Int(0)]).is_err());
+}
+
+#[test]
 fn script_vfx_controls_mutate_shared_state_without_a_renderer_or_vm() {
     let (_dir, mut app) = app();
     let vfx = app.context().singleton("Vfx").unwrap();

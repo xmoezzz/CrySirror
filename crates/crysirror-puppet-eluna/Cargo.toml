@@ -1,15 +1,18 @@
 [package]
 name = "crysirror-puppet-eluna"
 version.workspace = true
-edition.workspace = true
+edition = "2024"
 license.workspace = true
 rust-version.workspace = true
 description = "Bridge: the eluna E-mote player as a crysirror-puppet PuppetSource (import/bake tooling; never shipped as PSB)"
 
 [dependencies]
+crysirror-image.workspace = true
 log = "0.4"
 crysirror-tasks.workspace = true
 crysirror-puppet.workspace = true
-siglus_scene_vm = { path = "../siglus-upstream/siglus_scene_vm", default-features = false }
-eluna = { package = "eluna_rs", path = "../siglus-upstream/eluna_rs" }
+eluna = { package = "crysirror-codec-emote", path = "../crysirror-codec-emote" }
 anyhow.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

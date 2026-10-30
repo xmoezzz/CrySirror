@@ -130,3 +130,6 @@ moves to `done` only with recorded behavior evidence.
 | [0094](0094-isolated-layer-subtree-crossfades.md) | Engine-owned isolated subtree crossfades and thin native exchange semantics | bounded profile; see STATUS for validation |
 | [0095](0095-avg32-installed-games-shared-raster.md) | Installed AVG32 games: vendored original interpreter over a shared PDT raster device, engine glyph/overlay layers, audio channels and save mount | implemented; see STATUS for validation |
 | [0096](0096-cxdec-xp3-content-filter-and-special-index.md) | CXDEC XP3 content filter and encrypted filename index, parameters recovered from the user's own EXE/TPM at mount | implemented; see STATUS for validation |
+| [0097](0097-krkr-protection-interpreted-and-lifted-filters.md) | KiriKiri protection: interpreted (no-JIT) x86 filters, lifted IR, no brute force or bulk extraction | proposed; static CXDEC/HXV4 recovery is what runs today |
+
+- [0098: Client-scoped GPU mesh frame history](0098-client-scoped-gpu-mesh-frame-history.md)

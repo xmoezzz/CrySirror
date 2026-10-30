@@ -1,2 +1,0 @@
-// vs_mesh_static / vs_mesh_skinned.
-#include "mesh_vertex.cgh"

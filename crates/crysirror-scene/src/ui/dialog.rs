@@ -6,9 +6,9 @@
 //! dialog is open it takes all UI input; choosing a button queues one
 //! `dialog_result` event (value = button id) for the owning client.
 use super::{UiEvent, WidgetId};
-use crate::layer::{Paint, Primitive, rectangle};
-use anyhow::{Context, Result, ensure};
-use crysirror_core::service::{InputFrame, SIMPLE_TEXT_LAYOUT, UNWRAPPED_TEXT_LAYOUT, buttons};
+use crate::layer::{rectangle, Paint, Primitive};
+use anyhow::{ensure, Context, Result};
+use crysirror_core::service::{buttons, InputFrame, SIMPLE_TEXT_LAYOUT, UNWRAPPED_TEXT_LAYOUT};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 fn size() -> u16 {
@@ -55,10 +55,16 @@ impl DialogSpec {
         ensure!((1..=8).contains(&self.buttons.len()), "dialog button count");
         let mut ids = BTreeSet::new();
         for b in &self.buttons {
-            ensure!(ids.insert(b.id) && !b.label.is_empty() && b.label.len() <= 256, "dialog button id/label");
+            ensure!(
+                ids.insert(b.id) && !b.label.is_empty() && b.label.len() <= 256,
+                "dialog button id/label"
+            );
         }
         ensure!(ids.contains(&self.default), "dialog default button missing");
-        ensure!(self.cancel.is_none_or(|c| ids.contains(&c)), "dialog cancel button missing");
+        ensure!(
+            self.cancel.is_none_or(|c| ids.contains(&c)),
+            "dialog cancel button missing"
+        );
         Ok(())
     }
 }
@@ -94,8 +100,15 @@ impl DialogSystem {
     }
     pub fn open(&mut self, owner: u32, spec: DialogSpec) -> Result<()> {
         spec.validate()?;
-        ensure!(!self.clients.contains_key(&owner), "a dialog is already open for this client");
-        let focus = spec.buttons.iter().position(|b| b.id == spec.default).unwrap_or(0);
+        ensure!(
+            !self.clients.contains_key(&owner),
+            "a dialog is already open for this client"
+        );
+        let focus = spec
+            .buttons
+            .iter()
+            .position(|b| b.id == spec.default)
+            .unwrap_or(0);
         self.clients.insert(owner, Dialog { spec, focus });
         Ok(())
     }
@@ -136,10 +149,22 @@ impl DialogSystem {
         let title_h = if d.spec.title.is_empty() { 0. } else { s * 1.6 };
         let message_h = lines * s * 1.4;
         let button_h = s * 2.;
-        let height = (s + title_h + message_h + s + button_h + s).min(ch - 16.).max(1.);
+        let height = (s + title_h + message_h + s + button_h + s)
+            .min(ch - 16.)
+            .max(1.);
         let panel = [(cw - width) / 2., (ch - height) / 2., width, height];
-        let title = [panel[0] + s, panel[1] + s * 0.6, width - 2. * s, title_h.max(1.)];
-        let message = [panel[0] + s, panel[1] + s + title_h, width - 2. * s, message_h.max(1.)];
+        let title = [
+            panel[0] + s,
+            panel[1] + s * 0.6,
+            width - 2. * s,
+            title_h.max(1.),
+        ];
+        let message = [
+            panel[0] + s,
+            panel[1] + s + title_h,
+            width - 2. * s,
+            message_h.max(1.),
+        ];
         let n = d.spec.buttons.len() as f32;
         let gap = s * 0.6;
         let bw = ((width - 2. * s - gap * (n - 1.)) / n).min(s * 7.).max(1.);
@@ -149,7 +174,13 @@ impl DialogSystem {
         let buttons = (0..d.spec.buttons.len())
             .map(|i| [bx + i as f32 * (bw + gap), by, bw, button_h])
             .collect();
-        Layout { backdrop: [0., 0., cw, ch], panel, title, message, buttons }
+        Layout {
+            backdrop: [0., 0., cw, ch],
+            panel,
+            title,
+            message,
+            buttons,
+        }
     }
     /// Modal input: returns queued events and whether input was consumed
     /// (always, while a dialog is open).
@@ -198,7 +229,10 @@ impl DialogSystem {
             let d = self.clients.remove(&owner).context("dialog")?;
             self.pressed = None;
             events.push(UiEvent {
-                widget: WidgetId { owner, id: d.spec.id },
+                widget: WidgetId {
+                    owner,
+                    id: d.spec.id,
+                },
                 kind: "dialog_result".into(),
                 value: d.spec.buttons[i].id as f32,
                 menu_bar: None,
@@ -217,8 +251,28 @@ impl DialogSystem {
         // Primitive identity apart from widgets and menus (`bar << 16 | item`).
         let pid = 0xFFFF_0000 | d.spec.id;
         let mut out = vec![
-            rectangle(owner, pid, 210, l.backdrop, Paint::Solid { color: [0, 0, 0, 128] }, clip, order(0)),
-            rectangle(owner, pid, 211, l.panel, Paint::Solid { color: [36, 40, 48, 255] }, clip, order(1)),
+            rectangle(
+                owner,
+                pid,
+                210,
+                l.backdrop,
+                Paint::Solid {
+                    color: [0, 0, 0, 128],
+                },
+                clip,
+                order(0),
+            ),
+            rectangle(
+                owner,
+                pid,
+                211,
+                l.panel,
+                Paint::Solid {
+                    color: [36, 40, 48, 255],
+                },
+                clip,
+                order(1),
+            ),
         ];
         let text = |text: &str, size: u16, color, layout: &str| Paint::Text {
             text: text.to_owned(),
@@ -228,18 +282,64 @@ impl DialogSystem {
             layout: layout.into(),
         };
         if !d.spec.title.is_empty() {
-            out.push(rectangle(owner, pid, 212, l.title, text(&d.spec.title, s, [200, 210, 230, 255], UNWRAPPED_TEXT_LAYOUT), Some(l.title), order(2)));
+            out.push(rectangle(
+                owner,
+                pid,
+                212,
+                l.title,
+                text(
+                    &d.spec.title,
+                    s,
+                    [200, 210, 230, 255],
+                    UNWRAPPED_TEXT_LAYOUT,
+                ),
+                Some(l.title),
+                order(2),
+            ));
         }
-        out.push(rectangle(owner, pid, 213, l.message, text(&d.spec.message, s, [245, 245, 245, 255], SIMPLE_TEXT_LAYOUT), Some(l.message), order(3)));
+        out.push(rectangle(
+            owner,
+            pid,
+            213,
+            l.message,
+            text(&d.spec.message, s, [245, 245, 245, 255], SIMPLE_TEXT_LAYOUT),
+            Some(l.message),
+            order(3),
+        ));
         for (i, (b, r)) in d.spec.buttons.iter().zip(&l.buttons).enumerate() {
             let focused = i == d.focus;
             let sub = 214 + i as u8 * 2;
-            out.push(rectangle(owner, pid, sub, *r, Paint::Solid {
-                color: if focused { [65, 85, 120, 255] } else { [60, 64, 72, 255] },
-            }, clip, order(4)));
+            out.push(rectangle(
+                owner,
+                pid,
+                sub,
+                *r,
+                Paint::Solid {
+                    color: if focused {
+                        [65, 85, 120, 255]
+                    } else {
+                        [60, 64, 72, 255]
+                    },
+                },
+                clip,
+                order(4),
+            ));
             let pad = f32::from(s) * 0.5;
-            let label = [r[0] + pad, r[1] + (r[3] - f32::from(s) * 1.2) / 2., (r[2] - 2. * pad).max(1.), f32::from(s) * 1.3];
-            out.push(rectangle(owner, pid, sub + 1, label, text(&b.label, s, [245, 245, 245, 255], UNWRAPPED_TEXT_LAYOUT), Some(*r), order(5)));
+            let label = [
+                r[0] + pad,
+                r[1] + (r[3] - f32::from(s) * 1.2) / 2.,
+                (r[2] - 2. * pad).max(1.),
+                f32::from(s) * 1.3,
+            ];
+            out.push(rectangle(
+                owner,
+                pid,
+                sub + 1,
+                label,
+                text(&b.label, s, [245, 245, 245, 255], UNWRAPPED_TEXT_LAYOUT),
+                Some(*r),
+                order(5),
+            ));
         }
         Ok(out)
     }

@@ -4,6 +4,7 @@
 pub mod assets;
 pub mod csv;
 pub mod frame;
+pub mod font_resources;
 pub mod media;
 pub mod model;
 pub mod physics;
@@ -12,6 +13,7 @@ pub mod script;
 pub mod structured_text;
 pub mod vfs;
 pub mod vfx;
+mod vfx_query;
 pub mod vector;
 pub use model::Project;
 pub use runtime::{AdapterRegistry, Runtime};

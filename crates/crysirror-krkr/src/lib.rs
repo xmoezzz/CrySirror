@@ -13,6 +13,8 @@
 pub mod adapter;
 mod constants;
 mod async_trigger;
+mod alpha_movie;
+mod exe_options;
 mod kag;
 mod kag_save;
 pub mod host;
@@ -40,6 +42,10 @@ mod text_render_plugin;
 mod motion_plugin;
 
 mod csv_plugin;
+mod line_plugin;
+mod varfile_plugin;
+mod audio_plugin;
+mod kaicho_plugin;
 mod psbfile_plugin;
 
 mod kirakira;
@@ -51,3 +57,5 @@ mod storage_plugins;
 mod transitions;
 
 mod piled_copy;
+
+mod font_resources;

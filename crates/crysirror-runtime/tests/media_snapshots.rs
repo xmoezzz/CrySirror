@@ -46,4 +46,10 @@ fn media_snapshots_reject_even_stopped_resources_whose_textures_cannot_be_recons
             .to_string()
             .contains("retained EOF frames")
     );
+    assert!(rt.host.media_request(ClientId(2), MediaRequest::Remove { id: 0 }).is_err());
+    assert!(rt.host.media_info(ClientId(1), 0).is_ok());
+    rt.host.media_request(ClientId(1), MediaRequest::Remove { id: 0 }).unwrap();
+    assert!(rt.host.media_info(ClientId(1), 0).is_err());
+    assert!(!rt.host.media.has_resources());
+    assert!(rt.snapshot().is_ok(), "explicit removal releases the reconstruction obligation");
 }

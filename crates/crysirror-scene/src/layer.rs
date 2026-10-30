@@ -2,9 +2,15 @@
 //! Retained layers, parent transforms, clips and painter ordering. Derived from
 //! siglus_rs layer.rs storage/ordering and render_math.rs projection semantics.
 mod crossfade;
-pub use crossfade::{CompositeFrame, RuleWipe, SubtreeCrossfade};
+mod crossfade_effect;
+mod snapshot_opacity;
+pub mod motion;
+pub use motion::{MotionProperty,MotionTrackSpec,MotionTrackStatus,MotionStatus};
+use motion::MotionTracks;
 use crate::projection;
 use anyhow::{Context, Result, bail, ensure};
+pub use crossfade::{CompositeFrame, RuleWipe, SubtreeCrossfade};
+pub use crossfade_effect::{SubtreeTransitionEffect, MAX_TRANSITION_BLUR_RADIUS};
 use crysirror_core::{
     path::{Mount, VfsPath},
     state::ClientId,
@@ -148,6 +154,9 @@ pub enum Blend {
     /// Photoshop screen keeping the destination alpha (omPsScreen with
     /// holdAlpha): D·(1 - a·S) + a·S·Da.
     AtopScreen,
+    /// Replace the colour and keep the destination alpha (KiriKiri copyRect
+    /// on dfOpaque with holdAlpha, TVP_BB_COPY_MAIN): straight S·Da.
+    AtopCopy,
 }
 /// Per-layer 2D filter stack with the stage order and parameter meaning of
 /// the Siglus/tona3 sprite effect (ADR 0021). Color math runs on 8-bit
@@ -483,7 +492,11 @@ impl Paint {
                 text.len() <= 1024 * 1024
                     && !font.is_empty()
                     && (1..=512).contains(size)
-                    && matches!(layout.as_str(), crysirror_core::service::SIMPLE_TEXT_LAYOUT | crysirror_core::service::UNWRAPPED_TEXT_LAYOUT),
+                    && matches!(
+                        layout.as_str(),
+                        crysirror_core::service::SIMPLE_TEXT_LAYOUT
+                            | crysirror_core::service::UNWRAPPED_TEXT_LAYOUT
+                    ),
                 "unsupported text paint/profile"
             ),
             Self::GlyphRun {
@@ -498,7 +511,15 @@ impl Paint {
                     !font.is_empty() && font.len() <= 256 && !font.chars().any(char::is_control),
                     "invalid glyph-run font alias"
                 );
-                ensure!(blur.is_none_or(|b| b.radius <= 64), "glyph blur radius must be 0..=64");
+                ensure!(
+                    blur.is_none_or(|b| b.radius <= 64),
+                    "glyph blur radius must be 0..=64"
+                );
+                ensure!(
+                    blur.is_none_or(|b| b.kernel == GlyphCoverageKernel::WeightedBlur
+                        || (b.radius <= 16 && b.level == 256)),
+                    "glyph outline/face requires radius 0..=16 and level 256"
+                );
                 let valid_size = |s: f32| s.is_finite() && (1.0..=512.0).contains(&s);
                 ensure!(
                     valid_size(*size) && glyphs.len() <= 65_536,
@@ -557,28 +578,65 @@ pub fn snapshot_nesting(layers: &[LayerSpec]) -> usize {
         .unwrap_or(0)
 }
 fn validate_snapshot(size: [u32; 2], layers: &[LayerSpec]) -> Result<()> {
-    ensure!(size.iter().all(|v| (1..=8192).contains(v)), "snapshot resolution budget");
-    ensure!(!layers.is_empty() && layers.len() <= 4096, "snapshot layer budget");
+    ensure!(
+        size.iter().all(|v| (1..=8192).contains(v)),
+        "snapshot resolution budget"
+    );
+    ensure!(
+        !layers.is_empty() && layers.len() <= 4096,
+        "snapshot layer budget"
+    );
     let by_id: BTreeMap<_, _> = layers.iter().map(|s| (s.id, s)).collect();
     ensure!(by_id.len() == layers.len(), "snapshot duplicate layer IDs");
-    ensure!(layers.iter().filter(|s| s.parent.is_none()).count() == 1, "snapshot needs one local root");
+    ensure!(
+        layers.iter().filter(|s| s.parent.is_none()).count() == 1,
+        "snapshot needs one local root"
+    );
     let parents: BTreeSet<_> = layers.iter().filter_map(|s| s.parent).collect();
-    ensure!(snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING, "snapshot nesting budget");
+    ensure!(
+        snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING,
+        "snapshot nesting budget"
+    );
     for layer in layers {
-        ensure!(!matches!(layer.paint, Paint::Puppet { .. }), "snapshot dynamic puppet is unsupported");
-        ensure!(layer.paint.glyph_reveal_status().is_none_or(|r| r.complete), "snapshot dynamic glyph reveal is unsupported");
-        ensure!(matches!(layer.blend, Blend::Normal | Blend::Atop | Blend::AtopMultiply | Blend::AtopScreen), "snapshot requires normal or atop layer blend");
+        ensure!(
+            !matches!(layer.paint, Paint::Puppet { .. }),
+            "snapshot dynamic puppet is unsupported"
+        );
+        ensure!(
+            layer.paint.glyph_reveal_status().is_none_or(|r| r.complete),
+            "snapshot dynamic glyph reveal is unsupported"
+        );
+        ensure!(
+            matches!(
+                layer.blend,
+                Blend::Normal
+                    | Blend::Atop
+                    | Blend::AtopMultiply
+                    | Blend::AtopScreen
+                    | Blend::AtopCopy
+            ),
+            "snapshot requires normal or atop layer blend"
+        );
         if parents.contains(&layer.id) {
-            ensure!(layer.opacity == 255, "snapshot group opacity requires isolated composition");
+            ensure!(
+                layer.opacity == 255,
+                "snapshot group opacity requires isolated composition"
+            );
         }
         let t = &layer.transform;
-        ensure!(!t.camera_enabled && !t.billboard && t.rotate_x == 0. && t.rotate_y == 0., "snapshot requires 2D layer transforms");
+        ensure!(
+            !t.camera_enabled && !t.billboard && t.rotate_x == 0. && t.rotate_y == 0.,
+            "snapshot requires 2D layer transforms"
+        );
         let mut parent = layer.parent;
         let mut depth = 0;
         while let Some(id) = parent {
             depth += 1;
             ensure!(depth < 30, "snapshot depth/cycle budget");
-            parent = by_id.get(&id).context("snapshot parent outside frozen tree")?.parent;
+            parent = by_id
+                .get(&id)
+                .context("snapshot parent outside frozen tree")?
+                .parent;
         }
     }
     // Nested payloads are validated by this install; the nesting budget above
@@ -591,10 +649,28 @@ fn validate_snapshot(size: [u32; 2], layers: &[LayerSpec]) -> Result<()> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GlyphBlur {
-    /// Kernel radius in pixels, 1..=64 (0 only scales coverage by `level`).
+    /// Weighted-blur radius 0..=64; outline/face extent 0..=16. Zero blur
+    /// only scales coverage by `level`; zero outline/face leaves it unchanged.
     pub radius: u8,
     /// Coverage gain in 1/256 units; values above 255 amplify (thick edges).
     pub level: u16,
+    /// Coverage operation. Existing serialized blur records retain the native
+    /// weighted-blur kernel; outline/face use unscaled 256-level coverage.
+    #[serde(default)]
+    pub kernel: GlyphCoverageKernel,
+}
+/// Engine-owned glyph coverage operators; native adapters select policy and
+/// placement while Text and the shared renderer own mask resources.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GlyphCoverageKernel {
+    #[default]
+    /// Existing weighted coverage blur, scaled by level/256.
+    WeightedBlur,
+    /// Circular maximum-coverage outline, with origin shifted by -radius.
+    DiskOutline,
+    /// Alpha union of a (radius+1) square of face copies, growing down/right.
+    SquareFace,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -630,6 +706,10 @@ pub struct LayerSpec {
     /// Source UV rectangle [u0, v0, u1, v1] of an image paint.
     #[serde(default)]
     pub uv: Option<[f32; 4]>,
+    /// Explicit image texture addressing. Non-default modes accept bounded
+    /// repeated UV coordinates and are supported only by image paints.
+    #[serde(default)]
+    pub sampling:ImageSampling,
     /// Siglus-style 2D filter stack (ADR 0021).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<LayerFilter>,
@@ -654,6 +734,7 @@ pub struct Primitive {
     pub opacity: u8,
     pub blend: Blend,
     pub uv: [f32; 4],
+    pub sampling:ImageSampling,
     pub filter: Option<LayerFilter>,
     /// Evaluated puppet meshes of a `Paint::Puppet` layer (ADR 0029).
     pub puppet: Option<Arc<crysirror_puppet::PuppetFrame>>,
@@ -738,6 +819,8 @@ pub struct LayerSystem {
     transition: Option<ActiveTransition>,
     #[serde(default)]
     transition_serial: u64,
+    #[serde(default)]
+    motions: MotionTracks,
     /// An open multi-batch transaction (see [`LayerSystem::transaction`]).
     #[serde(skip)]
     txn: TxnSlot,
@@ -759,6 +842,7 @@ type SideState = (
     BTreeSet<(u32, u32)>,
     Option<ActiveTransition>,
     u64,
+    MotionTracks,
 );
 
 /// Originals of every layer the transaction's batches touched (first touch
@@ -979,6 +1063,12 @@ pub fn intersect(a: [f32; 4], b: [f32; 4]) -> Option<[f32; 4]> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LayerCommand {
+    /// Start or replace one local scalar track on an owned layer.
+    BeginMotion {id:u32,track:MotionTrackSpec},
+    /// Advance an external track in its caller-declared clock units.
+    SetMotionElapsed {id:u32,property:MotionProperty,elapsed:u64},
+    /// Cancel selected/all tracks, optionally applying their final values.
+    EndMotion {id:u32,#[serde(default)] property:Option<MotionProperty>,#[serde(default)] finish:bool},
     Put {
         layer: LayerSpec,
     },
@@ -1034,59 +1124,117 @@ pub enum LayerCommand {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         external: bool,
     },
+    /// Engine-owned blur or processed-rule transition over isolated subtrees.
+    BeginCrossfadeEffect {
+        id: u32,
+        source: u32,
+        duration_ms: u64,
+        effect: SubtreeTransitionEffect,
+        #[serde(default)]
+        external: bool,
+    },
     /// Progress of an `external` crossfade, in ms of its duration.
-    SetCrossfadeElapsed { id: u32, elapsed_ms: u64 },
+    SetCrossfadeElapsed {
+        id: u32,
+        elapsed_ms: u64,
+    },
     /// Release a subtree transition after observing completion or cancellation.
-    EndCrossfade { id: u32 },
+    EndCrossfade {
+        id: u32,
+    },
     /// Finish this client's transition immediately (skip).
     EndTransition,
 }
 impl LayerSystem {
     /// Inspect the same client-scoped logical node used by render extraction.
+    /// Owner-scoped retained motion state; an unknown layer is an error.
+    pub fn motion_status(&self,client:ClientId,id:u32)->Result<MotionStatus>{
+        ensure!(self.get(client,id).is_some(),"motion layer missing");
+        Ok(self.motions.status(client.0,id))
+    }
     pub fn get(&self, client: ClientId, id: u32) -> Option<&LayerSpec> {
         self.clients.get(&client.0)?.get(&id)
+    }
+    /// Inspect an immutable owner-published dynamic mesh frame. This is CPU
+    /// geometry/resource metadata, never a renderer or device pointer.
+    pub fn dynamic_puppet_frame(&self,client:u32,id:u32)->Option<&Arc<crysirror_puppet::PuppetFrame>>{
+        self.dynamic_puppets.contains(&(client,id)).then(||self.puppet_frames.get(&(client,id))).flatten()
+    }
+    /// Whether removing this node would also affect a client-owned child.
+    pub fn has_children(&self,client:ClientId,id:u32)->bool{
+        self.clients.get(&client.0).is_some_and(|layers|layers.values().any(|layer|layer.parent==Some(id)))
     }
     /// Frozen static, visible subtree input for shared retained Canvas capture.
     /// The requested root is evaluated in its own local image space.
     /// Frozen specs of `root`'s visible subtree. An isolated crossfade inside
     /// it is captured at its nearest endpoint (not the blended intermediate).
-    pub(crate) fn snapshot_subtree_specs(&self, client: ClientId, root: u32) -> Result<Vec<LayerSpec>> {
-        let owner = self.clients.get(&client.0).context("snapshot client missing")?;
+    pub(crate) fn snapshot_subtree_specs(
+        &self,
+        client: ClientId,
+        root: u32,
+    ) -> Result<Vec<LayerSpec>> {
+        let owner = self
+            .clients
+            .get(&client.0)
+            .context("snapshot client missing")?;
         ensure!(owner.contains_key(&root), "snapshot layer {root} missing");
         let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for (&id, layer) in owner {
-            if let Some(parent) = layer.parent { children.entry(parent).or_default().push(id); }
+            if let Some(parent) = layer.parent {
+                children.entry(parent).or_default().push(id);
+            }
         }
         let mut selected = BTreeSet::new();
         let mut stack = vec![(root, 0usize)];
         let mut out = Vec::new();
         while let Some((id, depth)) = stack.pop() {
             let original = &owner[&id];
-            if id != root && (!original.visible || original.opacity == 0) { continue; }
+            if id != root && (!original.visible || original.opacity == 0) {
+                continue;
+            }
             ensure!(depth < 30, "snapshot subtree depth budget");
             ensure!(selected.insert(id), "snapshot subtree cycle");
             ensure!(selected.len() <= 4096, "snapshot subtree node budget");
             let mut layer = original.clone();
             if id == root {
                 layer.parent = None;
-                layer.rect[0] = 0.; layer.rect[1] = 0.;
+                layer.rect[0] = 0.;
+                layer.rect[1] = 0.;
                 layer.transform = SpriteTransform::default();
-                layer.visible = true; layer.opacity = 255;
+                layer.visible = true;
+                layer.opacity = 255;
             }
-            ensure!(layer.blend == Blend::Normal, "snapshot requires normal layer blend");
-            ensure!(!matches!(layer.paint, Paint::Puppet { .. }), "snapshot of dynamic puppet needs an evaluated immutable resource");
+            ensure!(
+                layer.blend == Blend::Normal,
+                "snapshot requires normal layer blend"
+            );
+            ensure!(
+                !matches!(layer.paint, Paint::Puppet { .. }),
+                "snapshot of dynamic puppet needs an evaluated immutable resource"
+            );
             if let Paint::Snapshot { layers, .. } = &layer.paint {
-                ensure!(1 + snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING, "snapshot nesting budget");
+                ensure!(
+                    1 + snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING,
+                    "snapshot nesting budget"
+                );
             }
-            ensure!(!self.dynamic_puppets.contains(&(client.0, id)) && !self.puppet_frames.contains_key(&(client.0, id)),
-                "snapshot of evaluated/dynamic puppet needs an immutable mesh resource");
-            ensure!(layer.paint.glyph_reveal_status().is_none_or(|r| r.complete), "snapshot of dynamic glyph reveal is unsupported");
+            ensure!(
+                !self.dynamic_puppets.contains(&(client.0, id))
+                    && !self.puppet_frames.contains_key(&(client.0, id)),
+                "snapshot of evaluated/dynamic puppet needs an immutable mesh resource"
+            );
+            ensure!(
+                layer.paint.glyph_reveal_status().is_none_or(|r| r.complete),
+                "snapshot of dynamic glyph reveal is unsupported"
+            );
             let t = &layer.transform;
-            ensure!(!t.camera_enabled && !t.billboard && t.rotate_x == 0. && t.rotate_y == 0., "snapshot requires 2D layer transforms");
+            ensure!(
+                !t.camera_enabled && !t.billboard && t.rotate_x == 0. && t.rotate_y == 0.,
+                "snapshot requires 2D layer transforms"
+            );
             if let Some(ids) = children.get(&id) {
-                if ids.iter().any(|child| owner[child].visible && owner[child].opacity != 0) {
-                    ensure!(layer.opacity == 255, "snapshot group opacity requires isolated composition");
-                }
+                // Partial group alpha is isolated after the complete visible
+                // tree (and any transition endpoint) is frozen.
                 stack.extend(ids.iter().map(|child| (*child, depth + 1)));
             }
             out.push(layer);
@@ -1114,11 +1262,15 @@ impl LayerSystem {
             for &node in &selected {
                 let mut cursor = Some(node);
                 while let Some(n) = cursor {
-                    ensure!(n != *id && n != fade.source, "snapshot of active composite is unsupported");
+                    ensure!(
+                        n != *id && n != fade.source,
+                        "snapshot of active composite is unsupported"
+                    );
                     cursor = owner.get(&n).and_then(|s| s.parent);
                 }
             }
         }
+        snapshot_opacity::isolate(&mut out)?;
         out.sort_by_key(|layer| (layer.order, layer.id));
         Ok(out)
     }
@@ -1133,6 +1285,7 @@ impl LayerSystem {
             self.dynamic_puppets.clone(),
             self.transition.clone(),
             self.transition_serial,
+            self.motions.clone(),
         )
     }
     /// Run `f` as one atomic unit over several `apply_batch` calls without
@@ -1172,6 +1325,7 @@ impl LayerSystem {
                 self.dynamic_puppets,
                 self.transition,
                 self.transition_serial,
+                self.motions,
             ) = txn.side;
         }
         result
@@ -1205,6 +1359,7 @@ impl LayerSystem {
                 self.dynamic_puppets,
                 self.transition,
                 self.transition_serial,
+                self.motions,
             ) = side;
             return Err(e);
         }
@@ -1226,8 +1381,45 @@ impl LayerSystem {
         let mut children: Option<BTreeMap<u32, BTreeSet<u32>>> = None;
         for command in commands {
             match command {
-                LayerCommand::BeginCrossfade { id, source, duration_ms, rule, external } => {
-                    staged.begin_crossfade(client, *id, *source, *duration_ms, rule.clone(), *external)?;
+                LayerCommand::BeginMotion{id,track}=>{
+                    let layer=staged.clients.get_mut(&client.0).and_then(|o|o.get_mut(id)).context("motion layer missing")?;
+                    journal.entry(*id).or_insert_with(||Some(layer.clone()));
+                    let current=track.property.layer_value(layer);
+                    let value=staged.motions.begin(client.0,*id,track,current,true)?;
+                    track.property.set_layer(layer,value);continue;
+                }
+                LayerCommand::SetMotionElapsed{id,property,elapsed}=>{
+                    let layer=staged.clients.get_mut(&client.0).and_then(|o|o.get_mut(id)).context("motion layer missing")?;
+                    journal.entry(*id).or_insert_with(||Some(layer.clone()));
+                    let value=staged.motions.advance(client.0,*id,*property,*elapsed)?;
+                    property.set_layer(layer,value);continue;
+                }
+                LayerCommand::EndMotion{id,property,finish}=>{
+                    let layer=staged.clients.get_mut(&client.0).and_then(|o|o.get_mut(id)).context("motion layer missing")?;
+                    journal.entry(*id).or_insert_with(||Some(layer.clone()));
+                    for(p,value)in staged.motions.end(client.0,*id,*property,*finish)?{p.set_layer(layer,value);}continue;
+                }
+                LayerCommand::BeginCrossfade {
+                    id,
+                    source,
+                    duration_ms,
+                    rule,
+                    external,
+                } => {
+                    staged.begin_crossfade(
+                        client,
+                        *id,
+                        *source,
+                        *duration_ms,
+                        rule.clone(),
+                        *external,
+                    )?;
+                    continue;
+                }
+                LayerCommand::BeginCrossfadeEffect {id,source,duration_ms,effect,external} => {
+                    effect.validate()?;
+                    staged.begin_crossfade(client,*id,*source,*duration_ms,None,*external)?;
+                    staged.crossfades.get_mut(&client.0).unwrap().get_mut(id).unwrap().effect=Some(effect.clone());
                     continue;
                 }
                 LayerCommand::SetCrossfadeElapsed { id, elapsed_ms } => {
@@ -1235,7 +1427,9 @@ impl LayerSystem {
                     continue;
                 }
                 LayerCommand::EndCrossfade { id } => {
-                    if let Some(fades) = staged.crossfades.get_mut(&client.0) { fades.remove(id); }
+                    if let Some(fades) = staged.crossfades.get_mut(&client.0) {
+                        fades.remove(id);
+                    }
                     continue;
                 }
                 LayerCommand::Transition { transition } => {
@@ -1302,6 +1496,7 @@ impl LayerSystem {
                     if matches!(layer.paint, Paint::Snapshot { .. }) {
                         layer.paint.validate()?;
                     }
+                    staged.motions.cancel(client.0,layer.id);
                     let previous = owner.insert(layer.id, layer.clone());
                     if let Some(index) = &mut children {
                         if let Some(p) = previous.as_ref().and_then(|s| s.parent) {
@@ -1336,6 +1531,7 @@ impl LayerSystem {
                         }
                     }
                     for r in &remove {
+                        staged.motions.cancel(client.0,*r);
                         if let Some(spec) = owner.remove(r) {
                             if let Some(set) = spec.parent.and_then(|p| index.get_mut(&p)) {
                                 set.remove(r);
@@ -1344,9 +1540,15 @@ impl LayerSystem {
                         }
                         index.remove(r);
                     }
-                    if let Some(fades) = staged.crossfades.get_mut(&client.0) { fades.retain(|id, f| !remove.contains(id) && !remove.contains(&f.source)); }
-                    staged.dynamic_puppets.retain(|(c,id)| *c != client.0 || !remove.contains(id));
-                    staged.puppet_frames.retain(|(c,id),_| *c != client.0 || !remove.contains(id));
+                    if let Some(fades) = staged.crossfades.get_mut(&client.0) {
+                        fades.retain(|id, f| !remove.contains(id) && !remove.contains(&f.source));
+                    }
+                    staged
+                        .dynamic_puppets
+                        .retain(|(c, id)| *c != client.0 || !remove.contains(id));
+                    staged
+                        .puppet_frames
+                        .retain(|(c, id), _| *c != client.0 || !remove.contains(id));
                 }
                 other => {
                     let id = match other {
@@ -1410,10 +1612,12 @@ impl LayerSystem {
         }
         self.puppets.retain(|_, s| !s.is_empty());
         let puppets = &self.puppets;
-        self.dynamic_puppets.retain(|(c, id)| clients.get(c).is_some_and(|s| s.contains_key(id)));
+        self.dynamic_puppets
+            .retain(|(c, id)| clients.get(c).is_some_and(|s| s.contains_key(id)));
         let dynamic = &self.dynamic_puppets;
-        self.puppet_frames
-            .retain(|(c, id), _| dynamic.contains(&(*c, *id)) || puppets.get(c).is_some_and(|s| s.contains_key(id)));
+        self.puppet_frames.retain(|(c, id), _| {
+            dynamic.contains(&(*c, *id)) || puppets.get(c).is_some_and(|s| s.contains_key(id))
+        });
     }
     /// (client, layer id, rig asset) of every puppet layer.
     pub fn puppet_layers(&self) -> Vec<(u32, u32, String)> {
@@ -1445,10 +1649,23 @@ impl LayerSystem {
     }
     /// Validate and publish an engine puppet frame on an owned layer.
     /// The frame is derived state; no fake rig asset or VM renderer is needed.
-    pub fn set_dynamic_puppet(&mut self, client: u32, id: u32, frame: Arc<crysirror_puppet::PuppetFrame>) -> Result<()> {
+    pub fn set_dynamic_puppet(
+        &mut self,
+        client: u32,
+        id: u32,
+        frame: Arc<crysirror_puppet::PuppetFrame>,
+    ) -> Result<()> {
         frame.validate()?;
-        ensure!(self.clients.get(&client).is_some_and(|s| s.contains_key(&id)), "dynamic puppet layer missing");
-        ensure!(self.puppet_slot(client, id).is_none(), "static rig layer cannot also own a dynamic puppet");
+        ensure!(
+            self.clients
+                .get(&client)
+                .is_some_and(|s| s.contains_key(&id)),
+            "dynamic puppet layer missing"
+        );
+        ensure!(
+            self.puppet_slot(client, id).is_none(),
+            "static rig layer cannot also own a dynamic puppet"
+        );
         self.dynamic_puppets.insert((client, id));
         self.puppet_frames.insert((client, id), frame);
         Ok(())
@@ -1472,8 +1689,22 @@ impl LayerSystem {
     }
     /// Advance engine-owned text and transition clocks.
     pub fn tick(&mut self, delta_ms: u64) {
-        for fade in self.crossfades.values_mut().flat_map(|s| s.values_mut()).filter(|f| !f.external) {
-            fade.elapsed_ms = fade.elapsed_ms.saturating_add(delta_ms).min(fade.duration_ms);
+        for(owner,id,property,value)in self.motions.tick(delta_ms){
+            if let Some(layer)=self.clients.get_mut(&owner).and_then(|o|o.get_mut(&id)){
+                if let Some(txn)=self.txn.0.last_mut(){txn.journal.entry((owner,id)).or_insert_with(||Some(layer.clone()));}
+                property.set_layer(layer,value);
+            }
+        }
+        for fade in self
+            .crossfades
+            .values_mut()
+            .flat_map(|s| s.values_mut())
+            .filter(|f| !f.external)
+        {
+            fade.elapsed_ms = fade
+                .elapsed_ms
+                .saturating_add(delta_ms)
+                .min(fade.duration_ms);
         }
         for layer in self
             .clients
@@ -1564,6 +1795,7 @@ impl LayerSystem {
         self.validate_with(true)
     }
     fn validate_with(&self, snapshots: bool) -> Result<()> {
+        self.motions.validate(true,|owner,id|self.clients.get(&owner).is_some_and(|o|o.contains_key(&id)))?;
         if let Some(t) = &self.transition {
             t.spec.validate()?;
             ensure!(t.serial <= self.transition_serial, "transition serial");
@@ -1699,6 +1931,7 @@ impl LayerSystem {
                     opacity: (opacity * u32::from(spec.opacity) / 255) as u8,
                     blend: spec.blend,
                     uv: spec.uv.unwrap_or([0., 0., 1., 1.]),
+                    sampling:spec.sampling,
                     filter: spec.filter.clone(),
                     puppet: self.puppet_frames.get(&(*client, spec.id)).cloned(),
                 });
@@ -1737,6 +1970,7 @@ pub fn rectangle(
         opacity: 255,
         blend: Blend::Normal,
         uv: [0., 0., 1., 1.],
+        sampling:ImageSampling::default(),
         filter: None,
         puppet: None,
     }
@@ -1813,8 +2047,16 @@ fn descendants_of(specs: &[LayerSpec], root: u32) -> BTreeSet<u32> {
 
 /// Per-layer invariants. The parent walk is bounded by depth instead of a
 /// visited set: a cycle exceeds the depth limit, so no allocation is needed.
-fn validate_layer(owner: &BTreeMap<u32, LayerSpec>, id: u32, s: &LayerSpec, snapshots: bool) -> Result<()> {
-    ensure!(id == s.id && rect_valid(s.rect), "invalid layer identity/bounds");
+fn validate_layer(
+    owner: &BTreeMap<u32, LayerSpec>,
+    id: u32,
+    s: &LayerSpec,
+    snapshots: bool,
+) -> Result<()> {
+    ensure!(
+        id == s.id && rect_valid(s.rect),
+        "invalid layer identity/bounds"
+    );
     if snapshots || !matches!(s.paint, Paint::Snapshot { .. }) {
         s.paint.validate()?;
     }
@@ -1825,13 +2067,14 @@ fn validate_layer(owner: &BTreeMap<u32, LayerSpec>, id: u32, s: &LayerSpec, snap
     if let Some(f) = &s.filter {
         f.validate()?;
     }
+    ensure!(s.sampling==ImageSampling::default()||matches!(s.paint,Paint::Image{..}),"image sampling requires an image paint");
     if let Some(uv) = s.uv {
         ensure!(
             !matches!(s.paint, Paint::GlyphRun { .. }),
             "glyph runs do not take image UV crops"
         );
         ensure!(
-            uv.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) && uv[2] > uv[0] && uv[3] > uv[1],
+            s.sampling.valid_uv(uv),
             "invalid source UV"
         );
     }
@@ -1843,4 +2086,36 @@ fn validate_layer(owner: &BTreeMap<u32, LayerSpec>, id: u32, s: &LayerSpec, snap
         p = owner.get(&parent).context("layer parent missing")?.parent;
     }
     Ok(())
+}
+
+/// Per-axis image texture addressing. Explicit modes never change other
+/// clients, unrelated layers, fonts, masks or render-target sampling.
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Serialize,Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum TextureAddressMode {
+    /// Extend the nearest edge texel; UV coordinates remain inside 0..1.
+    #[default]
+    ClampToEdge,
+    /// Repeat the texture after each integer UV boundary.
+    Repeat,
+    /// Alternate forward and reversed texture copies across UV boundaries.
+    MirrorRepeat,
+}
+/// Sampler state stored with a retained image layer, independent of a GPU.
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Serialize,Deserialize)]
+#[serde(default,deny_unknown_fields)]
+pub struct ImageSampling {
+    /// Horizontal texture coordinate addressing.
+    pub address_u:TextureAddressMode,
+    /// Vertical texture coordinate addressing.
+    pub address_v:TextureAddressMode,
+}
+impl ImageSampling {
+    pub fn valid_uv(self,uv:[f32;4])->bool {
+        fn axis(mode:TextureAddressMode,a:f32,b:f32)->bool {
+            if !a.is_finite()||!b.is_finite()||b<=a{return false;}
+            match mode {TextureAddressMode::ClampToEdge=>(0.0..=1.0).contains(&a)&&(0.0..=1.0).contains(&b),_=>a.abs()<=4096.0&&b.abs()<=4096.0}
+        }
+        axis(self.address_u,uv[0],uv[2])&&axis(self.address_v,uv[1],uv[3])
+    }
 }

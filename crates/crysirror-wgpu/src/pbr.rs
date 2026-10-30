@@ -36,6 +36,7 @@ struct VfxResident {
 
 fn vfx_draw_metadata(g: &crysirror_vfx::GpuEmitterFrame) -> crysirror_vfx::EmitterFrame {
     crysirror_vfx::EmitterFrame {
+        screen:None,screen_uvs:None,
         key: g.key,
         system_key: g.system_key,
         client: g.client,

@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/xmoezzz/amv_decoder",
+  "crate": "amv_decoder 0.2.0 (crates.io, checksum 5e4581f79ed3fa017402961cdd5a5ea2efd99037efbb0a061cf173aee67f6692)",
+  "origin_package": "amv_decoder",
+  "package": "crysirror-codec-amv",
+  "license": "MPL-2.0",
+  "adoption": "Owner's AJPM/AlphaMovie decoder, the reference decoder xp3-brute (c82cb14) uses for AMV expansion. First-class CPU codec library; the CLI (src/main.rs) and the sample testcase/1.amv are not adopted.",
+  "baseline_sha256": {
+    "src/amv.rs": "94e89a1fc50732f61c4805d5fc36d21c8ca5215634487ae5930ca1928415786b",
+    "src/bit.rs": "ffdbb485d74345ba2c3d43623f5280d1a2ebc576424c22157c528c1e0b3d401d",
+    "src/decoder.rs": "62015e5281f97520086817a3c8614b490d4c487930d463362fbc4f1880b65e1a",
+    "src/huffman.rs": "1a69db9d4c1279be758efeb3294960d69448e58208b0c2419b91f4f695b4dc77",
+    "src/idct.rs": "f82c72e20962ddfe5a9728091d79ac8a1de550d1f5818bf3ce4e1768788fac51",
+    "src/lib.rs": "e08bf65db9e9e03f3c917dd5018e10b97e4ab1250b565f93bc1ec69b0a848ab9"
+  },
+  "patches": {
+    "src/amv.rs": {
+      "origin_sha256": "94e89a1fc50732f61c4805d5fc36d21c8ca5215634487ae5930ca1928415786b",
+      "current_sha256": "046c112a5f63c7a4f3349cdec999e9613ef5444501678539b0b8658b1c383cb9",
+      "reason": "File-path open and packet dump tooling gated behind the off-by-default `files` feature; the engine decodes from in-memory readers only."
+    }
+  }
+}

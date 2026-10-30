@@ -224,8 +224,67 @@ def module(value, parameters):
     _flags(value, ("kill",))
 
 
+def sequence_rng(value):
+    obj(value, {"algorithm", "state", "multiplier", "increment", "output_shift", "output_mask"})
+    require(value["algorithm"] == "lcg32", "VFX sequence algorithm")
+    for key in ("state", "multiplier", "increment"):
+        require(integer(value[key], 0, 2**32-1), "VFX sequence word")
+    require(integer(value["output_shift"], 0, 31) and integer(value["output_mask"], 1, 2**32-1), "VFX sequence output domain")
+
+
+def screen_target(value):
+    obj(value, {"canvas", "layer", "anchor"}, {"parent", "order"})
+    require(isinstance(value["canvas"], list) and len(value["canvas"]) == 2
+            and all(integer(n, 1, 16384) for n in value["canvas"]), "VFX screen canvas")
+    require(integer(value["layer"], 1, 2**32-1), "VFX screen layer")
+    if value.get("parent") is not None:
+        require(integer(value["parent"], 0, 2**32-1) and value["parent"] != value["layer"], "VFX screen parent")
+    order = value.get("order", [0, 0])
+    require(isinstance(order, list) and len(order) == 2
+            and all(integer(n, -(2**31), 2**31-1) for n in order), "VFX screen order")
+    _vector(value["anchor"], 2, 0, 1)
+
+
+def falling_atlas(value):
+    obj(value, {"canvas", "tick_hz", "x_bands", "fall_range", "fall_divisor", "sway_range",
+                "phase_modulus", "phase_step", "wind_step", "rows", "row_frames", "cell", "stride",
+                "texture_extent", "scale", "alpha_base", "alpha_step", "alpha_count", "alpha_offset",
+                "atlas_interval_ms", "atlas_clock_bits"})
+    for key in ("canvas", "cell", "stride", "texture_extent"):
+        require(isinstance(value[key], list) and len(value[key]) == 2
+                and all(integer(n, 1, 16384) for n in value[key]), "VFX falling pixel extent")
+    require(integer(value["tick_hz"], 1, 240), "VFX falling fixed clock")
+    bands = _list(value["x_bands"], 32, "VFX falling x bands")
+    require(bool(bands) and all(integer(n, -16, 16) for n in bands), "VFX falling x bands")
+    for key in ("fall_range", "sway_range"):
+        pair = value[key]
+        require(isinstance(pair, list) and len(pair) == 2 and all(integer(n, 0, 65535) for n in pair)
+                and pair[0] <= pair[1], "VFX falling random interval")
+    divisor = _float(value["fall_divisor"])
+    require(value["fall_range"][0] > 0 and divisor > 0
+            and _float(value["fall_range"][1] / divisor) <= value["canvas"][1] * 2,
+            "VFX falling speed")
+    require(integer(value["phase_modulus"], 1, 65536), "VFX falling phase modulus")
+    _number(value["phase_step"], -10, 10)
+    _number(value["wind_step"], -16384, 16384)
+    rows = _list(value["rows"], 256, "VFX falling rows")
+    frames = _list(value["row_frames"], 256, "VFX falling row frame counts")
+    require(bool(rows) and bool(frames) and all(integer(n, 1, 256) for n in frames), "VFX falling atlas rows")
+    for row in rows:
+        require(integer(row, 0, len(frames)-1), "VFX falling row index")
+        require((frames[row]-1)*value["stride"][0]+value["cell"][0] <= value["texture_extent"][0]
+                and row*value["stride"][1]+value["cell"][1] <= value["texture_extent"][1], "VFX falling backing extent")
+    _number(value["scale"], _float(.0001), 16)
+    require(integer(value["alpha_count"], 1, 256), "VFX falling alpha choices")
+    base, step, offset = (_float(value[k]) for k in ("alpha_base", "alpha_step", "alpha_offset"))
+    for choice in (0, value["alpha_count"]-1):
+        require(0 <= _float(_float(base + _float(step*choice)) + offset) <= 1, "VFX falling alpha range")
+    require(integer(value["atlas_interval_ms"], 1, 600000) and value["atlas_clock_bits"] in (32, 64)
+            and type(value["atlas_clock_bits"]) is int, "VFX falling atlas clock")
+
+
 def emitter(value, parameters):
-    obj(value, set(), {"id", "enabled", "enabled_parameter", "target", "space", "capacity", "seed", "overflow", "spawn", "initialize", "update", "render", "events"})
+    obj(value, set(), {"id", "enabled", "enabled_parameter", "target", "space", "capacity", "seed", "overflow", "spawn", "initialize", "update", "render", "events", "screen", "falling_atlas"})
     _name(value.get("id", "emitter"))
     _flags(value, ("enabled",))
     require(value.get("target", "cpu") in ("cpu", "gpu") and value.get("space", "world") in ("world", "local"), "VFX target/space")
@@ -275,6 +334,18 @@ def emitter(value, parameters):
         _number(event.get("probability", 1), 0, 1)
     draw = value.get("render", {"kind": "sprite"})
     render(draw)
+    if value.get("screen") is not None:
+        screen_target(value["screen"])
+        require(value.get("target", "cpu") == "cpu" and value.get("capacity", 1024) <= 4096,
+                "VFX screen profile requires bounded CPU particles")
+        require(draw["kind"] == "sprite" and draw.get("texture") is not None
+                and draw.get("facing", {"kind": "camera"}) == {"kind": "camera"}
+                and draw.get("blend", "alpha") in ("alpha", "additive", "multiply"), "VFX screen render profile")
+    if value.get("falling_atlas") is not None:
+        falling_atlas(value["falling_atlas"])
+        require(value.get("target", "cpu") == "cpu" and value.get("screen") is not None
+                and value.get("space", "world") == "local" and not value.get("update", []) and not events,
+                "VFX falling node profile")
     if value.get("target", "cpu") == "gpu":
         require(value.get("overflow", "drop_new") == "drop_new", "GPU VFX kill_oldest unsupported")
         require(not events, "GPU VFX event sub-emitters unsupported")
@@ -282,7 +353,23 @@ def emitter(value, parameters):
 
 
 def validate(value):
-    obj(value, set(), {"revision", "emitters", "parameters", "fixed_step_hz", "warmup_seconds", "max_steps_per_advance", "enabled", "paused", "time_scale"})
+    obj(value, set(), {"revision", "emitters", "parameters", "fixed_step_hz", "warmup_seconds", "max_steps_per_advance", "enabled", "paused", "time_scale", "clock", "sequence_rng", "sequence_exchange"})
+    clock = value.get("clock", {"source": "engine"})
+    require(isinstance(clock, dict), "VFX clock")
+    if clock.get("source") == "engine":
+        obj(clock, {"source"})
+    else:
+        obj(clock, {"source", "tick", "wall_time_ms"})
+        require(clock["source"] == "external" and all(integer(clock[k], 0, 2**64-1) for k in ("tick", "wall_time_ms")), "VFX external clock")
+    if value.get("sequence_rng") is not None:
+        sequence_rng(value["sequence_rng"])
+        require(clock["source"] == "external", "VFX sequence needs an external clock")
+    if value.get("sequence_exchange") is not None:
+        exchange = value["sequence_exchange"]
+        obj(exchange, {"epoch", "base_tick", "state"})
+        require(value.get("sequence_rng") is not None and integer(exchange["epoch"], 1, 2**64-1)
+                and integer(exchange["base_tick"], 0, 2**64-1), "VFX sequence exchange")
+        sequence_rng(exchange["state"])
     require(integer(value.get("revision", 0), 0, 2**64-1), "VFX revision")
     require(integer(value.get("fixed_step_hz", 60), 1, 240)
             and integer(value.get("max_steps_per_advance", 64), 1, 4096), "VFX fixed clock/step limit")
@@ -297,15 +384,27 @@ def validate(value):
     emitters = _list(value.get("emitters", [{}]), 64, "VFX emitter count")
     require(bool(emitters), "VFX system needs emitters")
     names = {}
+    screens = set()
     for item in emitters:
         emitter(item, parameters)
         name = item.get("id", "emitter")
         require(name not in names, "VFX duplicate emitter id")
         names[name] = item
+        if value.get("sequence_rng") is not None:
+            require(item.get("target", "cpu") == "cpu", "VFX sequence requires CPU emitters")
+        if item.get("screen") is not None:
+            layer = item["screen"]["layer"]
+            require(layer not in screens, "duplicate VFX screen target")
+            screens.add(layer)
+        if item.get("falling_atlas") is not None:
+            require(clock["source"] == "external" and value.get("sequence_rng") is not None
+                    and value.get("warmup_seconds", 0) == 0 and value.get("time_scale", 1) == 1
+                    and item["falling_atlas"]["tick_hz"] == value.get("fixed_step_hz", 60), "VFX falling clock profile")
     for item in emitters:
         for event in item.get("events", []):
             target = event["emitter"]
             require(target in names, "VFX event target absent")
+            require(names[target].get("falling_atlas") is None, "VFX falling child event target unsupported")
             require(item.get("target", "cpu") == names[target].get("target", "cpu") == "cpu",
                     "VFX child events require CPU source and target")
     return value

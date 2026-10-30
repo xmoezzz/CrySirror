@@ -22,7 +22,8 @@ fn phase(baseline: [f32; 2]) -> [f32; 2] {
         if p == 0. { 0. } else { p }
     })
 }
-pub(super) fn key(assets: &Assets, paint: &Paint) -> Result<String> {
+pub(super) fn key(assets: &Assets, owner: u32, paint: &Paint) -> Result<String> {
+    let text=assets.text.for_client(crysirror_core::state::ClientId(owner));
     let Paint::GlyphRun {
         font,
         size,
@@ -37,18 +38,20 @@ pub(super) fn key(assets: &Assets, paint: &Paint) -> Result<String> {
     ensure!(glyphs.len() == 1, "glyph draw must have one glyph");
     let g = &glyphs[0];
     let request = GlyphRaster {
-        glyph_id: assets.text.glyph_id(font, g.character)?,
+        glyph_id: text.glyph_id(font, g.character)?,
         size: *size,
         baseline: phase(g.baseline),
     };
     Ok(format!(
         "{}:bold={bold}{}",
-        assets.text.glyph_cell_key(font, request)?,
+        text.glyph_cell_key(font, request)?,
         blur_key(blur)
     ))
 }
 fn blur_key(blur: &Option<crysirror_scene::layer::GlyphBlur>) -> String {
-    blur.map_or(String::new(), |b| format!(":blur={},{}", b.radius, b.level))
+    blur.map_or(String::new(), |b| {
+        format!(":coverage={:?},{},{}", b.kernel, b.radius, b.level)
+    })
 }
 impl Renderer {
     pub(super) fn expand_glyph_runs(
@@ -60,6 +63,7 @@ impl Renderer {
         // changing a complete paragraph must not count both paragraphs forever.
         let mut needed = std::collections::BTreeSet::new();
         for p in &frame {
+            let text=assets.text.for_client(crysirror_core::state::ClientId(p.owner));
             if let Paint::GlyphRun {
                 font,
                 size,
@@ -73,13 +77,13 @@ impl Renderer {
                 let visible = p.paint.glyph_reveal_status().expect("glyph run").visible;
                 for g in glyphs.iter().take(visible) {
                     let request = GlyphRaster {
-                        glyph_id: assets.text.glyph_id(font, g.character)?,
+                        glyph_id: text.glyph_id(font, g.character)?,
                         size: g.size.unwrap_or(*size),
                         baseline: phase(g.baseline),
                     };
                     needed.insert(format!(
                         "{}:bold={}{}",
-                        assets.text.glyph_cell_key(font, request)?,
+                        text.glyph_cell_key(font, request)?,
                         g.bold.unwrap_or(*bold),
                         blur_key(blur)
                     ));
@@ -91,6 +95,7 @@ impl Renderer {
         let mut count = 0usize;
         let mut bytes: usize = self.glyph_cells.values().map(|c| c.rgba.len()).sum();
         for p in frame {
+            let text=assets.text.for_client(crysirror_core::state::ClientId(p.owner));
             let Paint::GlyphRun {
                 font,
                 size,
@@ -117,7 +122,7 @@ impl Renderer {
                 let color = g.color.unwrap_or(*color);
                 let bold = g.bold.unwrap_or(*bold);
                 let request = GlyphRaster {
-                    glyph_id: assets.text.glyph_id(font, g.character)?,
+                    glyph_id: text.glyph_id(font, g.character)?,
                     size,
                     baseline: phase(g.baseline),
                 };
@@ -136,9 +141,9 @@ impl Renderer {
                     reveal: None,
                     blur: *blur,
                 };
-                let key = key(assets, &paint)?;
+                let key = key(assets, p.owner, &paint)?;
                 if !self.glyph_cells.contains_key(&key) {
-                    let cell = assets.text.rasterize_glyph_cell(font, request)?;
+                    let cell = text.rasterize_glyph_cell(font, request)?;
                     let width = cell.width + u32::from(bold && cell.width > 0);
                     let length = width as usize * cell.height as usize * 4;
                     ensure!(
@@ -173,18 +178,44 @@ impl Renderer {
                     };
                     if let Some(b) = blur {
                         let coverage: Vec<u8> = bitmap.rgba.chunks_exact(4).map(|p| p[3]).collect();
-                        let (out, w, h) = crysirror_text::glyph_blur::blur_coverage(
-                            &coverage,
-                            bitmap.width as usize,
-                            bitmap.height as usize,
-                            u32::from(b.radius),
-                            i32::from(b.level),
-                        );
-                        let r = i32::from(b.radius);
+                        use crysirror_scene::layer::GlyphCoverageKernel;
+                        let (out, w, h, origin) = match b.kernel {
+                            GlyphCoverageKernel::WeightedBlur => {
+                                let (out, w, h) = crysirror_text::glyph_blur::blur_coverage(
+                                    &coverage,
+                                    bitmap.width as usize,
+                                    bitmap.height as usize,
+                                    u32::from(b.radius),
+                                    i32::from(b.level),
+                                );
+                                (out, w, h, [-i32::from(b.radius); 2])
+                            }
+                            mode => {
+                                let apply = match mode {
+                                    GlyphCoverageKernel::DiskOutline => {
+                                        crysirror_text::glyph_coverage::disk_outline
+                                    }
+                                    GlyphCoverageKernel::SquareFace => {
+                                        crysirror_text::glyph_coverage::square_face
+                                    }
+                                    _ => unreachable!(),
+                                };
+                                let cell = apply(
+                                    &coverage,
+                                    bitmap.width as usize,
+                                    bitmap.height as usize,
+                                    b.radius,
+                                )?;
+                                (cell.pixels, cell.size[0], cell.size[1], cell.origin)
+                            }
+                        };
                         bytes += (w * h * 4).saturating_sub(bitmap.rgba.len());
-                        ensure!(bytes <= 64 * 1024 * 1024, "positioned glyph resource budget exceeds 64 MiB");
+                        ensure!(
+                            bytes <= 64 * 1024 * 1024,
+                            "positioned glyph resource budget exceeds 64 MiB"
+                        );
                         bitmap = GlyphBitmap {
-                            origin: [bitmap.origin[0] - r, bitmap.origin[1] - r],
+                            origin: [bitmap.origin[0] + origin[0], bitmap.origin[1] + origin[1]],
                             width: w as u32,
                             height: h as u32,
                             rgba: out.iter().flat_map(|&a| [255, 255, 255, a]).collect(),
@@ -436,5 +467,110 @@ mod tests {
             .unwrap();
         assert!(blank.pixels().all(|p| p.0 == [0, 0, 0, 255]));
         assert!(renderer.glyph_cells.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires GPU and CRYSIRROR_TEST_FONT; reads runtime font only"]
+    fn shared_face_outline_keeps_individual_resources_and_reveal() {
+        let font = std::env::var_os("CRYSIRROR_TEST_FONT").expect("system font path");
+        let root = tempfile::tempdir().unwrap();
+        let mut assets = Assets::new(root.path()).unwrap();
+        assets
+            .text
+            .add_font("test", std::fs::read(font).unwrap())
+            .unwrap();
+        let body: LayerSpec =
+            serde_json::from_value(json!({"id":1,"rect":[0,0,160,80],"order":[0,2],
+            "paint":{"kind":"glyph_run","font":"test","size":40,"color":[255,0,0,255],
+            "glyphs":[{"character":"A","baseline":[20,55]},{"character":"B","baseline":[90,55]}],
+            "reveal":{"interval_ms":20,"initial_visible":0,"elapsed_ms":0}}}))
+            .unwrap();
+        let mut edge = body.clone();
+        edge.id = 2;
+        edge.order = [0, 1];
+        edge.rect[0] -= 1.;
+        edge.rect[1] -= 1.;
+        if let Paint::GlyphRun { color, blur, .. } = &mut edge.paint {
+            *color = [0, 255, 0, 255];
+            *blur = Some(crysirror_scene::layer::GlyphBlur {
+                radius: 2,
+                level: 256,
+                kernel: crysirror_scene::layer::GlyphCoverageKernel::SquareFace,
+            });
+        }
+        let mut layers = LayerSystem::default();
+        layers.install(ClientId(1), &[body, edge]).unwrap();
+        let instance = wgpu::Instance::default();
+        let gpu = Arc::new(pollster::block_on(Gpu::request(&instance, None)).unwrap());
+        let mut renderer = Renderer::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+        renderer
+            .set_engine_frame(layers.frame([160, 80]).unwrap())
+            .unwrap();
+        let hidden = renderer
+            .capture(
+                &SceneState::default(),
+                &mut assets,
+                [160, 80],
+                [0, 0, 0, 255],
+            )
+            .unwrap();
+        assert!(hidden.pixels().all(|p| p.0 == [0, 0, 0, 255]));
+        layers.tick(20);
+        renderer
+            .set_engine_frame(layers.frame([160, 80]).unwrap())
+            .unwrap();
+        let first = renderer
+            .capture(
+                &SceneState::default(),
+                &mut assets,
+                [160, 80],
+                [0, 0, 0, 255],
+            )
+            .unwrap();
+        assert!(first.pixels().any(|p| p.0[0] > 0 && p.0[1] == 0), "body");
+        assert!(
+            first.pixels().any(|p| p.0[1] > 0 && p.0[0] == 0),
+            "engine-owned outline"
+        );
+        assert!(
+            first
+                .enumerate_pixels()
+                .filter(|(x, _, _)| *x >= 80)
+                .all(|(_, _, p)| p.0 == [0, 0, 0, 255]),
+            "second glyph remains hidden in both passes"
+        );
+        assert_eq!(
+            renderer.glyph_cells.len(),
+            2,
+            "one glyph, separate body and face kernels"
+        );
+        layers.tick(20);
+        renderer
+            .set_engine_frame(layers.frame([160, 80]).unwrap())
+            .unwrap();
+        let full = renderer
+            .capture(
+                &SceneState::default(),
+                &mut assets,
+                [160, 80],
+                [0, 0, 0, 255],
+            )
+            .unwrap();
+        assert!(
+            full.enumerate_pixels()
+                .any(|(x, _, p)| x > 80 && p.0[0] > 0)
+        );
+        assert!(
+            full.enumerate_pixels()
+                .any(|(x, _, p)| x > 80 && p.0[1] > 0)
+        );
+        assert_eq!(
+            renderer.glyph_cells.len(),
+            4,
+            "two independently cached decorated glyphs"
+        );
+        if let Some(path) = std::env::var_os("CRYSIRROR_GLYPH_CAPTURE") {
+            full.save(path).unwrap();
+        }
     }
 }

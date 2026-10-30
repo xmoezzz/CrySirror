@@ -1,0 +1,76 @@
+{
+  "rfvp": {
+    "repository": "https://github.com/xmoezzz/rfvp",
+    "commit": "062fec82033b554b9eb3b5da069518c0c96a354e",
+    "license": "MPL-2.0",
+    "engine_sources": {
+      "crysirror-text/src/bitmap_font.rs": "rfvp/src/font.rs desktop font implementation",
+      "crysirror-text/src/vn_slot.rs": "rfvp/src/subsystem/resources/text_manager.rs generic text kernels; native read flags and save envelope excluded",
+      "crysirror-text/src/slot_color.rs": "rfvp/src/subsystem/resources/color_manager.rs ColorItem",
+      "crysirror-image/src/nvsg.rs": "rfvp/src/subsystem/resources/texture.rs portable NVSG profile, bounded decoding",
+      "crysirror-image/src/associated.rs": "GraphRGB and NVSG tone arithmetic; shared validated byte operation"
+    }
+  },
+  "siglus": {
+    "repository": "https://github.com/xmoezzz/siglus_rs",
+    "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+    "license": "MPL-2.0",
+    "engine_sources": {
+      "crysirror-resource/src/backref_lzss.rs": "siglus_assets/src/lzss.rs via audited crysirror-siglus-vm/lzss.rs; bounded output-history decoder",
+      "crysirror-image/src/wipe_mask.rs": "complete standalone grayscale generator; bounded targets; Runtime calls the shared module",
+      "crysirror-puppet-eluna/src/player_runtime": "independent E-mote player/texture resource helpers, no VM/renderer; texture decode uses crysirror-image",
+      "crysirror-video/src/omv.rs": "only complete OMV header/Ogg extraction/packed-plane conversion helpers; no Movie/SceneVm host",
+      "crysirror-video/src/mpeg_probe.rs": "MPEG sequence-header probing",
+      "crysirror-audio/src/nwa.rs": "NWA codec reader, directly used by engine source decoding",
+      "crysirror-wgpu/src/shaders/wipe.wgsl": "complete transition GPU shader, owned by the existing shared engine Transition compositor; no native renderer retained",
+      "crysirror-text/src/glyph_coverage.rs": "Bounded square-face coverage alpha union from siglus_scene_vm/src/text_render.rs::draw_glyph_bitmap_face/blend_rgba_pixel; independent of native fonts/windows/rendering. Disk outline reuses existing authored rich Text raster kernel.",
+      "crysirror-scene/src/timeline_counter.rs": "Portable integer count/range/loop with game/real delta selection from runtime/globals.rs::Counter; native opcodes/callbacks and save envelope stay in the VM."
+    },
+    "additional_origin_sha256": {
+      "siglus_scene_vm/src/runtime/wipe_mask.rs": "4f9f96ef1905d9f3434ef99ece082461b4ce3cf205c00f6fd8d66bb893ff4160",
+      "siglus_scene_vm/src/emote.rs": "bdd444e73a526026198cc34b3cd09b9d47f3a0b7a3a5ac085ab75172e01e9ee7",
+      "siglus_scene_vm/src/emote/player.rs": "f7d886c21cb68d3fdbf2ea895f8e3ab2c8b5e949bbf90d7dd9f12811e4edc7a4",
+      "siglus_scene_vm/src/emote/puppet_api.rs": "fe54522e18a65c9e5f71158ea5c0996245d6c75a2fda9414c4b4abd810cef7eb",
+      "siglus_scene_vm/src/movie/mod.rs": "4927c0d0e7a0404d377f9686d28e46ff14bf1adc7c8ca363a0882d814c2c1bcd",
+      "siglus_assets/src/nwa.rs": "7d4ecf2a84090c6f37b54f3bec91615ec0cd59fb28d5e871a50325cdadf6142b",
+      "siglus_assets/src/mpeg2.rs": "65d330ff143460a33e9a7776652d12f9bb957ea25447c403fb4eddb30e3ec582",
+      "siglus_scene_vm/src/render/shaders/wipe.wgsl": "f3f83b3ab4f7473e1736013e6f814d2942f3d2ed7889ba6667972fd8335f2ea2",
+      "siglus_scene_vm/src/text_render.rs": "5375c80a6a6c94796cc3039097e816de8cf7cd21fe75c0befa4fbe85fc6afc49",
+      "siglus_scene_vm/src/runtime/globals.rs": "b00eb432bf4c005e5a64c95e544faa4e0c65ab890a4c24f5944bf5268958f7dd"
+    }
+  },
+  "authored_engine_capabilities": {
+    "crysirror-puppet/src/cpu_snapshot.rs": "new immutable engine mesh capture implementation; built against CrySirror FramePart/sRGB/blend contracts, not copied from a native rasterizer"
+  },
+  "avg32_cursor": {
+    "repository": "https://github.com/xmoezzz/siglus_rs",
+    "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+    "license": "MPL-2.0",
+    "engine_sources": {
+      "crysirror-image/src/cursor.rs::decode_cur16m": "CUR16M BGR/mask/colour-key decode from crates/avg32/src/cursor.rs; 150-ms schedule from system.rs, no native cursor painter retained"
+    },
+    "origin_sha256": {
+      "crates/avg32/src/cursor.rs": "d9844fcc143a770c782d23d5dd507cb6dd7cfebf19f1ac27b77bc6bd4ec4653d"
+    }
+  },
+  "circus_resources": {
+    "repository": "https://github.com/morkt/GARbro",
+    "commit": "b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0",
+    "license": "MIT",
+    "engine_sources": {
+      "crysirror-image/src/crx.rs": {
+        "source": "ArcFormats/Circus/ImageCRX.cs",
+        "sha256": "59c2f3e9b86f8daa7e44ab9a2d93fb6dcb240acddcb28cf1d4638c6dacf0c10a"
+      },
+      "crysirror-audio/src/circus.rs": {
+        "source": "ArcFormats/Circus/AudioPCM.cs",
+        "sha256": "0be4958fc5ed9d74bd8f8c82fd92d64c500e4c81024f19ec1914bf8e71d2ac0e"
+      }
+    },
+    "notice_files": [
+      "crates/crysirror-image/src/crx.LICENSE",
+      "crates/crysirror-audio/src/circus.LICENSE"
+    ],
+    "scope": "CRXG compression 1/2/3 CPU surfaces; XPCM mode0 PCM and mode5 Ogg streamed through engine AudioSource. No Circus runtime/renderer hosted; XPCM spectral modes1/3 unsupported."
+  }
+}

@@ -524,7 +524,7 @@ impl<'a, H: TjsHost + 'static> Pause<'a, H> {
     /// [`Pause::registers`] for locals.
     pub fn eval(&mut self, expression: &str) -> Result<Variant> {
         let source = format!("return ({expression});");
-        let file = crate::compiler::compile_source_to_bytecode("<debug-eval>", &source)?;
+        let file = self.runtime.compile_source("<debug-eval>", &source)?;
         if let Some(debugger) = self.runtime.debugger.as_mut() {
             debugger.eval_depth += 1;
         }

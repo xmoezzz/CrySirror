@@ -140,7 +140,10 @@ pub(super) fn open(
                 "HXV4 hashed root must be one canonical path segment"
             );
             ensure!(
-                !base.entries.iter().any(|e| e.path == root || e.path.starts_with(&format!("{root}/"))),
+                !base
+                    .entries
+                    .iter()
+                    .any(|e| e.path == root || e.path.starts_with(&format!("{root}/"))),
                 "HXV4 hashed root collides with an archive entry"
             );
             Some(root.to_owned())
@@ -152,8 +155,15 @@ pub(super) fn open(
         let data: Arc<[u8]> = Arc::from(analysis.startup_tjs.clone());
         derived.push((target, data, "companion PE RCDATA/STARTUP.TJS"));
     }
-    if let Some(target) = options.get("hxv4_bootstrap_profile").and_then(|v| v.as_str()) {
-        derived.push((target, bootstrap_profile(&analysis, &recovered, exe, hashed_root.as_deref())?, "validated HXV4 bootstrap profile"));
+    if let Some(target) = options
+        .get("hxv4_bootstrap_profile")
+        .and_then(|v| v.as_str())
+    {
+        derived.push((
+            target,
+            bootstrap_profile(&analysis, &recovered, exe, hashed_root.as_deref())?,
+            "validated HXV4 bootstrap profile",
+        ));
     }
     let mut embedded = BTreeMap::new();
     for (target, data, origin) in derived {
@@ -173,7 +183,13 @@ pub(super) fn open(
             "HXV4 bootstrap byte limit"
         );
         let id = base.entries.len() as u32;
-        base.entries.push(ArchiveEntry{id,path:target.into(),size:data.len()as u64,stored_size:0,metadata:serde_json::json!({"format":"kirikiri/xp3","origin":origin,"derived":true})});
+        base.entries.push(ArchiveEntry {
+            id,
+            path: target.into(),
+            size: data.len() as u64,
+            stored_size: 0,
+            metadata: serde_json::json!({"format":"kirikiri/xp3","origin":origin,"derived":true}),
+        });
         embedded.insert(id, data);
     }
     Ok(Box::new(HxArchive {
@@ -202,7 +218,11 @@ fn bootstrap_profile(
     token.update(recovered.key);
     token.update(analysis.bootstrap_bres_path.as_bytes());
     token.update(recovered.bootstrap_prefix.as_bytes());
-    let token: String = token.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let token: String = token
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     let profile = serde_json::json!({
         "family": "hxv4-bootstrap",
         "executable": exe,
@@ -235,7 +255,10 @@ impl Archive for HxArchive {
     fn resolve(&self, path: &str) -> Option<u32> {
         let path = path.replace('\\', "/");
         let path = match &self.hashed_root {
-            Some(root) => path.strip_prefix(root.as_str())?.strip_prefix('/')?.to_owned(),
+            Some(root) => path
+                .strip_prefix(root.as_str())?
+                .strip_prefix('/')?
+                .to_owned(),
             None => path,
         };
         // Directory spelling keeps its trailing delimiter; the root is "".

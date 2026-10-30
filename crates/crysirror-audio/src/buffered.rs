@@ -68,6 +68,7 @@ impl std::error::Error for SourcePending {}
 /// Bounded streaming PCM source. Construct/prewarm on workers, call service on
 /// the owner before/after rendering. No shared mutable decoder or per-voice thread.
 pub struct BufferedSource {
+    has_replay_gain: bool,
     rate: u32,
     frames: Option<u64>,
     pool: TaskPool,
@@ -153,6 +154,7 @@ impl BufferedSource {
         cancel.check()?;
         source.seek(0)?;
         let rate = source.sample_rate();
+        let has_replay_gain = source.has_replay_gain();
         let mut frames = source.frame_count();
         ensure!((8000..=192000).contains(&rate), "buffered audio rate");
         let mut queue = VecDeque::with_capacity(config.prefetch_chunks as usize);
@@ -245,6 +247,7 @@ impl BufferedSource {
             source.seek(end)?;
         }
         Ok(Self {
+            has_replay_gain,
             rate,
             frames,
             pool,
@@ -351,6 +354,9 @@ impl BufferedSource {
     }
 }
 impl AudioSource for BufferedSource {
+    fn has_replay_gain(&self) -> bool {
+        self.has_replay_gain
+    }
     fn is_nonblocking(&self) -> bool {
         true
     }

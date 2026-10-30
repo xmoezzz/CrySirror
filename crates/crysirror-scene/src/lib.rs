@@ -16,6 +16,7 @@ pub mod physics;
 pub mod projection;
 pub mod sequence;
 pub mod terrain;
+pub mod timeline_counter;
 pub mod ui;
 pub mod view;
 pub mod world;
@@ -114,6 +115,7 @@ impl EngineSystems {
         step: impl FnMut(&mut World, f32) -> Result<()>,
     ) -> Result<bool> {
         let mut staged = self.clone();
+        staged.ui.advance_motions(delta_ms);
         let (actions, consumed) = staged.ui.tick(input, canvas)?;
         for (client, commands) in actions {
             staged.world.apply_batch(ClientId(client), &commands)?;
@@ -183,3 +185,6 @@ impl EngineSystems {
 }
 
 pub mod effect;
+
+/// Engine-clock sprite sheet sequences shared by retained UI/native adapters.
+pub mod sprite;

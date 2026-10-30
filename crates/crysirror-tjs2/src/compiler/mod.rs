@@ -24,7 +24,19 @@ pub fn compile_source_to_mir(source_name: &str, source: &str) -> Result<MirModul
 }
 
 pub fn compile_source_to_bytecode(source_name: &str, source: &str) -> Result<BytecodeFile> {
-    let module = compile_source_to_mir(source_name, source)?;
+    compile_source_to_bytecode_with(source_name, source, FrontendOptions::default())
+}
+
+/// As [`compile_source_to_bytecode`] with explicit frontend options (e.g. an
+/// engine instance's shared preprocessor values).
+pub fn compile_source_to_bytecode_with(
+    source_name: &str,
+    source: &str,
+    options: FrontendOptions,
+) -> Result<BytecodeFile> {
+    let output = crate::analyze_script(source_name, source, options);
+    let program = output_to_result(output)?;
+    let module = lower_hir_program(&program, source_name, source)?;
     compile_mir_to_bytecode(&module)
 }
 
@@ -1969,5 +1981,65 @@ mod tests {
         let file = compile_source_to_bytecode("inline.tjs", source).expect("bytecode");
         file.disassemble_object(file.top_level.expect("top-level"))
             .expect("disassemble")
+    }
+}
+
+#[cfg(test)]
+mod conditional_lvalue_tests {
+    use super::*;
+    #[test]
+    fn conditional_target_evaluates_rhs_once_then_only_selected_address() {
+        let source = r#"
+            global.log='';global.data=%[x:0];
+            function rhs(){global.log+='r';return 7;}
+            function condition(){global.log+='c';return true;}
+            function address(name){global.log+=name;return global.data;}
+            var result=((condition()?address('a').x:address('b').x)=rhs());
+            return global.log+':'+global.data.x+':'+result;
+        "#;
+        assert_eq!(
+            execute_source("conditional-place.tjs", source).unwrap(),
+            Variant::String("rca:7:7".into())
+        );
+    }
+    #[test]
+    fn conditional_places_cover_slots_members_compounds_updates_and_delete() {
+        let source = r#"
+            var a=10,b=20,choose=true;
+            var assigned=((choose?a:b)=3);
+            var compound=((choose?a:b)+=4);
+            var old=(choose?a:b)++;
+            var fresh=++(false?a:b);
+            var object=%[x:8,y:9];
+            var removed=delete(true?object.x:object.y);
+            var kind=typeof(false?object.missing:object.y);
+            return a+':'+b+':'+assigned+':'+compound+':'+old+':'+fresh+':'+removed+':'+kind+':'+object.y;
+        "#;
+        assert_eq!(
+            execute_source("conditional-operators.tjs", source).unwrap(),
+            Variant::String("8:21:3:7:7:21:1:Integer:9".into())
+        );
+        // T_TYPEOF only uses property-aware TYPEOFD for a direct member node.
+        // A conditional first reads its chosen value, so a missing member errors.
+        let error = execute_source(
+            "conditional-typeof.tjs",
+            "class H { function H() {} } var o=new H(); return typeof(true?o.missing:0);",
+        )
+        .unwrap_err();
+        assert!(error.message.contains("missing"), "{error:?}");
+    }
+    #[test]
+    fn nested_places_and_reference_swap_follow_the_native_write_protocol() {
+        let source = r#"
+            var a=1,b=2,c=3;
+            (false?a:(true?b:c))=9;
+            (true?a:c)<->(false?b:c);
+            return a+':'+b+':'+c;
+        "#;
+        assert_eq!(
+            execute_source("conditional-nested.tjs", source).unwrap(),
+            Variant::String("3:9:1".into())
+        );
+        assert!(compile_source_to_bytecode("bad-target.tjs", "(true?object.x:42)=3;").is_err());
     }
 }

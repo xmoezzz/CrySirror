@@ -1,0 +1,32 @@
+{
+  "repository": "https://github.com/xmoezzz/ethornell-rs",
+  "commit": "0cfff1d274ecc4554d0af8af1c7b1c7908595e96",
+  "license": "MPL-2.0",
+  "adoption": "First-class native BP instruction/ABI profile; no original App, renderer, image/text algorithms, decoder or mixer is linked. Two native metadata tables are adopted verbatim. The bounded bytecode execution/host publication seam is maintained here.",
+  "source_sha256": {
+    "crates/ethornell-script/src/native_abi.rs": "e81821f31ee9de194a65a91a05a3ee180fcd9cb750f8a67171333d69424cbca3",
+    "crates/ethornell-script/src/vm_opcode.rs": "b4762a04e09346d13a1527504f50e3a0e4e3174744ed03cef7d766e4a2bafe96",
+    "crates/ethornell-script/src/lib.rs": "59c17e148bd8bed35aa913afe04395778d72b2636080bc6a697113f8044b98fe",
+    "crates/ethornell-script/src/native_contract_reference.rs": "dece644294df0568327407fa0b83cb0c5ae731667da7b4c202a3c07bc3042f22",
+    "crates/ethornell-vm/src/lib.rs": "e35e444b108270e461832921eac6ecb3e63883b3f647e7faab9a5d17bd0267c5",
+    "crates/ethornell-app/src/lib.rs": "f129d44daf5a4ed57ba777ce97bb666bd1a834dba3f44bfb6b110e50c5ffacd6",
+    "crates/ethornell-app/src/native_sound.rs": "d121a890659f2dee5d0b884161066eebd0863bb449b35e84da827a57d5799c9c"
+  },
+  "adopted_files": {
+    "src/native_abi.rs": "crates/ethornell-script/src/native_abi.rs",
+    "src/vm_opcode.rs": "crates/ethornell-script/src/vm_opcode.rs"
+  },
+  "implementation_profile": "native-bp-v1",
+  "limits": [
+    "Only strict loose BP header images (16 MiB), one module and one cooperative thread; not Buriko scenario-script interpreter.",
+    "1 MiB frame/raw memory; 4096 native operand ring slots; 4096 return records. No heap or original save translation.",
+    "Unknown instructions and native calls fail explicitly and remain unacknowledged.",
+    "Adapter maps bitmap formats 1/2 (7 aliases 1), direct image load, background, normal sprite draw/position/opacity/order/visibility; not all native graphics.",
+    "Plain native font-0 text uses shared fixed-cell/GlyphRun state; no proprietary font, markup/ruby/kinsoku/shadow/vertical or matching native glyph-metric claim.",
+    "Native timers, key polling and yield are mapped. BGM direct file preload is worker-prepared and full native volume/once-only transport is mapped; no complete audio ABI claim.",
+    "No real BGI game has been run. Synthetic native BP execution is not complete BGI compatibility."
+  ],
+  "implementation_sha256": {
+    "src/lib.rs": "274a19e99e63e1ebb6bb675220ac7995bb7d1b3aa9828d814274a4bd7514624e"
+  }
+}

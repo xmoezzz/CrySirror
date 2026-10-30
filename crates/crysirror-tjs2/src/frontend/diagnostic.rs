@@ -1,14 +1,40 @@
 use crate::error::{Span, TjsError, TjsErrorKind};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct FrontendOptions {
     pub recover: bool,
+    /// TJS2 keeps `@set` values per engine instance (`tTJS::PPValues`), so
+    /// one script's `@set (FLAG=1)` is visible when later scripts compile.
+    /// `None` gives each compile its own fresh set.
+    pub pp_values: Option<PreprocessorValues>,
 }
+
+impl PartialEq for FrontendOptions {
+    fn eq(&self, other: &Self) -> bool {
+        self.recover == other.recover
+    }
+}
+impl Eq for FrontendOptions {}
 
 impl Default for FrontendOptions {
     fn default() -> Self {
-        Self { recover: true }
+        Self {
+            recover: true,
+            pp_values: None,
+        }
     }
+}
+
+/// Shared `@set` / `@if` values of one TJS engine instance.
+pub type PreprocessorValues =
+    std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, i32>>>;
+
+/// The values every TJS2 instance starts with.
+pub fn initial_preprocessor_values() -> std::collections::BTreeMap<String, i32> {
+    let mut values = std::collections::BTreeMap::new();
+    values.insert("kirikiriz".to_string(), 1);
+    values.insert("version".to_string(), 0x02040009);
+    values
 }
 
 #[derive(Clone, Debug, PartialEq)]

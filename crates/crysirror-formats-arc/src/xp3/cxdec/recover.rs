@@ -56,8 +56,8 @@ pub fn analyze(label: &str, raw: &[u8]) -> Vec<ModuleFacts> {
         let needs = needs_self_decode(&fact);
         out.push(fact);
         if needs {
-            if let Some((decoded, _seed)) = static_self_decode(&bytes) {
-                if let Some(d) = collect(&format!("{label}[self-decode:bitperm-v1]"), &decoded) {
+            if let Some((decoded, variant)) = static_self_decode(&bytes) {
+                if let Some(d) = collect(&format!("{label}[self-decode:{variant}]"), &decoded) {
                     let base = out.last().unwrap();
                     if improves(base, &d) {
                         out.push(d);
@@ -114,10 +114,20 @@ pub fn collect(label: &str, bytes: &[u8]) -> Option<ModuleFacts> {
         .as_ref()
         .map(|c| c.builder_rva)
         .or(dynamic.map(|d| d.builder_rva));
-    let dispatch = builder
-        .or(cabbage_rva)
-        .map(|anchor| find_dispatch_candidates(bytes, &pe, anchor))
-        .unwrap_or_default();
+    // Older class-based managers have no static callback descriptor and do
+    // not use the newer128-lane call pattern. An actual Classic PRNG body is
+    // an independent anchor; naked LCG words are insufficient evidence.
+    let mut dispatch = Vec::new();
+    for anchor in builder
+        .into_iter()
+        .chain(cabbage_rva)
+        .chain(find_classic_prng_windows(bytes, &pe))
+    {
+        dispatch.extend(find_dispatch_candidates(bytes, &pe, anchor));
+    }
+    dispatch.sort_by_key(|d| d.distance);
+    dispatch.dedup_by(|a, b| a.prolog == b.prolog && a.even == b.even && a.odd == b.odd);
+    dispatch.truncate(16);
     let random_seeds = cabbage_rva
         .map(|p| find_cabbage_seed_candidates(bytes, &pe, p, builder))
         .unwrap_or_default();
@@ -729,6 +739,35 @@ fn xor_count(w: &[u8]) -> usize {
     w.windows(2)
         .filter(|i| matches!(i[0], 0x31 | 0x33) && i[1] & 0xc0 == 0xc0)
         .count()
+}
+/// Register-register IMUL by the Classic multiplier, a dependent LEA/add of
+/// its increment, both16-bit old-state shifts and the two combining XORs.
+/// This recognizes code semantics instead of treating adjacent words as code.
+fn find_classic_prng_windows(b: &[u8], pe: &PeImage) -> Vec<u32> {
+    let mut out = Vec::new();
+    for (start, end) in pe.exec_ranges(b.len()) {
+        for off in start..end.saturating_sub(6) {
+            if b[off] != 0x69 || b[off + 1] & 0xc0 != 0xc0 || u32_opt(b, off + 2) != Some(LCG_MUL) {
+                continue;
+            }
+            let dest = (b[off + 1] >> 3) & 7;
+            let w = &b[off + 6..(off + 48).min(end)];
+            let add = (0..w.len().saturating_sub(5)).any(|i| {
+                (w[i] == 0x8d && w[i + 1] >> 6 == 2 && w[i + 1] & 7 == dest && dest != 4
+                    || w[i] == 0x81 && w[i + 1] == 0xc0 | dest)
+                    && u32_opt(w, i + 2) == Some(LCG_ADD)
+            });
+            if add && has_shift(w, true, 16) && has_shift(w, false, 16) && xor_count(w) >= 2 {
+                if let Some(rva) = pe.file_offset_to_rva(off) {
+                    out.push(rva)
+                }
+                if out.len() == 8 {
+                    return out;
+                }
+            }
+        }
+    }
+    out
 }
 fn has_not(w: &[u8]) -> bool {
     w.windows(2)
@@ -1360,14 +1399,152 @@ pub(super) fn bitperm_encode(input: &[u8], seed: u32) -> Vec<u8> {
         .collect()
 }
 
+// A bounded MSVC clear-bootstrap layout. All addresses and seed words are
+// read from the module. Section names and game identities are not selectors.
+#[derive(Clone, Debug)]
+struct BitpermBootstrap {
+    seed: u32,
+    order: [u8; 4],
+}
+const SIGNED_POST_UPDATE: &[u8] = &[
+    0x8d, 0x0c, 0xff, 0xc1, 0xe1, 0x04, 0x2b, 0xcf, 0x8d, 0x0c, 0x89, 0x8d, 0x0c, 0xc9, 0xd1, 0xe1,
+    0x2b, 0xcf, 0x81, 0xc1, 0x01, 0x1b, 0, 0, 0xc1, 0xff, 3, 0x33, 0xf9,
+];
+fn clear_bitperm_bootstraps(b: &[u8], pe: &PeImage) -> Vec<BitpermBootstrap> {
+    let mut out = Vec::new();
+    for (start, end) in pe.exec_ranges(b.len()) {
+        for update in start..end.saturating_sub(SIGNED_POST_UPDATE.len() + 5) {
+            let tail = update + SIGNED_POST_UPDATE.len();
+            if b.get(update..tail) != Some(SIGNED_POST_UPDATE)
+                || b.get(tail..tail + 4) != Some(&[0x40, 0x3b, 0xc5, 0x72])
+            {
+                continue;
+            }
+            let header = (tail + 5).checked_add_signed(b[tail + 4] as i8 as isize);
+            let Some(header) = header.filter(|&h| h >= start && h + 17 < update) else {
+                continue;
+            };
+            // mov ecx,edi; and ecx,3; cmp ecx,3; ja update;
+            // jmp [ecx*4+table]. The backedge proves current-state selection
+            // precedes the signed update, unlike the older unsigned variant.
+            if b.get(header..header + 9) != Some(&[0x8b, 0xcf, 0x83, 0xe1, 3, 0x83, 0xf9, 3, 0x77])
+                || b.get(header + 10..header + 13) != Some(&[0xff, 0x24, 0x8d])
+                || (header + 10).checked_add_signed(b[header + 9] as i8 as isize) != Some(update)
+                || b.get(update.saturating_sub(3)..update) != Some(&[0x88, 0x14, 0x30])
+            {
+                continue;
+            }
+            let Some(table) = u32_opt(b, header + 13).and_then(|va| pe.va_to_file_offset(va))
+            else {
+                continue;
+            };
+            let mut order = [0u8; 4];
+            let mut valid = true;
+            for (slot, kind) in order.iter_mut().enumerate() {
+                let target = u32_opt(b, table + slot * 4).and_then(|va| pe.va_to_file_offset(va));
+                let Some(target) = target.filter(|&t| t >= header + 17 && t < update) else {
+                    valid = false;
+                    break;
+                };
+                let block = &b[target..(target + 22).min(update)];
+                let patterns: [(&[u8], u8); 4] = [
+                    (&[0x80, 0xe2, 0x7f, 0xd0, 0xe2, 0xc0, 0xe9, 7], 0),
+                    (
+                        &[0x80, 0xe1, 0x55, 0xd0, 0xea, 0x80, 0xe2, 0x55, 0xd0, 0xe1],
+                        1,
+                    ),
+                    (&[0x80, 0xe2, 0x0f, 0xc0, 0xe2, 4, 0xc0, 0xe9, 4], 2),
+                    (
+                        &[
+                            0x80, 0xe1, 0x33, 0xc0, 0xea, 2, 0x80, 0xe2, 0x33, 0xc0, 0xe1, 2,
+                        ],
+                        3,
+                    ),
+                ];
+                let matches = patterns
+                    .iter()
+                    .filter(|(pattern, _)| contains(block, pattern))
+                    .map(|(_, k)| *k)
+                    .collect::<Vec<_>>();
+                if matches.len() != 1 {
+                    valid = false;
+                    break;
+                }
+                *kind = matches[0];
+            }
+            if !valid || !super::engine::permutation(&order) {
+                continue;
+            }
+            // The same state register is initialized immediately before the
+            // loop; never brute force or substitute a title parameter here.
+            // Match instruction boundaries, including the optional empty-
+            // section guard. An0xbf byte inside the seed is not an opcode.
+            let seed = [9usize, 5].into_iter().find_map(|distance| {
+                let at = header.checked_sub(distance).filter(|&at| at >= start)?;
+                if b[at] != 0xbf
+                    || distance == 9 && b.get(at + 5..at + 8) != Some(&[0x85, 0xed, 0x76])
+                {
+                    return None;
+                }
+                u32_opt(b, at + 1)
+            });
+            if let Some(seed) = seed {
+                out.push(BitpermBootstrap { seed, order });
+                if out.len() == 8 {
+                    return out;
+                }
+            }
+        }
+    }
+    out
+}
+fn signed_post_bitperm(input: &[u8], bootstrap: &BitpermBootstrap) -> Vec<u8> {
+    let mut state = bootstrap.seed;
+    input
+        .iter()
+        .map(|&v| {
+            let result = bitperm_byte(v, u32::from(bootstrap.order[(state & 3) as usize]));
+            state = state.wrapping_mul(12869).wrapping_add(0x1b01) ^ ((state as i32 >> 3) as u32);
+            result
+        })
+        .collect()
+}
+fn decoded_profile_evidence(b: &[u8]) -> bool {
+    collect("decoded-evidence", b)
+        .is_some_and(|f| f.classic && !f.control_blocks.is_empty() && !f.dispatch.is_empty())
+}
+
 /// Recover a bit-permuted executable section with seeds taken from the
 /// module's own `mov r,imm32`/`push imm32` operands. Accepted only when the
-/// decoded bytes reveal both classic generator LCG constants.
-fn static_self_decode(raw: &[u8]) -> Option<(Vec<u8>, u32)> {
+/// decoded bytes recover a control table and complete Classic dispatch grammar.
+fn static_self_decode(raw: &[u8]) -> Option<(Vec<u8>, &'static str)> {
     const PROBE: usize = 256 * 1024;
     let pe = PeImage::parse(raw).ok()?;
-    if !pe.i386() || (contains_u32(raw, LCG_MUL) && contains_u32(raw, LCG_ADD)) {
+    if !pe.i386() || decoded_profile_evidence(raw) {
         return None;
+    }
+    // Prefer a proven clear bootstrap over legacy seed trials. It can expose
+    // a different mode permutation, update phase and signed shift semantics.
+    for bootstrap in clear_bitperm_bootstraps(raw, &pe) {
+        for section in &pe.sections {
+            if !section.executable() {
+                continue;
+            }
+            let start = section.raw_offset as usize;
+            let available = section.virtual_size.min(section.raw_size) as usize;
+            if available == 0
+                || available > PROBE
+                || start.checked_add(available).is_none_or(|e| e > raw.len())
+            {
+                continue;
+            }
+            let decoded = signed_post_bitperm(&raw[start..start + available], &bootstrap);
+            let mut image = raw.to_vec();
+            image[start..start + available].copy_from_slice(&decoded);
+            if decoded_profile_evidence(&image) {
+                return Some((image, "bootstrap-sar-post"));
+            }
+        }
     }
     let seeds = mov_push_immediates(raw, &pe);
     for require_write in [true, false] {
@@ -1398,7 +1575,19 @@ fn static_self_decode(raw: &[u8]) -> Option<(Vec<u8>, u32)> {
                         scope.spawn(move || {
                             part.iter().copied().find(|&seed| {
                                 let d = bitperm_decode(probe, seed);
-                                contains_u32(&d, LCG_MUL) && contains_u32(&d, LCG_ADD)
+                                if !contains_u32(&d, LCG_MUL) || !contains_u32(&d, LCG_ADD) {
+                                    return false;
+                                }
+                                let mut image = raw.to_vec();
+                                if avail == probe.len() {
+                                    image[start..start + avail].copy_from_slice(&d);
+                                } else {
+                                    image[start..start + avail].copy_from_slice(&bitperm_decode(
+                                        &raw[start..start + avail],
+                                        seed,
+                                    ));
+                                }
+                                decoded_profile_evidence(&image)
                             })
                         })
                     })
@@ -1412,7 +1601,7 @@ fn static_self_decode(raw: &[u8]) -> Option<(Vec<u8>, u32)> {
                 let mut image = raw.to_vec();
                 image[start..start + avail]
                     .copy_from_slice(&bitperm_decode(&raw[start..start + avail], seed));
-                return Some((image, seed));
+                return Some((image, "bitperm-v1"));
             }
         }
     }
@@ -1458,6 +1647,155 @@ fn mov_push_immediates(b: &[u8], pe: &PeImage) -> Vec<u32> {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    fn bootstrap_fixture(seed: u32, order: [u8; 4]) -> (Vec<u8>, Vec<u8>, usize, usize) {
+        let (mut image, _) = super::super::tests::synthetic_module(0x1ff, 0x731);
+        image[0x86..0x88].copy_from_slice(&4u16.to_le_bytes());
+        let section = 0x98 + 0xe0 + 3 * 40;
+        image[section..section + 8].copy_from_slice(b".boot\0\0\0");
+        for (offset, value) in [
+            (8, 0x400u32),
+            (12, 0x4000),
+            (16, 0x400),
+            (20, 0x3400),
+            (36, 0x60000020),
+        ] {
+            image[section + offset..section + offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        // Encoded storage is writable/executable; the unrelated section name
+        // is deliberately retained to prevent a .decc-name based selector.
+        let flags = 0x98 + 0xe0 + 36;
+        image[flags..flags + 4].copy_from_slice(&0xe0000020u32.to_le_bytes());
+        image[0x2e00..0x2e07].copy_from_slice(b"V2Link\0");
+        let mut code = vec![0xbf];
+        code.extend(seed.to_le_bytes());
+        let header = code.len();
+        code.extend([
+            0x8b, 0xcf, 0x83, 0xe1, 3, 0x83, 0xf9, 3, 0x77, 0, 0xff, 0x24, 0x8d, 0, 0, 0, 0,
+        ]);
+        let patterns: [&[u8]; 4] = [
+            &[0x80, 0xe2, 0x7f, 0xd0, 0xe2, 0xc0, 0xe9, 7],
+            &[0x80, 0xe1, 0x55, 0xd0, 0xea, 0x80, 0xe2, 0x55, 0xd0, 0xe1],
+            &[0x80, 0xe2, 0x0f, 0xc0, 0xe2, 4, 0xc0, 0xe9, 4],
+            &[
+                0x80, 0xe1, 0x33, 0xc0, 0xea, 2, 0x80, 0xe2, 0x33, 0xc0, 0xe1, 2,
+            ],
+        ];
+        let mut targets = [0usize; 4];
+        let mut jumps = Vec::new();
+        for (at, &kind) in [1usize, 0, 2, 3].iter().enumerate() {
+            targets[kind] = code.len();
+            code.extend([0x8a, 0x0c, 0x30, 0x8a, 0xd1]);
+            code.extend(patterns[kind]);
+            if at < 3 {
+                jumps.push(code.len());
+                code.extend([0xeb, 0]);
+            }
+        }
+        let store = code.len();
+        code.extend([0x88, 0x14, 0x30]);
+        let update = code.len();
+        code.extend(SIGNED_POST_UPDATE);
+        code.extend([0x40, 0x3b, 0xc5, 0x72, 0]);
+        let back = code.len() - 1;
+        code[back] = (header as isize - code.len() as isize) as i8 as u8;
+        for jump in jumps {
+            code[jump + 1] = (store - jump - 2) as u8;
+        }
+        code[header + 9] = (update - header - 10) as u8;
+        let table = code.len();
+        let table_va = 0x10004000u32 + table as u32;
+        code[header + 13..header + 17].copy_from_slice(&table_va.to_le_bytes());
+        for kind in order {
+            code.extend((0x10004000u32 + targets[kind as usize] as u32).to_le_bytes());
+        }
+        image[0x3400..0x3400 + code.len()].copy_from_slice(&code);
+        let plain = image[0x400..0x1400].to_vec();
+        let bootstrap = BitpermBootstrap { seed, order };
+        image[0x400..0x1400].copy_from_slice(&encode_signed_post(&plain, &bootstrap));
+        (image, plain, 0x3400 + update, 0x3400 + table)
+    }
+    fn encode_signed_post(input: &[u8], bootstrap: &BitpermBootstrap) -> Vec<u8> {
+        let mut state = bootstrap.seed;
+        input
+            .iter()
+            .map(|&v| {
+                let kind = bootstrap.order[(state & 3) as usize];
+                let output = if kind == 0 {
+                    v.rotate_right(1)
+                } else {
+                    bitperm_byte(v, kind as u32)
+                };
+                state =
+                    state.wrapping_mul(12869).wrapping_add(0x1b01) ^ ((state as i32 >> 3) as u32);
+                output
+            })
+            .collect()
+    }
+    #[test]
+    fn clear_bootstrap_recovers_varied_seeds_and_case_permutations() {
+        for (seed, order) in [(0x1357f00d, [1, 0, 2, 3]), (0xbf00bf00, [2, 3, 0, 1])] {
+            let (image, plain, _, _) = bootstrap_fixture(seed, order);
+            let (decoded, variant) =
+                static_self_decode(&image).expect("complete authored decoded grammar");
+            assert_eq!(variant, "bootstrap-sar-post");
+            assert_eq!(&decoded[0x400..0x1400], &plain);
+            let fact = collect("authored", &decoded).unwrap();
+            assert!(fact.classic && fact.mask_offset.is_some());
+            assert!(!fact.dispatch.is_empty());
+        }
+    }
+    #[test]
+    fn bootstrap_rejects_wrong_shift_duplicate_cases_and_lcg_only_evidence() {
+        let (mut wrong, _, update, _) = bootstrap_fixture(0x1357f00d, [1, 0, 2, 3]);
+        wrong[update + 25] = 0xef; // SHR instead of the proven signed SAR.
+        assert!(clear_bitperm_bootstraps(&wrong, &PeImage::parse(&wrong).unwrap()).is_empty());
+        assert!(static_self_decode(&wrong).is_none());
+        let (mut bad, _, _, table) = bootstrap_fixture(0x1357f00d, [1, 0, 2, 3]);
+        let duplicate = bad[table + 4..table + 8].to_vec();
+        bad[table..table + 4].copy_from_slice(&duplicate);
+        assert!(static_self_decode(&bad).is_none());
+        let (mut bad, _, _, _) = bootstrap_fixture(0x1357f00d, [1, 0, 2, 3]);
+        let mut incomplete = vec![0x90; 0x1000];
+        incomplete[0x50..0x54].copy_from_slice(&LCG_MUL.to_le_bytes());
+        incomplete[0x60..0x64].copy_from_slice(&LCG_ADD.to_le_bytes());
+        bad[0x400..0x1400].copy_from_slice(&encode_signed_post(
+            &incomplete,
+            &BitpermBootstrap {
+                seed: 0x1357f00d,
+                order: [1, 0, 2, 3],
+            },
+        ));
+        assert!(
+            static_self_decode(&bad).is_none(),
+            "two words cannot prove a decoded generator"
+        );
+    }
+    #[test]
+    fn previous_unsigned_pre_update_variant_keeps_complete_profile_support() {
+        let (mut image, plain, _, _) = bootstrap_fixture(0x2468abcd, [1, 0, 2, 3]);
+        image[0x400..0x1400].copy_from_slice(&bitperm_encode(&plain, 0x2468abcd));
+        let (decoded, variant) = static_self_decode(&image).unwrap();
+        assert_eq!(variant, "bitperm-v1");
+        assert_eq!(&decoded[0x400..0x1400], &plain);
+    }
+    #[test]
+    fn semantic_classic_rng_anchors_dispatch_without_a_callback_descriptor() {
+        let (mut image, _) = super::super::tests::synthetic_module(0x1ff, 0x731);
+        image[0x2800..0x2810].fill(0);
+        let rng = [
+            0x8b, 0x51, 4, 0x56, 0x8b, 0xc2, 0x69, 0xc0, 0x6d, 0x4e, 0xc6, 0x41, 0x8d, 0xb0, 0x39,
+            0x30, 0, 0, 0x8b, 0xc2, 0xc1, 0xe8, 16, 0xc1, 0xe2, 16, 0x33, 0xc2, 0x89, 0x71, 4,
+            0x33, 0xc6, 0x5e, 0xc3,
+        ];
+        image[0x1000..0x1000 + rng.len()].copy_from_slice(&rng);
+        let fact = collect("no descriptor", &image).unwrap();
+        assert!(!fact.dispatch.is_empty());
+        // Removing real instructions while retaining both words removes this
+        // independent anchor. A descriptor/manager is deliberately absent.
+        image[0x1000..0x1006].fill(0x90);
+        image[0x1006] = 0x90;
+        assert!(collect("words only", &image).unwrap().dispatch.is_empty());
+    }
     #[test]
     fn bitperm_round_trips() {
         let plain: Vec<u8> = (0..4096u32).map(|i| (i * 7 + 3) as u8).collect();

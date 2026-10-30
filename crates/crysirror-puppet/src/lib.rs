@@ -15,6 +15,7 @@
 //! No GPU, window, audio or file-system access happens here.
 #![forbid(unsafe_code)]
 pub mod bake;
+pub mod cpu_snapshot;
 mod eval;
 mod source;
 

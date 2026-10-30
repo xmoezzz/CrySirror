@@ -1,0 +1,22 @@
+KiriKiri audio codec semantic references
+
+Opus: https://github.com/krkrz/wuopus
+Pinned commit: ce192414be87f371eddeee50a9bd1193393aa92a
+Complete OpusMainUnit.cpp inspected. The pinned kropus.vcxproj/kropus.def
+establish that the distributed module is kropus.dll. Original credit:
+"Opus Plug-in for TVP Sound System (C) 2013 T.Imoto".
+
+Vorbis: https://github.com/krkrz/wuvorbis
+Pinned commit: 7566c57c1cdd095846389cf74b66170988dd22cd
+Complete WuVorbisMainUnit.cpp inspected. Original credit:
+"OggVorbis Plug-in for TVP Sound System (C) 2000 W.Dee <dee@kikyou.info>".
+
+These references establish module exports, sample position/time semantics,
+codec/extension names and optional gain/output configuration. No original
+COM/Win32, libopus/libvorbis C/C++, SDK, mixer or renderer implementation is
+embedded or copied. The adapter validates the engine's decoder capability,
+then uses the existing engine-owned worker/resource/AudioRequest path.
+CrySirror's existing pure-Rust Opus decoder and Symphonia Vorbis decoder retain
+their own notices. Non-default native codec options fail explicitly; source
+ReplayGain metadata is exposed by shared AudioResourceInfo and native playback
+fails visibly where the original Vorbis module would apply it.

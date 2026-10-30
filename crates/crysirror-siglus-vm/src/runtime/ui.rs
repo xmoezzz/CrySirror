@@ -12,6 +12,12 @@ pub struct UiRuntime {
     pub name_glyphs: Vec<crysirror_text::grid::CellGlyph>,
     pub reveal: Option<crysirror_scene::layer::GlyphReveal>,
     pub published_message: bool,
+    /// Native R/PAGE's CLEAR proc runs after reveal and the DECIDE key proc.
+    pub clear_after_key: bool,
+    /// Native names can use spacing independent of the message grid.
+    pub name_spacing: Option<[i32; 2]>,
+    pub window_tween: Option<crysirror_scene::animation::ScalarTween>,
+    pub window_animation_type: i64,
 }
 impl UiRuntime {
     pub fn message_waiting(&self) -> bool {

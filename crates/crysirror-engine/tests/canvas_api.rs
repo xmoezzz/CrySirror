@@ -291,3 +291,30 @@ fn public_media_resource_feeds_canvas_and_reports_playback_without_any_native_vm
         "stopped"
     );
 }
+
+#[test]
+fn public_media_clock_samples_and_removal_use_owned_engine_resources() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = app(root.path());
+    std::fs::write(root.path().join("assets/a/movie.mpg"),
+        include_bytes!("../../crysirror-video/tests/fixtures/h264_main.mp4")).unwrap();
+    let surface = call(&mut app, "Media", "play", json!([4,"movie.mpg",{"audio":false}])).unwrap();
+    call(&mut app, "Media", "setClock", json!([4,"1000"])).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        app.frame(16, InputFrame::default()).unwrap();
+        let status = call(&mut app, "Media", "status", json!([4])).unwrap().to_json();
+        if status["state"] == "playing" { break; }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    call(&mut app, "Media", "setClock", json!([4,"1040"])).unwrap();
+    app.frame(999, InputFrame::default()).unwrap();
+    assert_eq!(call(&mut app, "Media", "status", json!([4])).unwrap().to_json()["position_ms"], 40);
+    assert!(call(&mut app, "Media", "setClock", json!([4,"1039"])).is_err());
+    call(&mut app, "Media", "remove", json!([4])).unwrap();
+    assert_eq!(call(&mut app, "Media", "status", json!([4])).unwrap(), Value::Null);
+    app.frame(0, InputFrame::default()).unwrap();
+    let client = app.runtime().unwrap().client_id("a").unwrap();
+    assert!(app.runtime().unwrap().assets.surface(client, surface.as_str().unwrap()).is_none());
+}

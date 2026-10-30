@@ -30,6 +30,12 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-reallive | Original RealLive bytecode VM and thin semantic/syscall adapter; retained Canvas/Layer/GlyphRun/UI and engine audio/Media services, no hosted renderer |
 | crysirror-krkr | Optional AGPL KiriKiri adapter: first-party TJS2 VM (crysirror-tjs2) and KAG parser (crysirror-kag), derived from Kirakira with native KAG3 classes translated onto shared Layer/Canvas/Text/UI/audio/clock/storage (ADR 0053/0088); not in default builds |
 | crysirror-avg32 | Vendored original AVG32 interpreter (siglus_rs 5f358ef) running installed games; PDT raster on shared `crysirror_image::avg32`, text/menus as engine GlyphRun/solid layers, audio channels, storage and save mount (ADR 0095) |
+| crysirror-rfvp-vm | First-class HCB interpreter and native syscall/primitive/wait/save policy; per-instance globals, shared text/font/image kernels, no original software renderer/mixer or private pixel-storage implementation |
+| crysirror-codec-{omv,theora,mpeg,wmv,emote} | First-class CPU format/codec libraries used by shared Video/Puppet services; no original standalone players, windows or renderers |
+| crysirror-rfvp | Optional `rfvp` semantic adapter: scoped storage/surfaces/PuppetFrame declarations, shared CPU mesh capture, channel audio and Media; framework snapshots remain unsupported |
+| crysirror-bgi-vm / crysirror-bgi | Optional first-class bounded native BP executor and semantic adapter; shared Canvas/Layer/GlyphRun, capability tasks, audio admission and input; no original BGI App or renderer |
+| crysirror-nscripter | Optional GPL-2.0-or-later native text-script interpreter; shared Layer/GlyphRun/UI, resource workers, audio and cyclic XOR; no ONScripter runtime or renderer linked |
+| crysirror-circus | First-class bounded DC4PH MES native interpreter and semantic/resource/wait adapter, registered by desktop feature `circus` for ABI0xabb6; shared Image/Layer/UI/Audio/VFX own presentation. ABI0xaab6 remains parse-only; original saves and later native operations remain unsupported |
 | crysirror-siglus-vm | Independent original SceneVm subset registered as `siglus`; native operations call shared engine services, including the explicit plain TEXT/NAME profile (ADR 0061) |
 | crysirror-engine | Unity-style public API: reflective classes/objects, App lifecycle, behaviours, plugins, ScriptHost contract (ADR 0004/0005) |
 | crysirror-script-js | Default JS/TS script host (Boa + Oxc) bound to the class registry; desktop feature `scripting` (ADR 0005) |
@@ -91,6 +97,24 @@ Per-client save/cache roots use adapter and game identity. Two instances of the
 same adapter/game intentionally see that game's persistent storage. Object and
 asset cache identities are instance-scoped. No arbitrary native Rust module is
 sandboxed by these conventions: linked code remains trusted.
+
+Installed-game launch lives in the desktop detection/launch modules. A named
+boot worker inspects bounded content evidence through the shared Resource
+`sniff::FileDetector` (immutable embedded pure-Rust magic rules), then native
+metadata/archive parsers select the actual profile. MIME detection does not
+establish decoder or VM compatibility. The owner consumes the completed plan
+before VM execution. Typed Resources indexing jobs prepare archives on engine
+workers, and owner publication installs client-scoped mounts before startup.
+This boot fence currently waits before creating the window; it is not a claim
+of an interactive asynchronous loading screen. No bootstrap script is needed.
+
+The engine retains menu trees, checked/radio state and activation events.
+Desktop presenters mirror menu bars into AppKit on macOS and HWND menus on
+Windows; Linux currently uses the engine fallback. Native callbacks validate
+owner/item identity and activate that same retained model. Headless captures
+omit OS menu bars, and cannot verify physical OS menu clicks. Native window
+requests remain logical state; the desktop's default title-bar preference is
+applied separately, including after state restoration.
 
 Project.scene3d provides a base camera/mesh scene. ClientSpec.systems adds a
 dynamic typed World, retained Layer and UI. They live in EngineSystems, separate

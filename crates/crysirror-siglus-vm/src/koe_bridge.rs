@@ -61,6 +61,15 @@ impl KoeEngine {
     pub fn volume_raw(&self) -> u8 {
         self.volume
     }
+    pub(crate) fn set_character_gain(&mut self, value: u8) -> Result<()> {
+        self.pending
+            .push(Operation::Control(AudioRequest::SetGain {
+                channel: CHANNEL,
+                gain: f32::from(value) / 255.,
+                fade_ms: 0.,
+            }))?;
+        Ok(())
+    }
     pub(crate) fn current_no(&self) -> i64 {
         self.current.unwrap_or(-1)
     }
@@ -249,6 +258,7 @@ pub(crate) fn dispatch(ctx: &mut CommandContext, id: u32, args: &[Value]) -> Res
             remember(ctx, no, chara, ex);
             let percent = rate(ctx, ex.then(|| named(args, 4).unwrap_or(0) != 0));
             ctx.koe.play(no, percent)?;
+            crate::character_voice::refresh(ctx)?;
             let direct = matches!(id, op::GLOBAL_KOE | op::GLOBAL_EXKOE);
             let wait = !direct || (ex && named(args, 2).unwrap_or(0) != 0);
             if wait {
@@ -318,6 +328,9 @@ pub(crate) fn config(ctx: &mut CommandContext, id: u32, args: &[Value]) -> Resul
     let Some(op) = prop_access::current_op_from_ctx_or_args(ctx, args) else {
         return Ok(false);
     };
+    if crate::character_voice::dispatch(ctx, op, args)? {
+        return Ok(true);
+    }
     let (key, action) = match op {
         cfg::SET_JITAN_NORMAL_ONOFF => (cfg::GET_JITAN_NORMAL_ONOFF, 0),
         cfg::SET_JITAN_NORMAL_ONOFF_DEFAULT => (cfg::GET_JITAN_NORMAL_ONOFF, 1),

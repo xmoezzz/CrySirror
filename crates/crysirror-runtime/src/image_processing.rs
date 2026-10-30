@@ -218,6 +218,10 @@ fn input_size(owner: ClientId, input: &ImageInput, depth: usize, nodes: &mut usi
                     || layer.source.iter().chain(&layer.destination).any(|v| v.unsigned_abs() > 1_000_000) {
                     return Err(Error::Invalid("image composite coordinates"));
                 }
+                if layer.clip.is_some_and(|clip| clip[2] < 0 || clip[3] < 0
+                    || clip.iter().any(|v| v.unsigned_abs() > 1_000_000)) {
+                    return Err(Error::Invalid("image composite clip"));
+                }
                 if matches!(layer.input.as_ref(), ImageInput::Raster { .. } | ImageInput::Transition { .. }) {
                     return Err(Error::Invalid("composite pair-effect input"));
                 }
@@ -289,21 +293,51 @@ fn load(
             let mut image = load(base, storage, decoders, cancel)?;
             for layer in layers {
                 cancel.check()?;
+                let (mut rect, mut destination) = (layer.source, layer.destination);
+                if let Some([x, y, width, height]) = layer.clip {
+                    let left = destination[0].max(x);
+                    let top = destination[1].max(y);
+                    let right = (destination[0] + rect[2]).min(x + width);
+                    let bottom = (destination[1] + rect[3]).min(y + height);
+                    if right <= left || bottom <= top { continue; }
+                    rect[0] += left - destination[0];
+                    rect[1] += top - destination[1];
+                    rect[2] = right - left;
+                    rect[3] = bottom - top;
+                    destination = [left, top];
+                }
                 let source = load(&layer.input, storage, decoders, cancel)?;
                 let mode = match layer.math {
                     ImageCompositeMath::Copy => PixelMath::Copy,
+                    ImageCompositeMath::CopyRgb => PixelMath::CopyRgb,
                     ImageCompositeMath::OpaqueScalar256 => PixelMath::OpaqueScalar256,
                     ImageCompositeMath::MaskScalar256 => PixelMath::MaskScalar256,
+                    ImageCompositeMath::MaskHoldAlphaScalar256 => PixelMath::MaskHoldAlphaScalar256,
+                    ImageCompositeMath::Ps { blend, hold_alpha } => {
+                        use crysirror_core::image_processing::PsBlend as C;
+                        use crysirror_image::bitmap::PsBlend as I;
+                        let blend = match blend {
+                            C::Normal => I::Normal,
+                            C::Overlay => I::Overlay,
+                            C::HardLight => I::HardLight,
+                            C::SoftLight => I::SoftLight,
+                            C::ColorDodge => I::ColorDodge,
+                            C::ColorBurn => I::ColorBurn,
+                            C::Lighten => I::Lighten,
+                            C::Darken => I::Darken,
+                        };
+                        PixelMath::Ps { blend, hold_alpha }
+                    }
                     ImageCompositeMath::OpaqueOnAlphaScalar256 => PixelMath::OpaqueOnAlphaScalar256,
                     ImageCompositeMath::AlphaOnAlphaScalar256 => PixelMath::AlphaOnAlphaScalar256,
                 };
                 // A bounded row is the cancellation granularity; no worker owns
                 // native VM state and publication occurs only after all rows.
-                for row in 0..layer.source[3] {
+                for row in 0..rect[3] {
                     if row % 32 == 0 { cancel.check()?; }
                     image.blit(&source, BlitOptions {
-                        source_rect: BitmapRect::new(layer.source[0], layer.source[1] + row, layer.source[2] as u32, 1),
-                        destination: [layer.destination[0], layer.destination[1] + row],
+                        source_rect: BitmapRect::new(rect[0], rect[1] + row, rect[2] as u32, 1),
+                        destination: [destination[0], destination[1] + row],
                         opacity: layer.opacity, mode, color_key: None,
                     })?;
                 }

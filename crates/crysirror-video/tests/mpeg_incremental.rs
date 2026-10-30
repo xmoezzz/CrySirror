@@ -4,10 +4,10 @@ use crysirror_video::mpeg::{self, AudioChunk, VideoFrame};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
 fn oracle_video(bytes: &[u8], limit: usize) -> Vec<VideoFrame> {
-    let header = siglus_assets::mpeg2::find_sequence_header(&bytes[..bytes.len().min(65536)]);
+    let header = crysirror_video::mpeg_probe::find_sequence_header(&bytes[..bytes.len().min(65536)]);
     let duration = header
         .as_ref()
-        .and_then(|h| siglus_assets::mpeg2::fps_from_frame_rate_code(h.frame_rate_code))
+        .and_then(|h| crysirror_video::mpeg_probe::fps_from_frame_rate_code(h.frame_rate_code))
         .map_or(1000. / 29.97, |fps| 1000. / f64::from(fps));
     let mut pipe = na_mpeg2_decoder::MpegVideoPipeline::new();
     let mut frames = Vec::new();

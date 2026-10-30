@@ -8,12 +8,14 @@
 //! TJS exception naming that capability; nothing is silently stubbed.
 use crate::host::{KrkrHost, LayerState, TimerState, WindowState};
 use crysirror_tjs2::{
-    Result, TjsError, compile_source_to_bytecode,
-    runtime::{Closure, NativeArgCount, ObjectHandle, Runtime, TjsHost, Variant},
+    Result, TjsError,
+    runtime::{Closure, NativeArgCount, ObjectHandle, Runtime, Variant},
 };
 use serde_json::json;
 
 pub type Rt = Runtime<KrkrHost>;
+#[path = "font_class.rs"]
+mod font_class;
 
 pub fn install(rt: &mut Rt) {
     crate::constants::install_tvp_constants(rt);
@@ -29,7 +31,11 @@ pub fn install(rt: &mut Rt) {
     crate::async_trigger::install(rt);
     crate::menus::install(rt);
     install_window(rt);
+    font_class::install(rt);
     install_layer(rt);
+    // KRKR2 ScriptMgnIntf.cpp registers the real KAGParser as a builtin.
+    // Explicit later plugin links can still replace it (including ExtKAG).
+    crate::kag::install(rt);
     crate::transitions::install(rt);
     crate::draw_plugin::capture_base_update(rt);
     crate::sound::install(rt);
@@ -264,7 +270,34 @@ pub(crate) fn native_class(rt: &mut Rt, name: &'static str, init: Native) -> Obj
                 if rt.object_super_class(h).is_none() && class != h {
                     rt.set_object_super_class(h, class);
                 }
-                rt.set_object_member(h, name, Variant::Closure(Closure::new(class, Some(h))));
+                if matches!(rt.object_member(h, name), Variant::Void) {
+                    rt.set_object_member(h, name, Variant::Closure(Closure::new(class, Some(h))));
+                }
+                // Native CreateNew first installs the class, then dispatches
+                // its named constructor (tjsNative.cpp:380-415). A script may
+                // have replaced that member, e.g. a constructor injection.
+                // The saved original class closure re-enters here with h as
+                // `this`, so only that original initializes engine resources.
+                if existing.is_none() {
+                    let constructor = rt.object_member(class, name);
+                    if let Some(method) = constructor.object_handle()
+                        && method != class
+                    {
+                        rt.add_object_class_info(h, name);
+                        for (member, value) in rt.object_members(class) {
+                            let value = match value {
+                                Variant::Object(object) => Variant::Closure(Closure::new(object, Some(h))),
+                                Variant::Closure(closure) if closure.this_obj.is_none() =>
+                                    Variant::Closure(Closure::new(closure.object, Some(h))),
+                                value => value,
+                            };
+                            rt.set_object_member(h, member, value);
+                        }
+                        let constructor = rt.object_member(h, name);
+                        rt.call_function(constructor, args)?;
+                        return Ok(Variant::Object(h));
+                    }
+                }
             }
             rt.add_object_class_info(h, name);
             init(rt, Some(h), args)?;
@@ -294,23 +327,31 @@ pub fn has_member(rt: &Rt, h: ObjectHandle, name: &str) -> bool {
     false
 }
 
+/// TJS2 expression mode (`Scripts.eval`, `evalStorage`, KAG `exp=`):
+/// tTJSLexicalAnalyzer prepends `return` and appends `;` without
+/// parentheses (`tjsLex.cpp:1061-1066,1753`), so text ending in `;` is valid.
+pub(crate) fn expression_source(text: &str) -> String {
+    format!("return {text};")
+}
+
 pub fn run_source(
     rt: &mut Rt,
     name: &str,
     source: &str,
     this: Option<ObjectHandle>,
 ) -> Result<Variant> {
-    let file = compile_source_to_bytecode(name, source)?;
+    let file = rt.compile_source(name, source)?;
     rt.execute_file_with_this(&file, this)
 }
 
 /// TVPExecuteStorage's first stage (`ScriptMgnIntf.cpp`, `tTJS::LoadByteCode`
 /// in `tjs.cpp`): TJS2 bytecode runs, and a `KBAD100` binary struct pack
 /// (`saveStruct(.., "b")`) is the result itself. `None`: a text script.
-fn storage_non_text(rt: &mut Rt, name: &str) -> Result<Option<Variant>> {
-    let bytes = rt.host_mut().read_binary(name, "")?;
+fn storage_non_text(rt: &mut Rt, name: &str, mode:&str, context:Option<ObjectHandle>) -> Result<Option<Variant>> {
+    let bytes = rt.read_storage_binary(name, mode)?;
     if bytes.starts_with(&crysirror_tjs2::bytecode::BYTECODE_SIGNATURE) {
-        return rt.execute_bytecode(&bytes).map(Some);
+        let file=crysirror_tjs2::bytecode::BytecodeFile::parse(&bytes)?;
+        return rt.execute_file_with_this(&file,context).map(Some);
     }
     if bytes.starts_with(b"KBAD100\0") {
         return Ok(Some(rt.decode_binary_struct(&bytes)?.unwrap_or_default()));
@@ -318,24 +359,68 @@ fn storage_non_text(rt: &mut Rt, name: &str) -> Result<Option<Variant>> {
     Ok(None)
 }
 
-pub fn exec_storage(rt: &mut Rt, name: &str) -> Result<Variant> {
-    if let Some(value) = storage_non_text(rt, name)? {
-        return Ok(value);
-    }
-    let source = rt.host_mut().read_text(name, "")?;
-    run_source(rt, name, &source, None)
+pub fn exec_storage(rt: &mut Rt, name: &str) -> Result<Variant> { exec_storage_with_context(rt,name,"",None,false) }
+
+// Original Scripts.execStorage/evalStorage take context as argument THREE,
+// unlike the string variants whose name/line arguments put it at FOUR.
+fn script_storage_context(args:&[Variant])->Result<(String,Option<ObjectHandle>)> {
+    let mode=match args.get(1) {None|Some(Variant::Void)=>String::new(),Some(v)=>v.to_tjs_string()?};
+    if !mode.is_empty() {return Err(unsupported("Scripts storage read mode","offset/encoding-specific stream modes"));}
+    let context=match args.get(2) {None|Some(Variant::Void|Variant::Null)=>None,Some(v)=>Some(object_arg(v).ok_or_else(||TjsError::runtime("Scripts storage context must be an object or null"))?)};
+    Ok((mode,context))
+}
+fn exec_storage_with_context(rt:&mut Rt,name:&str,mode:&str,context:Option<ObjectHandle>,expression:bool)->Result<Variant> {
+    if let Some(value)=storage_non_text(rt,name,mode,context)? {return Ok(value);}
+    let source=rt.read_storage_text(name,mode)?;
+    if expression && source.trim().is_empty() {return Ok(Variant::Void);}
+    run_source(rt,name,&if expression {expression_source(&source)} else {source},context)
 }
 
 // ----------------------------------------------------------------- System
 
 fn install_system(rt: &mut Rt) {
     let h = static_object(rt, "System");
+    // SystemIntf.cpp's native defaults are NULL, not no-op functions.
+    for member in ["onActivate","onDeactivate","exceptionHandler"] {
+        rt.set_object_member(h,member,Variant::Null);
+    }
     methods(
         rt,
         h,
         &[
             ("getTickCount", |rt, _, _| {
                 Ok(Variant::Integer(rt.host().now as i64))
+            }),
+            // krkrz SystemIntf.cpp createUUID: 128 random bits as a version-4
+            // UUID string. Bits come from a splitmix64 stream over a process
+            // counter and the engine clock (identifiers, not secrets).
+            ("createUUID", |rt, _, _| {
+                static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let mix = |mut z: u64| {
+                    z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
+                    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                    z ^ (z >> 31)
+                };
+                let seed = (rt.host().now ^ seq.rotate_left(32)).wrapping_add(seq);
+                let mut u = [0u8; 16];
+                u[..8].copy_from_slice(&mix(seed).to_le_bytes());
+                u[8..].copy_from_slice(&mix(seed ^ 0xa5a5_a5a5_a5a5_a5a5).to_le_bytes());
+                u[8] = u[8] & 0x3f | 0x80;
+                u[6] = u[6] & 0x0f | 0x40;
+                let h: Vec<String> = u.iter().map(|b| format!("{b:02x}")).collect();
+                Ok(Variant::String(
+                    format!(
+                        "{}-{}-{}-{}-{}",
+                        h[0..4].concat(),
+                        h[4..6].concat(),
+                        h[6..8].concat(),
+                        h[8..10].concat(),
+                        h[10..16].concat()
+                    )
+                    .into(),
+                ))
             }),
             ("inform", |rt, _, a| {
                 let m = a
@@ -419,29 +504,14 @@ fn install_system(rt: &mut Rt) {
         rt,
         h,
         &[
-            (
-                "screenWidth",
-                |rt, _| Ok(Variant::Integer(rt.host().canvas[0] as i64)),
-                read_only,
-            ),
-            (
-                "screenHeight",
-                |rt, _| Ok(Variant::Integer(rt.host().canvas[1] as i64)),
-                read_only,
-            ),
-            (
-                "desktopWidth",
-                |rt, _| Ok(Variant::Integer(rt.host().canvas[0] as i64)),
-                read_only,
-            ),
-            (
-                "desktopHeight",
-                |rt, _| Ok(Variant::Integer(rt.host().canvas[1] as i64)),
-                read_only,
-            ),
-            // The desktop is the engine canvas (see desktopWidth/Height).
-            ("desktopLeft", |_, _| Ok(Variant::Integer(0)), read_only),
-            ("desktopTop", |_, _| Ok(Variant::Integer(0)), read_only),
+            // The presenting host's display (canvas when it has none). KAGEX
+            // sizes its window and decides on forced fullscreen from these.
+            ("screenWidth", |rt, _| Ok(Variant::Integer(rt.host().display_rects().0[0])), read_only),
+            ("screenHeight", |rt, _| Ok(Variant::Integer(rt.host().display_rects().0[1])), read_only),
+            ("desktopLeft", |rt, _| Ok(Variant::Integer(rt.host().display_rects().1[0])), read_only),
+            ("desktopTop", |rt, _| Ok(Variant::Integer(rt.host().display_rects().1[1])), read_only),
+            ("desktopWidth", |rt, _| Ok(Variant::Integer(rt.host().display_rects().1[2])), read_only),
+            ("desktopHeight", |rt, _| Ok(Variant::Integer(rt.host().display_rects().1[3])), read_only),
             (
                 "exePath",
                 |_, _| Ok(Variant::String("file://./".into())),
@@ -489,7 +559,34 @@ fn install_system(rt: &mut Rt) {
                 |_, _| Ok(Variant::String("CrySirror-krkr".into())),
                 read_only,
             ),
+            // krkr's free-form "about" text (shown by debug/about dialogs).
+            (
+                "versionInformation",
+                |_, _| Ok(Variant::String("CrySirror KiriKiri adapter".into())),
+                read_only,
+            ),
         ],
+    );
+    // krkrz System.drawThreadNum: 0 = automatic (the krkrz default). Engine
+    // CPU drawing is already snapshot-safe for self-copies; the value is kept
+    // for scripts that read back what they set.
+    rt.set_object_member(h, "__drawThreadNum", Variant::Integer(0));
+    rt.register_object_native_property(
+        h,
+        "drawThreadNum",
+        |rt, _| {
+            let h = rt.global_member("System").object_handle().unwrap();
+            Ok(rt.object_member(h, "__drawThreadNum"))
+        },
+        |rt, _, v| {
+            let n = v.to_integer()?;
+            if !(0..=64).contains(&n) {
+                return Err(TjsError::runtime("System.drawThreadNum must be 0..64"));
+            }
+            let h = rt.global_member("System").object_handle().unwrap();
+            rt.set_object_member(h, "__drawThreadNum", Variant::Integer(n));
+            Ok(())
+        },
     );
     rt.set_object_member(h, "__title", Variant::String(String::new()));
     rt.register_object_native_property(
@@ -601,7 +698,9 @@ fn install_storages(rt: &mut Rt) {
             }),
             ("isExistentStorage", |rt, _, a| {
                 let name = string(&a, 0, "Storages.isExistentStorage")?;
-                let found = rt.host().storage()?.resolve(&name).is_some();
+                let found = if crate::varfile_plugin::is_uri(&name) {
+                    crate::varfile_plugin::exists(rt,&name)?
+                } else { rt.host().storage()?.resolve(&name).is_some() };
                 if !found && std::env::var_os("CRYSIRROR_KRKR_TRACE_STORAGE").is_some() {
                     rt.host_mut().push_log(format!("[storage miss] {name}"));
                 }
@@ -609,16 +708,17 @@ fn install_storages(rt: &mut Rt) {
             }),
             ("getPlacedPath", |rt, _, a| {
                 let name = string(&a, 0, "Storages.getPlacedPath")?;
-                Ok(Variant::String(
-                    rt.host()
-                        .storage()?
-                        .resolve(&name)
-                        .map(|p| format!("file://./{p}"))
-                        .unwrap_or_default(),
-                ))
+                if crate::varfile_plugin::is_uri(&name) {
+                    return Ok(Variant::String(if crate::varfile_plugin::exists(rt,&name)? {name} else {String::new()}));
+                }
+                Ok(Variant::String(rt.host().storage()?.placed_path(&name).unwrap_or_default()))
             }),
             ("getFullPath", |rt, _, a| {
                 let name = string(&a, 0, "Storages.getFullPath")?;
+                if crate::varfile_plugin::is_uri(&name) {
+                    crate::varfile_plugin::validate_uri(&name)?;
+                    return Ok(Variant::String(name));
+                }
                 let full = rt
                     .host()
                     .storage()?
@@ -741,7 +841,7 @@ fn install_scripts(rt: &mut Rt) {
                         "an external data pack IV (the pack header IV is supported)",
                     ));
                 }
-                let bytes = rt.host_mut().read_binary(&name, "")?;
+                let bytes = rt.read_storage_binary(&name, "")?;
                 let value = if bytes.starts_with(b"KBAD100\0") {
                     rt.decode_binary_struct(&bytes)?
                 } else if crysirror_resource::krkr_pbd::is_pbd(&bytes) {
@@ -760,18 +860,13 @@ fn install_scripts(rt: &mut Rt) {
             }),
             ("execStorage", |rt, _, a| {
                 let name = string(&a, 0, "Scripts.execStorage")?;
-                exec_storage(rt, &name)
+                let (mode,context)=script_storage_context(&a)?;
+                exec_storage_with_context(rt,&name,&mode,context,false)
             }),
             ("evalStorage", |rt, _, a| {
                 let name = string(&a, 0, "Scripts.evalStorage")?;
-                if let Some(value) = storage_non_text(rt, &name)? {
-                    return Ok(value);
-                }
-                let source = rt.host_mut().read_text(&name, "")?;
-                if source.trim().is_empty() {
-                    return Ok(Variant::Void);
-                }
-                run_source(rt, &name, &format!("return ({source});"), None)
+                let (mode,context)=script_storage_context(&a)?;
+                exec_storage_with_context(rt,&name,&mode,context,true)
             }),
             ("exec", |rt, _, a| {
                 let source = string(&a, 0, "Scripts.exec")?;
@@ -784,7 +879,7 @@ fn install_scripts(rt: &mut Rt) {
                     return Ok(Variant::Void);
                 }
                 let ctx = a.get(3).and_then(object_arg);
-                run_source(rt, "Scripts.eval", &format!("return ({source});"), ctx)
+                run_source(rt, "Scripts.eval", &expression_source(&source), ctx)
             }),
         ],
     );
@@ -951,6 +1046,24 @@ fn timer_mut(rt: &mut Rt, t: Option<ObjectHandle>) -> Result<&mut TimerState> {
 
 // ----------------------------------------------------------------- Window
 
+/// BasicDrawDevice members, on the class and on every instance. `recreate`
+/// has nothing to rebuild (presentation is the engine's); the native
+/// `interface` pointer is never exposed.
+fn draw_device_members(rt: &mut Rt, h: ObjectHandle) {
+    rt.register_object_native_property(
+        h,
+        "interface",
+        |_, _| {
+            Err(unsupported(
+                "BasicDrawDevice.interface",
+                "native draw-device pointers (never exposed)",
+            ))
+        },
+        read_only,
+    );
+    methods(rt, h, &[("recreate", |_, _, _| Ok(Variant::Void))]);
+}
+
 fn install_window(rt: &mut Rt) {
     let class = native_class(rt, "Window", |rt, this, _| {
         let h = this_of(rt, this, "Window")?;
@@ -977,12 +1090,13 @@ fn install_window(rt: &mut Rt) {
         rt.host_mut().windows.get_mut(&h.0).unwrap().menu = Some(root.0);
         rt.host_mut().menus_revision += 1;
         rt.set_object_member(h, "__caption", Variant::String(String::new()));
-        if let Variant::Object(class) = rt.global_member("Window") {
+        // Class objects may be stored bound; act on the object identity.
+        if let Some(class) = rt.global_member("Window").object_handle() {
             rt.set_object_member(class, "mainWindow", Variant::self_bound(h));
             // krkrz: every Window starts with a Window.BasicDrawDevice, which
             // here is the engine's retained-layer presentation path.
-            if let Variant::Object(device) = rt.object_member(class, "BasicDrawDevice") {
-                let d = rt.call_function(Variant::Object(device), vec![])?;
+            if let Some(device) = rt.object_member(class, "BasicDrawDevice").object_handle() {
+                let d = rt.construct(Variant::Object(device), vec![])?;
                 rt.set_object_member(h, "__drawDevice", d);
             }
         }
@@ -997,21 +1111,11 @@ fn install_window(rt: &mut Rt) {
             .unwrap_or_else(|| rt.alloc_ordinary_object());
         rt.add_object_class_info(h, "BasicDrawDevice");
         rt.set_object_member(h, "__crysirror_device", Variant::Integer(1));
+        draw_device_members(rt, h);
         Ok(Variant::Object(h))
     });
     rt.add_object_class_info(device, "BasicDrawDevice");
-    rt.register_object_native_property(
-        device,
-        "interface",
-        |_, _| {
-            Err(unsupported(
-                "BasicDrawDevice.interface",
-                "native draw-device pointers (never exposed)",
-            ))
-        },
-        read_only,
-    );
-    methods(rt, device, &[("recreate", |_, _, _| Ok(Variant::Void))]);
+    draw_device_members(rt, device);
     rt.set_object_member(class, "BasicDrawDevice", Variant::Object(device));
     rt.register_object_native_property(
         class,
@@ -1038,6 +1142,63 @@ fn install_window(rt: &mut Rt) {
             Ok(())
         },
     );
+    // krkr2 Win32 frame styles (krkrz dropped them). The engine draws no
+    // native frame/scroll bars; the values are kept so scripts read back
+    // what they set. krkr2 defaults: innerSunken true, showScrollBars true.
+    for (name, slot, default) in [
+        ("innerSunken", "__innerSunken", 1),
+        ("showScrollBars", "__showScrollBars", 1),
+    ] {
+        rt.register_object_native_property(
+            class,
+            name,
+            move |rt: &mut Rt, t: Option<ObjectHandle>| {
+                let h = this_of(rt, t, "Window")?;
+                Ok(match rt.object_member(h, slot) {
+                    Variant::Void => Variant::Integer(default),
+                    v => v,
+                })
+            },
+            move |rt: &mut Rt, t: Option<ObjectHandle>, v: Variant| {
+                let h = this_of(rt, t, "Window")?;
+                rt.set_object_member(h, slot, Variant::Integer(v.is_truthy() as i64));
+                Ok(())
+            },
+        );
+    }
+    // krkrz Window min/max size (WindowIntf.cpp setMinSize/setMaxSize; 0 is
+    // unconstrained). The engine window scales the canvas to any size, so the
+    // limits only bound user resizing; they are kept for scripts to read.
+    for name in ["minWidth", "minHeight", "maxWidth", "maxHeight"] {
+        let slot: &'static str = match name {
+            "minWidth" => "__minWidth",
+            "minHeight" => "__minHeight",
+            "maxWidth" => "__maxWidth",
+            _ => "__maxHeight",
+        };
+        rt.register_object_native_property(
+            class,
+            name,
+            move |rt: &mut Rt, t: Option<ObjectHandle>| {
+                let h = this_of(rt, t, "Window")?;
+                Ok(Variant::Integer(rt.object_member(h, slot).to_integer().unwrap_or(0)))
+            },
+            move |rt: &mut Rt, t: Option<ObjectHandle>, v: Variant| {
+                let h = this_of(rt, t, "Window")?;
+                rt.set_object_member(h, slot, Variant::Integer(v.to_integer()?.max(0)));
+                Ok(())
+            },
+        );
+    }
+    for (name, slots) in [("setMinSize", ["__minWidth", "__minHeight"]), ("setMaxSize", ["__maxWidth", "__maxHeight"])] {
+        rt.register_object_native(class, name, move |rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>| {
+            let h = this_of(rt, t, "Window")?;
+            let (w, ht) = (need_int(&a, 0, "Window.setMinSize/setMaxSize")?, need_int(&a, 1, "Window.setMinSize/setMaxSize")?);
+            rt.set_object_member(h, slots[0], Variant::Integer(w.max(0)));
+            rt.set_object_member(h, slots[1], Variant::Integer(ht.max(0)));
+            Ok(Variant::Void)
+        });
+    }
     rt.register_object_native_property(
         class,
         "focusedLayer",
@@ -1137,6 +1298,7 @@ fn install_window(rt: &mut Rt) {
         |rt, t, v| {
             let h = this_of(rt, t, "Window.fullScreen")?;
             let enabled = v.is_truthy();
+            rt.host_mut().push_log(format!("Window.fullScreen = {enabled}"));
             rt.host_mut()
                 .ui_op(json!({"op":"set_fullscreen","enabled":enabled}));
             rt.set_object_member(h, "__fullscreen", Variant::Integer(enabled as i64));
@@ -1161,6 +1323,7 @@ fn install_window(rt: &mut Rt) {
                 _ => return Err(TjsError::runtime("unknown Window.borderStyle")),
             };
             rt.set_object_member(h, "__borderStyle", Variant::Integer(n));
+            rt.host_mut().push_log(format!("Window.borderStyle = {n}"));
             rt.host_mut().ui_op(
                 json!({"op":"set_window_policy","decorated":decorated,"resizable":resizable}),
             );
@@ -1392,6 +1555,41 @@ pub const DEFAULT_FONT_HEIGHT: i64 = 24;
 
 /// Font members read through PropGet: scripts may replace them with
 /// properties (PreRenderFontEx-style font wrappers).
+/// krkr `Font` members are native properties (scripts take `&font.face`
+/// and wrap it, e.g. Yuzusoft's objectHookInjection), backed per object.
+const FONT_SLOTS: &[(&str, &str)] = &[
+    ("face", "__font_face"),
+    ("height", "__font_height"),
+    ("bold", "__font_bold"),
+    ("italic", "__font_italic"),
+    ("angle", "__font_angle"),
+];
+
+fn font_properties(rt: &mut Rt, font: ObjectHandle) {
+    for (name, slot) in FONT_SLOTS {
+        let initial = match *name {
+            "face" => Variant::String(String::new()),
+            "height" => Variant::Integer(DEFAULT_FONT_HEIGHT),
+            _ => Variant::Integer(0),
+        };
+        rt.set_object_member(font, *slot, initial);
+        let (get_slot, set_slot) = (*slot, *slot);
+        rt.register_object_native_property(
+            font,
+            *name,
+            move |rt: &mut Rt, this: Option<ObjectHandle>| {
+                let this = this.ok_or_else(|| TjsError::runtime("Font property without object"))?;
+                rt.resolve_object_member(this, get_slot)
+            },
+            move |rt: &mut Rt, this: Option<ObjectHandle>, value: Variant| {
+                let this = this.ok_or_else(|| TjsError::runtime("Font property without object"))?;
+                rt.set_object_member(this, set_slot, value);
+                Ok(())
+            },
+        );
+    }
+}
+
 fn font_size(rt: &mut Rt, font: ObjectHandle) -> Result<u64> {
     for property in ["italic", "angle"] {
         if rt.resolve_object_member(font, property)?.to_integer()? != 0 {
@@ -1415,12 +1613,13 @@ fn font_text_width(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     let font = this_of(rt, t, "Font.getTextWidth")?;
     let text = string(&a, 0, "Font.getTextWidth")?;
     let size = font_size(rt, font)?;
+    let alias=crate::font_resources::alias(rt,font)?;
     let host = rt.host();
     let metrics = host
         .text_measurement
         .as_ref()
         .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?
-        .measure_simple(&host.font, size as f32, &text)
+        .measure_simple(&alias, size as f32, &text)
         .map_err(|e| TjsError::runtime(format!("Font.getTextWidth: {e}")))?;
     Ok(Variant::Integer(metrics.advance.ceil() as i64))
 }
@@ -1481,24 +1680,10 @@ fn install_layer(rt: &mut Rt) {
             rt.host_mut().layer_mut(h)?.kind = 2;
         }
         let font = rt.alloc_ordinary_object();
-        rt.set_object_member(font, "face", Variant::String(String::new()));
-        rt.set_object_member(font, "height", Variant::Integer(DEFAULT_FONT_HEIGHT));
-        rt.set_object_member(font, "bold", Variant::Integer(0));
-        rt.set_object_member(font, "italic", Variant::Integer(0));
-        rt.set_object_member(font, "angle", Variant::Integer(0));
-        rt.register_object_native_with_arg_count(
-            font,
-            "getTextWidth",
-            NativeArgCount::AtLeast(1),
-            font_text_width,
-        );
-        rt.register_object_native_with_arg_count(
-            font,
-            "getTextHeight",
-            NativeArgCount::AtLeast(1),
-            font_text_height,
-        );
-        rt.set_object_member(h, "font", Variant::Object(font));
+        font_class::initialize(rt, font);
+        // Self-bound like krkr (`tTJSVariant(dsp, dsp)`): writes through
+        // `layer.font.x` act on the Font, not the caller (property hooks).
+        rt.set_object_member(h, "font", Variant::self_bound(font));
         rt.set_object_member(h, "__window", Variant::self_bound(window));
         rt.set_object_member(h, "name", Variant::String(String::new()));
         for (k, v) in [
@@ -1765,6 +1950,43 @@ fn install_layer(rt: &mut Rt) {
             }),
             ("loadImages", layer_load_images),
             ("adjustGamma", crate::image_api::gamma),
+            // krkrz tTJSNI_BaseLayer::DoBoxBlur (LayerIntf.cpp): a box blur
+            // of the clip rect over (-xblur,-yblur)..(xblur,yblur); the alpha
+            // face (dfAlpha, or dfAuto on an alpha layer) weights colour by
+            // alpha (DoBoxBlurForAlpha).
+            ("doBoxBlur", |rt, t, a| {
+                const M: &str = "Layer.doBoxBlur";
+                let h = this_of(rt, t, M)?;
+                let arg = |i: usize| -> Result<i64> {
+                    match a.get(i) {
+                        None | Some(Variant::Void) => Ok(1),
+                        Some(v) => v.to_integer(),
+                    }
+                };
+                let (x, y) = (arg(0)?.abs().min(8192) as i32, arg(1)?.abs().min(8192) as i32);
+                if x == 0 && y == 0 {
+                    return Ok(Variant::Void);
+                }
+                let face = rt.object_member(h, "__lp_face").to_integer().unwrap_or(0);
+                let l = rt.host().layer(h)?.clone();
+                let alpha_weighted = match face {
+                    0 => true,
+                    128 => l.kind != 1,
+                    _ => {
+                        return Err(unsupported(&format!("{M} with face={face}"), "per-channel box blur faces"));
+                    }
+                };
+                let [cx, cy, cw, ch] = clip_of(&l);
+                if cw <= 0 || ch <= 0 {
+                    return Ok(Variant::Void);
+                }
+                crate::image_api::begin(
+                    rt,
+                    Some(h),
+                    json!({"kind":"box_blur","rect":[cx.max(0),cy.max(0),cw,ch],
+                           "area":[-x,-y,x,y],"alpha_weighted":alpha_weighted}),
+                )
+            }),
             ("doGrayScale", |rt, t, _| {
                 crate::image_api::begin(rt, t, json!({"kind":"grayscale"}))
             }),
@@ -1834,20 +2056,38 @@ fn install_layer(rt: &mut Rt) {
             ("stretchCopy", layer_stretch_copy),
             ("affineCopy", layer_affine_copy),
             ("operateStretch", layer_operate_stretch),
-            ("operateAffine", |_, _, _| {
-                Err(unsupported("Layer.operateAffine", "affine canvas copies"))
-            }),
+            ("operateAffine", layer_operate_affine),
             ("getMainPixel", |_, _, _| {
                 Err(unsupported(
                     "Layer.getMainPixel",
                     "CPU pixel readback of canvases",
                 ))
             }),
-            ("setMainPixel", |_, _, _| {
-                Err(unsupported(
-                    "Layer.setMainPixel",
-                    "CPU pixel writes to canvases",
-                ))
+            // krkrz SetMainPixel (LayerIntf.cpp:2594): inside the clip rect,
+            // write the colour channels of one pixel and keep its alpha
+            // (SetPointMain) -- a 1x1 keep-alpha canvas fill.
+            ("setMainPixel", |rt, t, a| {
+                const M: &str = "Layer.setMainPixel";
+                let h = this_of(rt, t, M)?;
+                let (x, y) = (need_int(&a, 0, M)?, need_int(&a, 1, M)?);
+                let color = argb(need_int(&a, 2, M)?, Some(255));
+                let l = rt.host().layer(h)?.clone();
+                if !l.has_image {
+                    return Err(TjsError::runtime("Not drawable layer type"));
+                }
+                if x < 0 || y < 0 || x >= l.image_width || y >= l.image_height {
+                    return Err(TjsError::runtime(format!("{M}: point out of the image")));
+                }
+                if clip_rect(&l, [x, y, 1, 1]).is_none() || l.blank {
+                    // A transparent pixel stays invisible; its hidden colour
+                    // is not retained by the canvas.
+                    return Ok(Variant::Void);
+                }
+                let host = rt.host_mut();
+                host.canvas_op(json!({"op":"fill","id":l.slot,"rect":[x,y,1,1],"color":color,"keep_alpha":true}));
+                host.layer_mut(h)?.image_source = None;
+                host.api_calls += 1;
+                Ok(Variant::Void)
             }),
             ("saveLayerImage", |_, _, _| {
                 Err(unsupported("Layer.saveLayerImage", "canvas image export"))
@@ -2311,6 +2551,11 @@ fn check_face(rt: &Rt, h: ObjectHandle, member: &str) -> Result<()> {
 fn layer_load_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
     let h = this_of(rt, t, "Layer.loadImages")?;
     let name = string(&a, 0, "Layer.loadImages")?;
+    if crate::varfile_plugin::is_uri(&name) {
+        if int(&a,1,0x1fffffff)?!=0x1fffffff { return Err(unsupported("Layer.loadImages colour key","colour-keyed image decoding")); }
+        return crate::varfile_plugin::load_image(rt,h,&name);
+    }
+
     if crate::storage::save_path(&name)
         .map_err(|e| TjsError::runtime(e.to_string()))?
         .is_some()
@@ -2414,18 +2659,20 @@ fn layer_fill_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
         return Ok(Variant::Void);
     };
     if hold {
+        let input = filled_source(rt, h, [x,y,w,ht], color, true);
         if !l.blank {
             let host = rt.host_mut();
             host.canvas_op(json!({"op":"fill","id":l.slot,"rect":[x,y,w,ht],"color":color,"keep_alpha":true}));
-            host.layer_mut(h)?.image_source = None;
             host.api_calls += 1;
         }
+        rt.host_mut().layer_mut(h)?.image_source = input;
         return Ok(Variant::Void);
     }
     if face == 1 {
         color[3] = 255;
     }
     let covers = x <= 0 && y <= 0 && x + w >= l.image_width && y + ht >= l.image_height;
+    let input = (!covers).then(|| filled_source(rt, h, [x,y,w,ht], color, false)).flatten();
     let host = rt.host_mut();
     if covers {
         host.canvas_op(json!({"op":"clear","id":l.slot,"color":color}));
@@ -2437,8 +2684,33 @@ fn layer_fill_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
         host.layer_mut(h)?.blank = false;
         host.layer_mut(h)?.full_alpha = None;
     }
+    if !covers { host.layer_mut(h)?.image_source = input; }
     host.api_calls += 1;
     Ok(Variant::Void)
+}
+
+/// Native fill policy expressed as an engine-owned immutable bitmap command.
+fn filled_source(rt: &Rt, h: ObjectHandle, rect: [i64;4], color: [u8;4], keep_alpha: bool)
+    -> Option<crysirror_core::image_processing::ImageInput>
+{
+    use crysirror_core::image_processing::{ImageCompositeLayer, ImageCompositeMath, ImageInput};
+    let base=crate::image_api::input(rt,h).ok()?;
+    let [x,y,w,height]=[
+        i32::try_from(rect[0]).ok()?,i32::try_from(rect[1]).ok()?,
+        i32::try_from(rect[2]).ok()?,i32::try_from(rect[3]).ok()?,
+    ];
+    let layer=ImageCompositeLayer {
+        input:Box::new(ImageInput::Solid {size:[w as u32,height as u32],color}),
+        source:[0,0,w,height],destination:[x,y],clip:None,opacity:255,
+        math:if keep_alpha {ImageCompositeMath::CopyRgb} else {ImageCompositeMath::Copy},
+    };
+    Some(match base {
+        ImageInput::Composite {base,mut layers} if layers.len()<64 => {
+            layers.push(layer);
+            ImageInput::Composite {base,layers}
+        }
+        base=>ImageInput::Composite {base:Box::new(base),layers:vec![layer]},
+    })
 }
 
 fn layer_color_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
@@ -2552,15 +2824,42 @@ fn layer_copy(
     // keeps the destination alpha (source-atop; PSD clipping layers).
     let face = rt.object_member(h, "__lp_face").to_integer().unwrap_or(0);
     let hold = rt.object_member(h, "__lp_holdAlpha").to_integer().unwrap_or(0) != 0;
-    let atop = hold && !replace && matches!(face, 0 | 1 | 128);
-    if !atop {
+    // copyRect on dfOpaque with holdAlpha copies only the colour plane
+    // (krkrz CopyRect: TVP_BB_COPY_MAIN).
+    // CopyRect uses DrawFace, not HoldAlpha alone (krkrz LayerIntf.cpp
+    // UpdateDrawFace/CopyRect). Alpha/add-alpha faces copy both planes even
+    // with holdAlpha set; only the opaque face can request RGB-only copy.
+    let copy_face = if face == 128 {
+        match rt.host().layer(h)?.kind {
+            2 | 13..=28 => 0,
+            12 => 4,
+            _ => 1,
+        }
+    } else { face };
+    let copy_main = hold && replace && copy_face == 1;
+    let atop = copy_main || hold && !replace && matches!(face, 0 | 1 | 128);
+    if replace {
+        if !matches!(copy_face, 0 | 1 | 4) {
+            return Err(unsupported(&format!("{member} with draw face={copy_face}"),
+                "per-channel canvas draw faces"));
+        }
+    } else if !atop {
         check_face(rt, h, member)?;
     }
     // krkrz LayerBitmapIntf: Photoshop modes with holdAlpha use the `_HDA`
     // (hold destination alpha) kernels; without it they zero the alpha.
     let mode = if replace { 128 } else { int(&a, 7, 128)? };
+    // holdAlpha Photoshop modes the canvas has no blend state for run on the
+    // shared CPU bitmap compositor (krkr's own tvpps kernels), when both
+    // layers have CPU sources.
+    if atop && !matches!(mode, 2 | 13 | 128 | 16 | 17) {
+        if let Some(blend) = ps_blend(mode) {
+            return layer_operate_ps_cpu(rt, h, &a, blend, member);
+        }
+    }
     let atop_mode = match (atop, mode) {
         (false, _) => None,
+        _ if copy_main => Some("copy"),
         (true, 2 | 13 | 128) => Some("normal"),
         (true, 16) => Some("multiply"),
         (true, 17) => Some("screen"),
@@ -2616,20 +2915,36 @@ fn layer_copy(
         && sy >= 0
         && sx.checked_add(sw).is_some_and(|r| r <= source.image_width)
         && sy.checked_add(sh).is_some_and(|b| b <= source.image_height);
+    // Keep the destination's CPU image source as an ordered composite of
+    // the two sources, so later pixel effects (doBoxBlur, gamma, ...) see the
+    // bytes krkr's blitter produced. Computed before the canvas op, which
+    // invalidates the old source. The engine composition graph retains native
+    // destination clips; each operation keeps its original source mapping.
+    // Modes without a composite form leave the layer canvas-only.
+    let composed = match atop_mode {
+        None => composite_source(rt, h, src, &dest, &source, [sx, sy, sw, sh], [dx, dy], opa as u8, replace, mode),
+        Some("normal") => composite_source(rt, h, src, &dest, &source, [sx, sy, sw, sh], [dx, dy], opa as u8, replace, -1),
+        Some("copy") => composite_with(
+            rt, h, src, &dest, &source, [sx, sy, sw, sh], [dx, dy], 255,
+            crysirror_core::image_processing::ImageCompositeMath::CopyRgb,
+        ),
+        Some(_) => None,
+    };
     // Partial copyRect replaces the destination region (shared canvas
     // region replace); onto a blank destination it is a plain draw.
     let host = rt.host_mut();
     host.canvas_op(
         json!({"op":"copy","source":source.slot,"destination":dest.slot,
-        "rect":[sx,sy,sw,sh],"position":[dx,dy],"opacity":opa,"replace":replace && (whole || !dest.blank),
+        "rect":[sx,sy,sw,sh],"position":[dx,dy],"opacity":opa,"replace":replace && !atop && (whole || !dest.blank),
         "clip":dest.draw_clip,"atop":atop_mode}),
     );
     if atop {
         // Alpha is unchanged; only colour moved.
-        host.layer_mut(h)?.image_source = None;
+        host.layer_mut(h)?.image_source = composed;
         host.api_calls += 1;
         return Ok(Variant::Void);
     }
+    host.layer_mut(h)?.image_source = composed;
     let blank = (replace && whole && source.blank) || (dest.blank && source.blank);
     host.layer_mut(h)?.blank = blank;
     host.layer_mut(h)?.full_alpha = if replace && whole {
@@ -2641,6 +2956,127 @@ fn layer_copy(
     };
     host.api_calls += 1;
     Ok(Variant::Void)
+}
+
+/// krkrz omPs* modes with an exact byte-table form in the shared compositor.
+fn ps_blend(mode: i64) -> Option<crysirror_core::image_processing::PsBlend> {
+    use crysirror_core::image_processing::PsBlend as P;
+    Some(match mode {
+        13 => P::Normal,
+        18 => P::Overlay,
+        19 => P::HardLight,
+        20 => P::SoftLight,
+        21 => P::ColorDodge,
+        23 => P::ColorBurn,
+        24 => P::Lighten,
+        25 => P::Darken,
+        _ => return None,
+    })
+}
+
+/// holdAlpha operateRect in a Photoshop mode, computed as an ordered CPU
+/// composite of the two layers' sources; the result replaces the layer image
+/// when the job completes (the TJS call suspends until then).
+fn layer_operate_ps_cpu(
+    rt: &mut Rt,
+    h: ObjectHandle,
+    a: &[Variant],
+    blend: crysirror_core::image_processing::PsBlend,
+    member: &str,
+) -> Result<Variant> {
+    let (dx, dy) = (need_int(a, 0, member)?, need_int(a, 1, member)?);
+    let src = a
+        .get(2)
+        .and_then(object_arg)
+        .map(|s| rt.bound_this(s).unwrap_or(s))
+        .ok_or_else(|| TjsError::runtime(format!("{member}: source must be a Layer")))?;
+    let rect = [need_int(a, 3, member)?, need_int(a, 4, member)?, need_int(a, 5, member)?, need_int(a, 6, member)?];
+    let opa = int(a, 8, 255)?;
+    let opacity = u8::try_from(opa)
+        .map_err(|_| unsupported(&format!("{member} opacity {opa}"), "canvas copy opacity 0..=255"))?;
+    if opacity == 0 || rect[2] <= 0 || rect[3] <= 0 {
+        return Ok(Variant::Void);
+    }
+    let source = rt.host().layer(src)?.clone();
+    let dest = rt.host().layer(h)?.clone();
+    let math = crysirror_core::image_processing::ImageCompositeMath::Ps { blend, hold_alpha: true };
+    let Some(input) = composite_with(rt, h, src, &dest, &source, rect, [dx, dy], opacity, math) else {
+        return Err(unsupported(
+            &format!("{member} holdAlpha {blend:?} on a canvas-composed layer"),
+            "a CPU image source for both layers (shared compositor) or a canvas blend state",
+        ));
+    };
+    crate::image_api::queue_chain(rt, h, input, Vec::new())
+}
+
+/// The composite CPU source of a copyRect/operateRect, mirroring krkrz's
+/// tTVPBBBltMethod choice: copy for copyRect; for operateRect omAlpha (or
+/// omAuto with a non-opaque source) is bmAlphaOnAlpha onto an alpha layer and
+/// bmAlpha onto an opaque one, an opaque source is bmCopyOnAlpha / bmCopy;
+/// `mode` -1 is the hold-destination-alpha normal blend.
+#[allow(clippy::too_many_arguments)]
+fn composite_source(
+    rt: &Rt,
+    h: ObjectHandle,
+    src: ObjectHandle,
+    dest: &LayerState,
+    source: &LayerState,
+    rect: [i64; 4],
+    at: [i64; 2],
+    opacity: u8,
+    replace: bool,
+    mode: i64,
+) -> Option<crysirror_core::image_processing::ImageInput> {
+    use crysirror_core::image_processing::ImageCompositeMath as Math;
+    let alpha_source = mode == 2 || source.kind != 1;
+    // `mode == -1`: a holdAlpha "normal" blend.
+    let math = match (replace, dest.kind == 1, alpha_source) {
+        _ if mode == -1 => Math::MaskHoldAlphaScalar256,
+        (true, _, _) => Math::Copy,
+        (false, false, true) => Math::AlphaOnAlphaScalar256,
+        (false, false, false) => Math::OpaqueOnAlphaScalar256,
+        (false, true, true) => Math::MaskScalar256,
+        (false, true, false) => Math::OpaqueScalar256,
+    };
+    composite_with(rt, h, src, dest, source, rect, at, opacity, math)
+}
+
+/// `dest`'s CPU source with `source`'s rect drawn at `at` by `math`.
+#[allow(clippy::too_many_arguments)]
+fn composite_with(
+    rt: &Rt,
+    h: ObjectHandle,
+    src: ObjectHandle,
+    dest: &LayerState,
+    source: &LayerState,
+    rect: [i64; 4],
+    at: [i64; 2],
+    opacity: u8,
+    math: crysirror_core::image_processing::ImageCompositeMath,
+) -> Option<crysirror_core::image_processing::ImageInput> {
+    use crysirror_core::image_processing::{ImageCompositeLayer, ImageInput};
+    let trace = std::env::var_os("CRYSIRROR_KRKR_TRACE_SOURCE").is_some();
+    let base = crate::image_api::input(rt, h).inspect_err(|_| if trace { eprintln!("[source] composite base slot {} missing", dest.slot) }).ok()?;
+    let input = crate::image_api::input(rt, src).inspect_err(|_| if trace { eprintln!("[source] composite input slot {} missing: {}", source.slot, source.source_lost) }).ok()?;
+    let to_i32 = |v: i64| i32::try_from(v).ok();
+    let layer = ImageCompositeLayer {
+        input: Box::new(input),
+        source: [to_i32(rect[0])?, to_i32(rect[1])?, to_i32(rect[2])?, to_i32(rect[3])?],
+        destination: [to_i32(at[0])?, to_i32(at[1])?],
+        clip: match dest.draw_clip {
+            Some(c) => Some([to_i32(c[0])?, to_i32(c[1])?, to_i32(c[2])?, to_i32(c[3])?]),
+            None => None,
+        },
+        opacity,
+        math,
+    };
+    Some(match base {
+        ImageInput::Composite { base, mut layers } if layers.len() < 64 => {
+            layers.push(layer);
+            ImageInput::Composite { base, layers }
+        }
+        base => ImageInput::Composite { base: Box::new(base), layers: vec![layer] },
+    })
 }
 
 fn layer_assign_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
@@ -2663,6 +3099,11 @@ fn layer_assign_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) ->
         "rect":[0,0,source.image_width,source.image_height],"position":[0,0],"opacity":255,"replace":true}));
     host.layer_mut(h)?.blank = source.blank;
     host.layer_mut(h)?.full_alpha = source.full_alpha;
+    // The images are shared, so the CPU source is too.
+    host.layer_mut(h)?.image_source = source.image_source.clone();
+    if source.image_source.is_none() {
+        host.layer_mut(h)?.source_lost = format!("assign from slot {}: {}", source.slot, source.source_lost);
+    }
     host.api_calls += 1;
     Ok(Variant::Void)
 }
@@ -2703,9 +3144,9 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
         .ok_or_else(|| TjsError::runtime("Layer.font missing"))?;
     let size = font_size(rt, font)?;
     let l = rt.host().layer(h)?.clone();
+    let alias=crate::font_resources::alias(rt,font)?;
     let bold = rt.resolve_object_member(font, "bold")?.is_truthy();
     if !bold && shadow_level == 0 {
-        let alias = rt.host().font.clone();
         let host = rt.host_mut();
         if host.layer(h)?.full_alpha != Some(255) {
             host.layer_mut(h)?.full_alpha = None;
@@ -2725,13 +3166,12 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
         .text_measurement
         .as_ref()
         .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?
-        .position_simple(&host.font, size as u16, &text)
+        .position_simple(&alias, size as u16, &text)
         .map_err(|e| TjsError::runtime(e.to_string()))?;
     let glyphs = placements
         .into_iter()
         .map(|g| json!({"character":g.character.to_string(),"baseline":g.baseline}))
         .collect::<Vec<_>>();
-    let alias = rt.host().font.clone();
     let host = rt.host_mut();
     if host.layer(h)?.full_alpha != Some(255) {
         host.layer_mut(h)?.full_alpha = None;
@@ -2753,27 +3193,10 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
 /// `addFont.dll`: adds `System.addFont`.
 pub fn install_add_font(rt: &mut Rt) {
     let system = rt.global_member("System").object_handle().expect("System");
-    // addFont.dll: load and validate a game font through the shared text
-    // loader. All KiriKiri faces render with the configured project font
-    // alias (adapter policy), so the face is recorded, not substituted.
-    methods(
-        rt,
-        system,
-        &[("addFont", |rt, _, a| {
-            let name = string(&a, 0, "System.addFont")?;
-            let bytes = rt
-                .host()
-                .storage()?
-                .read_named(&name)
-                .map_err(|e| TjsError::runtime(format!("System.addFont: {e:#}")))?;
-            let mut probe = crysirror_text::TextSystem::default();
-            probe
-                .add_font("addFont", bytes)
-                .map_err(|e| TjsError::runtime(format!("System.addFont({name:?}): {e:#}")))?;
-            rt.host_mut().push_log(format!("[addFont] {name}"));
-            Ok(Variant::Integer(1))
-        })],
-    );
+    methods(rt,system,&[("addFont",|rt,_,a| {
+        let name=string(&a,0,"System.addFont")?;
+        crate::font_resources::add(rt,name)
+    })]);
 }
 
 /// Shared canvas transform copy (replace semantics of krkr copies). Sampling
@@ -2888,7 +3311,6 @@ fn layer_affine_copy(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> R
     let i = |k: usize| -> Result<f64> { Ok(need_int(&a, k, M)? as f64) };
     let (sl, st, sw, sh) = (i(1)?, i(2)?, i(3)?, i(4)?);
     let affine = a.get(5).is_some_and(Variant::is_truthy);
-    let r = |k: usize| -> Result<f64> { a.get(k).ok_or_else(TjsError::bad_param_count)?.to_real() };
     let clear = a.get(13).is_some_and(Variant::is_truthy);
     if clear {
         // krkrz AffineBlt(clear): the clip area not covered by the transformed
@@ -2911,8 +3333,17 @@ fn layer_affine_copy(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> R
     if sw <= 0. || sh <= 0. {
         return Ok(Variant::Void);
     }
+    let matrix = affine_matrix(&a, [sl, st, sw, sh], affine)?;
+    transform_copy(rt, h, src, [sl, st, sw, sh], matrix, M)
+}
+
+/// The canvas matrix of krkr's affine arguments 6..=11: a matrix
+/// (`affine`) or the three destination points of the source rect's
+/// top-left, top-right and bottom-left corners.
+fn affine_matrix(a: &[Variant], [sl, st, sw, sh]: [f64; 4], affine: bool) -> Result<[f64; 6]> {
+    let r = |k: usize| -> Result<f64> { a.get(k).ok_or_else(TjsError::bad_param_count)?.to_real() };
     // krkr coordinates are pixel centers; the canvas maps pixel edges.
-    let matrix = if affine {
+    Ok(if affine {
         let (ma, mb, mc, md, e, f) = (r(6)?, r(7)?, r(8)?, r(9)?, r(10)?, r(11)?);
         // dest_center = M·(src_center - (sl, st)) + (E, F), with centers at +0.5.
         let (cx, cy) = (sl + 0.5, st + 0.5);
@@ -2936,8 +3367,42 @@ fn layer_affine_copy(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> R
             x0 + 0.5 - (ma * sl + mc * st),
             y0 + 0.5 - (mb * sl + md * st),
         ]
-    };
-    transform_copy(rt, h, src, [sl, st, sw, sh], matrix, M)
+    })
+}
+
+/// `Layer.operateAffine(src, sl, st, sw, sh, affine, a/x0, b/y0, c/x1, d/y1,
+/// tx/x2, ty/y2, mode=omAuto, opa=255, type)` (krkrz LayerIntf.cpp:7455):
+/// affineCopy's geometry blended like operateStretch -- alpha modes
+/// (omAlpha, or omAuto) without holdAlpha are engine blends, other modes fail
+/// visibly; the filter type is the renderer's sampling.
+fn layer_operate_affine(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
+    const M: &str = "Layer.operateAffine";
+    let h = this_of(rt, t, M)?;
+    if a.len() < 12 {
+        return Err(TjsError::bad_param_count());
+    }
+    if rt.object_member(h, "__lp_holdAlpha").to_integer().unwrap_or(0) != 0 {
+        return Err(unsupported(&format!("{M} with holdAlpha"), "keep-alpha transformed canvas blend"));
+    }
+    let mode = int(&a, 12, 128)?;
+    if !matches!(mode, 2 | 128) {
+        return Err(unsupported(&format!("{M} mode {mode}"), "canvas blend operation modes"));
+    }
+    let opa = int(&a, 13, 255)?;
+    let opacity = u8::try_from(opa)
+        .map_err(|_| unsupported(&format!("{M} opacity {opa}"), "canvas copy opacity 0..=255"))?;
+    let src = a
+        .first()
+        .and_then(object_arg)
+        .map(|s| rt.bound_this(s).unwrap_or(s))
+        .ok_or_else(|| TjsError::runtime(format!("{M}: source must be a Layer")))?;
+    let i = |k: usize| -> Result<f64> { Ok(need_int(&a, k, M)? as f64) };
+    let rect = [i(1)?, i(2)?, i(3)?, i(4)?];
+    if rect[2] <= 0. || rect[3] <= 0. {
+        return Ok(Variant::Void);
+    }
+    let matrix = affine_matrix(&a, rect, a[5].is_truthy())?;
+    transform_blit(rt, h, src, rect, matrix, Some(opacity), M)
 }
 
 fn clip_of(l: &LayerState) -> [i64; 4] {

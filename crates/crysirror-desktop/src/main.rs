@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: only the Windows menu FFI (native_menu.rs) opts out.
+#![deny(unsafe_code)]
 mod app;
 mod audio;
+mod cursor;
+mod detect;
 #[cfg(feature = "gamepad")]
 mod gamepad;
 mod input_track;
+mod launch;
 mod native_menu;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -41,11 +45,41 @@ impl From<RenderChoice> for RenderingPath {
     about = "Data-driven wgpu/winit host; native VM adapters are explicit plugins"
 )]
 struct Args {
+    /// Without a subcommand: play the game in the folder holding this binary
+    /// (double-click launch inside the game folder).
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
+}
+#[derive(clap::Args, Default)]
+struct PlayOptions {
+    game: Option<PathBuf>,
+    #[arg(long)]
+    data_dir: Option<PathBuf>,
+    #[arg(long)]
+    font: Option<PathBuf>,
+    /// Print the detected engine, project and archive mount plan, then exit.
+    #[arg(long)]
+    detect_only: bool,
+    /// Validate/play offscreen, without creating a window or audio device.
+    #[arg(long)]
+    headless: bool,
+    #[arg(long, value_parser=clap::value_parser!(u32).range(1..=1000000))]
+    frames: Option<u32>,
+    #[arg(long)]
+    capture: Option<PathBuf>,
+    #[arg(long)]
+    input_track: Option<PathBuf>,
+    #[arg(long)]
+    no_audio: bool,
+    /// Allow the game's windowed borderStyle to hide the OS title bar.
+    #[arg(long)]
+    allow_borderless: bool,
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Detect the engine of an installed game and run it in place: the
+    /// game folder (or a file inside it, such as its executable).
+    Play(PlayOptions),
     /// Bake local E-mote PSB files into an engine puppet (rig JSON + PNG
     /// textures + report). The output never contains PSB data structures.
     #[cfg(feature = "emote-import")]
@@ -70,6 +104,8 @@ enum Command {
         font: Option<PathBuf>,
         #[arg(long)]
         no_audio: bool,
+        #[arg(long)]
+        allow_borderless: bool,
         #[arg(long,value_parser=clap::value_parser!(u64).range(1..=1000000))]
         frames: Option<u64>,
         #[arg(long)]
@@ -190,6 +226,18 @@ fn state_dir(project: &Path, explicit: Option<PathBuf>) -> Result<PathBuf> {
     .unwrap_or_else(|| PathBuf::from(".crysirror-state"));
     Ok(base.join("CrySirror").join(&fingerprint[..16]))
 }
+fn state_dir_base() -> PathBuf {
+    if cfg!(target_os = "windows") {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|p| PathBuf::from(p).join("Library/Application Support"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/share")))
+    }
+    .unwrap_or_else(|| PathBuf::from(".crysirror-state"))
+}
 fn adapter_registry() -> Result<AdapterRegistry> {
     #[allow(unused_mut)]
     let mut registry = AdapterRegistry::default();
@@ -199,19 +247,20 @@ fn adapter_registry() -> Result<AdapterRegistry> {
     crysirror_krkr::register(&mut registry)?;
     #[cfg(feature = "rfvp")]
     crysirror_rfvp::register(&mut registry)?;
+    #[cfg(feature = "nscripter")]
+    crysirror_nscripter::register(&mut registry)?;
+    #[cfg(feature = "bgi")]
+    crysirror_bgi::register(&mut registry)?;
+    #[cfg(feature = "circus")]
+    crysirror_circus::register(&mut registry)?;
+    #[cfg(feature = "catsystem2")]
+    crysirror_catsystem2::register(&mut registry)?;
     #[cfg(feature = "avg32")]
     crysirror_avg32::register(&mut registry)?;
     Ok(registry)
 }
 fn load_project(path: &Path) -> Result<Project> {
     let project = Project::load(path)?;
-    for client in &project.clients {
-        anyhow::ensure!(
-            client.adapter != "bgi",
-            "hosted engine adapter '{}' has been removed; a CrySirror API bridge is required",
-            client.adapter
-        );
-    }
     #[cfg(feature = "krkr")]
     for c in project.clients.iter().filter(|c| c.adapter == "krkr") {
         serde_json::from_value::<crysirror_krkr::Config>(c.config.clone())?.validate()?;
@@ -223,6 +272,22 @@ fn load_project(path: &Path) -> Result<Project> {
     #[cfg(feature = "reallive")]
     for c in project.clients.iter().filter(|c| c.adapter == "reallive") {
         serde_json::from_value::<crysirror_reallive::Config>(c.config.clone())?.validate()?;
+    }
+    #[cfg(feature = "nscripter")]
+    for c in project.clients.iter().filter(|c| c.adapter == "nscripter") {
+        serde_json::from_value::<crysirror_nscripter::Config>(c.config.clone())?.validate()?;
+    }
+    #[cfg(feature = "bgi")]
+    for c in project.clients.iter().filter(|c| c.adapter == "bgi") {
+        serde_json::from_value::<crysirror_bgi::Config>(c.config.clone())?.validate()?;
+    }
+    #[cfg(feature = "circus")]
+    for c in project.clients.iter().filter(|c| c.adapter == "circus") {
+        serde_json::from_value::<crysirror_circus::Config>(c.config.clone())?.validate()?;
+    }
+    #[cfg(feature = "catsystem2")]
+    for c in project.clients.iter().filter(|c| c.adapter == "catsystem2") {
+        serde_json::from_value::<crysirror_catsystem2::Config>(c.config.clone())?.validate()?;
     }
     #[cfg(feature = "avg32")]
     for c in project.clients.iter().filter(|c| c.adapter == "avg32") {
@@ -248,10 +313,12 @@ fn scripted(
     step_ms: u64,
     input: impl Fn(u32) -> InputFrame,
     prepare_render: bool,
+    mut each_frame: impl FnMut(&mut Runtime) -> Result<()>,
 ) -> Result<Runtime> {
     let mut app = start_app(rt, scripts, client)?;
     for frame in 0..frames {
         app.frame(if frame == 0 { 0 } else { step_ms }, input(frame))?;
+        each_frame(app.runtime_mut()?)?;
         if app.quit_requested() {
             break;
         }
@@ -340,20 +407,147 @@ fn scripted(
     _: u64,
     _: impl Fn(u32) -> InputFrame,
     _: bool,
+    _: impl FnMut(&mut Runtime) -> Result<()>,
 ) -> Result<Runtime> {
     anyhow::bail!("--script requires the 'scripting' feature")
+}
+/// `crysirror play`: engine detection, then the ordinary scripted host with
+/// the game folder as the explicit asset root.
+fn play(options: PlayOptions) -> Result<()> {
+    let PlayOptions {
+        game,
+        data_dir,
+        font,
+        detect_only,
+        headless,
+        frames,
+        capture,
+        input_track,
+        no_audio,
+        allow_borderless,
+    } = options;
+    anyhow::ensure!(
+        headless || input_track.is_none(),
+        "--input-track requires --headless"
+    );
+    let dir = match game {
+        Some(p) if p.is_file() => p
+            .parent()
+            .context("game file without a folder")?
+            .to_path_buf(),
+        Some(p) => p,
+        None => std::env::current_exe()?
+            .parent()
+            .context("binary without a folder")?
+            .to_path_buf(),
+    };
+    let dir = dir
+        .canonicalize()
+        .with_context(|| format!("game folder {}", dir.display()))?;
+    let detection_root = dir.clone();
+    let plan = std::thread::Builder::new()
+        .name("crysirror-detect".into())
+        .spawn(move || detect::detect(&detection_root))
+        .context("spawn engine detection worker")?
+        .join()
+        .map_err(|_| anyhow::anyhow!("engine detection worker panicked"))??;
+    log::info!("detected {} game in {}", plan.engine, dir.display());
+    if detect_only {
+        println!("{}", serde_json::to_string_pretty(&plan)?);
+        return Ok(());
+    }
+    let project: Project = serde_json::from_value(plan.project.clone())?;
+    let state_dir = match data_dir {
+        Some(d) => d,
+        None => {
+            // Same per-user location as projects, keyed by the folder too so
+            // two copies of a game keep separate saves.
+            // FNV-1a 64 over the folder path: stable across builds.
+            let folder = dir
+                .to_string_lossy()
+                .bytes()
+                .fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+                    (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+                });
+            // Player launch options do not change the installed game's save
+            // directory. Keep the previous identity while the actual project
+            // fingerprint still validates framework snapshots independently.
+            let mut identity_project = project.clone();
+            for client in &mut identity_project.clients {
+                if client.adapter == "krkr" {
+                    if let Some(config) = client.config.as_object_mut() {
+                        config.remove("arguments");
+                    }
+                }
+            }
+            let fingerprint = identity_project.fingerprint()?;
+            state_dir_base()
+                .join("CrySirror")
+                .join(format!("{}-{folder:016x}", &fingerprint[..8]))
+        }
+    };
+    std::fs::create_dir_all(&state_dir)?;
+    let mut rt = Runtime::with_asset_root(project, &dir, &state_dir, adapter_registry()?)?;
+    #[cfg(feature = "siglus-resources")]
+    rt.assets
+        .decoders
+        .register("g00", Arc::new(crysirror_siglus::SiglusImageDecoder))?;
+    rt.set_audio_nonblocking(!headless);
+    // Prefer a supplied game font to the host fallback. Do not override it
+    // merely because a system CJK font happens to exist.
+    let font = font.or_else(|| {
+        (!rt.project.fonts.contains_key("default"))
+            .then(detect::system_font)
+            .flatten()
+    });
+    app::load_fonts(&mut rt, font.as_deref())?;
+    if headless {
+        rt.host.display = Some(crysirror_core::service::DisplayInfo {
+            screen: [1920, 1080],
+            work: [0, 0, 1920, 1080],
+        });
+    }
+    let core = launch::bootstrap(rt, &plan)?;
+    if headless {
+        return launch::offscreen(
+            core,
+            frames.unwrap_or(600),
+            &capture.unwrap_or_else(|| state_dir.join("last-frame.png")),
+            input_track.as_deref(),
+            font.as_deref(),
+        );
+    }
+
+    app::App::run(
+        core,
+        app::RunOptions {
+            font,
+            muted: no_audio,
+            frames: frames.map(u64::from),
+            capture,
+            profile_path: None,
+            state_dir,
+            rendering_path: RenderingPath::Raster,
+            allow_borderless,
+        },
+    )
 }
 fn run() -> Result<()> {
     let args = Args::parse();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .target(env_logger::Target::Stderr)
         .init();
-    match args.command {
+    let command = args
+        .command
+        .unwrap_or(Command::Play(PlayOptions::default()));
+    match command {
+        Command::Play(options) => play(options),
         Command::Run {
             project,
             data_dir,
             font,
             no_audio,
+            allow_borderless,
             frames,
             capture,
             profile,
@@ -383,6 +577,7 @@ fn run() -> Result<()> {
                     profile_path: profile,
                     state_dir,
                     rendering_path: renderer.into(),
+                    allow_borderless,
                 },
             )
         }
@@ -409,6 +604,12 @@ fn run() -> Result<()> {
             );
             let dir = state_dir(&project, data_dir)?;
             let mut rt = load_runtime(&project, &dir)?;
+            // Headless renders have no monitor; VMs that size their window
+            // from the display see a fixed 1920x1080 virtual screen.
+            rt.host.display = Some(crysirror_core::service::DisplayInfo {
+                screen: [1920, 1080],
+                work: [0, 0, 1920, 1080],
+            });
             // Native callbacks may measure fonts during the first VM tick.
             app::load_fonts(&mut rt, font.as_deref())?;
             rt.assets
@@ -454,13 +655,35 @@ fn run() -> Result<()> {
                 );
                 return Ok(());
             }
+            // Compacted canvases are materialized as frames advance, as the
+            // window host does after each presented frame.
+            let mut materializer = crysirror_wgpu::Renderer::new(gpu.clone(),
+                if std::env::var_os("CRYSIRROR_CAPTURE_BGRA").is_some() { wgpu::TextureFormat::Bgra8UnormSrgb }
+                else { wgpu::TextureFormat::Rgba8UnormSrgb });
+            materializer.set_rendering_path(path)?;
+            if movie_dir.is_none() && std::env::var_os("CRYSIRROR_CPU_FRAME_HISTORY").is_none() {
+                rt.host.mesh_frame_history = Some(materializer.mesh_frame_history_provider());
+            }
+            let mut materialize =
+                |rt: &mut Runtime| app::materialize_canvases(&mut materializer, rt);
             if script.is_empty() {
                 for frame in 0..frames {
                     rt.tick(if frame == 0 { 0 } else { step_ms }, input(frame))?;
+                    materialize(&mut rt)?;
                 }
             } else {
-                rt = scripted(rt, &script, &script_client, frames, step_ms, input, true)?;
+                rt = scripted(
+                    rt,
+                    &script,
+                    &script_client,
+                    frames,
+                    step_ms,
+                    input,
+                    true,
+                    &mut materialize,
+                )?;
             }
+            drop(materialize);
             let stats = match &movie_dir {
                 Some(dir) => app::movie_on(
                     gpu,
@@ -472,7 +695,7 @@ fn run() -> Result<()> {
                     step_ms,
                     path,
                 )?,
-                None => app::capture_on(gpu, &mut rt, font.as_deref(), &output, path)?,
+                None => app::capture_existing(&mut materializer, &mut rt, font.as_deref(), &output)?,
             };
             println!(
                 "{}",
@@ -556,7 +779,16 @@ fn run() -> Result<()> {
             } else {
                 // No rendering preparation, GPU instance/device, window, or
                 // audio output device is created by this CPU execution path.
-                rt = scripted(rt, &script, &script_client, frames, step_ms, input, false)?;
+                rt = scripted(
+                    rt,
+                    &script,
+                    &script_client,
+                    frames,
+                    step_ms,
+                    input,
+                    false,
+                    |_| Ok(()),
+                )?;
             }
             println!(
                 "{}",
@@ -604,7 +836,8 @@ fn run() -> Result<()> {
                 serde_json::to_string_pretty(
                     &serde_json::json!({"project":p,"registered_adapters":adapters,
                         "rfvp_native_vm":adapters.contains(&"rfvp"),
-                        "bgi_native_vm":false,
+                        "bgi_native_vm":adapters.contains(&"bgi"),
+                        "nscripter_native_vm":adapters.contains(&"nscripter"),
                         "reallive_native_vm":adapters.contains(&"reallive"),
                         "avg32_native_vm":adapters.contains(&"avg32"),
                         "siglus_native_vm":adapters.contains(&"siglus")})

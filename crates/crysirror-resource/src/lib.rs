@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Shared archive and transform contracts. No VM, window or device dependency.
 #![forbid(unsafe_code)]
+pub mod compound;
+pub mod capability_lookup;
+pub mod circus_pck;
 mod context;
 mod crypto;
 mod jobs;
-mod wave;
-pub mod signature;
-pub mod compound;
-pub mod text_stream;
 pub mod krkr_pbd;
+pub mod signature;
+pub mod sniff;
+pub mod pe;
+pub mod pe_menu;
+pub mod xml;
 pub mod sli;
+pub mod text_stream;
+mod wave;
 pub use jobs::{ResourceResult, ResourceTasks, MAX_RESOURCE_JOBS, MAX_RESOURCE_JOBS_PER_CLIENT};
+pub mod backref_lzss;
 mod file;
 pub mod io;
 pub mod keys;

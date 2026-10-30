@@ -59,12 +59,7 @@ impl AngouChain {
 }
 
 pub fn xor_cycle_in_place(buf: &mut [u8], key: &[u8]) {
-    if key.is_empty() {
-        return;
-    }
-    for (i, b) in buf.iter_mut().enumerate() {
-        *b ^= key[i % key.len()];
-    }
+    crysirror_resource::transforms::xor_cycle_in_place(buf, key, 0);
 }
 
 /// Parse a hex string into bytes.

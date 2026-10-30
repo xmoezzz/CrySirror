@@ -68,6 +68,38 @@ emitters sort by distance; this is not unified scene transparency/OIT. Ribbon
 width is explicit full world width, independent of size-over-life curves.
 This API is a bounded modular VFX foundation, not full Niagara parity.
 
+CPU sprite emitters can additionally declare `screen` with a logical `canvas`,
+an owned `layer`, optional same-client `parent`, painter `order` and a fractional
+particle `anchor`. Runtime publishes completed particle snapshots as ordinary
+retained mesh layers, including after an explicit offline completion fence.
+They require no world camera and are excluded from world-space VFX drawing.
+`crysirror_vfx::screen::pack_screen_emitter` accepts explicit per-particle atlas
+UVs and is usable independently of any native VM. Unsupported facing, GPU screen
+simulation, producer conflicts and unsupported blends fail visibly. Framework
+snapshots with active or pending screen emitters are explicitly rejected until
+their derived mesh ownership can be reconstructed; this is not save support.
+
+`VfxSystemSpec.clock` separates engine deltas from explicit integration ticks
+and wall time. An external CPU system can own one `sequence_rng` shared by its
+emitters in declaration order. `sequence_exchange` borrows that stream at an
+already completed tick and replaces its state at a strictly increasing epoch;
+admission is distinct from acknowledgement. `Vfx.sequenceStatus(entity,
+revision, completedTick, exchangeEpoch)` returns pending until a worker has
+completed both requested boundaries for the current entity lifetime and authored
+declaration. It never returns an unprocessed seed as a completion. Native clients
+use the same client-checked `EngineQuery::VfxSequence`. Decimal strings preserve
+large counter arguments/results across JS/MCP transports. Worker receipts and
+their host cache are derived state and are cleared at restore.
+Active or queued sequence systems also reject framework snapshots until the
+completed random-stream and exchange state can be reconstructed safely.
+
+`VfxEmitterSpec.falling_atlas` is a CPU local-space screen-sprite node over the
+existing particle pool. Its declarative drift, reset plane, nonuniform atlas,
+wrapping/monotonic atlas clock and bounded integer stream need no VM callback or
+private particle renderer. GPU, conflicting modules/events and unsupported
+clock profiles reject at compilation. Multiple systems do not implicitly share
+one random stream; callers must preserve their actual ownership boundary.
+
 ## Acoustic scene and direct sound
 
 `Audio.prepareAcousticsAsync('room.json')` prepares the calling client's
@@ -587,6 +619,315 @@ services; they do not own a second general-purpose renderer.
 freezes a static layer subtree as one `Paint::Snapshot {size,layers}` draw. The
 renderer caches an offscreen product at the source resolution, so outer opacity
 and scaling affect the whole snapshot. This first profile admits solid drawing
-and verified immutable engine PNG resources, and explicitly rejects uncaptured
-fonts, dynamic content and nested snapshots. See ADR 0094 for resource readiness
+and verified immutable engine PNG resources. Bounded clipped groups can use
+nested isolation snapshots so overlapping children receive group opacity once.
+Uncaptured fonts and unsupported dynamic content still fail. See ADR 0094 for resource readiness
 and lifetime requirements; it is not a general CPU pixel-readback service.
+
+
+### Device-free engine mesh captures
+
+`crysirror_puppet::cpu_snapshot::{MeshSnapshot, SnapshotTexture}` captures ordinary
+engine `PuppetFrame` declarations from immutable RGBA resources. `render(size,
+check_cancelled)` is a pure worker job; the owner publishes the result for that
+immutable input. `capture(size)` is a blocking offline convenience with one cached
+output. Replacing an Arc-backed texture never changes an already captured input.
+
+This bounded CPU profile supports indexed triangles, interpolated UV/color,
+clamped bilinear sRGB texture sampling, linear premultiplied blending and the
+engine Normal/Add/Subtract/Multiply/Screen modes. Stencil masks fail explicitly.
+Target working memory, source residency and triangle coverage have explicit limits.
+The standalone tests in crysirror-puppet need no VM, device, font or game asset.
+General GPU-reference parity has not been established. The RFVP facade uses the
+presenter's client-scoped GPU mesh history when available, with this CPU capture
+as an explicit reference fallback; native thumbnails remain explicit readbacks.
+These Rust host APIs do not add reflective script signatures or change the
+`26edfb80137ff54a` fingerprint.
+
+The shared CPU image API also owns `wipe_mask::generate` (deterministic grayscale
+transition masks); its output can feed `associated::map_coverage_alpha` without
+a native VM. `video::omv::{header,packed_len,to_rgba}` validates native OMV plane
+layouts and converts them to ordinary engine RGBA. NWA remains available through
+the validated Audio decoder/source API, with lazy capability-reader access and
+bounded blocks. These implementations no longer link the Siglus interpreter.
+Native form/syscall mappings and real-game compatibility are separate concerns;
+these Rust additions do not change the reflective fingerprint.
+
+
+### Shared native movie resources
+
+`HostServices::media_frame(client,id)` returns an immutable engine-published
+`MediaFrame` with RGBA, dimensions, PTS and revision. Its clones retain the
+engine memory lease; foreign/missing identities fail, loading has no picture,
+and Stop releases the resource's local picture. Native adapters do not create
+decoders or playback clocks. Reader-based ASF/WMV/WMA and OMV/Theora/Vorbis run
+on the existing bounded Media workers, including cancellation and error
+publication. Audio uses the common float PCM builder/mixer. Native resource
+lookup, frame placement, return values and wait/skip semantics stay in adapters.
+
+Current reflective fingerprint: `1af7e309b18b2933`. The latest additions include
+menu enable state, bounded native menu template data and the partial KCS config;
+earlier additions include font jobs, Layer/UI motion and pointer coverage.
+Media picture publication itself remains a Rust host API. See the adapter
+READMEs and STATUS for supported native profiles and real-game results.
+
+Earlier Rust-only additions include
+`crysirror_scene::animation::ScalarTween`: validated finite endpoints,
+explicit monotonic millisecond clock, shared `Easing`, `sample`, `complete`
+and continuous `retarget`. Logical interpolation state is serializable and
+retains no host/VM/device reference. `image::cursor::decode_cur16m` feeds
+ordinary client-scoped animated cursor resources. `image::crx::decode` returns
+straight RGBA and native origin metadata; the default image registry also
+recognizes CRXG content. Audio `decoder::open_memory/open_reader` recognize
+XPCM mode 0 PCM and mode 5 Ogg, using a bounded seekable payload view and the
+existing packet decoder. XPCM spectral transforms 1/3 remain unsupported.
+`crysirror-circus::Program` preserves native MES operands and command boundaries.
+The registered Circus adapter executes a bounded original DC4/DC4PH native
+profile using shared engine image/layer/UI/audio/VFX/storage services. Unmapped
+instructions stop at their original PC; registration is not full compatibility.
+
+`crysirror_image::color::{srgb8_transfer, Srgb8Transfer}` exposes immutable
+batch colour transfer data; convenience `srgb8_to_linear` and
+`linear_to_srgb8` use the same checked byte-quantization boundaries. Shared
+CPU scene capture reuses this independently tested module. Pixel parity
+against the prior transfer expression is separate from game performance.
+
+
+### Shared sprite resources and installed-game bootstrap
+
+`ImageEffect::SpriteAlpha` uses `SpriteAlpha` to normalize a decoded sprite
+resource (preserved/opaque coverage, exact corner/colour key or paired mask).
+`ImageEffect::StripeReveal` generates generic stripe/stagger threshold masks;
+native effect numbers and their policy remain adapter data. Both run on the
+existing bounded image workers and publish ordinary engine resources.
+`crysirror_scene::sprite::SheetSequence` selects a horizontal cell and UVs from
+an absolute engine clock, independently of any VM or renderer.
+
+Rust native clients can query `EngineQuery::UiInteraction` for the shared
+widget's hovered/focused/pressed state. `ImageCompositeLayer.clip` constrains
+a destination rectangle while retaining source sampling phase. Canvas RGB-only
+copy preserves destination alpha and must not discard hidden source RGB. These
+capabilities do not require an NScripter or KiriKiri instance.
+
+Desktop `play <game-folder>` builds its typed native project and archive plan
+internally. `--detect-only` prints that plan; `--headless --frames N --capture
+image.png` uses the same native adapter and worker-mounted archives without a
+window or audio device. No temporary bootstrap TypeScript or bulk extraction is
+required. See docs/NATIVE_ADAPTERS.md for profiles and validation limits.
+
+Rust hosts also have `crysirror_resource::sniff::FileDetector`: `new()` acquires
+the verified immutable embedded `pure-magic`/`magic-db` rules, and `identify`
+reads a caller's `AssetReader` prefix of at most 64 KiB. `identify_bytes` takes
+an already-owned slice with the same bound. The detector has no filename hint,
+external rules dependency or libmagic FFI. Clones share read-only rules across
+workers; each call owns its reader/slice and result. `None` means no specific
+rule matched, and a positive MIME/description remains identification evidence,
+not file validation or a decoder-support claim. `prefix_truncated` records a
+bounded sample of a larger input. Desktop engine detection uses this API on
+its boot worker in addition to native metadata and archive/profile validation.
+The pure Rust library API does not add a reflective script signature.
+
+### Client-scoped mesh frame history
+
+`HostServices::mesh_frame_history(client)` optionally leases a
+`MeshFrameHistory` capability from the presenter's provider. `texture(layer,
+size)` reserves the layer's logical previous-picture resource and returns a
+canonical engine path; publication rejects an unreserved reference from that
+client. `readback(layer, size)` is an explicit blocking capture fence for native
+save/thumbnail jobs, and fails before a completed picture exists. Device handles,
+capability leases and captured GPU state are never native save data.
+
+`Renderer::mesh_frame_history_provider` installs the presenter before native boot.
+`advance_frame_histories` processes immutable mesh declarations once per logical
+tick, including headless ticks. Referenced sources are frozen by queue-ordered
+texture copies before any new target is drawn. Re-extracting the same retained
+`Arc<PuppetFrame>` does not recursively apply feedback. First reads of a reserved
+but never drawn source sample transparent black; explicit CPU readback still
+fails until that source has been drawn. Layers remain engine resources usable
+without RFVP or another VM. Last client lease disposal clears its slots; limits
+are eight slots per client, 64 leased clients and 128 MiB of logical target/history
+storage. Renderer cache and transient mesh targets retain their existing limits.
+
+The desktop host enables GPU history for windowed and `play --headless` runs,
+and for single-image `render` runs. Movie warm-up currently retains the CPU
+reference path. `CRYSIRROR_CPU_FRAME_HISTORY=1` selects that reference path for
+diagnostics. Normal GPU feedback never maps a buffer; only explicit captures do.
+Native thumbnail capture currently remains a blocking fence, rather than an
+asynchronous save-completion API. Renderer profiles expose history
+`renders`, `copies`, and explicit `readbacks`. These Rust host capabilities add no
+reflective JS/TS signature; generation still checks the documented fingerprint.
+
+### Retained glyph coverage effects
+
+`Paint.glyph_run.blur.kernel` defaults to `weighted_blur` for existing records.
+`disk_outline` produces circular maximum coverage around a glyph;
+`square_face` combines offset glyph faces by alpha union. Outline/face kernels
+admit radius at most 16 and level exactly 256; weighted blur retains its existing
+radius at most 64 and gain behavior. Each effect is an ordinary retained GlyphRun
+with independent color/placement and the same reveal timing as its body run.
+`crysirror_text::glyph_coverage` owns the bounded device-independent coverage
+operations; the renderer caches individual glyph resources. The public data
+example `examples/desktop/glyph-effects.json` uses this without a native VM.
+
+### Image backing extents and addressing
+
+`crysirror_image::padding::pad_to_extent` preserves an image's pixels at the
+origin and fills a larger checked extent with an explicit color. Native policies
+may choose a power-of-two backing while retaining the image's logical size.
+`LayerSpec.sampling` selects independent `address_u`/`address_v` modes:
+`clamp_to_edge` (default), `repeat`, or `mirror_repeat`. Clamp preserves the
+existing [0,1] source-UV contract. Explicit repeat/mirror axes admit increasing,
+finite source bounds with absolute value at most 4096. Non-default addressing
+currently requires an image paint; unsupported paints fail validation.
+
+The renderer creates independent sampling aliases over the same admitted GPU
+image allocation. Two layers using one asset with different addressing never
+mutate one another's sampler. Nested snapshot/composite renderers use the same
+image-key and sampling contract. These additions extend public LayerSpec data;
+Rust struct literals must initialize `sampling` (normally `Default::default()`).
+
+Rust hosts expose `HostServices::window_focused(client)` as current,
+client-checked presenter state: `Some(false)` is an unfocused window,
+`Some(true)` is focused and `None` means no window-focus model. Desktop updates
+it from winit's initial focus query and subsequent owner events; suspension
+clears it. Runtime snapshots do not overwrite current host focus. Native adapters
+choose an explicit offscreen policy when no window exists; they must not report
+that choice as an observed OS focus result.
+
+`Layers.beginCrossfadeEffect(id, source, durationMs, effect)` starts an isolated
+subtree effect using the engine clock. For example,
+`{kind:"blur",before:[4,4],after:[8,8],dynamic:false}` freezes its two inputs
+for the transition; `dynamic:true` renders live inputs each tick. Radius bounds
+are 0..128 per axis, arithmetic is in encoded byte colors and alpha, and one
+quantization follows the two-dimensional box sum. A `dim` effect processes a
+rule image with grayscale, box blur and optional inversion before a rule wipe.
+Progress/parameters, input snapshots, temporary textures and completion belong
+to the engine. `crossfadeStatus`/`endCrossfade` inspect/release its state.
+
+Rust `crysirror_scene::timeline_counter::Counter` supplies integer clocks and
+range/loop timelines from explicit game/real deltas (`update_time`). Start,
+pause/resume, count/range queries and `save_parts`/`from_save_parts` have no VM,
+window or device dependency. Native counter IDs, callback invocation and choice
+of clock remain adapter policy; the shared arithmetic uses checked-width i128
+intermediates for i64 ranges.
+
+`Ui.snapshotLayers(root)` returns independent logical `LayerSpec` records on the
+project canvas. A widget ID selects its subtree; null selects the owner's current
+widgets, engine menus and dialogs. Current text, state, layout, order and clipping
+are frozen in the returned data, with IDs remapped for independent installation.
+Window decorations and OS cursors are outside this capture. Native hosts use the
+same implementation through client-scoped `EngineQuery::UiSnapshot {canvas,root}`;
+unsupported non-axis-aligned or derived GPU state fails explicitly. These layers
+can become a shared Canvas snapshot without a VM rasterizer or a GPU readback.
+
+`HostServices::audio_codec_supported(client, codec)` queries canonical names such
+as `opus` or `vorbis` in the actual shared decoder registry. Availability does not
+imply every channel map or metadata option is supported. Prepared audio resource
+receipts expose `has_replay_gain`: this reports source tags, without claiming a
+gain policy was applied. An adapter must apply its native policy through shared
+audio capabilities or reject tagged material when that policy is unavailable.
+
+The default `Resources` archive registry also exposes `circus/pck`, independently
+of a Circus VM or the optional arc-formats package. `Resources.beginDecode`
+with archive kind/that format and `mountDecode` use the shared bounded PCK index
+and range readers. Native VOICE name/slot policy remains in its adapter.
+
+Widget text-field `text_color`/`text_inset` keep the existing default appearance.
+`activate_on_press` is opt-in for buttons, and avoids a second activation at
+release. `interaction_only` keeps shared input handling without visual paint;
+`keyboard_focusable:false` keeps a pointer button from taking an edit field's
+keyboard focus. `WidgetInteraction.activated` and its nonzero
+`activation_serial` describe one current-tick activation. Repeated native pumps
+can remember the serial instead of inferring clicks from a bounded event queue;
+new ticks and input restoration clear the edge.
+
+Rust `resource::text_stream::encode(text, mode, max_bytes)` produces bounded,
+immutable text bytes using `TextWriteMode::{PlainUtf16,Cipher1,Deflate{level}}`.
+It preserves UTF-16LE BOM, FEFE bit swapping, or mode-2 zlib and its two u64LE
+lengths; paths, offsets and atomic publication remain storage-owner policy.
+`resource::pe::PeData::parse` validates caller-owned PE32/PE32+ data up to 64 MiB.
+`image_base`, `sections`, `sha256`, `rva_slice` and `va_slice` expose validated,
+file-backed ranges and identity. Virtual-only padding is not readable file data.
+No executable is mapped or run by this parser; native build/table policy belongs
+to its adapter.
+
+Shared `Media.status` and native `HostServices::media_info` expose validated
+`size` before the first picture is presented, once decoder-header work finishes.
+`duration_ms` is a declared container duration when available; null remains
+unknown. OMV page/packet hints never substitute for a total-frame count. The
+incremental ASF/Theora `decode_video_with_metadata` callbacks publish those
+header facts before their first picture over the same caller-owned reader.
+Metadata preparation leaves the presentation clock and published-frame count
+unchanged. `MediaRequest::Remove` releases the scoped decoder/resource and
+surface; `Stop` retains a stopped resource and its reconstruction obligation.
+
+`Media.setClock(id, nowMs)` / `MediaRequest::SetClock` select an external clock
+before playback is first anchored, then admit monotonically nondecreasing
+samples. The engine computes position immediately from its retained origin and
+pause/seek offsets; frame publication has a separate PTS and remains tick work.
+Native adapters select an existing game/real clock without maintaining another
+video timer. Pause overlays compensate external elapsed time on resume. Unknown
+audio streams are prepared normally: a decoded audio track with an external
+clock fails before PCM/picture publication until audio-master mapping exists.
+Silent streams work even when the caller requested audio. Clock arguments can
+be exact decimal strings. `Media.remove` releases media and surface after callers
+detach image uses. Up to 16 resources per client and 32 per Runtime can be kept,
+with unchanged 128 MiB video/audio byte budgets and bounded decoder leases.
+
+
+## Client-owned dynamic fonts
+
+`Text.beginFont(alias, asset, faceIndex?)` submits a capability-scoped font job.
+Poll `Text.fontStatus(ticket)` from the ordinary host update; pending work never
+blocks the engine owner. I/O reads and CPU outline/shaping preparation are
+separate bounded worker stages. Ready means the immutable face has been
+published into the same catalog used by text measurement, CPU rasterization,
+GlyphRun and GPU text cache keys. It does not mean a frame has been presented.
+
+The returned `font.alias` pins the content/revision; use it in text/layer specs.
+`Text.resolveFont(logicalAliasOrFamily)` resolves a current owned face.
+`Text.releaseFontJob(ticket)` releases its retained completion, and
+`Text.releaseFont(handle)` separately removes its published resource. Existing
+measurement capabilities see catalog publication, while a different client's
+view rejects the canonical alias. Replacing a logical alias retains the old
+canonical face until explicitly released; it cannot silently change old text.
+
+Rust native clients use `HostServices::font_library` with the same
+FontLoadSpec/FontJob/FontLoadState/FontInfo contracts. A source is a scoped
+storage path or immutable byte buffer, and a selected collection index is
+explicit. Encoded sources are bounded to32MiB; job and retained-face admission
+are additionally bounded per client and Runtime. Framework capture/restore
+explicitly rejects pending or retained dynamic fonts until resource
+reconstruction is implemented. Original native script saves are separate.
+No font binary is distributed with these interfaces.
+
+## Retained Layer and UI motion
+
+`Layers.beginMotion(id, track)` and `Ui.beginMotion(id, track)` retain a shared
+MotionTrackSpec over the engine ScalarTween. Layers support x/y/scale_x/scale_y;
+UI supports x/y. An omitted `from` uses the current property. Automatic duration
+uses engine milliseconds; `external:true` uses caller units and advances only
+through `setMotionElapsed(id, property, elapsed)`. Repeated elapsed samples are
+idempotent and backward samples fail. Zero duration applies the endpoint
+immediately. External units can be native frames without a private VM tween.
+
+`motionStatus(id)` reports engine-sampled values and completion. An existing
+target with no tracks returns an empty completed status; a missing target fails.
+`endMotion(id, propertyOrNull, finish)` cancels one or all tracks and optionally
+applies their endpoints. Replacing/removing the target cancels its tracks.
+UI motion advances before pointer hit testing. Track state is serialized with
+the owned Layer/UI logical state and validated on restore. Native callers use
+LayerCommand/UiCommand and EngineQuery::LayerMotion/UiMotion, with the same
+client ownership checks as other engine resources.
+
+
+`Ui.setHitMask(id, maskOrNull)` (also WidgetSpec.hit_mask) binds a reusable,
+immutable one-byte coverage grid matching the widget's unscaled logical extent.
+A pointer sample is eligible at coverage >= threshold; threshold1 therefore
+selects nonzero alpha. Optional strict_bounds additionally excludes the local
+top/left edges. Transparent samples permit pointer input to reach lower widgets;
+keyboard focus/activation does not sample the mask. Ordinary unmasked widgets
+retain their existing rectangle behavior. Local bytes, dimensions and aggregate
+owner/Runtime memory are bounded, and masks are logical saved UI state.
+`ImageResource::alpha_region(rect)` extracts checked stored source alpha in the
+shared image contract; native adapters do not implement their own pixel loops.

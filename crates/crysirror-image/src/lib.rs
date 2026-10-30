@@ -7,6 +7,10 @@ mod formats;
 pub use formats::{ImageDecodeContext, ImageFormat, ImageSource};
 
 pub const MAX_DECODED_BYTES: usize = 64 * 1024 * 1024;
+pub mod nvsg;
+pub mod pixels;
+pub mod padding;
+pub mod wipe_mask;
 mod png;
 pub use png::{encode_png_uncompressed, png_uncompressed_len};
 pub fn rgba_len(width: u32, height: u32) -> Result<usize> {
@@ -53,15 +57,19 @@ pub trait ImageDecoder: Send + Sync {
 }
 pub mod associated;
 pub mod bitmap;
-pub mod effects;
+pub mod composition;
+pub mod cursor;
+pub mod color;
+pub mod crx;
 pub mod cximage;
+mod dds;
+pub mod effects;
+pub mod sprite_alpha;
+pub mod packed;
+pub mod row_copy;
+pub mod transition;
 pub mod vector;
 pub mod warp;
-pub mod transition;
-pub mod row_copy;
-pub mod composition;
-mod dds;
-pub mod packed;
 pub fn decode_standard(bytes: &[u8]) -> Result<ImageSurface> {
     ensure!(
         bytes.len() <= MAX_DECODED_BYTES,
@@ -136,6 +144,7 @@ impl Default for DecoderRegistry {
             this.decoders.insert(extension.into(), Arc::new(Standard));
         }
         this.decoders.insert("pdt".into(), Arc::new(Pdt));
+        this.formats.insert("circus/crx", Arc::new(crx::Format));
         this
     }
 }
@@ -205,12 +214,20 @@ pub fn encode_png(surface: &ImageSurface) -> Result<Vec<u8>> {
 /// CPU surfaces with explicit legacy /255 composition and affine sampling.
 pub mod surface;
 
-/// Shared MPL PDT10/PDT11 image codec; native cut/pattern metadata stays in adapters.
-pub mod pdt;
 pub mod avg32;
 pub mod g00;
+/// Shared MPL PDT10/PDT11 image codec; native cut/pattern metadata stays in adapters.
+pub mod pdt;
 pub mod reallive_wipe;
 
 pub mod cbg;
 
 pub mod vector_geometry;
+
+/// Engine image backing types. Native adapters share the established image
+/// library rather than retaining a private implementation of pixel storage.
+pub mod buffer {
+    pub use image::{
+        DynamicImage, GenericImageView, GrayAlphaImage, ImageBuffer, LumaA, Rgb, Rgba, RgbaImage,
+    };
+}

@@ -26,5 +26,4 @@ symphonia = { version = "=0.5.5", default-features = false, features = ["wav", "
 rodio = { version = "0.17.3", optional = true, default-features = false, features = ["wav", "vorbis", "mp3", "flac"] }
 
 # Device-free native resource codecs, not the original engine runtime.
-siglus_assets = { path = "../siglus-upstream/siglus_assets" }
 opus-decoder = "=0.1.1"

@@ -7,8 +7,14 @@ use crate::{
     state::{ClientId, Command, SceneState, TextRun},
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
+mod audio_release;
+pub use audio_release::*;
 mod audio_sequence;
 pub use audio_sequence::*;
+mod font;
+pub use font::*;
+mod frame_history;
+pub use frame_history::*;
 
 pub const SIMPLE_TEXT_LAYOUT: &str = "simple-horizontal-v1";
 /// The same horizontal glyph metrics without automatic width wrapping.
@@ -328,6 +334,9 @@ pub struct AudioResourceInfo {
     pub source_frames: Option<u64>,
     /// Immutable encoded snapshot bytes retained by the resource.
     pub encoded_bytes: u64,
+    /// Replay-gain tags were found in the source metadata. Presence does not
+    /// mean a gain policy was applied; adapters must handle or reject it.
+    pub has_replay_gain: bool,
 }
 /// Resource preparation and publication, separate from creating a voice.
 #[derive(Clone, Debug)]
@@ -464,6 +473,51 @@ pub enum MediaRequest {
     Stop {
         id: u32,
     },
+    /// Stop workers/playback and release this scoped media resource and surface.
+    /// Unlike Stop, later queries report the handle as absent.
+    Remove {
+        id: u32,
+    },
+    /// Select/sample an external monotonic video clock before first playback.
+    /// The engine retains the presentation origin, pause/seek/loop offsets.
+    SetClock {
+        id: u32,
+        now_ms: u64,
+    },
+    /// Freeze the media clock (audio stops; the current picture stays).
+    Pause {
+        id: u32,
+    },
+    /// Continue a paused clock from where it stopped.
+    Resume {
+        id: u32,
+    },
+    /// Restart decoding and present the picture at `position_ms` on the
+    /// stream's own timeline; a paused resource stays paused there.
+    Seek {
+        id: u32,
+        position_ms: u64,
+    },
+}
+impl MediaRequest {
+    pub fn id(&self) -> u32 {
+        match self {
+            Self::Play { id, .. }
+            | Self::Stop { id }
+            | Self::Remove { id }
+            | Self::SetClock { id, .. }
+            | Self::Pause { id }
+            | Self::Resume { id }
+            | Self::Seek { id, .. } => *id,
+        }
+    }
+}
+/// A presenting host's display in physical pixels: the whole screen and
+/// the usable work area (`[x, y, w, h]`, excluding OS bars).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DisplayInfo {
+    pub screen: [u32; 2],
+    pub work: [i32; 4],
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaPhase {
@@ -478,6 +532,38 @@ pub struct MediaInfo {
     pub phase: MediaPhase,
     pub position_ms: u64,
     pub published_frames: u64,
+    /// The clock is paused (`MediaRequest::Pause`); phase is unchanged.
+    pub paused: bool,
+    /// Picture duration the decoder reported (0 before it is known).
+    pub frame_ms: u64,
+    /// Validated display dimensions after decoder-header preparation.
+    /// None means metadata is pending, not a zero-sized picture.
+    pub size: Option<[u32; 2]>,
+    /// Header-declared duration in milliseconds, when the container provides it.
+    /// None remains unknown; decoded/published frame counts are not a duration.
+    pub duration_ms: Option<u64>,
+}
+/// Immutable decoded media picture. Clones retain its engine storage lease;
+/// no device pointer or native VM state is exposed.
+#[derive(Clone)]
+pub struct MediaFrame {
+    size: [u32; 2],
+    rgba: Arc<[u8]>,
+    pub revision: u64,
+    pub pts_ms: i64,
+    storage: Option<Arc<dyn Send + Sync>>,
+}
+impl MediaFrame {
+    pub fn new(size: [u32; 2], rgba: Vec<u8>, revision: u64, pts_ms: i64) -> Result<Self> {
+        let bytes=u64::from(size[0])*u64::from(size[1])*4;
+        if size.iter().any(|&n|n==0 || n>8192) || bytes>64*1024*1024 || bytes!=rgba.len() as u64 {
+            return Err(crate::Error::Invalid("media picture dimensions/bytes"));
+        }
+        Ok(Self {size,rgba:rgba.into(),revision,pts_ms,storage:None})
+    }
+    pub fn size(&self) -> [u32; 2] {self.size}
+    pub fn rgba(&self) -> &[u8] {&self.rgba}
+    pub fn retain_storage(&mut self, lease:Arc<dyn Send+Sync>) {self.storage=Some(lease);}
 }
 #[derive(Clone, Copy, Debug)]
 pub struct FontMetrics {
@@ -489,8 +575,26 @@ pub struct FontMetrics {
 pub enum EngineQuery {
     Layer(u32),
     LayerCrossfade(u32),
+    /// Owned layer motion tracks and their engine-sampled values.
+    LayerMotion(u32),
     Canvas(u32),
     UiWidget(u32),
+    /// Owner-scoped retained button pointer/focus/press state.
+    UiInteraction(u32),
+    /// Owned widget motion tracks; external elapsed values use caller units.
+    UiMotion(u32),
+    /// Freeze this client's current engine UI into reusable logical LayerSpec
+    /// records. None selects all owned UI; a root selects its widget subtree.
+    UiSnapshot { canvas: [u32; 2], root: Option<u32> },
+    /// Query completed worker state for this owner's VFX entity/revision.
+    /// A declaration or admitted task is not a completion receipt. Results are
+    /// pending until the requested tick and RNG exchange have completed.
+    VfxSequence {
+        entity: u32,
+        revision: u64,
+        completed_tick: u64,
+        exchange_epoch: u64,
+    },
     UiEvents,
     MenuEvents,
     /// Only `dialog_result` events (modal message dialog choices).
@@ -564,6 +668,9 @@ pub trait ClientStorage: Send + Sync {
     /// True when `path` resolves to a mounted container provider (an archive
     /// whose contents cannot change while mounted), not to a plain file.
     fn served_by_container(&self, _path: &VfsPath) -> bool { false }
+    /// The mounted container serving `path`, as `(container source, mount
+    /// point)` in the client's asset namespace; `None` for plain files.
+    fn serving_container(&self, _path: &VfsPath) -> Option<(String, String)> { None }
     /// Optional exclusive lease inside this client's cache namespace. Used by
     /// native save implementations that cannot merge concurrent writers.
     fn acquire_lease(&self, _name: &str) -> Result<alloc::boxed::Box<dyn StorageLease>> {
@@ -643,6 +750,23 @@ pub trait TextMeasurement: Send + Sync {
 }
 
 pub trait HostServices: FileSystem {
+    /// Admit a client-owned live-voice retirement and external-clock release.
+    fn begin_audio_release(&mut self,_client:ClientId,_spec:AudioReleaseSpec)->Result<AudioReleaseHandle>{Err(crate::Error::Unsupported("audio voice release"))}
+    /// Submit a monotonic caller update; completion is observed separately.
+    fn advance_audio_release(&mut self,_client:ClientId,_handle:AudioReleaseHandle,_elapsed_updates:u64)->Result<()>{Err(crate::Error::Unsupported("audio voice release"))}
+    /// Poll the actual owner boundary, never infer completion from admission.
+    fn audio_release_info(&mut self,_client:ClientId,_handle:AudioReleaseHandle)->Result<AudioReleaseInfo>{Err(crate::Error::Unsupported("audio voice release"))}
+    /// Release a terminal receipt. Active producer state cannot be discarded.
+    fn release_audio_release(&mut self,_client:ClientId,_handle:AudioReleaseHandle)->Result<()>{Err(crate::Error::Unsupported("audio voice release"))}
+
+    /// Availability of a canonical codec in the host's actual decoder registry.
+    /// This does not promise support for every channel mapping or metadata mode.
+    fn audio_codec_supported(&self, _client: ClientId, _codec: &str) -> Result<bool> {
+        Ok(false)
+    }
+    fn mesh_frame_history(&self, _client: ClientId) -> Result<Option<Arc<dyn MeshFrameHistory>>> {
+        Ok(None)
+    }
     fn capture_audio_sequence(
         &self,
         _client: ClientId,
@@ -793,6 +917,22 @@ pub trait HostServices: FileSystem {
     fn media_info(&self, _client: ClientId, _id: u32) -> Result<MediaInfo> {
         Err(crate::Error::Unsupported("engine media status"))
     }
+    /// The display the presenting host shows the canvas on; `None` when the
+    /// host has no display model.
+    fn display_info(&self) -> Option<DisplayInfo> {
+        None
+    }
+    /// Current focus published by the presenting window owner. None means
+    /// this host has no window focus model, rather than an inactive window.
+    /// Clients decide their explicit offscreen execution policy separately.
+    fn window_focused(&self, _client: ClientId) -> Result<Option<bool>> {
+        Ok(None)
+    }
+    /// Last owner-published picture; None while no frame has completed. A stale
+    /// or foreign media identity must not expose another client's picture.
+    fn media_frame(&self, _client: ClientId, _id: u32) -> Result<Option<MediaFrame>> {
+        Err(crate::Error::Unsupported("engine media picture"))
+    }
     fn font_metrics(&self, _font: &str, _size: f32, _character: char) -> Result<FontMetrics> {
         Err(crate::Error::Unsupported("engine font metrics"))
     }
@@ -860,6 +1000,10 @@ pub trait HostServices: FileSystem {
     /// Thread-safe image metadata handle for this client (ADR 0053).
     fn image_metadata(&mut self, _client: ClientId) -> Result<Arc<dyn ImageMetadata>> {
         Err(crate::Error::Unsupported("image metadata handle"))
+    }
+    /// Client-authorized asynchronous registration of engine-owned font faces.
+    fn font_library(&mut self, _client: ClientId) -> Result<Arc<dyn FontLibrary>> {
+        Err(crate::Error::Unsupported("font library handle"))
     }
     /// Client-authorized immutable font measurement capability.
     fn text_measurement(&mut self, _client: ClientId) -> Result<Arc<dyn TextMeasurement>> {

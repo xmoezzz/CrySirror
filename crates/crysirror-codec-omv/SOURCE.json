@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "origin_package": "siglus_omv_decoder",
+  "package": "crysirror-codec-omv",
+  "license": "MPL-2.0",
+  "adoption": "First-class CPU codec library; no VM, hosted renderer or device is part of its enabled library profile. Preserve historical codec fixes and source provenance.",
+  "baseline_sha256": {
+    "src/lib.rs": "39ec140cb0923794ae5e768a1f1d0311f1189c50a806c0e54be226fbe21fa273"
+  },
+  "patches": {
+    "src/lib.rs": {
+      "origin_sha256": "39ec140cb0923794ae5e768a1f1d0311f1189c50a806c0e54be226fbe21fa273",
+      "current_sha256": "e89ac9dab8d67600477e2e912339202943cb6211ddc0add6e410b97a07d98a13",
+      "reason": "Generic capability-reader Vorbis interface; validate Theora dimensions and Vorbis channel/rate before codec setup."
+    }
+  }
+}

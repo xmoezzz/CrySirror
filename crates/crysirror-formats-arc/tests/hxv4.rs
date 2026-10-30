@@ -31,7 +31,8 @@ impl AssetReader for Reader {
 struct Companions(PathBuf);
 impl DependencyResolver for Companions {
     fn open(&self, path: &str) -> anyhow::Result<Arc<dyn AssetReader>> {
-        anyhow::ensure!(path == "limelight_lj_trial.exe", "unexpected companion");
+        let exe = std::env::var("CRYSIRROR_HXV4_EXE").unwrap_or_else(|_| "limelight_lj_trial.exe".into());
+        anyhow::ensure!(path == exe, "unexpected companion");
         Ok(Arc::new(Reader(Mutex::new(std::fs::File::open(
             self.0.join(path),
         )?))))
@@ -130,7 +131,7 @@ fn actual_hxv4_hashed_root_resolves_requested_names_only() {
     assert_eq!(json["hashed_root"], "__hxv4");
 }
 #[test]
-#[ignore = "diagnostic dump: CRYSIRROR_HXV4_GAME, CRYSIRROR_HXV4_DUMP=dir, CRYSIRROR_HXV4_NAMES=a,b"]
+#[ignore = "diagnostic dump: CRYSIRROR_HXV4_GAME, CRYSIRROR_HXV4_EXE, CRYSIRROR_HXV4_DUMP=dir, CRYSIRROR_HXV4_NAMES=a,b"]
 fn dump_named_hxv4_entries() {
     let root = PathBuf::from(std::env::var_os("CRYSIRROR_HXV4_GAME").unwrap());
     let out = PathBuf::from(std::env::var_os("CRYSIRROR_HXV4_DUMP").unwrap());
@@ -140,7 +141,7 @@ fn dump_named_hxv4_entries() {
     ctx.resolver = Some(Arc::new(Companions(root)));
     ctx.limits.max_entry_size = 256 * 1024 * 1024;
     ctx.parameters.insert("kirikiri/xp3".into(),
-        serde_json::json!({"hxv4_executable":"limelight_lj_trial.exe","hxv4_hashed_root":"__hxv4"}));
+        serde_json::json!({"hxv4_executable":std::env::var("CRYSIRROR_HXV4_EXE").unwrap_or_else(|_| "limelight_lj_trial.exe".into()),"hxv4_hashed_root":"__hxv4"}));
     let archive = crysirror_formats_arc::Xp3.open(source, &ctx).unwrap();
     for name in std::env::var("CRYSIRROR_HXV4_NAMES").unwrap().split(',') {
         match archive.resolve(&format!("__hxv4/{name}")) {

@@ -1,0 +1,42 @@
+{
+  "repository": "https://github.com/ogapee/onscripter",
+  "commit": "848a60892e4d721459e8d1051e1b8fe45164c3e9",
+  "license": "GPL-2.0-or-later",
+  "copyright": "Reference ONScripter: Copyright (c) 2001-2020 Ogapee / Studio O.G.A.; GNU GPL version 2 or later. This Rust adapter preserves the version 2-or-later terms.",
+  "implementation": "New first-class Rust interpreter for a bounded native text-script profile, referenced against the pinned command/reader semantics; no C++ runtime, SDL, compositor, parser process or engine host is linked.",
+  "reference_sha256": {
+    "ScriptHandler.cpp": "a38045c66eac57f1e7df1556f70801b9fd5c3b3e655b3be269e32f05410e8f8a",
+    "ScriptHandler.h": "e8140c2f791cbfd2f4c566d4d090d1fecad7f22f246907d9e7fbd0fbb5780922",
+    "ScriptParser.cpp": "2440c045e6e57c5360186da67e940a7c34c349a036dc0ca7e1f723756429bc6f",
+    "ScriptParser_command.cpp": "19285b1f44d9d76b8af6ad759e0d7122eee07e0144edf61db2dfb794e2f2fb3a",
+    "ONScripter_command.cpp": "d130a058324ba19c293da3cb4dd4543bb25b36a109034990421ddb569ffd3a23",
+    "ONScripter_text.cpp": "2aa40c1947d3816ecf6e9b3ab1c13daacdb5fe7bcf7a691ad74fffa8b67913a7",
+    "COPYING": "32b1062f7da84967e7019d01ab805935caa7ab7321a7ced0e30ebe75e5df1670",
+    "AnimationInfo.cpp": "1d61b30c23828b3b0cc0824117ab67342d50d72c1bf1d2fa6d55ecb6ac985325",
+    "ONScripter_animation.cpp": "2830728fbbd0cccdc3b1706882581d8d7969b7e434200f5aa12f631c94d9338e",
+    "ONScripter_effect.cpp": "62144b49e51018cc4748f606694e7a86046bc5d97ce967278fb61bc222917895",
+    "NsaReader.cpp": "206591dad32f16e397c8c03aaa5f2e0a933f992da7e21e034c67431744837fb3",
+    "SarReader.cpp": "b522616a080b770ad050d5aba43ded768fd9c2fb6895d82156f05bd121f1587b"
+  },
+  "reviewed_semantic_units": [
+    "ScriptHandler::readScript/readScriptSub/readToken/readLabel/readStr/readInt",
+    "ScriptParser::movCommand/addCommand/incCommand/decCommand/numaliasCommand/straliasCommand/defsubCommand/ifCommand/gotoCommand/gosubCommand/getparamCommand/returnCommand/forCommand/nextCommand",
+    "ONScripter::captionCommand/gameCommand/lspCommand/vspCommand/cspCommand/bgCommand/printCommand/clickCommand/waitCommand/delayCommand/dwaveCommand/dwavestopCommand/textspeedCommand/textclearCommand",
+    "ONScripter::selectCommand including hidden choice numbering and goto/gosub/selnum completion",
+    "NScripter named-variable indices, backtick strings, inline text waits and physical-line skip addresses",
+    "ONScripter setwindow/setcursor, ld/cl, native btn atlas/UI selection, play CD Ogg naming",
+    "ONScripter_effect stripe16/curtain24 native mapping to generic shared stripe/stagger mask workers; 8-bit mask threshold rounding is not integer-pixel reference parity",
+    "Shared resource mounts are explicit prefixes with loose-file first, then ordered mixed NSA/SAR fallback; no pre-extraction"
+  ],
+  "boundaries": {
+    "native": "source syntax, control flow, variables, native handles, staging/presentation and resource naming policy",
+    "engine": "scoped readers, XOR transform, standard image decode, Layer/UI logical state, glyph layout/reveal/raster, channel audio loading/mixing/output"
+  },
+  "acceptance": "Native fixtures and owner Tsukihime bring-up tracked in STATUS.md. Framework schema-2 snapshots and engine-owned metadata are not original NScripter save/global/log formats; original save/load remains unsupported.",
+  "implementation_boundaries": [
+    "native source read/decode/parse worker; bounded owner publication and cancellation",
+    "explicit single-file script profile; numbered-file concatenation not yet mapped",
+    "framework snapshots validate before replacement; original savegame/loadgame remain unsupported",
+    "selection through shared modal UI; native hidden option ordinals retained"
+  ]
+}

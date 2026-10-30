@@ -10,6 +10,7 @@
 //! - Files and the original `SAVE.INI`: client-scoped capability storage.
 #![forbid(unsafe_code)]
 pub mod vm;
+mod cursor;
 
 use anyhow::{Context, Result, ensure};
 use crysirror_core::{
@@ -88,6 +89,9 @@ pub struct Avg32Vm {
     frames: u64,
     audio_requests: u64,
     recent_audio: VecDeque<String>,
+    cursor_image: Option<Arc<crysirror_image::cursor::CursorImage>>,
+    cursor_selected: Option<bool>,
+    cursor_visible: Option<bool>,
 }
 
 fn error(e: impl std::fmt::Display) -> Error {
@@ -128,6 +132,9 @@ impl Avg32Vm {
             frames: 0,
             audio_requests: 0,
             recent_audio: VecDeque::new(),
+            cursor_image: None,
+            cursor_selected: None,
+            cursor_visible: None,
         })
     }
 
@@ -335,6 +342,7 @@ impl Avg32Vm {
             .into_iter()
             .any(|request| request == HostRequest::Quit);
         self.audio(host)?;
+        self.publish_cursor(host)?;
         self.publish(host)?;
         self.frames += 1;
         if quit || !self.engine.as_ref().expect("booted").running() {

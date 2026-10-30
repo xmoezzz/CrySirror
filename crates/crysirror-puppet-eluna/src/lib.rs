@@ -18,7 +18,8 @@ pub mod motion;
 use anyhow::{bail, ensure, Context, Result};
 use crysirror_puppet::{FramePart, MotionInfo, ParameterInfo, PartBlend, PlayOptions, PuppetFrame, PuppetSource};
 use eluna::{EmoteDrawPass, EmoteStaticScene, EmoteStaticSprite, TimelinePlayMode};
-use siglus_scene_vm::emote::SiglusEmoteRuntime;
+pub mod player_runtime;
+use player_runtime::EmoteRuntime;
 use std::collections::{HashMap, HashSet};
 
 /// E-mote ticks per second (the player runs on a 60 Hz tick clock).
@@ -37,7 +38,7 @@ pub struct BridgeDiagnostics {
 }
 
 pub struct ElunaPuppet {
-    runtime: SiglusEmoteRuntime,
+    runtime: EmoteRuntime,
     /// Model-space origin (bounds minimum at load) and canvas size.
     origin: [f32; 2],
     size: [f32; 2],
@@ -51,7 +52,7 @@ pub struct ElunaPuppet {
 impl ElunaPuppet {
     /// Loads PSB sources (main file first) with an optional decryption key.
     pub fn from_psb(sources: &[&[u8]], key: Option<u32>) -> Result<Self> {
-        let runtime = SiglusEmoteRuntime::from_psb_sources(sources, key)?;
+        let runtime = EmoteRuntime::from_psb_sources(sources, key)?;
         let mut textures: Vec<u32> = runtime.decoded_textures().keys().copied().collect();
         textures.sort_unstable();
         let mut this = Self {

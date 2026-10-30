@@ -42,6 +42,44 @@ class VfxSchemaTests(unittest.TestCase):
         with self.assertRaises(desktop.ProjectError):
             vfx.validate(system)
 
+    def test_screen_atlas_and_fenced_sequence_require_supported_complete_profiles(self):
+        node = {"canvas": [32, 12], "tick_hz": 60, "x_bands": [0, -1, 1],
+                "fall_range": [2, 4], "fall_divisor": 2, "sway_range": [0, 3],
+                "phase_modulus": 5, "phase_step": .05, "wind_step": 0,
+                "rows": [0, 1], "row_frames": [2, 2], "cell": [4, 4], "stride": [4, 4],
+                "texture_extent": [8, 8], "scale": 1, "alpha_base": .3, "alpha_step": .1,
+                "alpha_count": 3, "alpha_offset": 0, "atlas_interval_ms": 300, "atlas_clock_bits": 32}
+        rng = {"algorithm": "lcg32", "state": 1, "multiplier": 214013, "increment": 2531011,
+               "output_shift": 16, "output_mask": 32767}
+        system = {"clock": {"source": "external", "tick": 0, "wall_time_ms": 0}, "sequence_rng": rng,
+                  "emitters": [{"space": "local", "capacity": 12,
+                                "render": {"kind": "sprite", "texture": "petals.png"},
+                                "screen": {"canvas": [32, 12], "layer": 61, "anchor": [0, 0]},
+                                "falling_atlas": node}]}
+        before = copy.deepcopy(system)
+        self.assertIs(vfx.validate(system), system)
+        self.assertEqual(system, before)
+        self.assertEqual(vfx.asset_paths(system), {"petals.png"})
+        exchange = copy.deepcopy(system)
+        exchange["sequence_exchange"] = {"epoch": 1, "base_tick": 0, "state": copy.deepcopy(rng)}
+        vfx.validate(exchange)
+        for field, value in [("clock", {"source": "engine"}), ("sequence_rng", None),
+                             ("sequence_exchange", {"epoch": 0, "base_tick": 0, "state": rng}),
+                             ("warmup_seconds", 1), ("fixed_step_hz", 30)]:
+            bad = copy.deepcopy(system)
+            bad[field] = value
+            self.assert_bad(bad)
+        for field, value in [("target", "gpu"), ("screen", None), ("space", "world"),
+                             ("render", {"kind": "sprite", "texture": "petals.png", "blend": "premultiplied"})]:
+            bad = copy.deepcopy(system)
+            bad["emitters"][0][field] = value
+            self.assert_bad(bad)
+        for field, value in [("texture_extent", [3, 3]), ("fall_divisor", 0), ("alpha_offset", 2),
+                             ("rows", [9]), ("atlas_clock_bits", True), ("phase_step", 11)]:
+            bad = copy.deepcopy(system)
+            bad["emitters"][0]["falling_atlas"][field] = value
+            self.assert_bad(bad)
+
     def test_minimal_and_real_serde_defaults_are_accepted_without_rewriting(self):
         vfx.validate({})
         docs = json.loads((ROOT / "docs/api/api.json").read_text())

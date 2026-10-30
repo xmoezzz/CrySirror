@@ -7,6 +7,108 @@
 //! - `value` is the "current" stored value (for oneshot, it is set to the target immediately).
 //! - `cur_value` is the animated/interpolated value computed each frame.
 
+/// Device-free scalar motion on a caller-supplied monotonic millisecond clock.
+/// The engine owns the immutable curve data; adapters choose native targets.
+/// No wall clock, thread, device or VM reference is retained.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScalarTween {
+    pub start: f32,
+    pub end: f32,
+    pub started_ms: u64,
+    pub duration_ms: u64,
+    pub easing: crate::layer::Easing,
+}
+impl ScalarTween {
+    pub fn new(
+        start: f32,
+        end: f32,
+        started_ms: u64,
+        duration_ms: u64,
+        easing: crate::layer::Easing,
+    ) -> anyhow::Result<Self> {
+        let value = Self {
+            start,
+            end,
+            started_ms,
+            duration_ms,
+            easing,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.start.is_finite() && self.end.is_finite(),
+            "scalar tween endpoints must be finite"
+        );
+        Ok(())
+    }
+    /// Times before admission retain the start value. Zero duration completes
+    /// at admission; elapsed time is subtracted, never added to a deadline.
+    pub fn sample(&self, now_ms: u64) -> f32 {
+        if now_ms < self.started_ms {
+            return self.start;
+        }
+        let elapsed = now_ms - self.started_ms;
+        if elapsed >= self.duration_ms {
+            return self.end;
+        }
+        let ratio=elapsed as f64 / self.duration_ms as f64;
+        let eased=if self.easing==crate::layer::Easing::Linear{ratio}else{f64::from(self.easing.apply(ratio as f32))};
+        // f64 avoids overflowing an intermediate end-start for finite f32
+        // endpoints of opposite signs.
+        ((1. - eased) * f64::from(self.start) + eased * f64::from(self.end))
+            as f32
+    }
+    pub fn complete(&self, now_ms: u64) -> bool {
+        now_ms >= self.started_ms && now_ms - self.started_ms >= self.duration_ms
+    }
+    /// Continue from the exact sampled value when reversing/changing target.
+    pub fn retarget(
+        &mut self,
+        now_ms: u64,
+        end: f32,
+        duration_ms: u64,
+        easing: crate::layer::Easing,
+    ) -> anyhow::Result<()> {
+        *self = Self::new(self.sample(now_ms), end, now_ms, duration_ms, easing)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod scalar_tween_tests {
+    use super::*;
+    use crate::layer::Easing;
+    #[test]
+    fn reversed_motion_and_serialized_continuation_have_no_jump() {
+        let mut tween = ScalarTween::new(0., 1., 100, 400, Easing::Smooth).unwrap();
+        assert_eq!(tween.sample(200), 0.15625);
+        tween.retarget(200, 0., 200, Easing::Smooth).unwrap();
+        assert_eq!(tween.sample(200), 0.15625);
+        let restored: ScalarTween =
+            serde_json::from_slice(&serde_json::to_vec(&tween).unwrap()).unwrap();
+        restored.validate().unwrap();
+        assert_eq!(restored.sample(300), 0.078125);
+        assert_eq!(restored.sample(400), 0.);
+        assert!(restored.complete(400));
+    }
+    #[test]
+    fn future_zero_duration_extreme_times_and_finite_endpoints() {
+        let t = ScalarTween::new(7., 9., u64::MAX, 0, Easing::Linear).unwrap();
+        assert_eq!(t.sample(u64::MAX - 1), 7.);
+        assert!(!t.complete(u64::MAX - 1));
+        assert_eq!(t.sample(u64::MAX), 9.);
+        assert!(t.complete(u64::MAX));
+        let t = ScalarTween::new(-f32::MAX, f32::MAX, u64::MAX - 10, 100, Easing::Linear).unwrap();
+        assert!(t.sample(u64::MAX).is_finite());
+        assert!(!t.complete(u64::MAX));
+        assert!(ScalarTween::new(f32::NAN, 0., 0, 1, Easing::Linear).is_err());
+        assert!(ScalarTween::new(0., f32::INFINITY, 0, 1, Easing::Linear).is_err());
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IntEvent {

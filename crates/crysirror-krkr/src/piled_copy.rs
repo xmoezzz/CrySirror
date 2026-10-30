@@ -5,10 +5,10 @@
 //! visual/LayerIntf.cpp PiledCopy (4102), Complete (6104), wrapper (7095).
 //! No snapshot pixels, compositing algorithm or renderer lives in this adapter.
 use crate::host::LayerState;
-use crate::natives::{has_member, need_int, this_of, unsupported, Rt};
+use crate::natives::{Rt, has_member, need_int, this_of, unsupported};
 use crysirror_tjs2::{
-    runtime::{ObjectHandle, Variant},
     Result, TjsError,
+    runtime::{ObjectHandle, Variant},
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -252,7 +252,12 @@ fn validate_visible_profile(
     }
     let kind = rt.host().layer(h)?.kind;
     match kind {
-        2 => {}
+        // Native ltAddAlpha uses premultiplied pixels (LayerIntf.cpp:5253).
+        // Layer resources here are canonically straight alpha, including
+        // loadImages/convertType/AlphaMovie; the shared source-over operation
+        // therefore represents both native display types without a second
+        // compositor or reinterpreting straight RGB as additive RGB.
+        2 | 12 => {}
         1 if root => {}
         1 if layer.full_alpha == Some(255)
             && layer.image_left <= 0
@@ -270,7 +275,7 @@ fn validate_visible_profile(
             return Err(unsupported(
                 &format!("Layer.piledCopy source type={kind}"),
                 "normal-alpha or proven opaque source content",
-            ))
+            ));
         }
     }
     for child in &layer.children {

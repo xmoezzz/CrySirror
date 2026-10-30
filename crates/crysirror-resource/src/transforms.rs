@@ -290,6 +290,23 @@ fn inflate(
         _reservation: reservation,
     }))
 }
+/// Apply a repeating byte mask at an absolute stream offset. Empty masks
+/// explicitly mean identity; resource key providers still reject missing keys.
+/// This kernel is shared by read-at transforms and native format frontends.
+pub fn xor_cycle_in_place(bytes: &mut [u8], key: &[u8], offset: u64) {
+    if key.is_empty() {
+        return;
+    }
+    let mut at = (offset % key.len() as u64) as usize;
+    for byte in bytes {
+        *byte ^= key[at];
+        at += 1;
+        if at == key.len() {
+            at = 0;
+        }
+    }
+}
+
 struct XorReader {
     input: Arc<dyn AssetReader>,
     key: KeyMaterial,
@@ -314,10 +331,7 @@ impl AssetReader for XorReader {
             .checked_add(offset)
             .ok_or(crysirror_core::Error::Invalid("xor offset overflow"))?;
         self.key.with_bytes(|key| {
-            let start = (at % key.len() as u64) as usize;
-            for (i, b) in out[..n].iter_mut().enumerate() {
-                *b ^= key[(start + i) % key.len()];
-            }
+            xor_cycle_in_place(&mut out[..n], key, at);
         });
         Ok(n)
     }
@@ -387,5 +401,24 @@ impl AssetReader for AesReader {
             })
             .map_err(|e| crysirror_core::Error::Io(e.to_string()))?;
         Ok(n)
+    }
+}
+
+#[cfg(test)]
+mod cyclic_mask_tests {
+    use super::*;
+    #[test]
+    fn split_reads_use_absolute_offsets_and_reapply_to_original_bytes() {
+        let mut full = vec![11; 17];
+        let mut split = full.clone();
+        let key = [1, 4, 7];
+        xor_cycle_in_place(&mut full, &key, 2);
+        xor_cycle_in_place(&mut split[..5], &key, 2);
+        xor_cycle_in_place(&mut split[5..], &key, 7);
+        assert_eq!(full, split);
+        xor_cycle_in_place(&mut full, &key, 2);
+        assert_eq!(full, [11; 17]);
+        xor_cycle_in_place(&mut full, &[], u64::MAX);
+        assert_eq!(full, [11; 17]);
     }
 }

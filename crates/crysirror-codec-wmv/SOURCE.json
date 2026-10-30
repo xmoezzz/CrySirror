@@ -1,0 +1,51 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "origin_package": "wmv-decoder",
+  "package": "crysirror-codec-wmv",
+  "license": "MPL-2.0",
+  "adoption": "First-class CPU codec library. Original standalone players/renderers and their optional window/GPU/audio-device dependencies are excluded; historical codec fixes and source provenance are preserved.",
+  "baseline_sha256": {
+    "src/na_wmv2dsp.rs": "938a8c1d6e80bf8e991817c2d8c26ad36fde294b73c7c352bd47bf18ee96bcc9",
+    "src/error.rs": "e7984a15631912607d517ac3adc116a3f745e7749d2306990aad83c2958f9252",
+    "src/vc1_tables.rs": "1e853ddabae46b30b5293c8430b88a11e30bafa25b65de54fb8af7e7d860d8c1",
+    "src/color.rs": "013739b6bfcfe8aff2611a1f3ded949970b5a5dcced2d8e7ee4093a85754ba04",
+    "src/wmv2.rs": "c24ecb45d56f0141f1735ec526ac7070a3fcebcb6701d6b16e5705d93104801e",
+    "src/lib.rs": "de98c441eb965e9f4a6e3dced45fa9768ad80a727a8e2e21dec01741563659c2",
+    "src/na_msmpeg4_mv_tables.rs": "0a36489bb9557f428d994365d53ae7dbff0ae2853ab7bbc44dc8b92d02f3acb7",
+    "src/decoder.rs": "25023ba48b0b086c1f7cc9ad5a5b4209885f49a08644cefda6452b9888872163",
+    "src/vc1.rs": "df033ca9b7aaef7eedfe09f0840183542e3c5c8948b085191db34905fc0bce41",
+    "src/na_simple_idct.rs": "d59966181423aa84802befc1e0749f3a7afa75ba4e73ccbd095a1dd8b7bbdd1c",
+    "src/ffi.rs": "de8844c1e31a68a452eb410f3882a5a68a3eec437fdef23c506c712e6c93cf7d",
+    "src/asf.rs": "340ae56247c7debe9b5ac6d2b0ea15277521aacb8ea0beb0f436395f6a531595",
+    "src/vlc_tree.rs": "7a2189d36dfa79dbb044616663d04ab12dfbb1ffe12cb5b91cc8d1a25a5de58e",
+    "src/vlc.rs": "3928ccbb6c13e098e694570e68474a96df6ee310c73609e6b81950c80671600a",
+    "src/bitreader.rs": "66738272309b652aa4894b0577c4d0bf70ac59b0582c833608480029409ffcdb",
+    "src/na_rl_tables.rs": "78b750071771fe13fdcb3f81ee88c65172a3d8d9f9353212aaed3aef511b1038",
+    "src/api.rs": "5578cca9d6a4e192ada32503bf3bfb5a34a7bbdcb10c9a2c4d8767b3a1ee815c",
+    "src/na_msmpeg4_tables.rs": "8a564a91c426ba969132b7d03a05f1fe3671d19f0f15668e69c2348741a43083",
+    "src/na_wmv2_tables.rs": "a7cdf8d335f6c0bcdcb76b70a64b7c532947aaa31c9686d9aee50d5cb7dc6a46",
+    "src/wma/mdct.rs": "6d5a281a77f3d6c9d634be716716648d58924f46b2fb074c35c63f23697a2a2c",
+    "src/wma/bitstream.rs": "25e79cef146ccc6c5ab60b58032a656673eeb030e99193c29839f9a605e066ce",
+    "src/wma/decoder.rs": "8cad410b9b63d4ded3212b8e4c0e60da3215b72dbc1ed14ea44c6eec6962186f",
+    "src/wma/mod.rs": "d36f52699ad5811575f9f1b0e8c0e450fc97617c7067a8360f612dd4ec70725f",
+    "src/wma/pro.rs": "5f84c3a5e6fca299ed4561d7e916ee1725ce5b66d7ac3ef2c14fb5d53e6dff42",
+    "src/wma/vlc.rs": "4c7ed14005b05e2954d00eba81d7fbe3194b97c51fe4b29246a19069dedd8c1a",
+    "src/wma/tables.rs": "9712c43199da6c1b5486a532cd98d301156b8dc8806f7faa0e68bcbfcca1f881",
+    "src/wma/pro_tables.rs": "d8768a8f5b1a0adbf1652649f3110484bf5c376f6e90d2fddf46d08d545f15eb",
+    "src/wma/na_tables.rs": "4f6f07543b0f4f707a4574e7133b693f82147b40f796fef894a567ac238959d8",
+    "src/wma/common.rs": "aeb7f0ad0a07bc6fafd5ed4a579830a72a7017799e8e34d199ec2ceb9b8e136f"
+  },
+  "excluded_host_sources_sha256": {
+    "src/bin/wmv_player_wgpu.rs": "97c48f94ef946a2c56bd3c0a7bf6fc02c4de83c13ebe5419e306a3170fdca713",
+    "src/bin/wmv3_frame_dump.rs": "99b59cf51db08a0d8d90dc582b991f792a86bc5f4fdf4abaf54d21a582d7b829",
+    "src/bin/wmv_decoder_cli.rs": "a31dafc6326fdbc3714b66b85f5d5d9f78c8699ad1224ab8184709f7e6a18663"
+  },
+  "patches": {
+    "src/asf.rs": {
+      "origin_sha256": "340ae56247c7debe9b5ac6d2b0ea15277521aacb8ea0beb0f436395f6a531595",
+      "current_sha256": "b6ee709070fdf3a94fc4b159f40cf56b5146fd5240019810157b7c8804c98137",
+      "reason": "Bound ASF metadata, packets and total reassembly residency before allocation."
+    }
+  }
+}

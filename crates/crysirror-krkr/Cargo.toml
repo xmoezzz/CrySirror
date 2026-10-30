@@ -12,7 +12,9 @@ crysirror-core.workspace = true
 crysirror-runtime.workspace = true
 crysirror-resource.workspace = true
 crysirror-text.workspace = true
-eluna = { package = "eluna_rs", path = "../siglus-upstream/eluna_rs" }
+crysirror-image.workspace = true
+crysirror-video = { path = "../crysirror-video" }
+eluna = { package = "crysirror-codec-emote", path = "../crysirror-codec-emote" }
 crysirror-scene.workspace = true
 crysirror-puppet.workspace = true
 crysirror-puppet-eluna.workspace = true
@@ -25,5 +27,6 @@ lz4_flex = { version = "=0.11.6", default-features = false, features = ["safe-en
 encoding_rs = "0.8"
 
 [dev-dependencies]
+crysirror-formats-arc.workspace = true
 tempfile = "3.12"
 image.workspace = true

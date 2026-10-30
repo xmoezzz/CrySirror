@@ -360,3 +360,39 @@ pub(crate) fn se(ctx: &mut CommandContext, args: &[Value]) -> Result<bool> {
     }
     Ok(true)
 }
+
+/// Original button sound-template policy; actual playback is an engine request.
+pub(crate) fn button_sound(ctx: &mut CommandContext, template: i64, event: &str) -> Result<()> {
+    if template < 0 {
+        return Ok(());
+    }
+    ensure!(
+        (0..256).contains(&template) && matches!(event, "HIT" | "PUSH" | "DECIDE"),
+        "native button SE template/event"
+    );
+    let cfg = ctx
+        .tables
+        .gameexe
+        .as_ref()
+        .context("native button sound needs Gameexe")?;
+    let default = match event {
+        "HIT" => 0,
+        "DECIDE" => 1,
+        _ => -1,
+    };
+    let number = cfg
+        .get_indexed_field("BUTTON.SE", template as usize, event)
+        .map(|s| s.trim().parse::<i64>())
+        .transpose()?
+        .unwrap_or(default);
+    if number < 0 {
+        return Ok(());
+    }
+    ensure!(number < 256, "native button SE number budget");
+    let file = cfg
+        .get_indexed_unquoted("SE", number as usize)
+        .filter(|s| !s.is_empty())
+        .context("native button SE entry missing")?
+        .to_owned();
+    ctx.se.state.play(SE_CHANNEL, SE_GROUP, &file)
+}

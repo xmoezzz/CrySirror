@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/crysirror-codec-omv",
+    "crates/crysirror-codec-amv",
+    "crates/crysirror-codec-theora",
+    "crates/crysirror-codec-mpeg",
+    "crates/crysirror-codec-wmv",
+    "crates/crysirror-codec-emote",
+
     "crates/crysirror-io",
     "crates/crysirror-tasks",
     "crates/crysirror-vfx",
@@ -27,16 +34,20 @@ members = [
     "crates/crysirror-asset",
     "crates/crysirror-engine",
     "crates/crysirror-script-js",
-    "crates/siglus-upstream/siglus_scene_vm",
     "crates/crysirror-ue-import",
     "crates/crysirror-video",
     "crates/crysirror-reallive",
     "crates/crysirror-avg32",
     "crates/crysirror-tjs2",
     "crates/crysirror-kag",
-    "crates/rfvp-upstream/rfvp",
+    "crates/crysirror-rfvp-vm",
     "crates/crysirror-krkr",
     "crates/crysirror-rfvp",
+    "crates/crysirror-nscripter",
+    "crates/crysirror-bgi-vm",
+    "crates/crysirror-bgi",
+    "crates/crysirror-circus",
+    "crates/crysirror-catsystem2",
     "crates/reallive-upstream/reallive-dll",
 ]
 exclude = [
@@ -77,15 +88,18 @@ crysirror-engine = { path = "crates/crysirror-engine" }
 crysirror-script-js = { path = "crates/crysirror-script-js" }
 crysirror-reallive = { path = "crates/crysirror-reallive" }
 crysirror-rfvp = { path = "crates/crysirror-rfvp" }
+crysirror-nscripter = { path = "crates/crysirror-nscripter" }
+crysirror-bgi-vm = { path = "crates/crysirror-bgi-vm" }
+crysirror-bgi = { path = "crates/crysirror-bgi" }
+crysirror-circus = { path = "crates/crysirror-circus" }
+crysirror-catsystem2 = { path = "crates/crysirror-catsystem2" }
 reallive-dll = { path = "crates/reallive-upstream/reallive-dll" }
 crysirror-avg32 = { path = "crates/crysirror-avg32" }
 crysirror-krkr = { path = "crates/crysirror-krkr" }
 crysirror-tjs2 = { path = "crates/crysirror-tjs2" }
 crysirror-kag = { path = "crates/crysirror-kag" }
-rfvp = { path = "crates/rfvp-upstream/rfvp", default-features = false, features = ["no_std"] }
+crysirror-rfvp-vm = { path = "crates/crysirror-rfvp-vm", default-features = false, features = ["no_std"] }
 crysirror-author = { path = "crates/crysirror-author" }
-# Vendored original Siglus SceneVm (MPL-2.0), headless profile; see crates/siglus-upstream/UPSTREAM.md.
-siglus_scene_vm = { path = "crates/siglus-upstream/siglus_scene_vm", default-features = false }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 anyhow = "1.0"

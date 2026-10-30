@@ -19,6 +19,8 @@ pub mod mixer;
 mod envelope;
 mod mix_groups;
 pub mod native;
+pub mod circus;
+mod nwa;
 pub mod pcm;
 pub mod reverb;
 pub mod resources;
@@ -26,6 +28,7 @@ pub mod voice_compression;
 pub mod render_job;
 pub mod scene;
 pub mod sequence;
+pub mod release;
 
 pub mod pcm_output;
 #[cfg(feature = "cpal-output")]

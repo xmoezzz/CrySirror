@@ -11,7 +11,7 @@
 //! protected entry is checksum-verified again before it is published.
 //! Unknown/unsupported layouts fail visibly.
 mod engine;
-mod pe;
+pub(super) mod pe;
 mod recover;
 mod special;
 use super::*;
@@ -155,8 +155,9 @@ pub(super) fn open(
         // bootstrap; sibling containers validated by the same text do not.
         if let Some(setup) = setup.as_ref().filter(|s| s.startup_archive) {
             let data = bootstrap_profile(setup, &special_report, &engine_report)?;
-            let path = crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Asset, target)
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let path =
+                crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Asset, target)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
             ensure!(
                 path.relative() == target && target.len() <= 512,
                 "CXDEC bootstrap profile target must be canonical"
@@ -553,7 +554,7 @@ impl AssetReader for FilterReader {
 }
 
 #[derive(Clone, Copy)]
-struct Adler {
+pub(super) struct Adler {
     a: u32,
     b: u32,
 }
@@ -563,7 +564,7 @@ impl Default for Adler {
     }
 }
 impl Adler {
-    fn update(&mut self, data: &[u8]) {
+    pub(super) fn update(&mut self, data: &[u8]) {
         for chunk in data.chunks(5552) {
             for &v in chunk {
                 self.a += u32::from(v);
@@ -573,7 +574,7 @@ impl Adler {
             self.b %= 65521;
         }
     }
-    fn finish(self) -> u32 {
+    pub(super) fn finish(self) -> u32 {
         (self.b << 16) | self.a
     }
 }
@@ -597,7 +598,7 @@ mod tests {
     /// Self-authored PE32 exposing a classic generator only through the
     /// structures the recognizers read: callback descriptor, signed control
     /// table, LCG constants and three emitter jump tables. No title data.
-    fn synthetic_module(mask: u32, offset: u32) -> (Vec<u8>, Vec<u8>) {
+    pub(super) fn synthetic_module(mask: u32, offset: u32) -> (Vec<u8>, Vec<u8>) {
         let mut pe = super::recover::tests::synthetic_pe();
         pe.resize(0x4000, 0xcc);
         // .text raw 0x400 (rva 0x1000) .. grow sections to 0x1000 bytes.

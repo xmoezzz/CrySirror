@@ -26,7 +26,8 @@
   "system.rs: screen_fade reports full-screen damage",
   "tests that used the host filesystem (savedata, sound CloneCD) are not vendored",
   "meswin.rs: choice-row inversion recolours the glyphs in that row (vm::text::invert) instead of removing them",
-  "vm/fs.rs: the game root may be the asset root (empty root)"
+  "vm/fs.rs: the game root may be the asset root (empty root)",
+  "CUR16M pixels/mask/colour-key decoding moved to crysirror-image::cursor; native CUR loading retains only format/resource policy and the shared UI presents animated/standard pointer selection."
  ],
  "shared_device_changes": [
   "bank.rs: buffer-0 write damage (mark_damage/take_damage), present revision counter",
@@ -56,12 +57,12 @@
   "crysirror-avg32/src/vm/cursor.rs": {
    "upstream": "crates/avg32/src/cursor.rs",
    "upstream_sha256": "d9844fcc143a770c782d23d5dd507cb6dd7cfebf19f1ac27b77bc6bd4ec4653d",
-   "sha256": "d9844fcc143a770c782d23d5dd507cb6dd7cfebf19f1ac27b77bc6bd4ec4653d"
+   "sha256": "996dae936e77797ec80eb225f91a8ed4d9c76f51d0e58c0b8b3c1a04cda7ab84"
   },
   "crysirror-avg32/src/vm/engine.rs": {
    "upstream": "crates/avg32/src/engine.rs",
    "upstream_sha256": "533a47ece50b1bb2f89827ac2fde6ddb248c2636734d5e22877bd22112ead4a9",
-   "sha256": "cc7c371bb8b0290a354164d0394cb7d1bc389757cd576c31f032a2020a5b0a4c"
+   "sha256": "d3fe0802cf88594fcee36696846d0625f46ad8579567cb925473c9bc8501f79c"
   },
   "crysirror-avg32/src/vm/flags.rs": {
    "upstream": "crates/avg32/src/flags.rs",

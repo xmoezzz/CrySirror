@@ -8,6 +8,7 @@ use crysirror_resource::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 const MAGIC: &[u8] = b"XP3\r\n \n\x1a\x8bg\x01";
+mod adler_xor;
 mod cxdec;
 mod hxv4;
 pub struct Xp3;
@@ -38,6 +39,13 @@ impl ArchiveFormat for Xp3 {
                 "HXV4 archive with indirect Special descriptor"
             );
             return hxv4::open(index.archive, d, context);
+        }
+        if adler_xor::requested(context) {
+            ensure!(
+                index.specials.is_empty(),
+                "rotating Adler XOR profile cannot decode an indirect filename index"
+            );
+            return adler_xor::open(index.archive, context);
         }
         if !index.specials.is_empty() || cxdec::requested(context) {
             ensure!(

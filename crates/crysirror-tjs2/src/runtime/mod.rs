@@ -293,7 +293,28 @@ impl NativeCallTrace {
     }
 }
 
+/// Storage calls whose native semantics may depend on the script namespace.
+/// A media handler receives VM values, never host pointers or executable code.
+#[derive(Clone, Debug)]
+pub enum StorageAction {
+    ReadText,
+    ReadBinary,
+    WriteText(String),
+    WriteBinary(Vec<u8>),
+}
+/// One scoped storage-media request. The embedding adapter owns URI policy.
+#[derive(Clone, Debug)]
+pub struct StorageRequest {
+    pub name: String,
+    pub mode: String,
+    pub action: StorageAction,
+}
+type StorageHandler<H> =
+    Arc<dyn Fn(&mut Runtime<H>, StorageRequest) -> Result<Variant> + Send + Sync>;
+
 pub struct Runtime<H: TjsHost = NoHost> {
+    /// `@set` values shared by every script this instance compiles.
+    pub pp_values: crate::frontend::diagnostic::PreprocessorValues,
     pub(crate) heap: Vec<Object>,
     pub(crate) array_extensions: BTreeMap<String, Variant>,
     /// Built-in instance methods (Array/Dictionary), allocated once and shared
@@ -328,6 +349,8 @@ pub struct Runtime<H: TjsHost = NoHost> {
     /// `TJSDoRehash`, so [`Runtime::tjs_rehash_tick`] can reproduce the
     /// reference's 1500 ms cadence.
     pub(crate) last_rehash_tick: i64,
+    storage_media: BTreeMap<String, StorageHandler<H>>,
+    storage_media_depth: usize,
     host: H,
 }
 
@@ -363,6 +386,9 @@ impl Default for Runtime<NoHost> {
 impl<H: TjsHost + 'static> Runtime<H> {
     pub fn with_host(host: H) -> Self {
         let mut runtime = Self {
+            pp_values: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::frontend::diagnostic::initial_preprocessor_values(),
+            )),
             heap: vec![Object::default()],
             array_extensions: BTreeMap::new(),
             shared_natives: BTreeMap::new(),
@@ -384,10 +410,113 @@ impl<H: TjsHost + 'static> Runtime<H> {
             debugger: None,
             debug_ui: None,
             last_rehash_tick: 0,
+            storage_media: BTreeMap::new(),
+            storage_media_depth: 0,
             host,
         };
         builtins::install(&mut runtime);
         runtime
+    }
+
+    /// Register an explicit URI scheme. Handlers inspect script data on the
+    /// VM thread; adapters retain responsibility for resource capabilities and
+    /// async completion. Captured object handles must be host GC roots.
+    pub fn register_storage_media<F>(&mut self, scheme: &str, handler: F) -> Result<()>
+    where
+        F: Fn(&mut Self, StorageRequest) -> Result<Variant> + Send + Sync + 'static,
+    {
+        if scheme.is_empty()
+            || scheme.len() > 32
+            || !scheme
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        {
+            return Err(TjsError::runtime("invalid storage media scheme"));
+        }
+        if self.storage_media.contains_key(scheme) {
+            return Err(TjsError::runtime("storage media already registered"));
+        }
+        if self.storage_media.len() >= 32 {
+            return Err(TjsError::runtime("storage media count limit"));
+        }
+        self.storage_media
+            .insert(scheme.to_owned(), Arc::new(handler));
+        Ok(())
+    }
+    fn storage_request(
+        &mut self,
+        name: &str,
+        mode: &str,
+        action: StorageAction,
+    ) -> Result<Option<Variant>> {
+        let Some((scheme, _)) = name.split_once("://") else {
+            return Ok(None);
+        };
+        let Some(handler) = self
+            .storage_media
+            .get(&scheme.to_ascii_lowercase())
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        if self.storage_media_depth >= 16 {
+            return Err(TjsError::runtime("storage media recursion limit"));
+        }
+        self.storage_media_depth += 1;
+        let result = handler(
+            self,
+            StorageRequest {
+                name: name.to_owned(),
+                mode: mode.to_owned(),
+                action,
+            },
+        );
+        self.storage_media_depth -= 1;
+        result.map(Some)
+    }
+    /// Read through a registered media handler or the embedding host.
+    pub fn read_storage_text(&mut self, name: &str, mode: &str) -> Result<String> {
+        match self.storage_request(name, mode, StorageAction::ReadText)? {
+            Some(Variant::String(text)) => Ok(text),
+            Some(_) => Err(TjsError::runtime("storage media did not return text")),
+            None => self.host.read_text(name, mode),
+        }
+    }
+    /// Read through a registered media handler or the embedding host.
+    pub fn read_storage_binary(&mut self, name: &str, mode: &str) -> Result<Vec<u8>> {
+        match self.storage_request(name, mode, StorageAction::ReadBinary)? {
+            Some(Variant::Octet(bytes)) => Ok(bytes),
+            Some(_) => Err(TjsError::runtime("storage media did not return octets")),
+            None => self.host.read_binary(name, mode),
+        }
+    }
+    /// Commit a complete text stream through its explicit media handler.
+    pub fn write_storage_text(&mut self, name: &str, mode: &str, text: &str) -> Result<()> {
+        if !name.split_once("://").is_some_and(|(scheme, _)| {
+            self.storage_media
+                .contains_key(&scheme.to_ascii_lowercase())
+        }) {
+            return self.host.write_text(name, mode, text);
+        }
+        match self.storage_request(name, mode, StorageAction::WriteText(text.to_owned()))? {
+            Some(Variant::Void) => Ok(()),
+            Some(_) => Err(TjsError::runtime("storage media write did not complete")),
+            None => self.host.write_text(name, mode, text),
+        }
+    }
+    /// Commit a complete binary stream through its explicit media handler.
+    pub fn write_storage_binary(&mut self, name: &str, mode: &str, bytes: &[u8]) -> Result<()> {
+        if !name.split_once("://").is_some_and(|(scheme, _)| {
+            self.storage_media
+                .contains_key(&scheme.to_ascii_lowercase())
+        }) {
+            return self.host.write_binary(name, mode, bytes);
+        }
+        match self.storage_request(name, mode, StorageAction::WriteBinary(bytes.to_vec()))? {
+            Some(Variant::Void) => Ok(()),
+            Some(_) => Err(TjsError::runtime("storage media write did not complete")),
+            None => self.host.write_binary(name, mode, bytes),
+        }
     }
 
     /// `TJSDoRehash()` (`tjsObject.cpp:362`): mark every object's member table
@@ -958,7 +1087,11 @@ impl<H: TjsHost + 'static> Runtime<H> {
                     .and_then(|n| n.as_ref())
                     .map(|n| format!("{n:?}"))
                     .unwrap_or_else(|| "?".into()),
-                _ => object.class_infos.first().cloned().unwrap_or_else(|| "-".into()),
+                _ => object
+                    .class_infos
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "-".into()),
             };
             *counts.entry(format!("{kind}/{class}")).or_default() += 1;
         }
@@ -1276,6 +1409,13 @@ impl<H: TjsHost + 'static> Runtime<H> {
         vm.call_variant_method(object, name, args)
     }
 
+    /// `new callee(args)` as the `new` operator does it.
+    pub fn construct(&mut self, callee: Variant, args: Vec<Variant>) -> Result<Variant> {
+        let file_id = self.call_context_file_id();
+        let mut vm = Vm::new(file_id, self)?;
+        vm.construct(callee, args)
+    }
+
     pub fn call_function(&mut self, callee: Variant, args: Vec<Variant>) -> Result<Variant> {
         let file_id = self.call_context_file_id();
         let mut vm = Vm::new(file_id, self)?;
@@ -1414,6 +1554,19 @@ impl<H: TjsHost + 'static> Runtime<H> {
                 ObjectKind::NativeFunction { .. } | ObjectKind::VmNativeFunction { .. }
             )
         })
+    }
+
+    /// Compiles source as this engine instance does: `@set` values persist
+    /// across scripts (`tTJS::PPValues`).
+    pub fn compile_source(&self, source_name: &str, source: &str) -> Result<BytecodeFile> {
+        crate::compiler::compile_source_to_bytecode_with(
+            source_name,
+            source,
+            crate::frontend::diagnostic::FrontendOptions {
+                pp_values: Some(self.pp_values.clone()),
+                ..Default::default()
+            },
+        )
     }
 
     pub(crate) fn install_script_file(&mut self, file: Arc<BytecodeFile>) -> usize {
@@ -1569,8 +1722,13 @@ impl<H: TjsHost + 'static> Runtime<H> {
 
     /// Install `function` as member `name` of `object`, sharing one native
     /// function object per `key` across all instances.
-    pub(crate) fn set_shared_native<F>(&mut self, object: ObjectHandle, key: &'static str, name: &str, function: F)
-    where
+    pub(crate) fn set_shared_native<F>(
+        &mut self,
+        object: ObjectHandle,
+        key: &'static str,
+        name: &str,
+        function: F,
+    ) where
         F: NativeFunction<H> + 'static,
     {
         let handle = match self.shared_natives.get(key) {
@@ -1689,5 +1847,58 @@ impl<H: TjsHost + 'static> Runtime<H> {
                 Ok(())
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod storage_media_tests {
+    use super::*;
+    #[test]
+    fn explicit_media_receives_runtime_values_and_bounds_recursion() {
+        let mut runtime = Runtime::new();
+        runtime.set_global_member("bytes", Variant::Octet(vec![1, 2, 3]));
+        runtime
+            .register_storage_media("memory", |rt, request| match request.action {
+                StorageAction::ReadBinary => Ok(rt.global_member("bytes")),
+                StorageAction::WriteBinary(bytes) => {
+                    rt.set_global_member("bytes", Variant::Octet(bytes));
+                    Ok(Variant::Void)
+                }
+                _ => Err(TjsError::runtime("unsupported fixture operation")),
+            })
+            .unwrap();
+        assert_eq!(
+            runtime.read_storage_binary("memory://./data", "").unwrap(),
+            vec![1, 2, 3]
+        );
+        runtime
+            .write_storage_binary("memory://./data", "b", &[4, 5])
+            .unwrap();
+        assert_eq!(
+            runtime.read_storage_binary("memory://./data", "").unwrap(),
+            vec![4, 5]
+        );
+        assert!(runtime.read_storage_binary("unknown://./data", "").is_err());
+        assert!(
+            runtime
+                .register_storage_media("memory", |_, _| Ok(Variant::Void))
+                .is_err()
+        );
+        runtime
+            .register_storage_media("recursive", |rt, r| {
+                rt.read_storage_binary(&r.name, &r.mode).map(Variant::Octet)
+            })
+            .unwrap();
+        assert!(
+            runtime
+                .read_storage_binary("recursive://./data", "")
+                .unwrap_err()
+                .to_string()
+                .contains("recursion limit")
+        );
+        assert_eq!(
+            runtime.read_storage_binary("memory://./data", "").unwrap(),
+            vec![4, 5]
+        );
     }
 }

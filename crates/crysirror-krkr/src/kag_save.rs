@@ -12,7 +12,7 @@ use crysirror_tjs2::{
 fn put(rt: &mut Rt, h: ObjectHandle, name: &str, v: impl Into<Variant>) {
     rt.set_object_member(h, name, v.into());
 }
-fn conditions(rt: &mut Rt, h: ObjectHandle, c: &Krkr2ConditionState) {
+pub(crate) fn conditions(rt: &mut Rt, h: ObjectHandle, c: &Krkr2ConditionState) {
     put(rt, h, "ExcludeLevel", Variant::Integer(c.exclude_level));
     put(rt, h, "IfLevel", Variant::Integer(c.if_level));
     put(
@@ -72,7 +72,9 @@ pub fn capture(rt: &mut Rt, p: &KagParser) -> Result<Variant> {
         let d = rt.alloc_dictionary_object();
         let storage = f.storage().to_owned();
         let label = f.current_label().unwrap_or("").to_owned();
-        let (line, pos) = p.line_pos_for_offset(&storage, f.offset()).unwrap_or((0, 0));
+        let (line, pos) = p
+            .line_pos_for_offset(&storage, f.offset())
+            .unwrap_or((0, 0));
         let base = if label.is_empty() {
             0
         } else {
@@ -80,7 +82,12 @@ pub fn capture(rt: &mut Rt, p: &KagParser) -> Result<Variant> {
         };
         put(rt, d, "storage", Variant::String(storage));
         put(rt, d, "label", Variant::String(label));
-        put(rt, d, "offset", Variant::Integer(line.saturating_sub(base) as i64));
+        put(
+            rt,
+            d,
+            "offset",
+            Variant::Integer(line.saturating_sub(base) as i64),
+        );
         put(rt, d, "orgLineStr", Variant::String(f.line_text().into()));
         put(rt, d, "lineBuffer", Variant::String(String::new()));
         put(rt, d, "pos", Variant::Integer(pos as i64));
@@ -194,6 +201,18 @@ pub fn decode(rt: &Rt, p: &KagParser, h: ObjectHandle) -> Result<ParserSnapshot>
             .collect::<Result<Vec<_>>>()?,
         _ => return Err(TjsError::runtime("native saved macro dictionary")),
     };
+    let condition = read_conditions(rt, h)?;
+    Ok(ParserSnapshot::from_krkr2_compatible(
+        Some(storage),
+        offset,
+        (!label.is_empty()).then_some(label),
+        vec![],
+        macros,
+        condition,
+    ))
+}
+
+pub(crate) fn read_conditions(rt: &Rt, h: ObjectHandle) -> Result<Krkr2ConditionState> {
     let hex = string_field(rt, h, "ExcludeLevelStack")?;
     let flags = string_field(rt, h, "IfLevelExecutedStack")?;
     let level = integer(rt, h, "IfLevel")?;
@@ -221,12 +240,5 @@ pub fn decode(rt: &Rt, p: &KagParser, h: ObjectHandle) -> Result<ParserSnapshot>
         exclude_level_stack: stack,
         if_level_executed_stack: flags.bytes().map(|v| v == b'1').collect(),
     };
-    Ok(ParserSnapshot::from_krkr2_compatible(
-        Some(storage),
-        offset,
-        (!label.is_empty()).then_some(label),
-        vec![],
-        macros,
-        condition,
-    ))
+    Ok(condition)
 }

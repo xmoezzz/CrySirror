@@ -263,6 +263,13 @@ pub struct CommandContext {
     pub input: input::InputState,
     pub script_input: input::InputState,
     pub wait: wait::VmWait,
+    /// Original EXCALL caller continuations. Kept inside VM transaction data
+    /// so worker admission/rollback and framework snapshots remain atomic.
+    pub(crate) native_proc_waits: Vec<wait::VmWait>,
+    /// Runtime-only monotonic identity for shared Media declarations. Movies
+    /// cannot be restored without external-resource reconstruction.
+    #[serde(skip)]
+    pub(crate) native_media_revision: u64,
     pub screen_w: u32,
     pub screen_h: u32,
     pub current_scene_no: Option<i64>,
@@ -304,6 +311,8 @@ impl CommandContext {
             input: Default::default(),
             script_input: Default::default(),
             wait: Default::default(),
+            native_proc_waits: Vec::new(),
+            native_media_revision: 0,
             screen_w: 1280,
             screen_h: 720,
             current_scene_no: None,
@@ -367,11 +376,23 @@ impl CommandContext {
             false,
         )
     }
-    pub fn tick_frame(&mut self) {
+    pub fn tick_frame(&mut self) -> Result<()> {
         let now = crate::platform_time::Instant::now().0;
         let delta = now.saturating_sub(self.last_ms).min(i32::MAX as u64) as i32;
         self.last_ms = now;
-        self.globals.tick_frame(delta, delta, &[], None);
+        let media_time = self.movie.live.then_some(self.globals.mov.timer_ms);
+        // Original Ctrl/read skip accelerates the game domain only. Source
+        // clocks remain native script state; shared Media owns clip position.
+        let game_delta = if forms::script::is_skipping(self)? {
+            delta.saturating_mul(32)
+        } else {
+            delta
+        };
+        self.globals.tick_frame(game_delta, delta, &[], None);
+        if let Some(time) = media_time {
+            self.globals.mov.timer_ms = time;
+        }
+        Ok(())
     }
     pub fn on_mouse_down(&mut self, b: input::VmMouseButton) {
         self.input.on_mouse_down(b);
@@ -390,6 +411,7 @@ impl CommandContext {
         self.runtime_load_completed = true;
     }
     pub fn begin_runtime_load_apply(&mut self) {
+        self.native_proc_waits.clear();
         self.wait.clear();
         self.input.clear_all();
         self.script_input.clear_all();
@@ -423,6 +445,10 @@ impl CommandContext {
         self.pending_read_flag_no = false;
     }
     pub fn submit_read_flag_no(&mut self, flag: i32) {
+        if self.ui.window.is_some() {
+            crate::message::stock_flag(self, flag);
+            return;
+        }
         if let Some(s) = self.current_scene_no {
             self.globals.set_read_flag(s, i64::from(flag));
         }
@@ -453,6 +479,7 @@ impl CommandContext {
         self.globals.append_name = name;
     }
     pub fn reset_for_scene_restart(&mut self) {
+        self.native_proc_waits.clear();
         self.wait.clear();
         self.stack.clear();
     }
@@ -465,6 +492,35 @@ impl CommandContext {
 }
 pub fn dispatch_form_code(ctx: &mut CommandContext, id: u32, args: &[Value]) -> Result<bool> {
     use constants::{elm_value as ev, global_form as gf};
+    if forms::global::dispatch_metadata(ctx, id, args)? {
+        return Ok(true);
+    }
+    if constants::matches_form_id(id, ctx.ids.form_global_script, gf::SCRIPT) {
+        return forms::script::dispatch(ctx, args);
+    }
+    if id == gf::FRAME_ACTION {
+        return forms::frame_action::dispatch(ctx, id, args);
+    }
+    if id == ctx.ids.form_global_frame_action_ch {
+        return forms::frame_action_ch::dispatch(ctx, id, args);
+    }
+    if id == ev::GLOBAL_FRAME as u32 || id == ev::GLOBAL_DISP as u32 {
+        anyhow::ensure!(
+            args.is_empty()
+                && ctx
+                    .vm_call
+                    .as_ref()
+                    .is_some_and(|call| call.element.as_slice() == [id as i32] && call.al_id == 0),
+            "native FRAME/DISP chain/arguments"
+        );
+        ctx.wait.wait_next_frame(ctx.globals.render_frame);
+        ctx.request_proc_boundary(if id == ev::GLOBAL_DISP as u32 {
+            ProcKind::Disp
+        } else {
+            ProcKind::Frame
+        });
+        return Ok(true);
+    }
     if id == ev::GLOBAL_NOP as u32 {
         return Ok(true);
     }
@@ -480,6 +536,9 @@ pub fn dispatch_form_code(ctx: &mut CommandContext, id: u32, args: &[Value]) -> 
     }
     if constants::matches_form_id(id, ctx.ids.form_global_bgm, gf::BGM) {
         return crate::bgm_bridge::dispatch(ctx, args);
+    }
+    if constants::matches_form_id(id, ctx.ids.form_global_mov, gf::MOV) {
+        return forms::mov::dispatch(ctx, args);
     }
     if constants::matches_form_id(id, ctx.ids.form_global_bgm_table, gf::BGMTABLE) {
         return crate::bgm_bridge::dispatch_table(ctx, args);
@@ -497,6 +556,9 @@ pub fn dispatch_form_code(ctx: &mut CommandContext, id: u32, args: &[Value]) -> 
         return crate::sfx_bridge::se(ctx, args);
     }
     if crate::koe_bridge::dispatch(ctx, id, args)? || crate::koe_bridge::config(ctx, id, args)? {
+        return Ok(true);
+    }
+    if id == ctx.ids.form_global_syscom && forms::syscom::dispatch_config(ctx, args)? {
         return Ok(true);
     }
     if id == gf::TIMEWAIT {
@@ -533,8 +595,74 @@ pub fn dispatch_form_code(ctx: &mut CommandContext, id: u32, args: &[Value]) -> 
         return forms::int_event::dispatch(ctx, id, args);
     }
 
+    if id == forms::codes::FORM_GLOBAL_SYSTEM {
+        return forms::system::dispatch(ctx, args);
+    }
     bail!(
         "unsupported Siglus native form {id} chain {:?}",
         ctx.vm_call.as_ref().map(|v| &v.element)
     )
+}
+
+#[cfg(test)]
+mod native_system_boundary_tests {
+    use super::*;
+    #[test]
+    fn native_optical_disc_check_is_explicit_host_policy_without_a_forged_return() {
+        let mut ctx = CommandContext::new(std::path::PathBuf::from("asset"));
+        ctx.vm_call = Some(VmCallMeta {
+            element: vec![92, 2],
+            ..Default::default()
+        });
+        dispatch_form_code(
+            &mut ctx,
+            92,
+            &[
+                Value::Str("dummy".into()),
+                Value::Int(1),
+                Value::Str("authored".into()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(ctx.globals.system.dummy_checks.len(), 1);
+        assert!(
+            ctx.stack.is_empty(),
+            "void call must not push fake authenticated=true"
+        );
+    }
+}
+
+#[cfg(test)]
+mod native_clock_tests {
+    use super::*;
+    #[test]
+    fn native_frame_samples_game_and_real_clocks_with_original_skip_precedence() {
+        let mut ctx = CommandContext::new("asset".into());
+        ctx.input.on_key_down(input::VmKey::Control);
+        crate::platform_time::scoped(10, || ctx.tick_frame()).unwrap();
+        assert_eq!(
+            (ctx.globals.local_game_time, ctx.globals.local_real_time),
+            (320, 10)
+        );
+        ctx.input.on_key_down(input::VmKey::Shift);
+        crate::platform_time::scoped(20, || ctx.tick_frame()).unwrap();
+        assert_eq!(
+            (ctx.globals.local_game_time, ctx.globals.local_real_time),
+            (330, 20)
+        );
+        ctx.input.on_key_up(input::VmKey::Shift);
+        ctx.globals.script.ctrl_disable = true;
+        crate::platform_time::scoped(30, || ctx.tick_frame()).unwrap();
+        assert_eq!(
+            (ctx.globals.local_game_time, ctx.globals.local_real_time),
+            (340, 30)
+        );
+        ctx.globals.script.time_stop_flag = true;
+        crate::platform_time::scoped(40, || ctx.tick_frame()).unwrap();
+        assert_eq!(
+            (ctx.globals.local_game_time, ctx.globals.local_real_time),
+            (350, 40),
+            "source clocks sample elapsed time even while ordinary stage work is frozen"
+        );
+    }
 }

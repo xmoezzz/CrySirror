@@ -1,0 +1,36 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "origin_package": "na_mpeg2_decoder",
+  "package": "crysirror-codec-mpeg",
+  "license": "MPL-2.0",
+  "adoption": "First-class CPU codec library. Original standalone players/renderers and their optional window/GPU/audio-device dependencies are excluded; historical codec fixes and source provenance are preserved.",
+  "baseline_sha256": {
+    "src/convert.rs": "ee7f8d04c574b0f4f391887a81e32f5b71eeadac956221b53a432c2660d91952",
+    "src/error.rs": "ef738d9c02a6a3173a5226bd9bc4e8e9ead95cbd3e8588d55ea2828cdade84d4",
+    "src/lib.rs": "ae201d17e6ae627ee0a9df918888b87f4344d30381a1d6021db10b35530ec624",
+    "src/av.rs": "802249f64a9cf15b44086543b049c482dc31733627e450d817d45ff9cb6ab7a8",
+    "src/pipeline.rs": "982565420a027efd0196d62c6ced43d76c163fcc26b22243b08f78ec77b2bd08",
+    "src/video/idct.rs": "63efae9a0019909c4d3b2e34e00ce6dc6f9526af5e10de82afc63d60333f85bb",
+    "src/video/error.rs": "b2a8d6ded0de784389dfdf89a91ab8e1c358bbdaed2e9cf9238484d78d71a012",
+    "src/video/decoder.rs": "f1c4989a25f8ecfd7f46fb3919a949506d93caf6cc7006aa6c75234ad7830e84",
+    "src/video/mod.rs": "126fe2ba4976adecf0e5aeb218d1ec5b3f46cff4e54acae46c40404bc8bed419",
+    "src/video/startcode.rs": "f59507294e07ca2f5de2240b5825ba370965fc287d92718e7eca26084b9f8148",
+    "src/video/vlc.rs": "37ae4ef44a9de59ca9b90a7b17bb17ebb227b5e7917733ebca97fa6d9c0b7272",
+    "src/video/frame.rs": "ca02a112e4f46b67dc4abb3e50949b4696499a5d7bf97eb2b97da9f01af9567b",
+    "src/video/bitreader.rs": "fddf36e5566889765464e2cd892f6f0fb5d6f92fc85dd4a39d43d1cfefd41ad9",
+    "src/video/tables.rs": "bbe898a557a4c6e60d287e246a12cd34802a380746448632e3ab3ab842140cca",
+    "src/video/videodsp.rs": "ec48a54f6fab6c39692cc200f38c0a2bc60879bce5154bb407f9d122c056b26d",
+    "src/video/vlctables.rs": "35f591ab7cad60cc12142f6230882704971bfc9dca0f2eedb3951aab490b205a",
+    "src/video/utils.rs": "76bf0f6394ec368ba29ddc2effcba09734d8e4aa8023259280830ad58697dda7",
+    "src/video/motion.rs": "b9bf6caec9b45c2634690c62c11cd8b0578907a6712e575df694bba951678efd",
+    "src/audio/mpa.rs": "738c4987984a32df06c4c54183a3c2caa4b39bb19fbb3a5a9b3a85b843387000",
+    "src/audio/ac3.rs": "84c5e251a4e16654069b862bbb973aef3e10a96ff3ac2e322d6dd5c17f67f8bd",
+    "src/audio/mod.rs": "d192bfe342fae17373f25d5dddb08f3a477d4a9203f3be8e8d40701c2f34db9e",
+    "src/demux/mod.rs": "8033505d9f2816e1b6117a15c34db47f5d42a6ac0b7d0b4a96f1ea3b2f9c88bc"
+  },
+  "excluded_host_sources_sha256": {
+    "src/bin/shader_blit.wgsl": "67713c3f5ddc71740cc5d1ae0cc00ab071927c0b4581e47ad3f557f0760ba267",
+    "src/bin/mpeg2_player_wgpu.rs": "36aa41ae9f04ad867c18e72ec3ec7a41ef0c261ce6fbc3d1a2100f641fc339a4"
+  }
+}

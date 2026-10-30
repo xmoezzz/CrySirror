@@ -61,6 +61,193 @@ fn set_spec(rt: &mut Runtime, client: u32, spec: SystemSpec) {
     )
     .unwrap();
 }
+fn screen_system() -> SystemSpec {
+    let mut spec = system(SimulationTarget::Cpu);
+    let emitter = &mut spec.emitters[0];
+    emitter.render = RenderSpec::Sprite {
+        texture: Some("authored.png".into()),
+        columns: 1,
+        rows: 1,
+        frames: 1,
+        fps: 0.,
+        soft_distance: 0.,
+        blend: BlendMode::Alpha,
+        facing: FacingMode::Camera,
+    };
+    emitter.screen = Some(crysirror_vfx::screen::ScreenSpriteTarget {
+        canvas: [160, 90],
+        layer: 61,
+        parent: None,
+        order: [2, 0],
+        anchor: [0.5, 0.5],
+    });
+    spec
+}
+#[test]
+fn screen_worker_publication_is_scoped_idempotent_hidden_and_cleaned() {
+    let (_tmp, mut rt) = runtime(screen_system(), 2);
+    rt.finish_vfx_offline().unwrap();
+    let old = rt
+        .host
+        .engine
+        .layers
+        .dynamic_puppet_frame(1, 61)
+        .unwrap()
+        .clone();
+    assert_eq!(old.parts.len(), 3);
+    assert_eq!(old.textures, ["authored.png"]);
+    assert!(!Arc::ptr_eq(
+        &old,
+        rt.host.engine.layers.dynamic_puppet_frame(2, 61).unwrap()
+    ));
+    rt.vfx.publish_screen(&mut rt.host.engine.layers).unwrap();
+    assert!(Arc::ptr_eq(
+        &old,
+        rt.host.engine.layers.dynamic_puppet_frame(1, 61).unwrap()
+    ));
+    submit(
+        &mut rt,
+        1,
+        vec![WorldCommand::SetVisible {
+            id: 1,
+            visible: false,
+        }],
+    )
+    .unwrap();
+    rt.finish_vfx_offline().unwrap();
+    assert!(!rt.host.engine.layers.get(ClientId(1), 61).unwrap().visible);
+    assert!(rt.host.engine.layers.get(ClientId(2), 61).unwrap().visible);
+    submit(&mut rt, 1, vec![WorldCommand::SetVfx { id: 1, vfx: None }]).unwrap();
+    rt.finish_vfx_offline().unwrap();
+    assert!(rt.host.engine.layers.get(ClientId(1), 61).is_none());
+    assert!(rt.host.engine.layers.get(ClientId(2), 61).is_some());
+}
+#[test]
+fn screen_publication_never_overwrites_an_existing_or_replaced_layer() {
+    use crysirror_scene::layer::{LayerCommand, LayerSpec};
+    let (_tmp, mut rt) = runtime(screen_system(), 1);
+    let existing: LayerSpec = serde_json::from_value(
+        json!({"id":61,"rect":[0,0,16,16],"paint":{"kind":"solid","color":[9,8,7,255]}}),
+    )
+    .unwrap();
+    rt.host
+        .engine
+        .layers
+        .apply_batch(ClientId(1), &[LayerCommand::Put { layer: existing }])
+        .unwrap();
+    assert!(rt.finish_vfx_offline().is_err());
+    assert_eq!(
+        serde_json::to_value(&rt.host.engine.layers.get(ClientId(1), 61).unwrap().paint).unwrap()
+            ["color"],
+        json!([9, 8, 7, 255])
+    );
+    let (_tmp, mut rt) = runtime(screen_system(), 1);
+    rt.finish_vfx_offline().unwrap();
+    rt.host
+        .engine
+        .layers
+        .apply_batch(
+            ClientId(1),
+            &[LayerCommand::SetOpacity { id: 61, opacity: 7 }],
+        )
+        .unwrap();
+    assert!(rt.vfx.publish_screen(&mut rt.host.engine.layers).is_err());
+    assert_eq!(
+        rt.host.engine.layers.get(ClientId(1), 61).unwrap().opacity,
+        7
+    );
+}
+#[test]
+fn screen_profile_rejects_gpu_and_duplicate_layer_declarations() {
+    let mut spec = screen_system();
+    spec.emitters[0].target = SimulationTarget::Gpu;
+    assert!(spec.compile().is_err());
+    let mut spec = screen_system();
+    let mut second = spec.emitters[0].clone();
+    second.id = "second".into();
+    spec.emitters.push(second);
+    assert!(spec.compile().is_err());
+}
+#[test]
+fn screen_snapshot_gate_covers_unsampled_live_and_fully_cleaned_producers() {
+    let (_tmp, mut rt) = runtime(screen_system(), 1);
+    assert!(rt.vfx.has_screen_state(&rt.host.engine.world));
+    assert!(rt.capture_snapshot().is_err()); //Declaration is not sampled yet.
+    rt.finish_vfx_offline().unwrap();
+    assert!(rt.capture_snapshot().is_err());
+    submit(&mut rt, 1, vec![WorldCommand::SetVfx { id: 1, vfx: None }]).unwrap();
+    rt.finish_vfx_offline().unwrap();
+    assert!(!rt.vfx.has_screen_state(&rt.host.engine.world));
+    assert!(rt.capture_snapshot().is_ok());
+}
+#[test]
+fn screen_serde_roundtrip_and_reset_cannot_reclaim_a_shape_as_a_producer() {
+    let (_tmp, mut rt) = runtime(screen_system(), 1);
+    rt.finish_vfx_offline().unwrap();
+    let bytes = serde_json::to_vec(&rt.host.engine.layers).unwrap();
+    let mut restored: crysirror_scene::layer::LayerSystem = serde_json::from_slice(&bytes).unwrap();
+    assert!(restored.dynamic_puppet_frame(1, 61).is_none());
+    rt.vfx.reset(rt.now_ms());
+    assert!(rt.vfx.publish_screen(&mut restored).is_err());
+    assert!(restored.get(ClientId(1), 61).is_some());
+    // A new runtime has no producer lease either, even for an identical
+    // transparent Solid declaration restored from otherwise valid JSON.
+    let mut fresh = crysirror_runtime::vfx::VfxRuntime::default();
+    let pool = crysirror_tasks::TaskPool::new("screen-restore-test", 1, 8).unwrap();
+    fresh
+        .finish_offline(&rt.host.engine.world, rt.now_ms(), &pool)
+        .unwrap();
+    assert!(fresh.publish_screen(&mut restored).is_err());
+    assert!(restored.get(ClientId(1), 61).is_some());
+}
+#[test]
+fn completed_sequence_receipts_normalize_default_budget_and_client_pause() {
+    use crysirror_vfx::falling_atlas::{SequenceRng, SimulationClock};
+    let mut spec = system(SimulationTarget::Cpu);
+    spec.clock = SimulationClock::External {
+        tick: 0,
+        wall_time_ms: 0,
+    };
+    spec.sequence_rng = Some(SequenceRng::msvc(1));
+    assert!(spec.max_steps_per_advance > 32);
+    let (_tmp, mut rt) = runtime(spec.clone(), 2);
+    assert!(rt
+        .vfx
+        .sequence_receipts(&rt.host.engine.world)
+        .unwrap()
+        .is_empty());
+    rt.finish_vfx_offline().unwrap();
+    let receipts = rt.vfx.sequence_receipts(&rt.host.engine.world).unwrap();
+    assert_eq!(receipts.len(), 2);
+    assert_eq!(receipts[&(1, 1)]["completed_tick"], 0);
+    let expected = blake3::hash(&serde_json::to_vec(&spec).unwrap())
+        .to_hex()
+        .to_string();
+    assert_eq!(receipts[&(1, 1)]["source_fingerprint"], expected);
+    submit(&mut rt, 1, vec![WorldCommand::Pause { paused: true }]).unwrap();
+    rt.finish_vfx_offline().unwrap();
+    let paused = rt.vfx.sequence_receipts(&rt.host.engine.world).unwrap();
+    assert_eq!(
+        paused[&(1, 1)]["sequence_rng"],
+        receipts[&(1, 1)]["sequence_rng"]
+    );
+    submit(&mut rt, 1, vec![WorldCommand::Pause { paused: false }]).unwrap();
+    spec.clock = SimulationClock::External {
+        tick: 1,
+        wall_time_ms: 100,
+    };
+    set_spec(&mut rt, 1, spec.clone());
+    assert!(!rt
+        .vfx
+        .sequence_receipts(&rt.host.engine.world)
+        .unwrap()
+        .contains_key(&(1, 1))); //New declaration is not its own receipt.
+    rt.finish_vfx_offline().unwrap();
+    assert_eq!(
+        rt.vfx.sequence_receipts(&rt.host.engine.world).unwrap()[&(1, 1)]["completed_tick"],
+        1
+    );
+}
 
 #[test]
 fn zero_time_initialization_and_offline_fences_do_not_tick_world_or_vm() {

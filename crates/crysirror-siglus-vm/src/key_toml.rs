@@ -145,6 +145,8 @@ pub struct KeyTomlConfig {
     pub exe_key16: Option<[u8; 16]>,
     pub base_angou_code: Option<Vec<u8>>,
     pub game_angou_code: Option<Vec<u8>>,
+    /// Optional caller-owned Scene.pck XOR table; never supplied by this crate.
+    pub scene_angou_code: Option<Vec<u8>>,
     pub chain_order: Option<Vec<AngouStepKind>>,
     /// Scene string-table decoding policy. Missing means the historical
     /// runtime default (`xor`). `none` forces plain UTF-16, while `mdl` and
@@ -172,6 +174,7 @@ pub fn parse_key_toml(text: &str) -> Result<KeyTomlConfig> {
         exe_key16: parse_key16_toml(text)?,
         base_angou_code: parse_named_bytes(text, "base_angou_code", "base_angou_hex")?,
         game_angou_code: parse_named_bytes(text, "game_angou_code", "game_angou_hex")?,
+        scene_angou_code: parse_named_bytes(text, "scene_angou_code", "scene_angou_hex")?,
         chain_order: parse_chain_order(text)?,
         override_string_encryption: parse_string_encryption_override_toml(text),
         emote_key: parse_named_u32(text, "emote_key")?,
@@ -761,7 +764,7 @@ fn collect_rhs_for_key(text: &str, key: &str) -> Option<String> {
             }
             collecting = true;
             out.push_str(rhs.trim());
-            if rhs.contains(']') {
+            if !rhs.trim_start().starts_with('[') || rhs.contains(']') {
                 break;
             }
         } else {
@@ -815,4 +818,16 @@ fn parse_chain_order(text: &str) -> Result<Option<Vec<AngouStepKind>>> {
         return Ok(None);
     }
     Ok(Some(out))
+}
+
+#[cfg(test)]
+mod decode_material_tests {
+    use super::*;
+    #[test]
+    fn adjacent_scalar_materials_are_not_concatenated() {
+        let config = parse_key_toml("key_hex = \"01010101010101010101010101010101\"\ngame_angou_hex = \"0203\"\nscene_angou_hex = \"040506\"\n").unwrap();
+        assert_eq!(config.exe_key16, Some([1; 16]));
+        assert_eq!(config.game_angou_code, Some(vec![2, 3]));
+        assert_eq!(config.scene_angou_code, Some(vec![4, 5, 6]));
+    }
 }

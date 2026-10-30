@@ -16,6 +16,12 @@ pub struct State {
     pub missing: BTreeSet<String>,
     #[serde(skip)]
     pub writes: BTreeMap<String, Vec<u8>>,
+    /// Per-pump observations supplied by the shared capability metadata API.
+    /// They are not serialized native or framework save state.
+    #[serde(skip)]
+    pub probes: BTreeMap<String, bool>,
+    #[serde(skip)]
+    pub pending_probes: BTreeSet<String>,
 }
 thread_local! {static STATE:RefCell<State>=RefCell::new(State::default());}
 pub fn scoped<T>(state: &mut State, f: impl FnOnce() -> T) -> T {
@@ -78,6 +84,31 @@ pub fn read(p: impl AsRef<Path>) -> io::Result<Vec<u8>> {
 pub fn read_to_string(p: impl AsRef<Path>) -> io::Result<String> {
     String::from_utf8(read(p)?).map_err(io::Error::other)
 }
+/// Native file-existence policy, with no ambient filesystem or whole-file read.
+/// An unresolved observation causes the adapter to retry the instruction after
+/// the owner supplies metadata; false is never committed for a pending query.
+pub fn probe_file(p: impl AsRef<Path>) -> io::Result<bool> {
+    let key = canonical(p.as_ref())?;
+    let key = if key == "asset" || key == "save" {
+        format!("{key}/")
+    } else {
+        key
+    };
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if let Some(present) = state.probes.get(&key) {
+            return Ok(*present);
+        }
+        if state.probes.len() >= 4096 || state.pending_probes.len() >= 32 {
+            return Err(io::Error::other("native file metadata query limit"));
+        }
+        state.pending_probes.insert(key);
+        Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "native file metadata pending",
+        ))
+    })
+}
 pub fn write(p: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
     let key = canonical(p.as_ref())?;
     if !key.starts_with("save/") {
@@ -93,6 +124,7 @@ pub fn write(p: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
         let mut s = s.borrow_mut();
         s.files
             .insert(key.clone(), std::sync::Arc::new(data.as_ref().to_vec()));
+        s.probes.insert(key.clone(), true);
         s.writes.insert(key, data.as_ref().to_vec());
     });
     Ok(())

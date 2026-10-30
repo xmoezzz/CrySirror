@@ -47,6 +47,11 @@
     "crates/siglus_scene_vm/src/runtime/forms/global.rs": "932ea4aab87291357319275d9c6b40e9dafc45516dd85932ee23fa3a91bd9258",
     "crates/siglus_scene_vm/src/platform_time.rs": "7a4ecf671ab8c3dfdd74e24a5e6c313213bd6a4ef2a167270d3a1db9b0186e8d",
     "crates/siglus_scene_vm/src/resource.rs": "24a2bfef2c8931cf4915807eecca6f6ad23a41f19b2a7a0e32e4b45fdba85e44",
-    "crates/siglus_scene_vm/src/image_manager.rs": "dfc0478eefb9cdb86890e48aead31f36661657e3c71d01636b2455c1017e3359"
+    "crates/siglus_scene_vm/src/image_manager.rs": "dfc0478eefb9cdb86890e48aead31f36661657e3c71d01636b2455c1017e3359",
+    "crates/siglus_scene_vm/src/runtime/forms/mov.rs": "fb8b0df8e0f2bc1db79cf3ae1f82f8eb2cdd23dec047a7e468df857a832265b6",
+    "crates/siglus_scene_vm/src/runtime/forms/system.rs": "77cf22cf05b941d26ec58fd29304409d4d13dd1464ea9f72fb71311f5c587faf",
+    "crates/siglus_scene_vm/src/runtime/forms/script.rs": "a43f21f48787d344e43723302427986361f0eda8b90e893d902c7a5484879e14",
+    "crates/siglus_scene_vm/src/runtime/forms/frame_action.rs": "3717a8c7ec6590536328359063ab2734bb6f15c5f8feb768c1eab9119d56b10f",
+    "crates/siglus_scene_vm/src/runtime/forms/frame_action_ch.rs": "9caa2bf45565d40d0f9c14b9ca14bef56afd107b0302a47a9c1fd769c00b023b"
   }
 }

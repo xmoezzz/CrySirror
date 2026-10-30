@@ -78,7 +78,7 @@ fn storages_load_octet(
     args: Vec<Variant>,
 ) -> Result<Variant> {
     let name = args.first().cloned().unwrap_or_default().to_tjs_string()?;
-    match runtime.host_mut().read_binary(&name, "") {
+    match runtime.read_storage_binary(&name, "") {
         Ok(bytes) => Ok(Variant::Octet(bytes)),
         Err(_) => Ok(Variant::Void),
     }
@@ -149,7 +149,7 @@ fn load_data_pack(
     previous: &Variant,
 ) -> Result<Variant> {
     let name = args.first().cloned().unwrap_or_default().to_tjs_string()?;
-    match runtime.host_mut().read_binary(&name, "") {
+    match runtime.read_storage_binary(&name, "") {
         Ok(bytes) => return decode_data_pack(runtime, &bytes, &name),
         // A lazily materialized Web asset must keep its request alive.
         Err(error) if error.kind == TjsErrorKind::ResourcePending => return Err(error),
@@ -159,7 +159,7 @@ fn load_data_pack(
         // Registered without the engine's Scripts: resolve the `.pbd` alias
         // here, the engine's rule.
         let storage_name = data_pack_storage_name(&name);
-        let bytes = runtime.host_mut().read_binary(&storage_name, "")?;
+        let bytes = runtime.read_storage_binary(&storage_name, "")?;
         return decode_data_pack(runtime, &bytes, &storage_name);
     }
     runtime.call_function(previous.clone(), args)
@@ -521,11 +521,11 @@ fn read_pack_thumbnail(runtime: &mut Runtime<KrkrHost>, name: &str) -> Option<Ve
     if name.is_empty() {
         return None;
     }
-    let bytes = match runtime.host_mut().read_binary(name, "") {
+    let bytes = match runtime.read_storage_binary(name, "") {
         Ok(bytes) => bytes,
         Err(_) => {
             let storage_name = data_pack_storage_name(name);
-            runtime.host_mut().read_binary(&storage_name, "").ok()?
+            runtime.read_storage_binary(&storage_name, "").ok()?
         }
     };
     let offset = image_end(&bytes).or_else(|| {

@@ -88,11 +88,14 @@ pub fn install_fstat(rt: &mut Rt) {
         if !name.ends_with('/') {
             return Err(error("Missing slash at end of directory name."));
         }
-        let entries = rt
-            .host()
-            .storage()?
-            .directory_entries(&name)
-            .map_err(error)?;
+        let entries = if crate::varfile_plugin::is_uri(&name) {
+            crate::varfile_plugin::list(rt, &name)?
+        } else {
+            rt.host()
+                .storage()?
+                .directory_entries(&name)
+                .map_err(error)?
+        };
         Ok(Variant::Object(rt.alloc_array_object(
             entries.into_iter().map(Variant::String).collect(),
         )))
@@ -146,25 +149,33 @@ pub fn install_fstat(rt: &mut Rt) {
             ("deleteFile", |rt, _, a| {
                 let name = string(&a, 0, "Storages.deleteFile")?;
                 let storage = rt.host().storage()?;
-                Ok(Variant::Integer(storage.delete_save(&name).map_err(error)? as i64))
+                Ok(Variant::Integer(
+                    storage.delete_save(&name).map_err(error)? as i64
+                ))
             }),
             ("moveFile", |rt, _, a| {
                 let from = string(&a, 0, "Storages.moveFile")?;
                 let to = string(&a, 1, "Storages.moveFile")?;
                 let storage = rt.host().storage()?;
-                Ok(Variant::Integer(storage.move_save(&from, &to).map_err(error)? as i64))
+                Ok(Variant::Integer(
+                    storage.move_save(&from, &to).map_err(error)? as i64,
+                ))
             }),
             ("copyFile", |rt, _, a| {
                 let from = string(&a, 0, "Storages.copyFile")?;
                 let to = string(&a, 1, "Storages.copyFile")?;
                 let storage = rt.host().storage()?;
-                Ok(Variant::Integer(storage.copy_to_save(&from, &to).map_err(error)? as i64))
+                Ok(Variant::Integer(
+                    storage.copy_to_save(&from, &to).map_err(error)? as i64,
+                ))
             }),
             // Save-mount directories exist implicitly (writes create parents).
             ("createDirectory", |_, _, a| {
                 let name = string(&a, 0, "Storages.createDirectory")?;
                 Ok(Variant::Integer(
-                    crate::storage::save_path(name.trim_end_matches('/')).map_err(error)?.is_some() as i64,
+                    crate::storage::save_path(name.trim_end_matches('/'))
+                        .map_err(error)?
+                        .is_some() as i64,
                 ))
             }),
         ],
@@ -199,4 +210,40 @@ pub fn install_fstat(rt: &mut Rt) {
             ))
         });
     }
+}
+
+/// dirlist.dll's global getDirList. Reference: complete krkrz/krkr2 Main.cpp
+/// at dec49af97e174d31059c3ccd7efc700ba3c6b788, native dirlist folder.
+/// Native local names are mapped to the client's scoped engine filesystem;
+/// listing never grants access outside that capability (including ../).
+pub fn install_dirlist(rt: &mut Rt) {
+    rt.register_global_native("getDirList", |rt: &mut Rt, _, args: Vec<Variant>| {
+        let name = string(&args, 0, "getDirList")?;
+        if !name.ends_with('/') {
+            return Err(error(
+                "'/' must be specified at the end of given directory name.",
+            ));
+        }
+        if crate::varfile_plugin::is_uri(&name) || name.contains('>') {
+            return Err(unsupported(
+                "getDirList non-file media",
+                "a capability-scoped local directory",
+            ));
+        }
+        let mut entries = rt
+            .host()
+            .storage()?
+            .directory_entries(&name)
+            .map_err(error)?;
+        if entries.len() > 65534 {
+            return Err(error("getDirList entry budget"));
+        }
+        // Win32 FindFirstFile also enumerates these directory names. Returning
+        // a name does not grant the capability to follow it outside the root.
+        entries.insert(0, "../".into());
+        entries.insert(0, "./".into());
+        Ok(Variant::Object(rt.alloc_array_object(
+            entries.into_iter().map(Variant::String).collect(),
+        )))
+    });
 }

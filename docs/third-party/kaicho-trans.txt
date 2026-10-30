@@ -1,0 +1,30 @@
+KaichoTrans v0.2.5.1 — KAICHO / KAICHO's Soft
+Source release: https://keepcreating.g2.xrea.com/krkrplugins/KaichoTrans/KaichoTrans.zip
+SHA-256: 11c47bd69bf7235d4238c2227fbd122dfadb42e1bf8ce76e84c4400edd66ba13
+
+Complete Main.cpp, blur.cpp, dim.cpp, associated headers, manual and license
+were reviewed as semantic references. CrySirror implements the reusable GPU
+box filtering and processed-rule transitions itself. No native DLL, Win32
+stream, original renderer or SSE implementation is embedded or executed.
+
+Original license text supplied with that source release follows:
+ライセンス：
+	以下のURLの「プラグインの作成」によると、プラグインの作成では
+	吉里吉里のソースコードを利用していても吉里吉里のライセンスに
+	従う必要はないらしい。
+	http://kikyou.info/extractor/?arc=tvp%2Ffiles%2Fkr2_230r2.lzh&file=license.txt&ct=text%2Fplain%3B%20charset%3DShift_JIS
+
+	ので、例によって我輩ライセンス、「好きに使え、再配布・改造自由、
+	開示・使用表示・報告義務なし、商用利用O.K.、ただし無保証」という
+	ユルユルのソレにしとく。みんな好きに使えた方が嬉しいでしょ？
+	もし上記認識が異なる場合、吉里吉里のライセンスに従う必要があるので、
+	各自適宜に。我輩は自作のもののライセンスには頓着ないので、適宜。
+
+	で、配布に際して、開発したディレクトリ構成そのまま配ることが
+	ライセンス上可能かどうかわかんないので、限られたファイルだけを
+	頒布しているわけで。だからライセンスがどうとかって嫌いなんだ…
+	(頭悪いだけ)。
+
+	我輩が唯一禁じたいのは、我輩以外の人が我輩に何かを強制すること。
+	そうでないなら、我輩は皆様のご利用に対し(謝意は表せども)何も
+	要求しない。フリーってのはそういうもんだと思う。

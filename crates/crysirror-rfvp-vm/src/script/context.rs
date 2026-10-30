@@ -1,0 +1,1435 @@
+use alloc::format;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::mem::size_of;
+
+use crate::script::global::Global;
+use crate::script::opcode::Opcode;
+use crate::script::parser::Parser;
+use crate::script::Variant;
+use crate::script::VmSyscall;
+use bitflags::bitflags;
+use serde::{Deserialize, Serialize};
+
+use anyhow::{bail, Result};
+
+#[cfg(target_os = "uefi")]
+macro_rules! uefi_context_stage {
+    ($($arg:tt)*) => {};
+}
+
+#[cfg(not(target_os = "uefi"))]
+macro_rules! uefi_context_stage {
+    ($($arg:tt)*) => {};
+}
+
+static MAX_STACK_SIZE: usize = 0x100;
+
+#[derive(Debug, Clone, Default)]
+pub struct StackFrame {
+    pub args_count: u16,
+    pub locals_count: u16,
+}
+
+/// implementation of the virtual machine
+/// stack layout:
+/// |-----------------|
+/// | arg(n)          | <- ...
+/// | ...             |
+/// | arg(0)          | <- -2 (0xfe in hex)
+/// | SavedFrameInfo  | <- -1, includes the base/current pointer and the return address
+/// |-----------------|
+/// | local(0)        | <- cur_stack_base
+///
+#[derive(Debug, Clone)]
+pub struct Context {
+    /// the context id
+    id: u32,
+    stack: Vec<Variant>,
+    cursor: usize,
+    /// absolute position of the current stack pointer
+    /// start from 0 if the context is just created
+    cur_stack_pos: usize,
+    /// relative to the base pointer of the current stack frame
+    /// start from 0
+    cur_stack_base: usize,
+    start_addr: u32,
+    return_value: Variant,
+    state: ThreadState,
+    wait_ms: u64,
+    sleep_ms: u64,
+    should_exit: bool,
+    should_break: bool,
+}
+
+bitflags! {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ThreadState: u32 {
+        const CONTEXT_STATUS_NONE = 0;
+        const CONTEXT_STATUS_RUNNING = 1;
+        const CONTEXT_STATUS_WAIT = 2;
+        const CONTEXT_STATUS_SLEEP = 4;
+        const CONTEXT_STATUS_TEXT = 8;
+        const CONTEXT_STATUS_DISSOLVE_WAIT = 16;
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextSnapshotV1 {
+    pub id: u32,
+    pub stack: Vec<Variant>,
+    pub cursor: usize,
+    pub cur_stack_pos: usize,
+    pub cur_stack_base: usize,
+    pub start_addr: u32,
+    pub return_value: Variant,
+    pub state_bits: u32,
+    pub wait_ms: u64,
+    pub sleep_ms: u64,
+    pub should_exit: bool,
+    pub should_break: bool,
+}
+
+impl Context {
+    pub fn new(start_addr: u32, id: u32) -> Self {
+        let mut ctx = Context {
+            id,
+            // The PlayStation grows each thread's stack as it is used (see `grow_to`): 32 full
+            // stacks are 190 KiB of its 2 MiB, and most threads never run.
+            #[cfg(feature = "psx")]
+            stack: Vec::new(),
+            #[cfg(not(feature = "psx"))]
+            stack: vec![Variant::Nil; MAX_STACK_SIZE],
+            cursor: start_addr as usize,
+            cur_stack_pos: 0,
+            cur_stack_base: 0,
+            start_addr,
+            return_value: Variant::Nil,
+            state: ThreadState::CONTEXT_STATUS_NONE,
+            wait_ms: 0,
+            sleep_ms: 0,
+            should_exit: false,
+            should_break: false,
+        };
+
+        // the initial stack frame
+        ctx.push(Variant::SavedStackInfo(super::SavedStackInfo {
+            stack_base: 0,
+            stack_pos: 0,
+            return_addr: usize::MAX,
+            args: 0,
+        }))
+        .unwrap();
+
+        ctx.cur_stack_base = ctx.cur_stack_pos;
+        ctx.cur_stack_pos = 0;
+
+        ctx
+    }
+
+    pub fn capture_snapshot_v1(&self) -> ContextSnapshotV1 {
+        ContextSnapshotV1 {
+            id: self.id,
+            stack: self.stack.clone(),
+            cursor: self.cursor,
+            cur_stack_pos: self.cur_stack_pos,
+            cur_stack_base: self.cur_stack_base,
+            start_addr: self.start_addr,
+            return_value: self.return_value.clone(),
+            state_bits: self.state.bits(),
+            wait_ms: self.wait_ms,
+            sleep_ms: self.sleep_ms,
+            should_exit: self.should_exit,
+            should_break: self.should_break,
+        }
+    }
+
+    pub fn apply_snapshot_v1(&mut self, snap: &ContextSnapshotV1) {
+        self.id = snap.id;
+        self.stack = snap.stack.clone();
+        self.cursor = snap.cursor;
+        self.cur_stack_pos = snap.cur_stack_pos;
+        self.cur_stack_base = snap.cur_stack_base;
+        self.start_addr = snap.start_addr;
+        self.return_value = snap.return_value.clone();
+        self.state = ThreadState::from_bits_truncate(snap.state_bits);
+        self.wait_ms = snap.wait_ms;
+        self.sleep_ms = snap.sleep_ms;
+        self.should_exit = snap.should_exit;
+        self.should_break = snap.should_break;
+
+        // Ensure stack capacity matches runtime expectations.
+        if self.stack.len() < MAX_STACK_SIZE && !cfg!(feature = "psx") {
+            self.stack.resize(MAX_STACK_SIZE, Variant::Nil);
+        } else if self.stack.len() > MAX_STACK_SIZE {
+            self.stack.truncate(MAX_STACK_SIZE);
+        }
+    }
+
+    pub fn set_should_break(&mut self, should_break: bool) {
+        self.should_break = should_break;
+    }
+
+    pub fn should_break(&self) -> bool {
+        self.should_break
+    }
+
+    fn to_global_offset(&self) -> Result<usize> {
+        let base = self.cur_stack_base as isize;
+        let base = match base.checked_add(self.cur_stack_pos as isize) {
+            Some(base) => base,
+            None => bail!("stack pointer out of bounds"),
+        };
+
+        if base.is_negative() {
+            bail!("stack position is negative");
+        }
+
+        Ok(base as usize)
+    }
+
+    /// Make the stack reach slot `pos` (the PlayStation's stacks grow; elsewhere they are full
+    /// from the start).
+    #[inline]
+    fn grow_to(&mut self, pos: usize) {
+        #[cfg(feature = "psx")]
+        if pos >= self.stack.len() && pos < MAX_STACK_SIZE {
+            self.stack
+                .resize((pos + 16).min(MAX_STACK_SIZE), Variant::Nil);
+        }
+        #[cfg(not(feature = "psx"))]
+        let _ = pos;
+    }
+
+    /// push a value onto the stack and increment the stack pointer
+    fn push(&mut self, value: Variant) -> Result<()> {
+        let pos = self.to_global_offset();
+        if let Ok(pos) = pos {
+            self.grow_to(pos);
+            if pos >= self.stack.len() {
+                bail!("push: stack is unable to grow to the position: {}", pos);
+            } else {
+                self.stack[pos] = value;
+            }
+        }
+
+        self.cur_stack_pos += 1;
+
+        Ok(())
+    }
+
+    fn pop(&mut self) -> Result<Variant> {
+        if self.cur_stack_pos == 0 {
+            bail!("no top of the stack")
+        }
+
+        let pos = self.to_global_offset();
+        let result = if let Ok(mut pos) = pos {
+            // be aware of the offset, we should always decrement the position first
+            pos -= 1;
+            if pos >= self.stack.len() {
+                let msg = format!("pop: stack pointer out of bounds: {:x}", self.cursor);
+                bail!(msg);
+            }
+            // Pop transfers ownership; cloning strings and tables here costs both
+            // allocations and CPU time before immediately discarding the original.
+            core::mem::replace(&mut self.stack[pos], Variant::Nil)
+        } else {
+            bail!("stack pointer out of bounds");
+        };
+
+        self.cur_stack_pos -= 1;
+        Ok(result)
+    }
+
+    fn top(&mut self) -> Result<Variant> {
+        if self.cur_stack_pos == 0 {
+            bail!("no top of the stack")
+        }
+        self.get_local(self.cur_stack_pos as i8)
+    }
+
+    fn get_local(&self, offset: i8) -> Result<Variant> {
+        let base = self.cur_stack_base as isize;
+        let off = match base.checked_add(offset as isize) {
+            Some(off) => off,
+            None => bail!("stack pointer out of bounds"),
+        };
+        // off += 1;
+
+        if off < 0 {
+            bail!("stack pointer is negative");
+        }
+
+        if off > MAX_STACK_SIZE as isize {
+            bail!("stack pointer out of bounds");
+        }
+
+        // A slot the stack has not grown to yet holds Nil.
+        if cfg!(feature = "psx") && off as usize >= self.stack.len() {
+            return Ok(Variant::Nil);
+        }
+        let var = self
+            .stack
+            .get(off as usize)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("stack pointer out of bounds"))?;
+
+        Ok(var)
+    }
+
+    fn get_local_mut(&mut self, offset: i8) -> Result<&mut Variant> {
+        let base = self.cur_stack_base as isize;
+        let off = match base.checked_add(offset as isize) {
+            Some(off) => off,
+            None => bail!("stack pointer out of bounds"),
+        };
+        // off += 1;
+
+        if off < 0 {
+            bail!("stack pointer is negative");
+        }
+
+        if off > MAX_STACK_SIZE as isize {
+            bail!("stack pointer out of bounds");
+        }
+
+        self.grow_to(off as usize);
+        let var = self
+            .stack
+            .get_mut(off as usize)
+            .ok_or_else(|| anyhow::anyhow!("stack pointer out of bounds"))?;
+
+        Ok(var)
+    }
+
+    fn set_local(&mut self, offset: i8, value: Variant) -> Result<()> {
+        let base = self.cur_stack_base as isize;
+        let off = match base.checked_add(offset as isize) {
+            Some(off) => off,
+            None => bail!("stack pointer out of bounds"),
+        };
+        // off += 1;
+
+        if off < 0 {
+            bail!("stack pointer is negative");
+        }
+
+        if off > MAX_STACK_SIZE as isize {
+            bail!("stack pointer out of bounds");
+        }
+
+        self.grow_to(off as usize);
+        if off as usize >= self.stack.len() {
+            bail!("stack pointer out of bounds");
+        }
+        self.stack[off as usize] = value;
+
+        Ok(())
+    }
+
+    fn print_stack(&self) {
+        log::error!("thread id : {}", self.id);
+        log::error!("pc: {:x}", self.cursor);
+        if let Ok(offset) = self.to_global_offset() {
+            let slice = &self.stack[0..(offset + 1).min(self.stack.len())];
+            log::error!("stack: {:?}", slice);
+        }
+    }
+
+    /// 0x00 nop instruction
+    /// nop, no operation
+    pub fn nop(&mut self) -> Result<()> {
+        self.cursor += 1;
+        Ok(())
+    }
+
+    /// 0x01 init stack instruction
+    /// initialize the local routine stack, as well as
+    /// the post-phase of perforimg call instruction or launching a new routine
+    pub fn init_stack(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+
+        // how many arguments are passed to the routine
+        let args_count = parser.read_i8(self.cursor)?;
+        self.cursor += size_of::<i8>();
+        if args_count < 0 {
+            bail!("args count is negative");
+        }
+
+        // how many locals are declared in the routine
+        let locals_count = parser.read_i8(self.cursor)?;
+        self.cursor += size_of::<i8>();
+        if locals_count < 0 {
+            bail!("locals count is negative");
+        }
+
+        // log::info!("init_stack: args: {} locals: {}", args_count, locals_count);
+
+        let frame = self.get_local_mut(-1)?;
+        if let Some(frame) = frame.as_saved_stack_info_mut() {
+            frame.args = args_count as usize;
+        } else {
+            self.print_stack();
+            bail!("init_stack: invalid stack frame");
+        }
+
+        for _ in 0..locals_count {
+            // we must allocate the space for the locals
+            self.push(Variant::Nil)?;
+        }
+
+        Ok(())
+    }
+
+    /// 0x02 call instruction
+    /// call a routine
+    pub fn call(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let addr = parser.read_u32(self.cursor)?;
+        self.cursor += size_of::<u32>();
+        if !parser.is_code_area(addr) {
+            bail!("call: address is not in the code area");
+        }
+
+        // log::info!("call: {:x}", addr);
+
+        let frame = Variant::SavedStackInfo(super::SavedStackInfo {
+            stack_base: self.cur_stack_base,
+            stack_pos: self.cur_stack_pos,
+            return_addr: self.cursor,
+            args: 0, // the field will be updated in the init_stack instruction
+        });
+
+        self.push(frame)?;
+
+        self.cur_stack_base += self.cur_stack_pos;
+        self.cur_stack_pos = 0;
+        // update the program counter
+        self.cursor = addr as usize;
+
+        Ok(())
+    }
+
+    /// 0x03 syscall
+    /// call a system call
+    pub fn syscall(&mut self, sys: &mut impl VmSyscall, parser: &mut Parser) -> Result<()> {
+        let opcode_cursor = self.cursor;
+        self.cursor += 1;
+        uefi_context_stage!("[UEFI] Context::syscall before read id pc={}", self.cursor);
+        let id = parser.read_u16(self.cursor)?;
+        uefi_context_stage!("[UEFI] Context::syscall after read id={}", id);
+        self.cursor += size_of::<u16>();
+
+        if let Some(syscall) = parser.get_syscall(id) {
+            uefi_context_stage!(
+                "[UEFI] Context::syscall resolved id={} name={} args={}",
+                id,
+                syscall.name,
+                syscall.args
+            );
+            #[cfg(feature = "psx")]
+            let mut args = Vec::with_capacity(usize::from(syscall.args));
+            #[cfg(not(feature = "psx"))]
+            let mut args = Vec::new();
+            for _ in 0..syscall.args {
+                uefi_context_stage!("[UEFI] Context::syscall before pop arg");
+                args.push(self.pop()?);
+                uefi_context_stage!("[UEFI] Context::syscall after pop arg");
+            }
+
+            // reverse the arguments
+            args.reverse();
+            uefi_context_stage!(
+                "[UEFI] Context::syscall before do_syscall name={}",
+                syscall.name
+            );
+
+            crate::trace::syscall(format_args!(
+                "syscall: t{} {} {:?}",
+                self.id, &syscall.name, &args
+            ));
+            let started = crate::perf::start();
+            let rollback_args = args.clone();
+            let result = sys.do_syscall(syscall.name.as_str(), args);
+            crate::perf::stop(20, started);
+            let result = match result {
+                Ok(result) => result,
+                Err(error) => {
+                    for arg in rollback_args {
+                        self.push(arg)?;
+                    }
+                    self.cursor = opcode_cursor;
+                    return Err(error.context(format!(
+                        "RFVP syscall {} at 0x{opcode_cursor:x}",
+                        syscall.name
+                    )));
+                }
+            };
+            uefi_context_stage!(
+                "[UEFI] Context::syscall after do_syscall name={}",
+                syscall.name
+            );
+            self.return_value = result;
+            crate::trace::syscall(format_args!(
+                "syscall_ret: {} -> {:?}",
+                &syscall.name, &self.return_value
+            ));
+        } else {
+            self.cursor = opcode_cursor;
+            bail!("syscall not found: {}", id);
+        }
+
+        Ok(())
+    }
+
+    /// 0x04 ret instruction
+    /// return from a routine
+    pub fn ret(&mut self) -> Result<()> {
+        self.cursor += 1;
+        self.return_value = Variant::Nil;
+        let frame = self.get_local(-1)?;
+        if let Some(frame) = frame.as_saved_stack_info() {
+            self.cur_stack_pos = frame.stack_pos;
+            self.cur_stack_base = frame.stack_base;
+            self.cursor = frame.return_addr;
+            if self.cursor == usize::MAX {
+                log::info!("Thread {} is exiting", self.id);
+                self.should_exit = true;
+                return Ok(());
+            }
+
+            // pop the arguments
+            for _ in 0..frame.args {
+                self.pop()?;
+            }
+        } else {
+            self.print_stack();
+            bail!("ret: invalid stack frame: {:?}", &frame);
+        }
+        Ok(())
+    }
+
+    /// 0x05 retv instruction
+    /// return from a routine with a value
+    pub fn retv(&mut self) -> Result<()> {
+        self.cursor += 1;
+        self.return_value = self.pop()?;
+        let frame = self.get_local(-1)?;
+        if let Some(frame) = frame.as_saved_stack_info() {
+            self.cur_stack_pos = frame.stack_pos;
+            self.cur_stack_base = frame.stack_base;
+            self.cursor = frame.return_addr;
+            if self.cursor == usize::MAX {
+                log::info!("Thread {} is exiting", self.id);
+                self.should_exit = true;
+                return Ok(());
+            }
+
+            // pop the arguments
+            for _ in 0..frame.args {
+                self.pop()?;
+            }
+        } else {
+            self.print_stack();
+            bail!("retv: invalid stack frame");
+        }
+        Ok(())
+    }
+
+    /// 0x06 jmp instruction
+    /// jump to the address
+    pub fn jmp(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let addr = parser.read_u32(self.cursor)?;
+        self.cursor += size_of::<u32>();
+        // log::info!("jmp: {:x}", addr);
+
+        self.cursor = addr as usize;
+        Ok(())
+    }
+
+    /// 0x07 jz instruction
+    /// jump to the address if the top of the stack is zero
+    pub fn jz(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let addr = parser.read_u32(self.cursor)?;
+        self.cursor += size_of::<u32>();
+
+        let top = self.pop()?;
+        // log::info!("jz: {:?}", &top);
+
+        if !top.canbe_true() {
+            self.cursor = addr as usize;
+        }
+        Ok(())
+    }
+
+    /// 0x08 push nil
+    /// push a nil value onto the stack
+    pub fn push_nil(&mut self) -> Result<()> {
+        self.cursor += 1;
+        self.push(Variant::Nil)?;
+
+        // log::info!("push_nil");
+        Ok(())
+    }
+
+    /// 0x09 push true
+    /// push a true value onto the stack
+    pub fn push_true(&mut self) -> Result<()> {
+        self.cursor += 1;
+        self.push(Variant::True)?;
+
+        // log::info!("push_true");
+        Ok(())
+    }
+
+    /// 0x0A push i32
+    /// push an i32 value onto the stack
+    pub fn push_i32(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let value = parser.read_i32(self.cursor)?;
+        self.cursor += size_of::<i32>();
+
+        // log::info!("push_i32: {}", value);
+
+        self.push(Variant::Int(value))?;
+        Ok(())
+    }
+
+    /// 0x0B push i16
+    /// push an i16 value onto the stack
+    pub fn push_i16(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let value = parser.read_i16(self.cursor)?;
+        self.cursor += size_of::<i16>();
+
+        // log::info!("push_i16: {}", value);
+
+        self.push(Variant::Int(value as i32))?;
+        Ok(())
+    }
+
+    /// 0x0C push i8
+    /// push an i8 value onto the stack
+    pub fn push_i8(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let value = parser.read_i8(self.cursor)?;
+        self.cursor += size_of::<i8>();
+
+        // log::info!("push_i8: {}", value);
+
+        self.push(Variant::Int(value as i32))?;
+        Ok(())
+    }
+
+    /// 0x0D push f32
+    /// push an f32 value onto the stack
+    pub fn push_f32(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let value = parser.read_f32(self.cursor)?;
+        self.cursor += size_of::<f32>();
+
+        // log::info!("push_f32: {}", value);
+
+        self.push(Variant::Float(value))?;
+        Ok(())
+    }
+
+    /// 0x0E push string
+    /// push a string onto the stack
+    pub fn push_string(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let len = parser.read_u8(self.cursor)? as usize;
+        self.cursor += size_of::<u8>();
+
+        // IDA (original engine) semantics for opcode 0x0E (push_str):
+        //   - push Variant{Type=4, Value=NextOpOffset} onto the stack
+        //   - read a u8 length, then advance NextOpOffset by that many bytes
+        //
+        // Many syscalls (notably TextPrint) branch on whether the argument is a
+        // script-buffer string (Type=4) and use the offset as a stable identifier.
+        // Preserve that offset in our Variant so game scripts can observe the
+        // intended return values and control flow.
+        let addr = self.cursor as u32; // points to the first byte of the string payload
+
+        let s = parser.read_cstring(self.cursor, len)?;
+        self.cursor += len;
+
+        // log::info!("push_string: {}", &s);
+
+        self.push(Variant::ConstString(s, addr))?;
+        Ok(())
+    }
+
+    /// 0x0F push global
+    /// push a global variable onto the stack
+    pub fn push_global(&mut self, parser: &mut Parser, globals: &mut Global) -> Result<()> {
+        self.cursor += 1;
+        let key = parser.read_u16(self.cursor)?;
+        self.cursor += size_of::<u16>();
+
+        // log::info!("push_global: {:x}", key);
+
+        if let Some(value) = globals.get(key) {
+            self.push(value.clone())?;
+            // log::info!("global: {:?}", &value);
+        } else {
+            // Match original engine: uninitialized globals read as Nil.
+            self.push(Variant::Nil)?;
+        }
+        Ok(())
+    }
+
+    /// 0x10 push stack
+    /// push a stack variable onto the stack
+    pub fn push_stack(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let offset = parser.read_i8(self.cursor)?;
+        self.cursor += size_of::<i8>();
+
+        let local = self.get_local(offset)?;
+        // log::info!("push stack: {} {:?}", offset, &local);
+        self.push(local)?;
+
+        Ok(())
+    }
+
+    /// 0x11 push global table
+    /// push a value than stored in the global table by immediate key onto the stack
+    /// we assume that if any failure occurs, such as the key not found,
+    /// we will push a nil value onto the stack for compatibility reasons.
+    pub fn push_global_table(&mut self, parser: &mut Parser, globals: &mut Global) -> Result<()> {
+        self.cursor += 1;
+        let key = parser.read_u16(self.cursor)?;
+        self.cursor += size_of::<u16>();
+
+        let top = self.pop()?;
+
+        // Original engine behavior (IDA decompilation):
+        // - If global[key] is a table and top is int and entry exists: push that value.
+        // - Otherwise: push Nil. No warnings/errors.
+        let mut out = Variant::Nil;
+        if let Some(v) = globals.get_mut(key) {
+            if let Some(tbl) = v.as_table() {
+                if let Some(k) = top.as_int() {
+                    if let Some(found) = tbl.get(k as u32) {
+                        out = found.clone();
+                    }
+                }
+            }
+        }
+
+        self.push(out)?;
+        Ok(())
+    }
+
+    /// 0x12 push local table
+    /// push a value than stored in the local table by key onto the stack
+    pub fn push_local_table(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let idx = parser.read_i8(self.cursor)?;
+        self.cursor += size_of::<i8>();
+
+        let top = self.pop()?;
+
+        // Original engine behavior (IDA decompilation):
+        // - If local[idx] is a table and top is int and entry exists: push that value.
+        // - Otherwise: push Nil. No warnings/errors.
+        let mut out = Variant::Nil;
+        let mut local = self.get_local(idx)?;
+        if let Some(tbl) = local.as_table() {
+            if let Some(k) = top.as_int() {
+                if let Some(found) = tbl.get(k as u32) {
+                    out = found.clone();
+                }
+            }
+        }
+
+        self.push(out)?;
+        Ok(())
+    }
+
+    /// 0x13 push top
+    /// push the top of the stack onto the stack
+    pub fn push_top(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let top = self.top()?;
+        self.push(top)?;
+        Ok(())
+    }
+
+    /// 0x14 push return value
+    /// push the return value onto the stack
+    pub fn push_return_value(&mut self) -> Result<()> {
+        self.cursor += 1;
+        self.push(self.return_value.clone())?;
+        self.return_value.set_nil();
+        Ok(())
+    }
+
+    /// 0x15 pop global
+    /// pop the top of the stack and store it in the global table
+    pub fn pop_global(&mut self, parser: &mut Parser, globals: &mut Global) -> Result<()> {
+        self.cursor += 1;
+        let key = parser.read_u16(self.cursor)?;
+        self.cursor += size_of::<u16>();
+
+        let value = self.pop()?;
+        globals.set(key, value);
+        Ok(())
+    }
+
+    /// 0x16 local copy
+    /// copy the top of the stack to the local variable
+    pub fn local_copy(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let idx = parser.read_i8(self.cursor)?;
+        self.cursor += size_of::<i8>();
+
+        let value = self.pop()?;
+        // log::info!("local_copy: {} {:?}", idx, &value);
+        self.set_local(idx, value)?;
+        Ok(())
+    }
+
+    /// 0x17 pop global table
+    /// pop the top of the stack and store it in the global table by key
+    pub fn pop_global_table(&mut self, parser: &mut Parser, globals: &mut Global) -> Result<()> {
+        self.cursor += 1;
+        let key = parser.read_u16(self.cursor)?;
+        self.cursor += size_of::<u16>();
+
+        let value = self.pop()?;
+        let mkey = self.pop()?;
+
+        // Original engine behavior (IDA decompilation):
+        // - Only performs the store when mkey is an integer.
+        // - If the destination is not a table, it is created on demand.
+        // - If mkey is not an integer, the destination is cleared.
+        let Some(mkey_i) = mkey.as_int() else {
+            globals.set(key, Variant::Nil);
+            return Ok(());
+        };
+
+        if let Some(dst) = globals.slot_mut(key) {
+            if !dst.is_table() {
+                dst.cast_table();
+            }
+            if let Some(tbl) = dst.as_table() {
+                tbl.insert(mkey_i as u32, value);
+            }
+        }
+        Ok(())
+    }
+
+    /// 0x18 pop local table
+    /// pop the top of the stack and store it in the local table by key
+    pub fn pop_local_table(&mut self, parser: &mut Parser) -> Result<()> {
+        self.cursor += 1;
+        let idx = parser.read_i8(self.cursor)?;
+        self.cursor += size_of::<i8>();
+
+        let value = self.pop()?;
+        let key = self.pop()?;
+
+        // Original engine behavior (IDA decompilation):
+        // - Only performs the store when key is an integer.
+        // - If the destination is not a table, it is created on demand.
+        // - If key is not an integer, the destination is cleared.
+        let Some(k) = key.as_int() else {
+            self.set_local(idx, Variant::Nil)?;
+            return Ok(());
+        };
+
+        let local = self.get_local_mut(idx)?;
+        if !local.is_table() {
+            local.cast_table();
+        }
+        if let Some(tbl) = local.as_table() {
+            tbl.insert(k as u32, value);
+        }
+        Ok(())
+    }
+
+    /// 0x19 neg
+    /// negate the top of the stack, only works for integers and floats
+    pub fn neg(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let mut top = self.pop()?;
+
+        // log::info!("neg: {:?}", &top);
+        top.neg();
+        self.push(top)?;
+
+        Ok(())
+    }
+
+    /// 0x1A add
+    /// add the top two values on the stack
+    pub fn add(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let a = self.pop()?;
+
+        // log::info!("add: {:?} {:?}", &a, &b);
+        self.push(super::vm_add(a, b))?;
+        Ok(())
+    }
+
+    /// 0x1B sub
+    /// subtract the top two values on the stack
+    pub fn sub(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let a = self.pop()?;
+
+        // log::info!("sub: {:?} {:?}", &a, &b);
+        self.push(super::vm_sub(a, b))?;
+        Ok(())
+    }
+
+    /// 0x1C mul
+    /// multiply the top two values on the stack
+    pub fn mul(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let a = self.pop()?;
+
+        // log::info!("mul: {:?} {:?}", &a, &b);
+        self.push(super::vm_mul(a, b))?;
+        Ok(())
+    }
+
+    /// 0x1D div
+    /// divide the top two values on the stack
+    pub fn div(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let a = self.pop()?;
+
+        // log::info!("div: {:?} {:?}", &a, &b);
+        self.push(super::vm_div(a, b))?;
+        Ok(())
+    }
+
+    /// 0x1E modulo
+    /// modulo the top two values on the stack
+    pub fn modulo(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let a = self.pop()?;
+
+        // log::info!("mod: {:?} {:?}", &a, &b);
+        self.push(super::vm_mod(a, b))?;
+        Ok(())
+    }
+
+    /// 0x1F bittest
+    /// test with the top two values on the stack
+    pub fn bittest(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let a = self.pop()?;
+
+        // Matches the original VM semantics: the result is a boolean Variant.
+        // - push True if bit `b` is set in integer `a`
+        // - otherwise push Nil
+        // Note: in this VM, *any non-nil Variant is considered true* by `jz`,
+        // so returning Int(0) here would incorrectly behave as true.
+        if let (Some(a_i), Some(bit_i)) = (a.as_int(), b.as_int()) {
+            let bit_u: Option<u32> = if bit_i >= 0 && bit_i < 32 {
+                Some(bit_i as u32)
+            } else {
+                None
+            };
+
+            let is_set = if let Some(shift) = bit_u {
+                let mask = 1u32.wrapping_shl(shift);
+                ((a_i as u32) & mask) != 0
+            } else {
+                false
+            };
+
+            self.push(if is_set { Variant::True } else { Variant::Nil })?;
+        } else {
+            self.push(Variant::Nil)?;
+        }
+        Ok(())
+    }
+
+    /// 0x20 and
+    /// push true if both the top two values on the stack are none-nil
+    pub fn and(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let mut a = self.pop()?;
+
+        // log::info!("and: {:?} {:?}", &a, &b);
+        a.and(&b);
+        self.push(a)?;
+        Ok(())
+    }
+
+    /// 0x21 or
+    /// push true if either of the top two values on the stack is none-nil
+    pub fn or(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let mut a = self.pop()?;
+
+        // log::info!("or: {:?} {:?}", &a, &b);
+        a.or(&b);
+        self.push(a)?;
+        Ok(())
+    }
+
+    /// 0x22 sete
+    /// set the top of the stack to true if the top two values on the stack are equal
+    pub fn sete(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let mut a = self.pop()?;
+
+        // log::info!("sete: {:?} {:?}", &a, &b);
+        a.equal(&b);
+        self.push(a)?;
+        Ok(())
+    }
+
+    /// 0x23 setne
+    /// set the top of the stack to true if the top two values on the stack are not equal
+    pub fn setne(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let mut a = self.pop()?;
+
+        // log::info!("setne: {:?} {:?}", &a, &b);
+        a.not_equal(&b);
+        self.push(a)?;
+        Ok(())
+    }
+
+    /// 0x24 setg
+    /// set the top of the stack to true if the top two values on the stack are greater
+    pub fn setg(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let mut a = self.pop()?;
+
+        // log::info!("setg: {:?} {:?}", &a, &b);
+        a.greater(&b);
+        self.push(a)?;
+        Ok(())
+    }
+
+    /// 0x25 setge
+    /// set the top of the stack to true if the top two values on the stack are greater or equal
+    pub fn setle(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let mut a = self.pop()?;
+
+        // log::info!("setle: {:?} {:?}", &a, &b);
+        a.greater_equal(&b);
+        self.push(a)?;
+        Ok(())
+    }
+
+    /// 0x26 setl
+    /// set the top of the stack to true if the top two values on the stack are less
+    pub fn setl(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let mut a = self.pop()?;
+
+        // log::info!("setl: {:?} {:?}", &a, &b);
+        a.less(&b);
+        self.push(a)?;
+        Ok(())
+    }
+
+    /// 0x27 setle
+    /// set the top of the stack to true if the top two values on the stack are less or equal
+    pub fn setge(&mut self) -> Result<()> {
+        self.cursor += 1;
+        let b = self.pop()?;
+        let mut a = self.pop()?;
+
+        // log::info!("setge: {:?} {:?}", &a, &b);
+        a.less_equal(&b);
+        self.push(a)?;
+        Ok(())
+    }
+
+    pub fn get_id(&self) -> u32 {
+        self.id
+    }
+
+    /// get the program counter
+    pub fn get_pc(&self) -> usize {
+        self.cursor
+    }
+
+    /// get waiting time for the context in ms
+    pub fn get_waiting_time(&self) -> u64 {
+        self.wait_ms
+    }
+
+    /// set waiting time for the context in ms
+    pub fn set_waiting_time(&mut self, wait_ms: u64) {
+        self.wait_ms = wait_ms;
+    }
+
+    pub fn get_sleeping_time(&self) -> u64 {
+        self.sleep_ms
+    }
+
+    pub fn set_sleeping_time(&mut self, sleep_ms: u64) {
+        self.sleep_ms = sleep_ms;
+    }
+
+    pub fn get_status(&self) -> ThreadState {
+        self.state.clone()
+    }
+
+    pub fn set_status(&mut self, state: ThreadState) {
+        self.state = state;
+    }
+
+    /// is the main context
+    pub fn is_main(&self) -> bool {
+        self.id == 0
+    }
+
+    pub fn set_exited(&mut self) {
+        self.should_exit = true;
+    }
+
+    pub fn should_exit_now(&self) -> bool {
+        self.should_exit
+    }
+
+    #[inline]
+    pub fn dispatch_opcode(
+        &mut self,
+        syscaller: &mut impl VmSyscall,
+        parser: &mut Parser,
+    ) -> Result<()> {
+        uefi_context_stage!(
+            "[UEFI] Context::dispatch_opcode before read pc={}",
+            self.get_pc()
+        );
+        let op_started = crate::perf::cycles();
+        #[cfg(test)]
+        page_trace::touch(self.get_pc() as u32 >> 10);
+        let opcode = parser.read_u8(self.get_pc())? as i32;
+        #[cfg(test)]
+        {
+            if opcode == 0x01 {
+                page_trace::func(self.get_pc() as u32);
+            }
+            page_trace::pc(self.get_pc() as u32);
+        }
+        crate::perf::count_op();
+        uefi_context_stage!(
+            "[UEFI] Context::dispatch_opcode after read pc={} opcode={}",
+            self.get_pc(),
+            opcode
+        );
+
+        match opcode.try_into() {
+            Ok(Opcode::Nop) => {
+                self.nop()?;
+            }
+            Ok(Opcode::InitStack) => {
+                self.init_stack(parser)?;
+            }
+            Ok(Opcode::Call) => {
+                self.call(parser)?;
+            }
+            Ok(Opcode::Syscall) => {
+                self.syscall(syscaller, parser)?;
+            }
+            Ok(Opcode::Ret) => {
+                self.ret()?;
+            }
+            Ok(Opcode::RetV) => {
+                self.retv()?;
+            }
+            Ok(Opcode::Jmp) => {
+                self.jmp(parser)?;
+            }
+            Ok(Opcode::Jz) => {
+                self.jz(parser)?;
+            }
+            Ok(Opcode::PushNil) => {
+                self.push_nil()?;
+            }
+            Ok(Opcode::PushTrue) => {
+                self.push_true()?;
+            }
+            Ok(Opcode::PushI32) => {
+                self.push_i32(parser)?;
+            }
+            Ok(Opcode::PushI16) => {
+                self.push_i16(parser)?;
+            }
+            Ok(Opcode::PushI8) => {
+                self.push_i8(parser)?;
+            }
+            Ok(Opcode::PushF32) => {
+                self.push_f32(parser)?;
+            }
+            Ok(Opcode::PushString) => {
+                self.push_string(parser)?;
+            }
+            Ok(Opcode::PushGlobal) => {
+                self.push_global(parser, syscaller.globals())?;
+            }
+            Ok(Opcode::PushStack) => {
+                self.push_stack(parser)?;
+            }
+            Ok(Opcode::PushGlobalTable) => {
+                self.push_global_table(parser, syscaller.globals())?;
+            }
+            Ok(Opcode::PushLocalTable) => {
+                self.push_local_table(parser)?;
+            }
+            Ok(Opcode::PushTop) => {
+                self.push_top()?;
+            }
+            Ok(Opcode::PushReturn) => {
+                self.push_return_value()?;
+            }
+            Ok(Opcode::PopGlobal) => {
+                self.pop_global(parser, syscaller.globals())?;
+            }
+            Ok(Opcode::PopStack) => {
+                self.local_copy(parser)?;
+            }
+            Ok(Opcode::PopGlobalTable) => {
+                self.pop_global_table(parser, syscaller.globals())?;
+            }
+            Ok(Opcode::PopLocalTable) => {
+                self.pop_local_table(parser)?;
+            }
+            Ok(Opcode::Neg) => {
+                self.neg()?;
+            }
+            Ok(Opcode::Add) => {
+                self.add()?;
+            }
+            Ok(Opcode::Sub) => {
+                self.sub()?;
+            }
+            Ok(Opcode::Mul) => {
+                self.mul()?;
+            }
+            Ok(Opcode::Div) => {
+                self.div()?;
+            }
+            Ok(Opcode::Mod) => {
+                self.modulo()?;
+            }
+            Ok(Opcode::BitTest) => {
+                self.bittest()?;
+            }
+            Ok(Opcode::And) => {
+                self.and()?;
+            }
+            Ok(Opcode::Or) => {
+                self.or()?;
+            }
+            Ok(Opcode::SetE) => {
+                self.sete()?;
+            }
+            Ok(Opcode::SetNE) => {
+                self.setne()?;
+            }
+            Ok(Opcode::SetG) => {
+                self.setg()?;
+            }
+            Ok(Opcode::SetLE) => {
+                self.setle()?;
+            }
+            Ok(Opcode::SetL) => {
+                self.setl()?;
+            }
+            Ok(Opcode::SetGE) => {
+                self.setge()?;
+            }
+            _ => {
+                log::error!(
+                    "unknown opcode: {:#02x} @ {:#08x}, thread: {}",
+                    opcode,
+                    self.cursor,
+                    self.id
+                );
+                self.backtrace();
+                #[cfg(feature = "no_std")]
+                anyhow::bail!("unknown opcode: {:#02x} @ {:#08x}", opcode, self.cursor);
+                #[cfg(not(feature = "no_std"))]
+                std::process::exit(1);
+            }
+        };
+
+        crate::perf::op_cycles(opcode as u8, op_started);
+        Ok(())
+    }
+
+    fn backtrace(&self) {
+        log::error!("backtrace for context: {}", self.id);
+        let mut pos = self.cur_stack_pos + self.cur_stack_base;
+
+        while pos != 0 {
+            let local = self.stack.get(pos);
+            log::info!("pos: {}, value: {:?}", pos, local);
+            pos -= 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod stack_move_tests {
+    use super::*;
+    use alloc::string::String;
+
+    #[test]
+    fn pop_moves_owned_strings_and_clears_the_slot() {
+        let mut ctx = Context::new(0, 0);
+        let value = String::from("graph/title_start");
+        let pointer = value.as_ptr();
+        ctx.push(Variant::String(value)).unwrap();
+        let slot = ctx.cur_stack_base;
+        let popped = ctx.pop().unwrap();
+        assert_eq!(popped.as_string().unwrap().as_ptr(), pointer);
+        assert!(ctx.stack[slot].is_nil());
+        assert!(ctx.pop().is_err());
+    }
+
+    #[test]
+    fn owned_arithmetic_preserves_wrapping_and_string_concatenation() {
+        let mut ctx = Context::new(0, 0);
+        ctx.push(Variant::Int(i32::MAX)).unwrap();
+        ctx.push(Variant::Int(1)).unwrap();
+        ctx.add().unwrap();
+        assert_eq!(ctx.pop().unwrap().as_int(), Some(i32::MIN));
+        ctx.push(Variant::ConstString(String::from("graph/"), 1))
+            .unwrap();
+        ctx.push(Variant::ConstString(String::from("title_start"), 2))
+            .unwrap();
+        ctx.add().unwrap();
+        assert_eq!(ctx.pop().unwrap().as_string().unwrap(), "graph/title_start");
+    }
+}
+
+/// Test-only: the 1 KiB script pages instructions run from, in order (consecutive repeats
+/// dropped), for sizing the PlayStation's script cache (see `no_std_harness`).
+#[cfg(test)]
+pub mod page_trace {
+    extern crate std;
+    use std::sync::Mutex;
+    pub static PAGES: Mutex<std::vec::Vec<u32>> = Mutex::new(std::vec::Vec::new());
+
+    /// Script functions in the order they first ran (for the PlayStation's code layout).
+    pub static FUNCS: Mutex<std::vec::Vec<u32>> = Mutex::new(std::vec::Vec::new());
+
+    pub fn func(addr: u32) {
+        FUNCS.lock().unwrap().push(addr);
+    }
+
+    /// How many times each instruction ran, and when it first did (for the PlayStation's code
+    /// layout).
+    pub static PCS: Mutex<Option<std::collections::HashMap<u32, (u32, u32)>>> = Mutex::new(None);
+
+    pub fn pc(addr: u32) {
+        let mut pcs = PCS.lock().unwrap();
+        let pcs = pcs.get_or_insert_with(Default::default);
+        let next = pcs.len() as u32;
+        pcs.entry(addr).or_insert((0, next)).0 += 1;
+    }
+
+    pub fn touch(page: u32) {
+        let mut pages = PAGES.lock().unwrap();
+        if pages.last() != Some(&page) {
+            pages.push(page);
+        }
+    }
+}
+
+#[cfg(test)]
+mod instance_global_tests {
+    extern crate std as test_std;
+    use super::*;
+    struct Owner {
+        globals: Global,
+    }
+    impl VmSyscall for Owner {
+        fn globals(&mut self) -> &mut Global {
+            &mut self.globals
+        }
+        fn do_syscall(&mut self, _: &str, _: Vec<Variant>) -> Result<Variant> {
+            bail!("unexpected syscall")
+        }
+    }
+    fn execute(value: i32) -> i32 {
+        let mut owner = Owner {
+            globals: Global::new(),
+        };
+        owner.globals.init_with(1, 1);
+        let mut parser = Parser::default();
+        // Native pop_global(0), push_global(0), with original stack semantics.
+        parser.buffer = alloc::sync::Arc::new(vec![0x15, 0, 0, 0x0f, 0, 0]);
+        let mut context = Context::new(0, 0);
+        context.push(Variant::Int(value)).unwrap();
+        context.dispatch_opcode(&mut owner, &mut parser).unwrap();
+        context.dispatch_opcode(&mut owner, &mut parser).unwrap();
+        context.pop().unwrap().as_int().unwrap()
+    }
+    #[test]
+    fn failed_syscall_keeps_the_native_instruction_operands_and_return_value() {
+        let mut owner = Owner {
+            globals: Global::new(),
+        };
+        let mut parser = Parser::default();
+        parser.buffer = alloc::sync::Arc::new(vec![0x03, 0, 0]);
+        parser.syscalls.insert(
+            0,
+            crate::script::parser::Syscall {
+                name: "missing-capability".into(),
+                args: 2,
+            },
+        );
+        let mut context = Context::new(0, 0);
+        context.return_value = Variant::Int(99);
+        context.push(Variant::Int(11)).unwrap();
+        context
+            .push(Variant::String("retained operand".into()))
+            .unwrap();
+        let error = context
+            .dispatch_opcode(&mut owner, &mut parser)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("missing-capability"));
+        assert_eq!(context.get_pc(), 0);
+        assert_eq!(context.return_value.as_int(), Some(99));
+        assert_eq!(
+            context.pop().unwrap().as_string().unwrap(),
+            "retained operand"
+        );
+        assert_eq!(context.pop().unwrap().as_int(), Some(11));
+    }
+
+    #[test]
+    fn independent_native_opcode_owners_can_run_on_parallel_workers() {
+        let first = test_std::thread::spawn(|| (0..64).map(|i| execute(i)).collect::<Vec<_>>());
+        let second =
+            test_std::thread::spawn(|| (0..64).map(|i| execute(-1000 - i)).collect::<Vec<_>>());
+        assert_eq!(first.join().unwrap(), (0..64).collect::<Vec<_>>());
+        assert_eq!(
+            second.join().unwrap(),
+            (0..64).map(|i| -1000 - i).collect::<Vec<_>>()
+        );
+    }
+}

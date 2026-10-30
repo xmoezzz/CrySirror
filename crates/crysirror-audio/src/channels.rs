@@ -44,6 +44,7 @@ struct Source {
     gain: f32,
 }
 impl AudioSource for Source {
+    fn has_replay_gain(&self) -> bool { self.inner.has_replay_gain() }
     fn is_nonblocking(&self) -> bool {
         self.inner.is_nonblocking()
     }
@@ -115,6 +116,7 @@ struct Joined {
     at: u64,
 }
 impl AudioSource for Joined {
+    fn has_replay_gain(&self) -> bool { self.intro.has_replay_gain() || self.tail.has_replay_gain() }
     fn sample_rate(&self) -> u32 {
         self.intro.sample_rate()
     }
@@ -286,6 +288,7 @@ pub(super) fn prepare(
 }
 pub struct ChannelAudio {
     pub sequences: crate::sequence::Sequences,
+    pub(super) releases:crate::release::Releases,
     pub mixer: Mixer,
     pub resources: crate::resources::AudioResources,
     pub(super) voices: BTreeMap<(u32, u32), VoiceHandle>,
@@ -298,6 +301,7 @@ impl Default for ChannelAudio {
     fn default() -> Self {
         Self {
             sequences: Default::default(),
+            releases:Default::default(),
             mixer: Mixer::new(MixerConfig {
                 max_voices: 256,
                 ..Default::default()
@@ -584,6 +588,7 @@ impl ChannelAudio {
     /// Owner control phase, shared by synchronous and worker frame paths.
     pub fn prepare_render(&mut self, delta_ms: u64) -> Result<usize> {
         self.mixer.idle()?;
+        self.poll_releases()?;
         self.poll_preparations()?;
         for (&(client, _), &h) in &self.voices {
             if self.mixer.is_playing(client, h) {

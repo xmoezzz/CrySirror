@@ -161,7 +161,7 @@ impl Transitions {
         let wipe_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("siglus wipe"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("../../siglus-upstream/siglus_scene_vm/src/render/shaders/wipe.wgsl")
+                include_str!("shaders/wipe.wgsl")
                     .into(),
             ),
         });

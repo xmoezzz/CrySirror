@@ -381,11 +381,26 @@ pub(crate) fn install_array_methods<H: TjsHost + 'static>(
     runtime.set_shared_native(handle, "Array.unshift", "unshift", array_unshift::<H>);
     runtime.set_shared_native(handle, "Array.clear", "clear", array_clear::<H>);
     runtime.set_shared_native(handle, "Array.assign", "assign", array_assign::<H>);
-    runtime.set_shared_native(handle, "Array.assignStruct", "assignStruct", array_assign_struct::<H>);
+    runtime.set_shared_native(
+        handle,
+        "Array.assignStruct",
+        "assignStruct",
+        array_assign_struct::<H>,
+    );
     runtime.set_shared_native(handle, "Array.load", "load", array_load::<H>);
     runtime.set_shared_native(handle, "Array.save", "save", array_save::<H>);
-    runtime.set_shared_native(handle, "Array.saveStruct", "saveStruct", array_save_struct::<H>);
-    runtime.set_shared_native(handle, "Array.loadStruct", "loadStruct", array_load_struct::<H>);
+    runtime.set_shared_native(
+        handle,
+        "Array.saveStruct",
+        "saveStruct",
+        array_save_struct::<H>,
+    );
+    runtime.set_shared_native(
+        handle,
+        "Array.loadStruct",
+        "loadStruct",
+        array_load_struct::<H>,
+    );
     runtime.set_shared_native(handle, "Array.split", "split", array_split::<H>);
     runtime.set_shared_native(handle, "Array.join", "join", array_join::<H>);
     runtime.set_shared_native(handle, "Array.sort", "sort", array_sort::<H>);
@@ -403,11 +418,31 @@ pub fn install_dictionary_methods<H: TjsHost + 'static>(
     runtime.add_object_class_info(handle, "Dictionary");
     runtime.set_shared_native(handle, "Dictionary.clear", "clear", dictionary_clear::<H>);
     runtime.set_shared_native(handle, "Dictionary.load", "load", dictionary_load::<H>);
-    runtime.set_shared_native(handle, "Dictionary.loadStruct", "loadStruct", dictionary_load_struct::<H>);
+    runtime.set_shared_native(
+        handle,
+        "Dictionary.loadStruct",
+        "loadStruct",
+        dictionary_load_struct::<H>,
+    );
     runtime.set_shared_native(handle, "Dictionary.save", "save", dictionary_save::<H>);
-    runtime.set_shared_native(handle, "Dictionary.saveStruct", "saveStruct", dictionary_save_struct::<H>);
-    runtime.set_shared_native(handle, "Dictionary.assign", "assign", dictionary_assign::<H>);
-    runtime.set_shared_native(handle, "Dictionary.assignStruct", "assignStruct", dictionary_assign_struct::<H>);
+    runtime.set_shared_native(
+        handle,
+        "Dictionary.saveStruct",
+        "saveStruct",
+        dictionary_save_struct::<H>,
+    );
+    runtime.set_shared_native(
+        handle,
+        "Dictionary.assign",
+        "assign",
+        dictionary_assign::<H>,
+    );
+    runtime.set_shared_native(
+        handle,
+        "Dictionary.assignStruct",
+        "assignStruct",
+        dictionary_assign_struct::<H>,
+    );
 }
 
 fn require_this(this_obj: Option<ObjectHandle>, name: &str) -> Result<ObjectHandle> {
@@ -654,7 +689,7 @@ fn array_load<H: TjsHost + 'static>(
     // The reference creates the read stream *before* it touches the receiver
     // (`tjsArray.cpp:270-273`), so a path that cannot be read leaves the items
     // exactly as they were.
-    let text = runtime.host_mut().read_text(&path, &mode)?;
+    let text = runtime.read_storage_text(&path, &mode)?;
     // `ni->Items.clear()` and the refill work on the native instance behind
     // `this` (`tjsArray.cpp:270-332`), so the receiver object and every member
     // on it survive the call.  That is what `saveStruct.dll` needs: `save2`
@@ -696,7 +731,7 @@ fn array_save<H: TjsHost + 'static>(
         .map(Variant::to_tjs_string)
         .collect::<Result<Vec<_>>>()?
         .join("\n");
-    runtime.host_mut().write_text(&path, &mode, &lines)?;
+    runtime.write_storage_text(&path, &mode, &lines)?;
     Ok(Variant::Object(handle))
 }
 
@@ -1157,11 +1192,11 @@ fn save_structured_value<H: TjsHost + 'static>(
         let mut serializer = BinaryStructSerializer::new(runtime);
         let mut bytes = Vec::from(BINARY_STRUCT_HEADER);
         serializer.value(&Variant::Object(handle), &mut bytes)?;
-        runtime.host_mut().write_binary(&path, &mode, &bytes)?;
+        runtime.write_storage_binary(&path, &mode, &bytes)?;
     } else {
         let mut serializer = StructTextSerializer::new(runtime);
         let text = serializer.value(&Variant::Object(handle), 0);
-        runtime.host_mut().write_text(&path, &mode, &text)?;
+        runtime.write_storage_text(&path, &mode, &text)?;
     }
     Ok(())
 }
@@ -1219,7 +1254,7 @@ fn dictionary_load_struct<H: TjsHost + 'static>(
     if let Some(value) = load_binary_struct(runtime, &path, &mode, root)? {
         return Ok(value);
     }
-    let Ok(text) = runtime.host_mut().read_text(&path, &mode) else {
+    let Ok(text) = runtime.read_storage_text(&path, &mode) else {
         return Err(TjsError::invalid_param());
     };
     // `SetText` returns before it touches the result for an empty file
@@ -1227,8 +1262,11 @@ fn dictionary_load_struct<H: TjsHost + 'static>(
     if text.trim().is_empty() {
         return Ok(Variant::Void);
     }
-    let wrapped = format!("return ({text});");
-    let file = compile_source_to_bytecode(&path, &wrapped)?;
+    // Expression mode as tTJSLexicalAnalyzer (`tjsLex.cpp:1061-1066,1753`):
+    // a leading `return` and an appended `;`, no parentheses -- so a file
+    // ending in `];` (Cloverdays envinit.tjs) leaves an empty statement.
+    let wrapped = format!("return {text};");
+    let file = runtime.compile_source(&path, &wrapped)?;
     runtime.execute_file(&file)
 }
 
@@ -1257,7 +1295,7 @@ fn load_binary_struct<H: TjsHost + 'static>(
     mode: &str,
     root: Option<ObjectHandle>,
 ) -> Result<Option<Variant>> {
-    let Ok(bytes) = runtime.host_mut().read_binary(path, mode) else {
+    let Ok(bytes) = runtime.read_storage_binary(path, mode) else {
         return Ok(None);
     };
     if !bytes.starts_with(BINARY_STRUCT_HEADER) {

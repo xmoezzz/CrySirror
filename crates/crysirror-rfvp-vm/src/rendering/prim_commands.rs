@@ -1,0 +1,1622 @@
+#[cfg(feature = "no_std")]
+use alloc::{vec, vec::Vec};
+
+#[cfg(feature = "no_std")]
+use core_maths::CoreFloat;
+use crysirror_image::buffer::GenericImageView;
+use glam::{vec2, vec3, vec4, Mat4, Vec2, Vec4};
+
+use crate::host_api::{
+    CommandBlendMode, DrawImageCmd, HitProxy, HitProxyTable, PortableTextureDesc, PrimId, RectI16,
+    RectU16, RenderBackend, RenderCommand, RenderFrame, RfvpError, RfvpResult, Rgba8,
+    TextureBackend, TextureFormat, TextureHandle, Vertex2D,
+};
+use crate::subsystem::resources::{
+    color_manager::ColorManager,
+    graph_buff::GraphBuff,
+    motion_manager::{snow::SnowMotion, DissolveType, MotionManager},
+    prim::{Prim, PrimManager, PrimType},
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HostGraphCacheEntry {
+    pub graph_id: u16,
+    pub generation: u64,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct HostPrimRenderCache {
+    graphs: Vec<HostGraphCacheEntry>,
+    white_ready: bool,
+    #[cfg(feature = "psx")]
+    mask_key: Option<(u64, alloc::string::String)>,
+    #[cfg(not(feature = "psx"))]
+    mask_frame: super::mask_dissolve::MaskDissolveFrame,
+    #[cfg(not(feature = "psx"))]
+    mask_upload: Option<(u64, u16, u16)>,
+    /// Size of the frame last shown as uploaded to `PREV_FRAME_TEXTURE` for this frame, if any.
+    #[cfg(not(feature = "psx"))]
+    prev_frame: Option<(u16, u16)>,
+    /// Whether the draw list built last has a Sprt with texture id -1.
+    #[cfg(not(feature = "psx"))]
+    wants_prev_frame: bool,
+}
+
+impl HostPrimRenderCache {
+    #[cfg(feature = "psx")]
+    pub fn is_mask_uploaded(&self, generation: u64, path: &str) -> bool {
+        self.mask_key
+            .as_ref()
+            .is_some_and(|key| key.0 == generation && key.1 == path)
+    }
+
+    pub fn new() -> Self {
+        Self {
+            graphs: Vec::new(),
+            white_ready: false,
+            #[cfg(feature = "psx")]
+            mask_key: None,
+            #[cfg(not(feature = "psx"))]
+            mask_frame: Default::default(),
+            #[cfg(not(feature = "psx"))]
+            mask_upload: None,
+            #[cfg(not(feature = "psx"))]
+            prev_frame: None,
+            #[cfg(not(feature = "psx"))]
+            wants_prev_frame: false,
+        }
+    }
+
+    /// Whether the frame being drawn needs the frame last shown (`set_prev_frame`): the last
+    /// one drew a Sprt with texture id -1.
+    #[cfg(not(feature = "psx"))]
+    pub fn wants_prev_frame(&self) -> bool {
+        self.wants_prev_frame
+    }
+
+    #[cfg(not(feature = "psx"))]
+    pub fn bind_prev_frame<B: crate::host_api::RfvpRenderer>(
+        &mut self,
+        backend: &mut B,
+        width: u32,
+        height: u32,
+    ) -> RfvpResult<bool> {
+        let size = (
+            u16::try_from(width).map_err(|_| RfvpError::InvalidArgument)?,
+            u16::try_from(height).map_err(|_| RfvpError::InvalidArgument)?,
+        );
+        if !backend.bind_previous_frame(
+            crate::host_api::TextureId(PREV_FRAME_TEXTURE.0),
+            width,
+            height,
+        )? {
+            return Ok(false);
+        }
+        self.prev_frame = Some(size);
+        Ok(true)
+    }
+    /// Hand over the frame last shown (RGBA8, the virtual size) for Sprt texture id -1, or
+    /// `None` when the host cannot read it back (the sprite is then not drawn).
+    #[cfg(not(feature = "psx"))]
+    pub fn set_prev_frame<B>(
+        &mut self,
+        backend: &mut B,
+        frame: Option<(u16, u16, &[u8])>,
+    ) -> RfvpResult<()>
+    where
+        B: TextureBackend<Error = RfvpError>,
+    {
+        let Some((width, height, rgba)) = frame else {
+            if self.prev_frame.take().is_some() {
+                backend.destroy_texture(PREV_FRAME_TEXTURE);
+            }
+            return Ok(());
+        };
+        let desc = PortableTextureDesc {
+            width,
+            height,
+            format: TextureFormat::Rgba8,
+        };
+        let updated = self.prev_frame == Some((width, height))
+            && backend.update_texture_data(PREV_FRAME_TEXTURE, desc, rgba)?;
+        if !updated {
+            if self.prev_frame.is_some() {
+                backend.destroy_texture(PREV_FRAME_TEXTURE);
+            }
+            backend.create_texture(PREV_FRAME_TEXTURE, desc, rgba)?;
+        }
+        self.prev_frame = Some((width, height));
+        Ok(())
+    }
+
+    pub fn wants_mask_snapshot(&self, motion: &MotionManager) -> bool {
+        self.mask_frame.wants_snapshot(motion)
+    }
+
+    pub fn set_mask_snapshot(
+        &mut self,
+        motion: &MotionManager,
+        size: (u32, u32),
+        rgba: Vec<u8>,
+    ) -> RfvpResult<()> {
+        let image = crysirror_image::buffer::RgbaImage::from_raw(size.0, size.1, rgba)
+            .ok_or(RfvpError::InvalidData)?;
+        self.mask_frame.set_snapshot(motion, image);
+        Ok(())
+    }
+
+    /// Whether the host holds `graph_id` at `generation` (so its CPU copy may be evicted).
+    pub fn is_graph_uploaded(&self, graph_id: u16, generation: u64) -> bool {
+        self.graph_generation(graph_id) == Some(generation)
+    }
+
+    /// Upload one graph now (see `MotionManager::upload_evicted_one_by_one`).
+    #[cfg(feature = "psx")]
+    pub fn upload_graph<B>(
+        &mut self,
+        backend: &mut B,
+        graph_id: u16,
+        graph: &GraphBuff,
+        vfs: &crate::subsystem::resources::vfs::Vfs,
+    ) -> bool
+    where
+        B: TextureBackend<Error = RfvpError>,
+    {
+        if let Some(streamed) = &graph.streamed_clut {
+            use std::io::{Read, Seek, SeekFrom};
+            let result = (|| -> RfvpResult<()> {
+                let mut stream = vfs
+                    .open_stream(&graph.texture_path)
+                    .map_err(|_| RfvpError::Io)?;
+                let per = if streamed.palette.bits == 4 { 2 } else { 1 };
+                let mut read = |x: u32, y: u32, w: u32, h: u32, out: &mut [u8], stride: u32| {
+                    let bytes = w.div_ceil(per) as usize;
+                    for row in 0..h as usize {
+                        let offset = streamed.indices_at
+                            + (y as u64 + row as u64) * streamed.row_bytes as u64
+                            + u64::from(x / per);
+                        stream
+                            .seek(SeekFrom::Start(offset))
+                            .map_err(|_| RfvpError::Io)?;
+                        let start = row * stride as usize;
+                        stream
+                            .read_exact(
+                                out.get_mut(start..start + bytes)
+                                    .ok_or(RfvpError::InvalidArgument)?,
+                            )
+                            .map_err(|_| RfvpError::Io)?;
+                    }
+                    Ok(())
+                };
+                backend
+                    .create_texture_rows(
+                        host_texture_id(graph_id),
+                        PortableTextureDesc {
+                            width: graph.width,
+                            height: graph.height,
+                            format: if streamed.palette.bits == 4 {
+                                TextureFormat::Indexed4
+                            } else {
+                                TextureFormat::Indexed8
+                            },
+                        },
+                        &streamed.palette.bytes,
+                        &mut read,
+                    )
+                    .ok_or(RfvpError::Unsupported)??;
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    self.set_graph_generation(graph_id, graph.generation);
+                    return true;
+                }
+                Err(error) => {
+                    log::error!("streamed graph {graph_id}: {error:?}");
+                    return false;
+                }
+            }
+        }
+        match self.upload_graph_if_needed(backend, graph_id, graph) {
+            Ok(done) => done,
+            Err(err) => {
+                log::error!("graph {graph_id}: upload failed: {err:?}");
+                false
+            }
+        }
+    }
+
+    /// Free the host's copy of a graph the game unloaded.
+    pub fn remove_graph<B>(&mut self, backend: &mut B, graph_id: u16)
+    where
+        B: TextureBackend<Error = RfvpError>,
+    {
+        #[cfg(feature = "psx")]
+        let index = self
+            .graphs
+            .binary_search_by_key(&graph_id, |entry| entry.graph_id)
+            .ok();
+        #[cfg(not(feature = "psx"))]
+        let index = self
+            .graphs
+            .iter()
+            .position(|entry| entry.graph_id == graph_id);
+        if let Some(index) = index {
+            #[cfg(feature = "psx")]
+            self.graphs.remove(index);
+            #[cfg(not(feature = "psx"))]
+            self.graphs.swap_remove(index);
+            backend.destroy_texture(host_texture_id(graph_id));
+        }
+    }
+
+    fn graph_generation(&self, graph_id: u16) -> Option<u64> {
+        #[cfg(feature = "psx")]
+        {
+            return self
+                .graphs
+                .binary_search_by_key(&graph_id, |entry| entry.graph_id)
+                .ok()
+                .map(|index| self.graphs[index].generation);
+        }
+        #[cfg(not(feature = "psx"))]
+        self.graphs
+            .iter()
+            .find(|entry| entry.graph_id == graph_id)
+            .map(|entry| entry.generation)
+    }
+
+    fn set_graph_generation(&mut self, graph_id: u16, generation: u64) {
+        #[cfg(feature = "psx")]
+        {
+            match self
+                .graphs
+                .binary_search_by_key(&graph_id, |entry| entry.graph_id)
+            {
+                Ok(index) => self.graphs[index].generation = generation,
+                Err(index) => self.graphs.insert(
+                    index,
+                    HostGraphCacheEntry {
+                        graph_id,
+                        generation,
+                    },
+                ),
+            }
+            return;
+        }
+        #[cfg(not(feature = "psx"))]
+        {
+            if let Some(entry) = self
+                .graphs
+                .iter_mut()
+                .find(|entry| entry.graph_id == graph_id)
+            {
+                entry.generation = generation;
+                return;
+            }
+            self.graphs.push(HostGraphCacheEntry {
+                graph_id,
+                generation,
+            });
+        }
+    }
+
+    fn ensure_white<B>(&mut self, backend: &mut B) -> RfvpResult<()>
+    where
+        B: TextureBackend<Error = RfvpError>,
+    {
+        if self.white_ready {
+            return Ok(());
+        }
+        backend.create_texture(
+            WHITE_TEXTURE,
+            PortableTextureDesc {
+                width: 1,
+                height: 1,
+                format: TextureFormat::Rgba8,
+            },
+            &[255, 255, 255, 255],
+        )?;
+        self.white_ready = true;
+        Ok(())
+    }
+
+    fn upload_graph_if_needed<B>(
+        &mut self,
+        backend: &mut B,
+        graph_id: u16,
+        graph: &GraphBuff,
+    ) -> RfvpResult<bool>
+    where
+        B: TextureBackend<Error = RfvpError>,
+    {
+        let generation = graph.get_generation();
+        if self.graph_generation(graph_id) == Some(generation) {
+            // Uploaded already; its CPU pixels may have been evicted since.
+            return Ok(true);
+        }
+        let Some(img) = graph.get_texture().as_ref() else {
+            return Ok(false);
+        };
+
+        let (width, height) = img.dimensions();
+        let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {
+            log::error!("graph {graph_id} is {width}x{height}: too large for a texture");
+            return Err(RfvpError::CapacityExceeded);
+        };
+        let (format, pixels) = match img {
+            crate::DynamicImage::ImageRgba8(img) => (TextureFormat::Rgba8, img.as_raw().as_slice()),
+            crate::DynamicImage::ImageLumaA8(img) => {
+                (TextureFormat::LumaA8, img.as_raw().as_slice())
+            }
+            #[cfg(feature = "psx")]
+            crate::DynamicImage::ImageClut(img) => {
+                let format = if img.bits == 4 {
+                    TextureFormat::Indexed4
+                } else {
+                    TextureFormat::Indexed8
+                };
+                (format, img.texture_bytes())
+            }
+            #[cfg(feature = "psx")]
+            crate::DynamicImage::ImagePs1Mask(img) => (
+                TextureFormat::Native(crate::ps1_mask::NATIVE_FORMAT),
+                img.gpu.as_slice(),
+            ),
+            _ => return Err(RfvpError::Unsupported),
+        };
+        backend.create_texture(
+            host_texture_id(graph_id),
+            PortableTextureDesc {
+                width,
+                height,
+                format,
+            },
+            pixels,
+        )?;
+        self.set_graph_generation(graph_id, generation);
+        Ok(true)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum DrawTextureKey {
+    Graph(u16),
+    White,
+    #[cfg(not(feature = "psx"))]
+    PrevFrame,
+}
+
+const WHITE_TEXTURE: TextureHandle = TextureHandle(u32::MAX);
+const MASK_TEXTURE: TextureHandle = TextureHandle(u32::MAX - 1);
+#[cfg(not(feature = "psx"))]
+const PREV_FRAME_TEXTURE: TextureHandle = TextureHandle(u32::MAX - 2);
+
+fn host_texture_id(graph_id: u16) -> TextureHandle {
+    TextureHandle(graph_id as u32)
+}
+
+fn build_draw_model(
+    virtual_size: (u32, u32),
+    prim: &Prim,
+    parent_x: f32,
+    parent_y: f32,
+    draw_x: f32,
+    draw_y: f32,
+    off_x: f32,
+    off_y: f32,
+    pivot_x: f32,
+    pivot_y: f32,
+    v3d_x: i32,
+    v3d_y: i32,
+    v3d_z: i32,
+) -> Mat4 {
+    // Most console UI primitives only translate. Avoid trigonometry and four
+    // general matrix products on CPUs without hardware floating point.
+    if prim.get_attr() & 4 == 0 && prim.get_angle() == 0 {
+        let pos_x = parent_x + draw_x;
+        let pos_y = parent_y + draw_y;
+        if prim.get_factor_x() == 1000 && prim.get_factor_y() == 1000 {
+            return Mat4::from_translation(vec3(pos_x + off_x, pos_y + off_y, 0.0));
+        }
+        let sx = prim.get_factor_x() as f32 / 1000.0;
+        let sy = prim.get_factor_y() as f32 / 1000.0;
+        return Mat4::from_cols_array(&[
+            sx,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            sy,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            pos_x + pivot_x + sx * (off_x - pivot_x),
+            pos_y + pivot_y + sy * (off_y - pivot_y),
+            0.0,
+            1.0,
+        ]);
+    }
+    #[cfg(not(feature = "psx"))]
+    let theta = -(prim.get_angle() as f32) * core::f32::consts::TAU / 3600.0;
+    let attr = prim.get_attr();
+    let pos_x = parent_x + draw_x;
+    let pos_y = parent_y + draw_y;
+    let local_x = off_x - pivot_x;
+    let local_y = off_y - pivot_y;
+    // A sprite is 2D: the model is a 2x2 matrix M = scale * rotation and a translation, worked
+    // out directly (four 4x4 matrix products cost thousands of software float operations a
+    // sprite on CPUs without floating point hardware). A point p goes to
+    // origin + scale * shift + M * (p + local).
+    #[cfg(not(feature = "psx"))]
+    let (sin, cos) = if theta == 0.0 {
+        (0.0, 1.0)
+    } else {
+        (theta.sin(), theta.cos())
+    };
+    #[cfg(feature = "psx")]
+    let (sin, cos) = crate::ps1_math::sin_cos_angle(-i32::from(prim.get_angle()));
+    let (sx, sy, origin_x, origin_y, shift_x, shift_y) = if (attr & 4) != 0 {
+        let (vw, vh) = (virtual_size.0 as f32, virtual_size.1 as f32);
+        let mut fx = prim.get_factor_x() as f32;
+        let mut fy = prim.get_factor_y() as f32;
+        if fx.abs() < 1e-6 {
+            fx = 1.0;
+        }
+        if fy.abs() < 1e-6 {
+            fy = 1.0;
+        }
+        let mut depth = prim.get_z() as f32 - v3d_z as f32;
+        if depth.abs() < 1e-3 {
+            depth = 1.0;
+        }
+        let cam_shift_x = 1000.0 * (v3d_x as f32) / fx;
+        let cam_shift_y = 1000.0 * (v3d_y as f32) / fy;
+        (
+            fx / depth,
+            fy / depth,
+            vw * 0.5,
+            vh * 0.5,
+            pos_x - cam_shift_x,
+            pos_y - cam_shift_y,
+        )
+    } else {
+        let sx = prim.get_factor_x() as f32 / 1000.0;
+        let sy = prim.get_factor_y() as f32 / 1000.0;
+        (sx, sy, pos_x + pivot_x, pos_y + pivot_y, 0.0, 0.0)
+    };
+    let (m00, m01, m10, m11) = (sx * cos, -sx * sin, sy * sin, sy * cos);
+    let tx = origin_x + sx * shift_x + m00 * local_x + m01 * local_y;
+    let ty = origin_y + sy * shift_y + m10 * local_x + m11 * local_y;
+    Mat4::from_cols_array(&[
+        m00, m10, 0.0, 0.0, m01, m11, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, tx, ty, 0.0, 1.0,
+    ])
+}
+
+/// `PrimSetBlend(id, 1)` selects additive blending (SRCALPHA/ONE) in the original engine.
+fn prim_blend(prim: &Prim) -> CommandBlendMode {
+    if prim.get_blend() {
+        CommandBlendMode::Add
+    } else {
+        CommandBlendMode::Normal
+    }
+}
+
+fn sprite_corners(model: Mat4, dst_w: f32, dst_h: f32) -> [glam::Vec3; 4] {
+    // Share the transformed origin and edges, including for rotated quads.
+    let p1 = model.w_axis.truncate();
+    let edge_x = model.x_axis.truncate() * dst_w;
+    let edge_y = model.y_axis.truncate() * dst_h;
+    let p0 = p1 + edge_y;
+    let p3 = p1 + edge_x;
+    [p0, p1, p3 + edge_y, p3]
+}
+
+fn emit_sprite(
+    commands: &mut Vec<RenderCommand>,
+    hit_proxies: &mut HitProxyTable,
+    order: &mut u32,
+    prim_id: i16,
+    model: Mat4,
+    dst_w: f32,
+    dst_h: f32,
+    uv0: Vec2,
+    uv1: Vec2,
+    color: Vec4,
+    texture: DrawTextureKey,
+    blend: CommandBlendMode,
+) -> RfvpResult<()> {
+    let [p0, p1, p2, p3] = sprite_corners(model, dst_w, dst_h);
+    let texture = match texture {
+        DrawTextureKey::Graph(graph_id) => host_texture_id(graph_id),
+        DrawTextureKey::White => WHITE_TEXTURE,
+        #[cfg(not(feature = "psx"))]
+        DrawTextureKey::PrevFrame => PREV_FRAME_TEXTURE,
+    };
+    let vertices = [
+        vertex(p0, vec2(uv0.x, uv1.y), color),
+        vertex(p1, vec2(uv0.x, uv0.y), color),
+        vertex(p2, vec2(uv1.x, uv1.y), color),
+        vertex(p3, vec2(uv1.x, uv0.y), color),
+    ];
+    let rect = vertices_aabb(&vertices);
+
+    commands.push(RenderCommand::DrawImage(DrawImageCmd {
+        texture,
+        src: RectU16 {
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 0,
+        },
+        dst: rect,
+        color: rgba8_from_vec4(color),
+        blend,
+        effect_id: 0,
+        clip: None,
+        vertices,
+    }));
+    if rect.w > 0 && rect.h > 0 && prim_id >= 0 {
+        hit_proxies.push(HitProxy {
+            prim_id: PrimId(prim_id as u32),
+            rect,
+            enabled: true,
+            visible: color.w > 0.0,
+            order: *order,
+        });
+    }
+    *order = order.wrapping_add(1);
+    Ok(())
+}
+
+fn vertex(position: glam::Vec3, tex_coord: Vec2, color: Vec4) -> Vertex2D {
+    Vertex2D {
+        position: [position.x, position.y],
+        tex_coord: [tex_coord.x, tex_coord.y],
+        color: crate::host_api::ColorRgba {
+            r: color.x,
+            g: color.y,
+            b: color.z,
+            a: color.w,
+        },
+    }
+}
+
+fn rgba8_from_vec4(color: Vec4) -> Rgba8 {
+    Rgba8 {
+        r: (color.x.clamp(0.0, 1.0) * 255.0) as u8,
+        g: (color.y.clamp(0.0, 1.0) * 255.0) as u8,
+        b: (color.z.clamp(0.0, 1.0) * 255.0) as u8,
+        a: (color.w.clamp(0.0, 1.0) * 255.0) as u8,
+    }
+}
+
+fn vertices_aabb(vertices: &[Vertex2D; 4]) -> RectI16 {
+    let mut min_x = vertices[0].position[0];
+    let mut max_x = min_x;
+    let mut min_y = vertices[0].position[1];
+    let mut max_y = min_y;
+    for vertex in vertices.iter().skip(1) {
+        min_x = min_x.min(vertex.position[0]);
+        max_x = max_x.max(vertex.position[0]);
+        min_y = min_y.min(vertex.position[1]);
+        max_y = max_y.max(vertex.position[1]);
+    }
+    let x = min_x.floor().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+    let y = min_y.floor().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+    let right = max_x.ceil().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+    let bottom = max_y.ceil().clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+    RectI16 {
+        x,
+        y,
+        w: right.saturating_sub(x),
+        h: bottom.saturating_sub(y),
+    }
+}
+
+pub(crate) fn render_motion_to_host<B>(
+    backend: &mut B,
+    cache: &mut HostPrimRenderCache,
+    motion: &MotionManager,
+    virtual_size: (u32, u32),
+) -> RfvpResult<RenderFrame>
+where
+    B: RenderBackend<Error = RfvpError> + TextureBackend<Error = RfvpError>,
+{
+    backend.begin_frame(
+        u16::try_from(virtual_size.0).map_err(|_| {
+            log::error!("virtual size {virtual_size:?} is too large");
+            RfvpError::CapacityExceeded
+        })?,
+        u16::try_from(virtual_size.1).map_err(|_| RfvpError::CapacityExceeded)?,
+    )?;
+    cache.ensure_white(backend)?;
+    #[cfg(not(feature = "psx"))]
+    {
+        cache.wants_prev_frame = false;
+    }
+
+    let prim_manager = motion.prim_manager();
+    let graphs = motion.graphs();
+    let snow_motions = motion.snow_motions();
+
+    let tree_started = crate::perf::start();
+    let mut frame = RenderFrame::default();
+    let mut order = 0u32;
+    let mut visit = vec![0u8; 4096];
+    collect_tree(
+        backend,
+        cache,
+        &mut frame.commands,
+        &mut frame.hit_proxies,
+        &mut order,
+        virtual_size,
+        prim_manager,
+        &motion.color_manager,
+        graphs,
+        snow_motions,
+        motion.get_v3d_x(),
+        motion.get_v3d_y(),
+        motion.get_v3d_z(),
+        0,
+        0.0,
+        0.0,
+        &mut visit,
+        0,
+    )?;
+
+    // Between the two trees, as the desktop renderer does: the scene dissolve (a full-screen
+    // color fade), then dissolve2 (the engine's own fades around save, load and transitions).
+    // PS1 masks blend a black reveal directly over the completed scene, before HUD/text.
+    // Other hosts keep continuous alpha and update a normal RGBA texture. Mask dissolves
+    // (wait=4/5) wipe away the previous frame, which these hosts do not keep: the new scene shows
+    // at once (drawing black instead blacks the screen out at every transition).
+    #[cfg(feature = "psx")]
+    {
+        use alloc::string::ToString;
+        let active = motion.get_dissolve_type() == DissolveType::MaskFadeOut;
+        let graph = motion.get_dissolve_mask_graph();
+        if let Some(crate::DynamicImage::ImagePs1Mask(mask)) =
+            graph.get_texture().as_ref().filter(|_| active)
+        {
+            let key_matches = cache.mask_key.as_ref().map_or(false, |(generation, path)| {
+                *generation == graph.generation && path == &graph.texture_path
+            });
+            if !key_matches {
+                backend.create_texture(
+                    MASK_TEXTURE,
+                    PortableTextureDesc {
+                        width: mask.width as u16,
+                        height: mask.height as u16,
+                        format: TextureFormat::Native(crate::ps1_mask::NATIVE_FORMAT),
+                    },
+                    &mask.gpu,
+                )?;
+                cache.mask_key = Some((graph.generation, graph.texture_path.to_string()));
+            }
+            let alpha = motion.get_dissolve_alpha().clamp(0.0, 1.0);
+            let w = virtual_size.0 as f32;
+            let h = virtual_size.1 as f32;
+            let color = crate::host_api::ColorRgba {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: alpha,
+            };
+            let vertices = [
+                Vertex2D {
+                    position: [0.0, h],
+                    tex_coord: [0.0, 1.0],
+                    color,
+                },
+                Vertex2D {
+                    position: [0.0, 0.0],
+                    tex_coord: [0.0, 0.0],
+                    color,
+                },
+                Vertex2D {
+                    position: [w, h],
+                    tex_coord: [1.0, 1.0],
+                    color,
+                },
+                Vertex2D {
+                    position: [w, 0.0],
+                    tex_coord: [1.0, 0.0],
+                    color,
+                },
+            ];
+            frame.commands.push(RenderCommand::DrawImage(DrawImageCmd {
+                texture: MASK_TEXTURE,
+                src: RectU16::default(),
+                dst: RectI16 {
+                    x: 0,
+                    y: 0,
+                    w: virtual_size.0 as i16,
+                    h: virtual_size.1 as i16,
+                },
+                color: Rgba8 {
+                    r: 0,
+                    g: 0,
+                    b: 0,
+                    a: (alpha * 255.0 + 0.5) as u8,
+                },
+                blend: CommandBlendMode::Normal,
+                effect_id: 0,
+                clip: None,
+                vertices,
+            }));
+        } else if cache.mask_key.take().is_some() {
+            backend.destroy_texture(MASK_TEXTURE);
+        }
+    }
+    #[cfg(not(feature = "psx"))]
+    {
+        cache.mask_frame.prepare(motion)?;
+        if let Some(crate::DynamicImage::ImageRgba8(image)) = &cache.mask_frame.image {
+            let width = u16::try_from(image.width()).map_err(|_| RfvpError::CapacityExceeded)?;
+            let height = u16::try_from(image.height()).map_err(|_| RfvpError::CapacityExceeded)?;
+            let generation = cache.mask_frame.generation;
+            let desc = PortableTextureDesc {
+                width,
+                height,
+                format: TextureFormat::Rgba8,
+            };
+            if cache.mask_upload != Some((generation, width, height)) {
+                let updated = if cache
+                    .mask_upload
+                    .map_or(false, |(_, w, h)| (w, h) == (width, height))
+                {
+                    backend.update_texture_data(MASK_TEXTURE, desc, image.as_raw())?
+                } else {
+                    false
+                };
+                if !updated {
+                    backend.create_texture(MASK_TEXTURE, desc, image.as_raw())?;
+                }
+                cache.mask_upload = Some((generation, width, height));
+            }
+            let start = frame.commands.len();
+            emit_sprite(
+                &mut frame.commands,
+                &mut frame.hit_proxies,
+                &mut order,
+                -1,
+                Mat4::IDENTITY,
+                virtual_size.0 as f32,
+                virtual_size.1 as f32,
+                vec2(0.0, 0.0),
+                vec2(1.0, 1.0),
+                vec4(1.0, 1.0, 1.0, 1.0),
+                DrawTextureKey::White,
+                CommandBlendMode::Normal,
+            )?;
+            if let RenderCommand::DrawImage(draw) = &mut frame.commands[start] {
+                draw.texture = MASK_TEXTURE;
+            }
+        } else if cache.mask_upload.take().is_some() {
+            backend.destroy_texture(MASK_TEXTURE);
+        }
+    }
+    let dissolve_alpha = match motion.get_dissolve_type() {
+        DissolveType::Static | DissolveType::ColoredFadeIn | DissolveType::ColoredFadeOut => {
+            Some((motion.get_dissolve_color_id(), motion.get_dissolve_alpha()))
+        }
+        _ => None,
+    };
+    let fades = [
+        dissolve_alpha,
+        Some((
+            motion.get_dissolve2_color_id(),
+            motion.get_dissolve2_alpha(),
+        )),
+    ];
+    for (color_id, alpha) in fades.into_iter().flatten() {
+        if alpha <= 0.0 {
+            continue;
+        }
+        let c = motion.color_manager.get_entry(color_id as u8);
+        let color = vec4(
+            c.get_r() as f32 / 255.0,
+            c.get_g() as f32 / 255.0,
+            c.get_b() as f32 / 255.0,
+            (c.get_a() as f32 / 255.0) * alpha,
+        );
+        emit_sprite(
+            &mut frame.commands,
+            &mut frame.hit_proxies,
+            &mut order,
+            -1,
+            Mat4::IDENTITY,
+            virtual_size.0 as f32,
+            virtual_size.1 as f32,
+            vec2(0.5, 0.5),
+            vec2(0.5, 0.5),
+            color,
+            DrawTextureKey::White,
+            CommandBlendMode::Normal,
+        )?;
+    }
+
+    let root = prim_manager.get_custom_root_prim_id() as i16;
+    if root != 0 {
+        let mut visit = vec![0u8; 4096];
+        collect_tree(
+            backend,
+            cache,
+            &mut frame.commands,
+            &mut frame.hit_proxies,
+            &mut order,
+            virtual_size,
+            prim_manager,
+            &motion.color_manager,
+            graphs,
+            snow_motions,
+            motion.get_v3d_x(),
+            motion.get_v3d_y(),
+            motion.get_v3d_z(),
+            root,
+            0.0,
+            0.0,
+            &mut visit,
+            0,
+        )?;
+    }
+
+    crate::perf::stop(11, tree_started);
+    let t = crate::perf::start();
+    backend.submit_commands(&frame.commands)?;
+    crate::perf::stop(12, t);
+    let t = crate::perf::start();
+    backend.end_frame()?;
+    crate::perf::stop(13, t);
+    Ok(frame)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_tree<B>(
+    backend: &mut B,
+    cache: &mut HostPrimRenderCache,
+    commands: &mut Vec<RenderCommand>,
+    hit_proxies: &mut HitProxyTable,
+    order: &mut u32,
+    virtual_size: (u32, u32),
+    prim_manager: &PrimManager,
+    color_manager: &ColorManager,
+    graphs: &crate::subsystem::resources::graph_buff::Graphs,
+    snow_motions: &[SnowMotion],
+    v3d_x: i32,
+    v3d_y: i32,
+    v3d_z: i32,
+    prim_id: i16,
+    parent_x: f32,
+    parent_y: f32,
+    visit: &mut [u8],
+    depth: usize,
+) -> RfvpResult<()>
+where
+    B: TextureBackend<Error = RfvpError>,
+{
+    if prim_id < 0 {
+        return Ok(());
+    }
+
+    let prim_idx = prim_id as usize;
+    if prim_idx >= visit.len() || depth > 4096 {
+        return Ok(());
+    }
+    if visit[prim_idx] != 0 {
+        return Ok(());
+    }
+    visit[prim_idx] = 1;
+
+    let base_prim = prim_manager.get_prim_immutable(prim_id);
+    if !base_prim.get_draw_flag() {
+        visit[prim_idx] = 2;
+        return Ok(());
+    }
+
+    let draw_x = base_prim.get_x() as f32;
+    let draw_y = base_prim.get_y() as f32;
+    let draw_alpha = base_prim.get_alpha() as f32 / 255.0;
+
+    let mut draw_id = prim_id;
+    let mut sprt = base_prim.get_sprt();
+    // A sprite chain that loops back on itself must not hang the frame.
+    let mut sprt_steps = 0u32;
+    while sprt != -1 {
+        sprt_steps += 1;
+        if sprt_steps > 4096 {
+            visit[prim_idx] = 2;
+            return Ok(());
+        }
+        if sprt < 0 || sprt >= 4096 {
+            visit[prim_idx] = 2;
+            return Ok(());
+        }
+        let sref = prim_manager.get_prim_immutable(sprt);
+        if !sref.get_draw_flag() {
+            visit[prim_idx] = 2;
+            return Ok(());
+        }
+        draw_id = sprt;
+        sprt = sref.get_sprt();
+    }
+
+    let draw_prim = prim_manager.get_prim_immutable(draw_id);
+    let first_child = draw_prim.get_first_child_idx();
+
+    match draw_prim.get_type() {
+        PrimType::PrimTypeGroup | PrimType::PrimTypeNone => {}
+        #[cfg(not(feature = "psx"))]
+        PrimType::PrimTypeSprt if draw_prim.get_texture_id() == -1 => {
+            // The frame last shown, stretched over the screen (or the prim's W/H with attr
+            // bit 1). The whole frame is always sampled; U/V are not used.
+            // Read the frame back only for a sprite that shows.
+            cache.wants_prev_frame |= draw_alpha > 0.0;
+            let attr = draw_prim.get_attr();
+            let (mut w, mut h) = (virtual_size.0 as f32, virtual_size.1 as f32);
+            if (attr & 1) != 0 {
+                w = draw_prim.get_w() as f32;
+                h = draw_prim.get_h() as f32;
+            }
+            if cache.prev_frame.is_some() && w > 0.0 && h > 0.0 {
+                let (pivot_x, pivot_y) = if (attr & 2) != 0 {
+                    (draw_prim.get_opx() as f32, draw_prim.get_opy() as f32)
+                } else {
+                    (0.0, 0.0)
+                };
+                let model = build_draw_model(
+                    virtual_size,
+                    &draw_prim,
+                    parent_x,
+                    parent_y,
+                    draw_x,
+                    draw_y,
+                    0.0,
+                    0.0,
+                    pivot_x,
+                    pivot_y,
+                    v3d_x,
+                    v3d_y,
+                    v3d_z,
+                );
+                // No hit proxy: the original hit-tests a Sprt against graph[texture id].
+                emit_sprite(
+                    commands,
+                    hit_proxies,
+                    order,
+                    -1,
+                    model,
+                    w,
+                    h,
+                    vec2(0.0, 0.0),
+                    vec2(1.0, 1.0),
+                    vec4(1.0, 1.0, 1.0, draw_alpha),
+                    DrawTextureKey::PrevFrame,
+                    prim_blend(&draw_prim),
+                )?;
+            }
+        }
+        PrimType::PrimTypeSprt => {
+            let tex_id = draw_prim.get_texture_id();
+            let graph_id = if tex_id >= 0 {
+                Some(tex_id as u16)
+            } else if tex_id == -2 {
+                Some(crate::subsystem::resources::videoplayer::MOVIE_GRAPH_ID)
+            } else {
+                None
+            };
+            if let Some(graph_id) = graph_id {
+                if let Some(graph) = graphs.get(graph_id as usize) {
+                    if cache.upload_graph_if_needed(backend, graph_id, graph)? {
+                        emit_graph_sprite(
+                            commands,
+                            hit_proxies,
+                            order,
+                            virtual_size,
+                            graph_id,
+                            graph,
+                            &draw_prim,
+                            parent_x,
+                            parent_y,
+                            draw_x,
+                            draw_y,
+                            draw_alpha,
+                            v3d_x,
+                            v3d_y,
+                            v3d_z,
+                            false,
+                            draw_id,
+                        )?;
+                    }
+                }
+            }
+        }
+        PrimType::PrimTypeText => {
+            let slot = draw_prim.get_text_index();
+            if (0..=31).contains(&slot) {
+                let graph_id = 4064u16 + slot as u16;
+                if let Some(graph) = graphs.get(graph_id as usize) {
+                    if cache.upload_graph_if_needed(backend, graph_id, graph)? {
+                        emit_graph_sprite(
+                            commands,
+                            hit_proxies,
+                            order,
+                            virtual_size,
+                            graph_id,
+                            graph,
+                            &draw_prim,
+                            parent_x,
+                            parent_y,
+                            draw_x,
+                            draw_y,
+                            draw_alpha,
+                            v3d_x,
+                            v3d_y,
+                            v3d_z,
+                            true,
+                            draw_id,
+                        )?;
+                    }
+                }
+            }
+        }
+        PrimType::PrimTypeSnow => {
+            emit_snow(
+                backend,
+                cache,
+                commands,
+                hit_proxies,
+                order,
+                virtual_size,
+                graphs,
+                snow_motions,
+                &draw_prim,
+                parent_x,
+                parent_y,
+                draw_x,
+                draw_y,
+                draw_alpha,
+            )?;
+        }
+        PrimType::PrimTypeTile => {
+            let w = draw_prim.get_w() as f32;
+            let h = draw_prim.get_h() as f32;
+            let color = color_manager.tile_color(draw_prim.get_tile());
+            if w > 0.0 && h > 0.0 {
+                let rgba = vec4(
+                    color.get_r() as f32 / 255.0,
+                    color.get_g() as f32 / 255.0,
+                    color.get_b() as f32 / 255.0,
+                    draw_alpha * (color.get_a() as f32 / 255.0),
+                );
+                // The original engine's draw_color_tile() uses only the
+                // accumulated parent position plus the tile's X/Y and W/H.
+                // Tile primitives do not apply rotation, scale, pivot, or V3D.
+                let model = Mat4::from_translation(vec3(parent_x + draw_x, parent_y + draw_y, 0.0));
+                emit_sprite(
+                    commands,
+                    hit_proxies,
+                    order,
+                    draw_id,
+                    model,
+                    w,
+                    h,
+                    // The original engine draws Tile primitives as an untextured
+                    // diffuse-color quad. Keep the compatibility 1x1 white texture, but
+                    // sample its center at every vertex so filtering can never pull an
+                    // edge/border value into the solid rectangle.
+                    vec2(0.5, 0.5),
+                    vec2(0.5, 0.5),
+                    rgba,
+                    DrawTextureKey::White,
+                    prim_blend(&draw_prim),
+                )?;
+            }
+        }
+    }
+
+    let mut children = Vec::new();
+    let mut child = first_child;
+    let mut steps = 0usize;
+    while child != -1 {
+        if steps >= 4096 || child < 0 || child >= 4096 {
+            break;
+        }
+        steps += 1;
+        children.push(child);
+        let child_prim = prim_manager.get_prim_immutable(child);
+        child = child_prim.get_next_sibling_idx();
+    }
+
+    let next_parent_x = parent_x + draw_x;
+    let next_parent_y = parent_y + draw_y;
+    for child in children {
+        collect_tree(
+            backend,
+            cache,
+            commands,
+            hit_proxies,
+            order,
+            virtual_size,
+            prim_manager,
+            color_manager,
+            graphs,
+            snow_motions,
+            v3d_x,
+            v3d_y,
+            v3d_z,
+            child,
+            next_parent_x,
+            next_parent_y,
+            visit,
+            depth + 1,
+        )?;
+    }
+
+    visit[prim_idx] = 2;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_graph_sprite(
+    commands: &mut Vec<RenderCommand>,
+    hit_proxies: &mut HitProxyTable,
+    order: &mut u32,
+    virtual_size: (u32, u32),
+    graph_id: u16,
+    graph: &GraphBuff,
+    prim: &Prim,
+    parent_x: f32,
+    parent_y: f32,
+    draw_x: f32,
+    draw_y: f32,
+    draw_alpha: f32,
+    v3d_x: i32,
+    v3d_y: i32,
+    v3d_z: i32,
+    text_graph: bool,
+    prim_id: i16,
+) -> RfvpResult<()> {
+    let Some((tw, th)) = graph.image_dimensions() else {
+        return Ok(());
+    };
+    if tw == 0 || th == 0 {
+        return Ok(());
+    }
+    let attr = prim.get_attr();
+    let use_rect = (attr & 1) != 0;
+    let mut text_draw_x = 0.0;
+    let mut text_draw_y = 0.0;
+
+    let (mut w, mut h, mut u, mut v, mut tex_w, mut tex_h) = if text_graph {
+        let Some(region) = graph.text_texture_region(
+            tw,
+            th,
+            use_rect,
+            prim.get_u() as f32,
+            prim.get_v() as f32,
+            prim.get_w() as f32,
+            prim.get_h() as f32,
+        ) else {
+            return Ok(());
+        };
+        text_draw_x = region.draw_x;
+        text_draw_y = region.draw_y;
+        (
+            region.draw_w,
+            region.draw_h,
+            region.tex_x,
+            region.tex_y,
+            region.tex_w,
+            region.tex_h,
+        )
+    } else if use_rect {
+        let mut w = prim.get_w() as f32;
+        let mut h = prim.get_h() as f32;
+        if w <= 0.0 {
+            w = graph.get_width() as f32;
+        }
+        if h <= 0.0 {
+            h = graph.get_height() as f32;
+        }
+        (
+            w,
+            h,
+            prim.get_u() as f32 - graph.get_offset_x() as f32,
+            prim.get_v() as f32 - graph.get_offset_y() as f32,
+            w,
+            h,
+        )
+    } else {
+        (
+            graph.get_width() as f32,
+            graph.get_height() as f32,
+            0.0,
+            0.0,
+            graph.get_width() as f32,
+            graph.get_height() as f32,
+        )
+    };
+
+    let mut clip_x = 0.0;
+    let mut clip_y = 0.0;
+    if use_rect && !text_graph {
+        if u < 0.0 {
+            clip_x = -u;
+            w += u;
+            tex_w += u;
+            u = 0.0;
+        }
+        if v < 0.0 {
+            clip_y = -v;
+            h += v;
+            tex_h += v;
+            v = 0.0;
+        }
+        let max_w = tw as f32 - u;
+        let max_h = th as f32 - v;
+        w = w.min(max_w);
+        h = h.min(max_h);
+        tex_w = tex_w.min(max_w);
+        tex_h = tex_h.min(max_h);
+    }
+
+    if w <= 0.0 || h <= 0.0 || tex_w <= 0.0 || tex_h <= 0.0 {
+        return Ok(());
+    }
+
+    let uv0 = vec2(u / tw as f32, v / th as f32);
+    let uv1 = vec2((u + tex_w) / tw as f32, (v + tex_h) / th as f32);
+    let color = vec4(1.0, 1.0, 1.0, draw_alpha);
+    let off_x = graph.get_offset_x() as f32 + if text_graph { text_draw_x } else { clip_x };
+    let off_y = graph.get_offset_y() as f32 + if text_graph { text_draw_y } else { clip_y };
+    let (pivot_x, pivot_y) = if (attr & 2) != 0 {
+        (prim.get_opx() as f32, prim.get_opy() as f32)
+    } else {
+        (graph.get_u() as f32, graph.get_v() as f32)
+    };
+    let model = build_draw_model(
+        virtual_size,
+        prim,
+        parent_x,
+        parent_y,
+        draw_x,
+        draw_y,
+        off_x,
+        off_y,
+        pivot_x,
+        pivot_y,
+        v3d_x,
+        v3d_y,
+        v3d_z,
+    );
+
+    emit_sprite(
+        commands,
+        hit_proxies,
+        order,
+        prim_id,
+        model,
+        w,
+        h,
+        uv0,
+        uv1,
+        color,
+        DrawTextureKey::Graph(graph_id),
+        prim_blend(prim),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_snow<B>(
+    backend: &mut B,
+    cache: &mut HostPrimRenderCache,
+    commands: &mut Vec<RenderCommand>,
+    hit_proxies: &mut HitProxyTable,
+    order: &mut u32,
+    virtual_size: (u32, u32),
+    graphs: &crate::subsystem::resources::graph_buff::Graphs,
+    snow_motions: &[SnowMotion],
+    prim: &Prim,
+    parent_x: f32,
+    parent_y: f32,
+    draw_x: f32,
+    draw_y: f32,
+    draw_alpha: f32,
+) -> RfvpResult<()>
+where
+    B: TextureBackend<Error = RfvpError>,
+{
+    let snow_id = prim.get_texture_id();
+    if snow_id < 0 {
+        return Ok(());
+    }
+    let Some(sm) = snow_motions.get(snow_id as usize) else {
+        return Ok(());
+    };
+    if !sm.enabled || sm.flake_count <= 0 || sm.texture_id < 0 || sm.flake_w <= 1 || sm.flake_h <= 1
+    {
+        return Ok(());
+    }
+
+    let a0 = sm.color_r as f32;
+    let a1 = sm.color_b_or_extra as f32;
+    let a2 = sm.color_g as f32;
+    let p0 = sm.period_min as f32;
+    let p1 = sm.time_override as f32;
+    let p2 = sm.period_max as f32;
+    let base_tex = sm.texture_id as i32;
+    let variant_count = sm.variant_count.max(1) as u32;
+    let tile_w_cfg = (sm.flake_w - 1) as f32;
+    let tile_h_cfg = (sm.flake_h - 1) as f32;
+    let count = sm.flake_count.max(0).min(1024) as usize;
+
+    for idx in 0..count {
+        let flake_idx = sm.flake_ptrs[idx];
+        let flake = &sm.flakes[flake_idx];
+        let graph_i32 = base_tex + (flake.variant_idx % variant_count) as i32;
+        if graph_i32 < 0 {
+            continue;
+        }
+        let graph_id = graph_i32 as u16;
+        let Some(graph) = graphs.get(graph_id as usize) else {
+            continue;
+        };
+        if !cache.upload_graph_if_needed(backend, graph_id, graph)? {
+            continue;
+        }
+        let Some((tw, th)) = graph.image_dimensions() else {
+            continue;
+        };
+        if tw == 0 || th == 0 {
+            continue;
+        }
+
+        let period = flake.period;
+        let alpha_u8 = if period <= p0 || p1 <= p0 {
+            a0
+        } else if period <= p1 {
+            a0 + (period - p0) * (a1 - a0) / (p1 - p0)
+        } else if period <= p2 && p2 > p1 {
+            a1 + (period - p1) * (a2 - a1) / (p2 - p1)
+        } else {
+            a2
+        };
+        let alpha = (alpha_u8.clamp(0.0, 255.0) / 255.0) * draw_alpha;
+        let scale = if flake.period > 0.0 {
+            1000.0 / flake.period
+        } else {
+            1.0
+        };
+        let tile_w = tile_w_cfg.min(tw as f32 - 1.0).max(0.0);
+        let tile_h = tile_h_cfg.min(th as f32 - 1.0).max(0.0);
+        let w = tile_w * scale;
+        let h = tile_h * scale;
+        let model = Mat4::from_translation(vec3(
+            parent_x + draw_x + flake.x - w * 0.5,
+            parent_y + draw_y + flake.y - h * 0.5,
+            0.0,
+        ));
+        emit_sprite(
+            commands,
+            hit_proxies,
+            order,
+            prim.get_texture_id() as i16,
+            model,
+            w,
+            h,
+            vec2(0.0, 0.0),
+            vec2(tile_w / tw as f32, tile_h / th as f32),
+            vec4(1.0, 1.0, 1.0, alpha),
+            DrawTextureKey::Graph(graph_id),
+            prim_blend(prim),
+        )?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod transform_tests {
+    use super::*;
+
+    #[test]
+    fn shared_edges_preserve_rotated_and_projected_quads() {
+        for attr in [0, 4] {
+            for angle in [0, 450, -900, 1800] {
+                let mut prim = Prim::new();
+                prim.set_attr(attr);
+                prim.set_rotation(angle);
+                prim.set_factor_x(1250);
+                prim.set_factor_y(-800);
+                prim.set_z(1000);
+                let model = build_draw_model(
+                    (1920, 1080),
+                    &prim,
+                    35.0,
+                    -20.0,
+                    250.0,
+                    105.0,
+                    18.0,
+                    -9.0,
+                    12.0,
+                    24.0,
+                    10,
+                    20,
+                    50,
+                );
+                let corners = sprite_corners(model, 320.0, 240.0);
+                for (actual, point) in corners.into_iter().zip([
+                    vec3(0.0, 240.0, 0.0),
+                    vec3(0.0, 0.0, 0.0),
+                    vec3(320.0, 240.0, 0.0),
+                    vec3(320.0, 0.0, 0.0),
+                ]) {
+                    let delta = actual - model.transform_point3(point);
+                    assert!(delta.abs().max_element() < 0.001);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unrotated_models_preserve_scaled_pivots_and_vertices() {
+        for (fx, fy) in [(1000, 1000), (1250, 800), (-1000, 0), (0, -250)] {
+            let mut prim = Prim::new();
+            prim.set_factor_x(fx);
+            prim.set_factor_y(fy);
+            let actual = build_draw_model(
+                (1920, 1080),
+                &prim,
+                35.0,
+                -20.0,
+                250.0,
+                105.0,
+                18.0,
+                -9.0,
+                12.0,
+                24.0,
+                0,
+                0,
+                0,
+            );
+            let expected = Mat4::from_translation(vec3(297.0, 109.0, 0.0))
+                * Mat4::from_scale(vec3(fx as f32 / 1000.0, fy as f32 / 1000.0, 1.0))
+                * Mat4::from_rotation_z(0.0)
+                * Mat4::from_translation(vec3(6.0, -33.0, 0.0));
+            for point in [
+                vec3(0.0, 0.0, 0.0),
+                vec3(320.0, 0.0, 0.0),
+                vec3(0.0, 240.0, 0.0),
+                vec3(320.0, 240.0, 0.0),
+            ] {
+                let delta = actual.transform_point3(point) - expected.transform_point3(point);
+                assert!(delta.abs().max_element() < 0.001);
+            }
+        }
+    }
+}
+
+#[cfg(all(test, not(feature = "psx")))]
+mod prev_frame_tests {
+    use super::*;
+    use crate::host_api::*;
+    #[derive(Default)]
+    struct DrawRecorder {
+        solids: usize,
+        sprites: usize,
+        captures: usize,
+        uploads: Vec<Vec<u8>>,
+        draws: Vec<DrawSpriteCommand>,
+    }
+    impl RfvpRenderer for DrawRecorder {
+        fn create_texture(
+            &mut self,
+            _: TextureId,
+            _: TextureDesc,
+            pixels: Option<&[u8]>,
+        ) -> RfvpResult<()> {
+            self.uploads.push(pixels.unwrap_or_default().to_vec());
+            Ok(())
+        }
+        fn update_texture(&mut self, _: TextureId, _: TextureRect, _: &[u8]) -> RfvpResult<()> {
+            Ok(())
+        }
+        fn destroy_texture(&mut self, _: TextureId) {}
+        fn begin_frame(&mut self, _: u32, _: u32, _: Option<ColorRgba>) -> RfvpResult<()> {
+            self.solids = 0;
+            self.sprites = 0;
+            self.draws.clear();
+            Ok(())
+        }
+        fn draw_sprite(&mut self, command: &DrawSpriteCommand) -> RfvpResult<()> {
+            self.sprites += 1;
+            self.draws.push(*command);
+            Ok(())
+        }
+        fn draw_solid(&mut self, _: &DrawSolidCommand) -> RfvpResult<()> {
+            self.solids += 1;
+            Ok(())
+        }
+        fn end_frame(&mut self) -> RfvpResult<()> {
+            Ok(())
+        }
+        fn present(&mut self) -> RfvpResult<()> {
+            Ok(())
+        }
+        fn capture_thumbnail(&mut self, _: u32, _: u32) -> Option<Vec<u8>> {
+            self.captures += 1;
+            Some([255, 0, 0, 255].repeat(64))
+        }
+    }
+    use crate::subsystem::resources::motion_manager::MotionManager;
+
+    /// One frame as `RfvpCore` draws it: the frame last shown is read back first when the
+    /// frame before drew a Sprt with texture id -1.
+    fn draw(raster: &mut DrawRecorder, cache: &mut HostPrimRenderCache, motion: &MotionManager) {
+        let rgba = cache
+            .wants_prev_frame()
+            .then(|| raster.capture_thumbnail(8, 8))
+            .flatten();
+        cache
+            .set_prev_frame(raster, rgba.as_deref().map(|rgba| (8, 8, rgba)))
+            .unwrap();
+        render_motion_to_host(raster, cache, motion, (8, 8)).unwrap();
+    }
+
+    #[test]
+    fn sprt_minus_one_requests_and_submits_engine_capture() {
+        let mut motion = MotionManager::new();
+        let red = motion.color_manager.get_entry_mut(10);
+        red.set_r(255);
+        red.set_a(255);
+        let pm = &mut motion.prim_manager;
+        pm.prim_init_with_type(1, PrimType::PrimTypeTile);
+        pm.prim_set_alpha(1, 255);
+        pm.prim_set_size(1, 8, 8);
+        pm.prim_set_tile(1, 10);
+        pm.set_prim_group_in(0, 1);
+        pm.prim_init_with_type(2, PrimType::PrimTypeSprt);
+        pm.prim_set_alpha(2, 255);
+        pm.prim_set_scale(2, 1000, 1000);
+        pm.prim_set_texture_id(2, -1);
+        pm.set_prim_group_in(0, 2);
+
+        let mut raster = DrawRecorder::default();
+        let mut cache = HostPrimRenderCache::new();
+        // No frame was shown before: only the red tile.
+        draw(&mut raster, &mut cache, &motion);
+        assert_eq!(raster.captures, 0);
+        assert_eq!(raster.sprites, 1);
+
+        // The tile is gone; the Sprt shows the red frame last shown.
+        motion.prim_manager.prim_set_alpha(1, 0);
+        draw(&mut raster, &mut cache, &motion);
+        assert_eq!(raster.captures, 1);
+        assert_eq!(
+            raster
+                .draws
+                .iter()
+                .filter(|draw| draw.texture == TextureId(PREV_FRAME_TEXTURE.0)
+                    && draw.vertices.iter().any(|v| v.color.a > 0.0))
+                .count(),
+            1
+        );
+        assert_eq!(raster.uploads.last().unwrap(), &[255, 0, 0, 255].repeat(64));
+
+        // Without a Sprt -1 the frame is not read back.
+        motion.prim_manager.prim_set_alpha(2, 0);
+        draw(&mut raster, &mut cache, &motion);
+        draw(&mut raster, &mut cache, &motion);
+        assert!(!cache.wants_prev_frame());
+        assert_eq!(raster.solids, 0);
+        assert!(raster
+            .draws
+            .iter()
+            .all(|draw| draw.vertices.iter().all(|v| v.color.a == 0.0)));
+    }
+}

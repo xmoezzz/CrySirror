@@ -1,0 +1,20 @@
+{
+  "repository": "https://github.com/xmoezzz/siglus_rs",
+  "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+  "origin_package": "eluna_rs",
+  "package": "crysirror-codec-emote",
+  "license": "MPL-2.0",
+  "adoption": "First-class CPU codec library; no VM, hosted renderer or device is part of its enabled library profile. Preserve historical codec fixes and source provenance.",
+  "baseline_sha256": {
+    "src/vertex.rs": "18c3de733d41342d0330ce4ba342cdff7cdcaf399e012de56d94f6434071aa83",
+    "src/runtime.rs": "ae436fbc5b94b62408ef2b02bbf61b3423e900f83c175fd79c1b620e2645c429",
+    "src/reverse.rs": "9c2d9cbb777ce21d1ab58e221ec4fd88a4c0ea19a6c47c02e5a9c971eb66d6de",
+    "src/sdk.rs": "d4fd1135295d46d0acd2d3b1eedbc60f5f50614fd6b662032bc503e0d9ff7956",
+    "src/shader.rs": "99a4ed03da4b8f6a02bddcbfed37cc1315f58bad4c3d11ec5458b7b5e747814f",
+    "src/lib.rs": "99b6216442667b7fe2cf7088ee677b4944877f316be240a87e0779ef42156c90",
+    "src/emote.rs": "aed2861d874c4dcce7f04ce14f799ccf46b534879f233fef0652fbc47288e876",
+    "src/schema.rs": "ac75f641e277aa4108966d248bc478336fff3a2346af9909499b5a1c18d599bc",
+    "src/api.rs": "12028946b09f01fbfdb503b27ef0b91419c1d45a11984baf43ba764dc249edf0",
+    "src/psb/mod.rs": "1653bcb2623f32d098085014d3e23703ce9b746d29a72b61c9fc8e2b648eccbf"
+  }
+}

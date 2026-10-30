@@ -4,6 +4,226 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `1af7e309b18b2933` (2026-10-31): retained menu enable state and native template data
+
+- `Ui.setMenuEnabled(id, item, enabled)` maps to the owned SetMenuEnabled
+  command. Disabling an item closes invalid popup paths and cancels only
+  gestures/focus made ineligible; ancestor disabling also blocks native
+  activation. The logical enabled state survives engine save/restore.
+- Resource PeData exposes bounded standard version-zero MENU templates as
+  immutable MenuTemplate/MenuTemplateItem/PeMenuResource data. Invalid UTF-16,
+  extents, budgets and unsupported MENUEX formats fail visibly. Parsing never
+  creates an OS menu or executes the source module.
+- The reference includes the partial first-class CatSystem2 KCS Config:
+  original script, font, heap_bytes, optional read-only executable ABI evidence
+  and virtual canvas. Detection can select an installed data capability root
+  without extraction. A configuration or registered factory does not imply
+  full native syscall, story or save compatibility.
+
+## `0f42d774636005f8` (2026-10-31): shared font resources, retained motion and pointer coverage
+
+- `Text.beginFont`, `fontStatus`, `resolveFont`, `releaseFontJob` and
+  `releaseFont` expose bounded client-owned I/O/CPU font jobs. Ready publishes
+  one immutable canonical face used by measurement, layout and rendering;
+  FontInfo retains digest, revision, family and collection metadata. Native
+  clients use the same HostServices FontLibrary contract. Framework dynamic
+  font capture/restore rejects until resource reconstruction is available.
+- Layers and Ui add `beginMotion`, `setMotionElapsed`, `endMotion` and
+  `motionStatus`, backed by shared scalar tracks. Engine time is milliseconds;
+  external duration/elapsed use caller units. Ownership, cancellation and
+  serialized continuation belong to the shared systems. UI rejects scale tracks.
+- `Ui.setHitMask` / `WidgetSpec.hit_mask` bind bounded immutable coverage to
+  pointer routing; keyboard activation remains independent. WidgetHitMask
+  declares dimensions, bytes, minimum threshold and optional strict edges.
+  Shared ImageResource alpha-region extraction keeps pixel loops out of VMs.
+
+## `4094eacf6dc444ee` (2026-10-31): sampled media clocks and explicit resource release
+
+- `Media.setClock(id, nowMs)` and native `MediaRequest::SetClock` select an
+  external monotonic clock before first playback and admit later samples.
+  `MediaOptions.clock` defaults to Engine; `MediaClock` describes both profiles.
+  Shared Media owns origin, pause compensation, seek and loop offsets. Backward
+  samples fail; paused samples do not turn into a jump on resume. Decoded audio
+  with an external clock is explicitly unsupported until audio-master mapping.
+- `Media.remove(id)` exposes the same scoped resource/surface release used by
+  native adapters. Stop remains distinct from removal.
+- Retained resources are bounded at 16 per client and 32 per Runtime, while
+  queued-video and retained-audio byte budgets remain 128 MiB each. Canceled
+  workers keep admission leases until they actually exit.
+
+## `497d019748fb64d4` (2026-10-31): video-header metadata and completed VFX stream receipts
+
+- `MediaInfo`/`MediaStatus` expose optional validated `size` and declared
+  `duration_ms`. Unknown duration remains null, including OMV packet/page hints.
+  Native `MediaRequest::Remove` releases a scoped resource and its surface.
+- `Vfx.sequenceStatus(entity, revision, completedTick, exchangeEpoch)` queries
+  completed worker state. Entity lifetime, declaration fingerprint and minimum
+  tick/exchange acknowledgements are checked; declared seeds are never ready
+  receipts. Counter strings preserve exact u64 arguments and large results.
+- VFX data adds engine/external `SimulationClock`, explicit `SequenceRng`,
+  fenced `SequenceExchange`, `FallingAtlasSpec` and `SystemSequenceState`.
+  Their generated names use the existing Vfx prefix. Existing systems retain
+  engine clocks, with no sequence or falling node by default. CPU/screen/clock
+  capability limits fail at validation and are mirrored by Python tooling.
+
+## `9e71ed5151241ed2` (2026-10-31): CPU VFX screen-sprite publication
+
+- Optional `VfxEmitterSpec.screen` declares a client-owned retained mesh-layer
+  target with canvas, parent, painter order and anchor. Existing emitters keep
+  their world-space profile when it is null. `VfxScreenSpriteTarget` and
+  `VfxScreenSpriteOptions` are generated from the shared VFX crate.
+- Runtime publishes completed CPU particle frames through ordinary dynamic
+  PuppetFrame layers; 2D hosts need no PBR camera, VM renderer or whole-screen
+  upload. World VFX drawing excludes these emitters to avoid drawing them twice.
+- GPU screen simulation, conflicting layer producers and unsupported projection
+  profiles fail explicitly. Active or pending screen-sprite framework snapshots
+  are rejected until producer/resource ownership can be reconstructed safely.
+
+## `d7986e975e6c66a8` (2026-10-31): reusable UI snapshots, input policy and audio metadata
+
+- `Ui.snapshotLayers(root)` exposes independent owned UI paint/layout records;
+  null selects all UI, a widget ID selects its subtree. Native clients use the
+  same operation through client-checked `EngineQuery::UiSnapshot`.
+- `WidgetSpec.text_color` and `text_inset` preserve their prior default text-field
+  appearance. `activate_on_press` defaults false and applies only to buttons.
+- `interaction_only` defaults false; true keeps normal shared input handling
+  while producing no visual primitive. `keyboard_focusable` defaults true;
+  false permits a pointer button to preserve an active text field's focus.
+- `WidgetInteraction.activated` and `activation_serial` identify the current
+  tick's activation. Repeated queries keep the same nonzero serial; a new tick
+  or restored input state does not replay that activation. Native callback
+  policy remains outside the generic widget system.
+- Audio source receipts add `has_replay_gain`, a presence flag rather than a
+  promise of applied gain. **Rust literal migration:** initialize this field in
+  directly constructed `AudioResourceInfo`; existing custom sources have a
+  default false metadata query. The host's client-scoped codec query consults
+  the actual shared decoder registry and makes no device/format-mode promise.
+- Host-only additions include live window focus, bounded integer timeline
+  counters, read-only PE metadata and shared text-stream encoders. These Rust
+  APIs do not themselves add reflective class signatures. UI `setText` with
+  null font now preserves the existing font alias.
+
+## `a51c7455afd639b3` (2026-10-30): shared glyph, image sampling and subtree effects
+
+- `Layers.beginCrossfadeEffect(id, source, durationMs, effect)` and
+  `begin_crossfade_effect` expose engine-owned isolated Blur/Dim transitions;
+  `SubtreeTransitionEffect` and `RuleWipe` describe their data. Rendering and
+  validation evidence is recorded separately in STATUS.md.
+- `LayerSpec.sampling` uses `ImageSampling`/`TextureAddressMode` for independent
+  clamp, repeat or mirrored addressing. Omitted sampling preserves clamp.
+- `GlyphBlur.kernel` defaults to weighted blur; disk outline and square face
+  coverage are shared glyph operations. `GlyphBlur`/`GlyphCoverageKernel` are
+  now exported data types, including bounds and backward-compatible defaults.
+- Optional first-class `circus` adapter config exports `script`/`font`. The
+  automatic launcher selects only the implemented DC4PH bytecode ABI; this is
+  a bounded native execution profile, not a full compatibility claim.
+- **Breaking for Rust literals:** initialize `LayerSpec`/`Primitive.sampling`
+  and `GlyphBlur.kernel` (normally `Default::default()`). Direct construction
+  of subtree extraction/state records must also initialize their generation,
+  timing and optional effect fields. Prefer the public layer commands and
+  constructors. Existing serialized layer/glyph records keep their defaults.
+- Rust host-only `MeshFrameHistory` capabilities and resource
+  `LineCursor`/`decode_auto` additions remain outside the reflective class
+  signature. Explicit native save readbacks still use a blocking fence.
+
+## `2663a3650d0f8656` (2026-10-30): native KiriKiri startup arguments
+
+- Optional `krkr` config `arguments` maps canonical `-name` keys to strings for
+  native `System.getArgument` before the first startup instruction. Explicit
+  player values override executable-embedded defaults; absent keys remain void
+  and native `System.setArgument` can still mutate the table.
+- Default `{}` preserves the raw adapter's previous argument policy. Rust
+  `Config` literals need `arguments: BTreeMap::new()` (**Breaking** for Rust
+  literal construction). At most 64 options / 64 KiB are admitted, with bounded
+  canonical names and string values.
+- Automatic desktop `play` supplies `-debugwin=no`, selecting the installed
+  game's own production branch rather than enabling optional Windows-only
+  developer consoles. This does not implement or acknowledge arbitrary
+  WIN32Dialog.open calls. Player launch options do not change the installed
+  game's persistent directory; framework snapshot fingerprints still cover
+  the real project configuration.
+- Host-only additions (reflective fingerprint unchanged): shared
+  `animation::ScalarTween` owns explicit-clock interpolation/retarget state;
+  `image::cursor::decode_cur16m` decodes native animated cursor resources;
+  `image::crx::decode` returns bounded CRXG surfaces and native origin metadata.
+  Shared AudioSource decoding now recognizes XPCM PCM/Ogg containers without
+  allocating an entire decoded song. These do not establish a complete native
+  Circus VM or change the script class registry.
+- `image::color::Srgb8Transfer` provides batch sRGB byte decoding and linear
+  byte quantization using boundaries matched to the existing f32 transfer
+  expression. Shared CPU scene capture uses it; native VMs retain no colour
+  conversion kernel. Exact-boundary tests and game performance measurements
+  are separate evidence.
+
+## `8ff9a0e655c6babe` (2026-10-30): reusable native sprite effects and canvas copies
+
+- Image effects add `sprite_alpha {spec}` (preserve/opaque/corner key/colour
+  key/paired side mask) and `stripe_reveal {spec}` (generic stripe/stagger
+  threshold masks). `SpriteAlpha` and `StripeReveal` describe the same worker
+  operations used by native adapters; existing effect declarations remain valid.
+- `SheetSequence`/`SheetLoop` document device-free absolute-clock sprite sheet
+  frame/UV selection. `WidgetInteraction` describes the shared hovered, focused
+  and pressed state exposed by `EngineQuery::UiInteraction`.
+- Canvas `AtopMode` adds `copy`; `Blend` adds `atop_copy` for RGB-only copies
+  which preserve destination coverage, including hidden RGB at source alpha 0.
+- Optional NScripter config `archives` lists scoped container mount prefixes
+  in native lookup priority order, after loose files. Default `[]` preserves
+  the previous loose-resource profile. This is not an original save schema.
+- Rust-only **Breaking**: literal `ImageCompositeLayer` construction now needs
+  `clip: None` (or a validated destination clip rectangle); exhaustive matches
+  over the extended image/scene/query enums need the new variants. Rust
+  `nscripter::Config` literals also need `archives: Vec::new()`. Serialized
+  projects can omit these optional/defaulted fields.
+- Installed-game CLI bootstrap now uses typed Resources worker operations,
+  with `play --headless` using the same plan. It needs no external mount script;
+  these host CLI options are not reflective script members.
+
+## `8e6792f059054768` (2026-10-30): pointer cursors, media transport, krkr pixel ops
+
+- `Ui.defineCursor(id, {frames:[{width,height,hotspot,rgba}], steps:[[frame,ms]]})`
+  defines a client cursor image (still or animated, edges 1..256, straight
+  RGBA8); `Ui.setCursor({kind:'standard', shape} | {kind:'custom', id})`
+  selects the pointer shape. The desktop host maps them to OS cursors.
+  `Ui.setCursorVisible` is unchanged.
+- `Media.pause(id)`, `Media.resume(id)` and `Media.seek(id, position_ms)` drive
+  the shared media clock; `Media.status` adds `paused` and `frame_ms`.
+  Existing calls keep their behaviour.
+- Image spec additions: effect `box_blur {rect?, area, alpha_weighted}`;
+  bitmap pixel math `mask_hold_alpha_scalar256` and `ps {blend, hold_alpha}`
+  (krkr Photoshop-like tables). Existing values are unchanged.
+- Rust-only: `MediaRequest::{Pause, Resume, Seek}`, `MediaInfo::{paused,
+  frame_ms}` (**Breaking** for code that constructs `MediaInfo` or matches
+  `MediaRequest` exhaustively), `ClientStorage::serving_container`,
+  `crysirror_image::cursor` (`.cur`/`.ico`/`.ani` decoding),
+  `ImageCompositeMath::{MaskHoldAlphaScalar256, Ps}`, and
+  AlphaMovie (AJPM) in `crysirror-video` and the media workers.
+
+## `810d2690fcbf11b5` (2026-10-30): first-class native adapter configuration
+
+- Public source-generated metadata now includes the optional RFVP, BGI and
+  NScripter adapter configs. Existing clients retain their config shapes.
+- RFVP declares its root/font/encoding/canvas mapping; BGI declares a scoped BP
+  module and optional project font; NScripter declares its script, encoding,
+  project font, canvas and plain text window. These describe bounded profiles,
+  not complete native-game compatibility or an implicitly linked adapter.
+- Rust-only shared additions: immutable leased `HostServices::media_frame`,
+  reader-based ASF/WMV/WMA and OMV/Theora/Vorbis decoding, and float PCM append.
+  Native VMs share Media worker, clock, frame and audio ownership.
+
+## `26edfb80137ff54a` (2026-10-30): Siglus installed-resource boot
+
+- Siglus config adds optional `key_file`, a capability-relative caller-owned
+  decode-material file; no key bytes are added to project JSON or the repository.
+- `gameexe` also accepts encoded Gameexe.dat. With Gameexe configured, boot
+  respects START_SCENE/label and SCREEN_SIZE; missing entry scenes fail visibly.
+  Explicit `scene_name` overrides and packs without Gameexe keep their fixture behavior.
+- **Breaking** (runtime snapshots): Siglus payload schema 8 includes the new
+  config field; schema-7 payloads are not automatically migrated. Original native
+  save-file layouts are unchanged. Private decode material cannot be packaged.
+- Shared Rust slot-text/font, NVSG, channel-conversion, borrowed bitmap blit,
+  coverage/tone, output-history LZSS and cyclic-mask kernels are available without
+  native VMs; they add no reflective class signatures in this fingerprint.
+
 ## `c6204fad405840ca` (2026-10-30): AVG32 installed-game adapter config
 
 - **Breaking** (AVG32 adapter config): the `plain-adv-v1` profile fields

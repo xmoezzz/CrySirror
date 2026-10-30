@@ -46,6 +46,10 @@ pub struct Config {
     /// `Storages.setupArchiveData` facade) the natives must match.
     #[serde(default)]
     pub bootstrap_profile: Option<String>,
+    /// Native command-line values exposed by System.getArgument. Explicit
+    /// player values override executable-embedded defaults before startup.
+    #[serde(default)]
+    pub arguments: BTreeMap<String, String>,
 }
 fn startup() -> String {
     "startup.tjs".into()
@@ -74,6 +78,16 @@ impl Config {
             self.plugin_shells.len() <= 128,
             "KiriKiri plugin shell limit"
         );
+        ensure!(self.arguments.len() <= 64, "KiriKiri argument count");
+        let mut argument_bytes = 0usize;
+        for (name, value) in &self.arguments {
+            ensure!(name.starts_with('-') && (2..=128).contains(&name.len())
+                && name.chars().all(|c| !c.is_whitespace() && !c.is_control()),
+                "KiriKiri argument must be a canonical -name");
+            ensure!(value.len() <= 4096 && !value.contains('\0'), "KiriKiri argument value");
+            argument_bytes += name.len() + value.len();
+        }
+        ensure!(argument_bytes <= 64 * 1024, "KiriKiri argument byte budget");
         if let Some(exe) = &self.executable {
             ensure!(
                 !exe.is_empty() && exe.len() <= 255 && !exe.contains(['/', '\\', ':', '\0']) && exe != "." && exe != "..",
@@ -83,7 +97,7 @@ impl Config {
         for name in &self.plugin_shells {
             let name = crate::plugins::canonical(name).map_err(|e| anyhow::anyhow!("{e}"))?;
             ensure!(
-                !matches!(name.as_str(), "savestruct.dll" | "fstat.dll" | "menu.dll" | "kagparser.dll" | "layerexraster.dll" | "json.dll" | "layerexdraw.dll" | "krmovie.dll" | "layereximage.dll" | "kagparserex.dll" | "textrender.dll" | "motionplayer.dll" | "motionplayer_nod3d.dll" | "csvparser.dll" | "scriptsex.dll" | "addfont.dll" | "windowex.dll" | "win32dialog.dll" | "extrans.dll" | "extnagano.dll"),
+                !matches!(name.as_str(), "savestruct.dll" | "fstat.dll" | "menu.dll" | "kagparser.dll" | "layerexraster.dll" | "json.dll" | "layerexdraw.dll" | "krmovie.dll" | "layereximage.dll" | "kagparserex.dll" | "extkagparser.dll" | "kropus.dll" | "wuvorbis.dll" | "textrender.dll" | "motionplayer.dll" | "motionplayer_nod3d.dll" | "csvparser.dll" | "lineparser.dll" | "varfile.dll" | "dirlist.dll" | "scriptsex.dll" | "addfont.dll" | "windowex.dll" | "win32dialog.dll" | "extrans.dll" | "extnagano.dll" | "kaichotrans.dll"),
                 "engine facade cannot be replaced by a plugin shell"
             );
         }
@@ -107,6 +121,7 @@ pub struct KrkrVm {
     pass: Option<FramePass>,
     last_down: u64,
     last_pointer: [i32; 2],
+    last_focus: Option<bool>,
     pressed: Option<usize>,
     /// Live TJS object count that triggers the next collection.
     gc_threshold: usize,
@@ -153,6 +168,7 @@ impl KrkrVm {
             pass: None,
             last_down: 0,
             last_pointer: [-1, -1],
+            last_focus: None,
             pressed: None,
             gc_threshold: 50_000,
             frames: 0,
@@ -172,6 +188,9 @@ impl KrkrVm {
         );
         let mut host = KrkrHost::new(self.config.canvas, self.config.font_alias.clone());
         host.client = self.client.0;
+        for codec in ["opus","vorbis"] {
+            if h.audio_codec_supported(self.client,codec).map_err(err)? { host.audio_codecs.insert(codec.into()); }
+        }
         host.input = input;
         host.plugin_shells = self
             .config
@@ -194,10 +213,39 @@ impl KrkrVm {
         host.storage = Some(storage);
         host.images = Some(h.image_metadata(self.client).map_err(err)?);
         host.text_measurement = Some(h.text_measurement(self.client).map_err(err)?);
+        host.fonts.library=Some(h.font_library(self.client).map_err(err)?);
         host.now = h.now_ms();
+        host.display = h.display_info();
         let mut rt = Runtime::with_host(host);
         natives::install(&mut rt);
         crate::protect_plugin::install_startup(&mut rt);
+        // krkr2 reads release options embedded in the executable before any
+        // script runs (`System.getArgument("-debugwin")` is "no" in shipped
+        // games); they seed the argument table, never overriding a value.
+        if let Some(exe) = rt.host().executable.clone()
+            && let Some(path) = rt.host().storage.as_ref().and_then(|s| s.resolve(&exe))
+        {
+            let bytes = rt.host().storage.as_ref().unwrap().read_limited(&path, 64 << 20)?;
+            let options = crate::exe_options::parse(&bytes)
+                .with_context(|| format!("{exe}: embedded options"))?;
+            if !options.is_empty() {
+                let table = rt.alloc_dictionary_object();
+                for (name, value) in options {
+                    rt.set_object_member(table, &format!("-{name}"), Variant::String(value.into()));
+                }
+                rt.set_global_member("__crysirror_arguments", Variant::Object(table));
+            }
+        }
+        if !self.config.arguments.is_empty() {
+            let table = match rt.global_member("__crysirror_arguments").object_handle() {
+                Some(table) => table,
+                None => rt.alloc_dictionary_object(),
+            };
+            for (name, value) in &self.config.arguments {
+                rt.set_object_member(table, name, Variant::String(value.clone()));
+            }
+            rt.set_global_member("__crysirror_arguments", Variant::Object(table));
+        }
         // Developer diagnostic: on the first runtime exception, log the paused
         // frame's registers and evaluate `;;`-separated expressions in it.
         if let Ok(exprs) = std::env::var("CRYSIRROR_KRKR_EXCEPTION_EVAL") {
@@ -290,6 +338,31 @@ impl KrkrVm {
             .map(|_| ())
             .map_err(|e| anyhow::anyhow!("{e}"))
             .with_context(|| format!("TJS event {method}"))
+    }
+
+    fn observe_focus(&mut self, host:&dyn HostServices)->Result<()> {
+        let focus=host.window_focused(self.client).map_err(err)?;
+        let previous=std::mem::replace(&mut self.last_focus,focus);
+        let (Some(previous),Some(current))=(previous,focus) else {return Ok(());};
+        if previous==current {return Ok(());}
+        let event=if current {"onActivate"}else{"onDeactivate"};
+        let rt=self.rt.as_mut().context("KiriKiri runtime absent")?;
+        let system=rt.global_member("System").object_handle().context("System object missing")?;
+        let callback=rt.object_member(system,event);
+        let old=rt.host().can_suspend;rt.host_mut().can_suspend=false;
+        // TVPFireOnApplicationActivateEvent calls the stored closure without a
+        // System receiver. Its original ObjThis (or unbound fallback) is kept.
+        let result=if callback.object_handle().is_some() {rt.call_function(callback,Vec::new()).map(|_|())}else{Ok(())};
+        rt.host_mut().can_suspend=old;
+        result.map_err(|e|anyhow::anyhow!("TJS System focus event {event}: {e}"))?;
+        let windows=rt.host().windows.keys().copied().collect::<Vec<_>>();
+        for window in windows {
+            self.rt.as_mut().unwrap().host_mut().can_suspend=false;
+            let result=self.call(ObjectHandle(window),event,Vec::new());
+            self.rt.as_mut().unwrap().host_mut().can_suspend=old;
+            result?;
+        }
+        Ok(())
     }
 
     fn input(&mut self, input: InputFrame) -> Result<()> {
@@ -547,6 +620,7 @@ impl KrkrVm {
             if !crate::motion_plugin::poll(self.rt.as_mut().unwrap(), h, self.client)? {
                 return Ok(false);
             }
+            if !crate::font_resources::poll(self.rt.as_mut().unwrap())? {return Ok(false);}
             if !crate::image_api::poll(self.rt.as_mut().unwrap(), h, self.client)? {
                 return Ok(false);
             }
@@ -562,6 +636,8 @@ impl KrkrVm {
             if !crate::sound::drive(self.rt.as_mut().unwrap(), h, self.client)? {
                 return Ok(false);
             }
+            crate::video::drive(self.rt.as_mut().unwrap(), h, self.client)?;
+            crate::alpha_movie::drive(self.rt.as_mut().unwrap(), h, self.client)?;
             let rt = self.rt.as_mut().unwrap();
             if rt.is_suspended() {
                 rt.resume_suspended().map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -570,7 +646,10 @@ impl KrkrVm {
                 return Ok(true);
             }
         }
-        bail!("native audio continuation budget")
+        // Many continuations completed this frame (e.g. a startup that loads
+        // hundreds of images, each suspending on its worker); the VM is still
+        // suspended at a valid resume point, so continue next frame.
+        Ok(false)
     }
     fn execute(&mut self, h: &mut dyn HostServices, input: InputFrame) -> Result<VmYield> {
         use crysirror_core::deferred_dispatch::DispatchPhase;
@@ -586,10 +665,14 @@ impl KrkrVm {
             self.boot(h, input)?;
         }
         self.rt.as_mut().unwrap().host_mut().now = now;
+        self.rt.as_mut().unwrap().host_mut().display = h.display_info();
         if !self.drive_sound(h)? {
             return Ok(VmYield::BudgetExhausted);
         }
         if self.pass.is_none() {
+            self.observe_focus(h)?;
+            crate::video::observe(self.rt.as_mut().unwrap(), h, self.client)?;
+            crate::alpha_movie::observe(self.rt.as_mut().unwrap(), h, self.client)?;
             let callbacks = crate::sound::observations(self.rt.as_mut().unwrap(), h, self.client)?;
             for (id, event) in callbacks {
                 let kind = if event == "onStatusChanged" { 2 } else { 3 };

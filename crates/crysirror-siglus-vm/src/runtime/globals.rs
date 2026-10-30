@@ -1043,7 +1043,9 @@ impl Default for SoundRoutingState {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GlobalState {
     /// Generic int-list storage keyed by the global form ID.
-    pub int_lists: HashMap<u32, Vec<i64>>,
+    // Per-instruction rollback snapshots share flag storage. A native write
+    // detaches only its destination list; serialized values remain plain lists.
+    pub int_lists: HashMap<u32, Arc<Vec<i64>>>,
     /// Generic string-list storage keyed by the global form ID.
     pub str_lists: HashMap<u32, Vec<String>>,
     /// Counter-list storage keyed by the global form ID.
@@ -1535,213 +1537,7 @@ impl GlobalMovieState {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
-pub struct Counter {
-    cur_time: i64,
-    is_running: bool,
-    real_flag: bool,
-    frame_mode: bool,
-    frame_loop_flag: bool,
-    frame_start_value: i64,
-    frame_end_value: i64,
-    frame_time: i64,
-}
-
-impl Counter {
-    fn limit(min: i64, value: i64, max: i64) -> i64 {
-        if value < min {
-            min
-        } else if value > max {
-            max
-        } else {
-            value
-        }
-    }
-
-    pub fn reinit(&mut self) {
-        *self = Self::default();
-    }
-
-    pub fn reset(&mut self) {
-        self.is_running = false;
-        self.real_flag = false;
-        self.frame_mode = false;
-        self.cur_time = 0;
-    }
-
-    pub fn set_count(&mut self, value: i64) {
-        if self.frame_mode {
-            if self.frame_end_value == self.frame_start_value {
-                self.cur_time = 0;
-                return;
-            }
-
-            let denom = self.frame_end_value - self.frame_start_value;
-            let frame_time = self.frame_time;
-            let mut cur_time = (value - self.frame_start_value) * frame_time / denom;
-            if self.frame_loop_flag {
-                cur_time = Self::limit(0, cur_time, frame_time - 1);
-            } else {
-                cur_time = Self::limit(0, cur_time, frame_time);
-            }
-            self.cur_time = cur_time;
-        } else {
-            self.cur_time = value;
-        }
-    }
-
-    pub fn start(&mut self) {
-        self.is_running = true;
-        self.real_flag = false;
-        self.frame_mode = false;
-        self.cur_time = 0;
-    }
-
-    pub fn start_real(&mut self) {
-        self.is_running = true;
-        self.real_flag = true;
-        self.frame_mode = false;
-        self.cur_time = 0;
-    }
-
-    pub fn start_frame(&mut self, from: i64, to: i64, frame_time: i64) {
-        self.is_running = true;
-        self.real_flag = false;
-        self.frame_mode = true;
-        self.frame_loop_flag = false;
-        self.frame_start_value = from;
-        self.frame_end_value = to;
-        self.frame_time = frame_time;
-        self.cur_time = 0;
-    }
-
-    pub fn start_frame_real(&mut self, from: i64, to: i64, frame_time: i64) {
-        self.is_running = true;
-        self.real_flag = true;
-        self.frame_mode = true;
-        self.frame_loop_flag = false;
-        self.frame_start_value = from;
-        self.frame_end_value = to;
-        self.frame_time = frame_time;
-        self.cur_time = 0;
-    }
-
-    pub fn start_frame_loop(&mut self, from: i64, to: i64, frame_time: i64) {
-        self.is_running = true;
-        self.real_flag = false;
-        self.frame_mode = true;
-        self.frame_loop_flag = true;
-        self.frame_start_value = from;
-        self.frame_end_value = to;
-        self.frame_time = frame_time;
-        self.cur_time = 0;
-    }
-
-    pub fn start_frame_loop_real(&mut self, from: i64, to: i64, frame_time: i64) {
-        self.is_running = true;
-        self.real_flag = true;
-        self.frame_mode = true;
-        self.frame_loop_flag = true;
-        self.frame_start_value = from;
-        self.frame_end_value = to;
-        self.frame_time = frame_time;
-        self.cur_time = 0;
-    }
-
-    pub fn stop(&mut self) {
-        self.is_running = false;
-    }
-
-    pub fn resume(&mut self) {
-        self.is_running = true;
-    }
-
-    pub fn update_time(&mut self, past_game_time: i32, past_real_time: i32) {
-        if self.is_running {
-            let add = if self.real_flag {
-                past_real_time
-            } else {
-                past_game_time
-            };
-            self.cur_time = self.cur_time.saturating_add(add as i64);
-        }
-
-        if self.frame_mode && !self.frame_loop_flag && self.cur_time >= self.frame_time {
-            self.is_running = false;
-        }
-    }
-
-    pub fn get_count(&self) -> i64 {
-        if self.frame_mode {
-            if self.frame_time <= 0 {
-                return self.frame_end_value;
-            }
-            if self.frame_start_value == self.frame_end_value {
-                return self.frame_end_value;
-            }
-
-            let span = self.frame_end_value - self.frame_start_value;
-            let mut value = span * self.cur_time / self.frame_time;
-            if self.frame_loop_flag {
-                value %= span;
-                value += self.frame_start_value;
-            } else {
-                value += self.frame_start_value;
-                if self.frame_start_value > self.frame_end_value {
-                    value = Self::limit(self.frame_end_value, value, self.frame_start_value);
-                } else {
-                    value = Self::limit(self.frame_start_value, value, self.frame_end_value);
-                }
-            }
-            value
-        } else {
-            self.cur_time
-        }
-    }
-
-    pub fn get_count_with_frame(&self, _current_frame: i64) -> i64 {
-        self.get_count()
-    }
-
-    pub fn is_running(&self) -> bool {
-        self.is_running
-    }
-
-    pub(crate) fn save_parts(&self) -> (bool, bool, bool, bool, i64, i64, i64, i64) {
-        (
-            self.is_running,
-            self.real_flag,
-            self.frame_mode,
-            self.frame_loop_flag,
-            self.frame_start_value,
-            self.frame_end_value,
-            self.frame_time,
-            self.cur_time,
-        )
-    }
-
-    pub(crate) fn from_save_parts(
-        is_running: bool,
-        real_flag: bool,
-        frame_mode: bool,
-        frame_loop_flag: bool,
-        frame_start_value: i64,
-        frame_end_value: i64,
-        frame_time: i64,
-        cur_time: i64,
-    ) -> Self {
-        Self {
-            cur_time,
-            is_running,
-            real_flag,
-            frame_mode,
-            frame_loop_flag,
-            frame_start_value,
-            frame_end_value,
-            frame_time,
-        }
-    }
-}
+pub use crysirror_scene::timeline_counter::Counter;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct PcmEventLine {
@@ -3627,6 +3423,10 @@ impl ObjectWeatherWorkState {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ObjectMovieState {
+    /// Runtime-only native declaration revision; engine Media bindings are not
+    /// original-save bytes and live movie snapshots are explicitly unsupported.
+    #[serde(skip)]
+    pub(crate) engine_revision: u64,
     pub loop_flag: bool,
     pub auto_free_flag: bool,
     pub real_time_flag: bool,
@@ -3661,6 +3461,7 @@ pub struct ObjectMovieState {
 impl Default for ObjectMovieState {
     fn default() -> Self {
         Self {
+            engine_revision: 0,
             loop_flag: false,
             auto_free_flag: true,
             real_time_flag: true,
@@ -3714,37 +3515,9 @@ impl ObjectMovieState {
         self.seeked = false;
     }
 
-    pub fn tick(&mut self, past_game_time: i32, past_real_time: i32) {
-        self.just_finished = false;
-        self.just_looped = false;
-        if !self.playing || self.pause_flag || self.audio_id.is_some() {
-            // The audio device is the master clock while a movie soundtrack is
-            // active. Advancing a second wall/game clock here causes drift and
-            // lets video reach EOS before the sound handle does.
-            return;
-        }
-        let add = if self.real_time_flag {
-            past_real_time.max(0) as u64
-        } else {
-            past_game_time.max(0) as u64
-        };
-        if add == 0 {
-            return;
-        }
-        self.timer_ms = self.timer_ms.saturating_add(add);
-        if let Some(total) = self.total_ms
-            && total > 0
-            && self.timer_ms >= total
-        {
-            if self.loop_flag {
-                self.timer_ms %= total;
-                self.just_looped = true;
-            } else {
-                self.playing = false;
-                self.just_finished = true;
-            }
-        }
-    }
+    /// Shared engine Media owns the playback clock. The adapter mirrors its
+    /// receipts before native frame work; never advance a second private clock.
+    pub fn tick(&mut self, _past_game_time: i32, _past_real_time: i32) {}
 
     pub fn seek(&mut self, time_ms: u64) {
         // C_elm_object::seek_movie stores m_omv_timer verbatim. Loop wrapping

@@ -222,11 +222,32 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 && class_handle != handle
                 && self
                     .class_chain_owner(class_handle, name)?
-                    .is_some_and(|owner| !self.is_bytecode_class(owner))
+                    .is_some_and(|owner| {
+                        !self.is_bytecode_class(owner)
+                            && !self.handle_class_name_matches(owner, name)
+                    })
             {
                 match self.prop_get_handle(class_handle, name, flags.without_probe(), Some(handle))
                 {
                     Ok(value) => return Ok(self.bind_proxy_value(value, Some(handle))),
+                    Err(error) if error.is_member_not_found() => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            // tTJSInterCodeContext::PropGet on a class object consults every
+            // superclass getter entry from the *last* `extends` operand back
+            // to the first (TJS_DO_SUPERCLASS_PROXY_BEGIN iterates
+            // `rbegin()`), so in `class C extends A, B` a member both bases
+            // declare resolves to B's, just as B's class body ran last on the
+            // instance. The primary chain below only answers what no later
+            // extender holds.
+            if self.has_secondary_extenders(handle)?
+                && let Some(owner) = self.class_member_owner(handle, name, false)?
+                && owner != handle
+            {
+                let receiver = self.inherited_member_this(handle, caller_this);
+                match self.prop_get_handle(owner, name, flags.without_probe(), receiver) {
+                    Ok(value) => return Ok(self.bind_proxy_value(value, receiver)),
                     Err(error) if error.is_member_not_found() => {}
                     Err(error) => return Err(error),
                 }
@@ -237,20 +258,6 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 // walks on only for TJS_E_MEMBERNOTFOUND, so a super class
                 // member that exists with a void value is the answer.
                 match self.prop_get_handle(class_handle, name, flags.without_probe(), receiver) {
-                    Ok(value) => return Ok(self.bind_proxy_value(value, receiver)),
-                    Err(error) if error.is_member_not_found() => {}
-                    Err(error) => return Err(error),
-                }
-            }
-            // tTJSInterCodeContext::PropGet on a class object consults every
-            // superclass getter entry, not only the primary parent followed
-            // above: `class C extends A, B` reads `C.fromB` through B.
-            if self.has_secondary_extenders(handle)?
-                && let Some(owner) = self.class_member_owner(handle, name, true)?
-                && owner != handle
-            {
-                let receiver = self.inherited_member_this(handle, caller_this);
-                match self.prop_get_handle(owner, name, flags.without_probe(), receiver) {
                     Ok(value) => return Ok(self.bind_proxy_value(value, receiver)),
                     Err(error) if error.is_member_not_found() => {}
                     Err(error) => return Err(error),
@@ -1570,16 +1577,9 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
             // inherited one, so the call recurses until the stack overflows.
             // Native classes hold no bytecode constructor; calling the class
             // object itself with the bound instance runs their initializer.
-            matches!(
-                self.runtime.heap[handle.0].kind,
-                ObjectKind::InterCode {
-                    context: BytecodeContextType::Class,
-                    ..
-                }
-            )
-            .then(|| self.runtime.heap[handle.0].get_raw(name))
-            .flatten()
-            .unwrap_or_else(|| Variant::Closure(Closure::new(handle, Some(this_obj))))
+            self.runtime.heap[handle.0]
+                .get_raw(name)
+                .unwrap_or_else(|| Variant::Closure(Closure::new(handle, Some(this_obj))))
         } else {
             // VM_CALLD dispatches with `clo.ObjThis ? clo.ObjThis : ra[-1]`.
             // Class objects carry no ObjThis of their own in krkrz, so a
@@ -2191,6 +2191,19 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         }
     }
 
+    /// `new callee(args)` from the host, through the same `is_new` protocol
+    /// as the `new` opcode.
+    pub fn construct(&mut self, callee: Variant, args: Vec<Variant>) -> Result<Variant> {
+        let base_depth = self.runtime.call_depth;
+        match self.call_value(callee, None, args, true, Continuation::Root)? {
+            CallOutcome::Immediate(value, Continuation::Root) => Ok(value),
+            CallOutcome::Immediate(_, continuation) => Err(TjsError::runtime(format!(
+                "unexpected immediate constructor continuation {continuation:?}"
+            ))),
+            CallOutcome::Frame(frame) => self.run_call_stack(vec![*frame], base_depth),
+        }
+    }
+
     pub(super) fn invalidate_object(&mut self, handle: ObjectHandle) -> Result<bool> {
         if !self.runtime.heap[handle.0].valid {
             return Ok(false);
@@ -2466,53 +2479,31 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 } else {
                     this_obj
                 };
-                // CrySirror port change: a native class included as a later
-                // base (`class T extends Script, Layer`) is not on the
-                // instance's class chain. krkrz includes each base with
-                // `(base incontextof this)()` (tjsInterCodeGen.cpp
-                // CreateExtendsExprCode), and a native class then copies its
-                // non-static members onto the object, overwriting, with
-                // context-free closures rebound to it (tjsNative.cpp
-                // tTJSNativeClass::FuncCall / tCallback). A first native base
-                // stays reachable through the chain without the copy.
-                if !is_new && constructable && args.is_empty() {
-                    if let Some(instance) = this_obj.map(|t| self.runtime.bound_this(t).unwrap_or(t)) {
-                        if self.is_class_initializing(instance) {
-                            let on_chain = match self.class_body_class.get(&instance.0).copied() {
-                                Some(class) => {
-                                    let mut cursor = Some(class);
-                                    let mut found = false;
-                                    for _ in 0..64 {
-                                        let Some(c) = cursor else { break };
-                                        if c == handle {
-                                            found = true;
-                                            break;
-                                        }
-                                        cursor = self.runtime.heap[c.0].super_class;
-                                    }
-                                    found
-                                }
-                                None => true,
-                            };
-                            if !on_chain {
-                                for (name, value) in self.runtime.object_members(handle) {
-                                    let value = match value {
-                                        Variant::Object(h) => Variant::Closure(Closure::new(h, Some(instance))),
-                                        Variant::Closure(c) if c.this_obj.is_none() => {
-                                            Variant::Closure(Closure::new(c.object, Some(instance)))
-                                        }
-                                        other => other,
-                                    };
-                                    self.runtime.heap[instance.0].set(&name, value);
-                                }
-                            }
-                        }
-                    }
-                }
+                // Native class-body initialization is distinct from invoking
+                // its named constructor. The reference copies non-static
+                // members even for the primary base (tjsNative.cpp:293-365).
+                // Copy after the host initializes native storage so a host's
+                // default constructor slot cannot overwrite a script hook.
+                let native_class_body = (!is_new && constructable && args.is_empty())
+                    .then(|| this_obj.map(|t| self.runtime.bound_this(t).unwrap_or(t)))
+                    .flatten()
+                    .filter(|instance| self.is_class_initializing(*instance));
                 if let Some(name) = self.runtime.native_call_name(id, false).map(str::to_string) {
                     self.runtime.trace_native_call(&name, native_this, &args);
                 }
                 let value = function.call(self.runtime, native_this, args)?;
+                if let Some(instance) = native_class_body {
+                    for (name, value) in self.runtime.object_members(handle) {
+                        let value = match value {
+                            Variant::Object(h) => Variant::Closure(Closure::new(h, Some(instance))),
+                            Variant::Closure(c) if c.this_obj.is_none() => {
+                                Variant::Closure(Closure::new(c.object, Some(instance)))
+                            }
+                            other => other,
+                        };
+                        self.runtime.heap[instance.0].set(&name, value);
+                    }
+                }
                 // `VM_CALLD` (the `new` opcode) stores the object a native
                 // constructor produced as `tTJSVariant(dsp, dsp)`
                 // (`tjsInterCodeExec.cpp:2377-2385`).
@@ -3286,7 +3277,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         } else {
             format!("{source};")
         };
-        let file = compile_source_to_bytecode("<eval>", &source)?;
+        let file = self.runtime.compile_source("<eval>", &source)?;
         let top_level = file
             .top_level
             .ok_or_else(|| TjsError::runtime("eval bytecode has no top-level object"))?;

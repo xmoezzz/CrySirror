@@ -1,0 +1,482 @@
+{
+  "schema": 2,
+  "name": "Shared positioned-glyph outlines and face coverage (runtime font)",
+  "content_revision": "glyph-coverage-1",
+  "assets": "assets",
+  "canvas": [
+    640,
+    240
+  ],
+  "background": [
+    18,
+    28,
+    42,
+    255
+  ],
+  "fonts": {},
+  "clients": [
+    {
+      "name": "engine",
+      "adapter": "crysirror-script-v1",
+      "game": "glyph-coverage",
+      "asset_prefix": "a",
+      "program": [
+        {
+          "op": "halt"
+        }
+      ],
+      "systems": {
+        "layers": [
+          {
+            "id": 1,
+            "rect": [
+              32,
+              28,
+              560,
+              72
+            ],
+            "order": [
+              0,
+              0
+            ],
+            "paint": {
+              "kind": "glyph_run",
+              "font": "default",
+              "size": 42,
+              "color": [
+                70,
+                210,
+                255,
+                255
+              ],
+              "glyphs": [
+                {
+                  "character": "D",
+                  "baseline": [
+                    0,
+                    44
+                  ]
+                },
+                {
+                  "character": "i",
+                  "baseline": [
+                    26,
+                    44
+                  ]
+                },
+                {
+                  "character": "s",
+                  "baseline": [
+                    52,
+                    44
+                  ]
+                },
+                {
+                  "character": "k",
+                  "baseline": [
+                    78,
+                    44
+                  ]
+                },
+                {
+                  "character": " ",
+                  "baseline": [
+                    104,
+                    44
+                  ]
+                },
+                {
+                  "character": "o",
+                  "baseline": [
+                    130,
+                    44
+                  ]
+                },
+                {
+                  "character": "u",
+                  "baseline": [
+                    156,
+                    44
+                  ]
+                },
+                {
+                  "character": "t",
+                  "baseline": [
+                    182,
+                    44
+                  ]
+                },
+                {
+                  "character": "l",
+                  "baseline": [
+                    208,
+                    44
+                  ]
+                },
+                {
+                  "character": "i",
+                  "baseline": [
+                    234,
+                    44
+                  ]
+                },
+                {
+                  "character": "n",
+                  "baseline": [
+                    260,
+                    44
+                  ]
+                },
+                {
+                  "character": "e",
+                  "baseline": [
+                    286,
+                    44
+                  ]
+                }
+              ],
+              "reveal": {
+                "interval_ms": 40
+              },
+              "blur": {
+                "radius": 2,
+                "level": 256,
+                "kernel": "disk_outline"
+              }
+            }
+          },
+          {
+            "id": 2,
+            "rect": [
+              32,
+              28,
+              560,
+              72
+            ],
+            "order": [
+              0,
+              1
+            ],
+            "paint": {
+              "kind": "glyph_run",
+              "font": "default",
+              "size": 42,
+              "color": [
+                250,
+                250,
+                250,
+                255
+              ],
+              "glyphs": [
+                {
+                  "character": "D",
+                  "baseline": [
+                    0,
+                    44
+                  ]
+                },
+                {
+                  "character": "i",
+                  "baseline": [
+                    26,
+                    44
+                  ]
+                },
+                {
+                  "character": "s",
+                  "baseline": [
+                    52,
+                    44
+                  ]
+                },
+                {
+                  "character": "k",
+                  "baseline": [
+                    78,
+                    44
+                  ]
+                },
+                {
+                  "character": " ",
+                  "baseline": [
+                    104,
+                    44
+                  ]
+                },
+                {
+                  "character": "o",
+                  "baseline": [
+                    130,
+                    44
+                  ]
+                },
+                {
+                  "character": "u",
+                  "baseline": [
+                    156,
+                    44
+                  ]
+                },
+                {
+                  "character": "t",
+                  "baseline": [
+                    182,
+                    44
+                  ]
+                },
+                {
+                  "character": "l",
+                  "baseline": [
+                    208,
+                    44
+                  ]
+                },
+                {
+                  "character": "i",
+                  "baseline": [
+                    234,
+                    44
+                  ]
+                },
+                {
+                  "character": "n",
+                  "baseline": [
+                    260,
+                    44
+                  ]
+                },
+                {
+                  "character": "e",
+                  "baseline": [
+                    286,
+                    44
+                  ]
+                }
+              ],
+              "reveal": {
+                "interval_ms": 40
+              }
+            }
+          },
+          {
+            "id": 3,
+            "rect": [
+              31,
+              121,
+              560,
+              72
+            ],
+            "order": [
+              0,
+              0
+            ],
+            "paint": {
+              "kind": "glyph_run",
+              "font": "default",
+              "size": 42,
+              "color": [
+                70,
+                210,
+                255,
+                255
+              ],
+              "glyphs": [
+                {
+                  "character": "S",
+                  "baseline": [
+                    0,
+                    44
+                  ]
+                },
+                {
+                  "character": "q",
+                  "baseline": [
+                    26,
+                    44
+                  ]
+                },
+                {
+                  "character": "u",
+                  "baseline": [
+                    52,
+                    44
+                  ]
+                },
+                {
+                  "character": "a",
+                  "baseline": [
+                    78,
+                    44
+                  ]
+                },
+                {
+                  "character": "r",
+                  "baseline": [
+                    104,
+                    44
+                  ]
+                },
+                {
+                  "character": "e",
+                  "baseline": [
+                    130,
+                    44
+                  ]
+                },
+                {
+                  "character": " ",
+                  "baseline": [
+                    156,
+                    44
+                  ]
+                },
+                {
+                  "character": "f",
+                  "baseline": [
+                    182,
+                    44
+                  ]
+                },
+                {
+                  "character": "a",
+                  "baseline": [
+                    208,
+                    44
+                  ]
+                },
+                {
+                  "character": "c",
+                  "baseline": [
+                    234,
+                    44
+                  ]
+                },
+                {
+                  "character": "e",
+                  "baseline": [
+                    260,
+                    44
+                  ]
+                }
+              ],
+              "reveal": {
+                "interval_ms": 40
+              },
+              "blur": {
+                "radius": 2,
+                "level": 256,
+                "kernel": "square_face"
+              }
+            }
+          },
+          {
+            "id": 4,
+            "rect": [
+              32,
+              122,
+              560,
+              72
+            ],
+            "order": [
+              0,
+              1
+            ],
+            "paint": {
+              "kind": "glyph_run",
+              "font": "default",
+              "size": 42,
+              "color": [
+                250,
+                250,
+                250,
+                255
+              ],
+              "glyphs": [
+                {
+                  "character": "S",
+                  "baseline": [
+                    0,
+                    44
+                  ]
+                },
+                {
+                  "character": "q",
+                  "baseline": [
+                    26,
+                    44
+                  ]
+                },
+                {
+                  "character": "u",
+                  "baseline": [
+                    52,
+                    44
+                  ]
+                },
+                {
+                  "character": "a",
+                  "baseline": [
+                    78,
+                    44
+                  ]
+                },
+                {
+                  "character": "r",
+                  "baseline": [
+                    104,
+                    44
+                  ]
+                },
+                {
+                  "character": "e",
+                  "baseline": [
+                    130,
+                    44
+                  ]
+                },
+                {
+                  "character": " ",
+                  "baseline": [
+                    156,
+                    44
+                  ]
+                },
+                {
+                  "character": "f",
+                  "baseline": [
+                    182,
+                    44
+                  ]
+                },
+                {
+                  "character": "a",
+                  "baseline": [
+                    208,
+                    44
+                  ]
+                },
+                {
+                  "character": "c",
+                  "baseline": [
+                    234,
+                    44
+                  ]
+                },
+                {
+                  "character": "e",
+                  "baseline": [
+                    260,
+                    44
+                  ]
+                }
+              ],
+              "reveal": {
+                "interval_ms": 40
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

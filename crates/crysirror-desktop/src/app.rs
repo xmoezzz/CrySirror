@@ -102,6 +102,15 @@ pub struct RunOptions {
     pub profile_path: Option<PathBuf>,
     pub state_dir: PathBuf,
     pub rendering_path: RenderingPath,
+    /// Permit a native game to remove the title bar in windowed mode.
+    /// Fullscreen selection is independent of this host preference.
+    pub allow_borderless: bool,
+}
+
+/// Desktop accessibility/navigation policy is separate from a game's retained
+/// native window request. A standard window keeps its OS title bar by default.
+fn window_decorations(requested: bool, fullscreen: bool, allow_borderless: bool) -> bool {
+    requested || (!fullscreen && !allow_borderless)
 }
 struct WindowState {
     pending_snapshot: Option<crysirror_runtime::frame::PendingFrame>,
@@ -113,6 +122,7 @@ struct WindowState {
     renderer: Renderer,
     config: wgpu::SurfaceConfiguration,
     minimized: bool,
+    window_policy: Option<(bool, bool)>,
 }
 pub struct App {
     core: Core,
@@ -129,9 +139,10 @@ pub struct App {
     remainder: Duration,
     presented: u64,
     error: Option<anyhow::Error>,
-    /// OS menu bar mirroring engine menu bars (opt-in,
-    /// `CRYSIRROR_NATIVE_MENU=1`); otherwise the engine-drawn bar is used.
+    /// OS menu bar mirroring engine menu bars (default; opt out with
+    /// `CRYSIRROR_ENGINE_MENU=1` for the engine-drawn bar).
     native_menu: Option<crate::native_menu::NativeMenu>,
+    cursor: crate::cursor::CursorPresenter,
 }
 
 pub fn load_fonts(rt: &mut Runtime, override_font: Option<&Path>) -> Result<()> {
@@ -244,40 +255,37 @@ pub fn movie_on(
         "hardware_rt_stats":renderer.hardware_rt_stats(),"vfx":renderer.pbr().map(|p|p.vfx_stats()),"frame_samples":frame_samples,"frame_samples_dropped":frames.saturating_sub(256),"profile":renderer.profile_report_offline()?}),
     )
 }
-pub fn capture_on(
-    gpu: Arc<Gpu>,
-    rt: &mut Runtime,
-    font: Option<&Path>,
-    path: &Path,
-    rendering_path: RenderingPath,
-) -> Result<serde_json::Value> {
-    let previous = rt.assets.is_nonblocking();
-    rt.assets.set_nonblocking(false);
-    let result = capture_ready(gpu, rt, font, path, rendering_path);
-    rt.assets.set_nonblocking(previous);
-    result
-}
-fn capture_ready(
-    gpu: Arc<Gpu>,
-    rt: &mut Runtime,
-    font: Option<&Path>,
-    path: &Path,
-    rendering_path: RenderingPath,
-) -> Result<serde_json::Value> {
-    let mut renderer = Renderer::new(
-        gpu,
-        // Developer diagnostic: the BGRA surface format of macOS windows.
-        if std::env::var_os("CRYSIRROR_CAPTURE_BGRA").is_some() {
-            wgpu::TextureFormat::Bgra8UnormSrgb
-        } else {
-            wgpu::TextureFormat::Rgba8UnormSrgb
-        },
-    );
-    renderer.set_rendering_path(rendering_path)?;
-    capture_ready_with_renderer(&mut renderer, rt, font, path)
+/// Compacted canvases (scene compaction requests) are rasterized once by the
+/// renderer and republished as immutable engine PNGs, so their frozen
+/// snapshot trees stop nesting. A request whose images are still loading is
+/// retried next frame.
+pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result<()> {
+    for request in rt.host.engine.canvases.materialize_requests() {
+        let Some(image) = renderer.materialize_snapshot(&mut rt.assets, request.client, request.size, &request.layers)?
+        else {
+            continue;
+        };
+        let mut png = Vec::new();
+        image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+        // FNV-1a over the pixels names the immutable image.
+        let hash = image.as_raw().iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+        let path = format!(
+            "__crysirror/canvas-{}-{}x{}-{hash:016x}.png",
+            request.surface, request.size[0], request.size[1]
+        );
+        let client = crysirror_core::state::ClientId(request.client);
+        rt.assets.register_generated(client, &path, png)?;
+        let engine = &mut rt.host.engine;
+        engine.canvases.resolve_materialized(&request, &path, &mut engine.layers)?;
+        log::debug!("canvas {} materialized as {path}", request.surface);
+    }
+    renderer.advance_frame_histories(&mut rt.assets,rt.host.engine.layers.frame(rt.project.canvas)?,rt.project.canvas)?;
+    Ok(())
 }
 /// Explicit capture fence on the live renderer, retaining GPU simulation state.
-fn capture_existing(
+pub(crate) fn capture_existing(
     renderer: &mut Renderer,
     rt: &mut Runtime,
     font: Option<&Path>,
@@ -353,6 +361,22 @@ impl App {
                 None
             }
         };
+        #[cfg(target_os = "windows")]
+        let event_loop = {
+            use winit::platform::windows::EventLoopBuilderExtWindows;
+            EventLoop::builder()
+                .with_msg_hook(crate::native_menu::accelerator_hook)
+                .build()?
+        };
+        #[cfg(target_os = "macos")]
+        let event_loop = {
+            use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+            EventLoop::builder()
+                .with_activation_policy(ActivationPolicy::Regular)
+                .with_default_menu(false)
+                .build()?
+        };
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let event_loop = EventLoop::new()?;
         let mut app = Self {
             core,
@@ -369,6 +393,7 @@ impl App {
             remainder: Duration::ZERO,
             presented: 0,
             native_menu: None,
+            cursor: Default::default(),
             error: None,
         };
         let event_result = event_loop.run_app(&mut app);
@@ -445,10 +470,30 @@ impl App {
             )?,
         );
         window.set_ime_allowed(true);
-        // The engine-drawn menu bar inside the window is the default on every
-        // platform; CRYSIRROR_NATIVE_MENU=1 mirrors it into the OS menu bar.
-        if std::env::var_os("CRYSIRROR_NATIVE_MENU").is_some_and(|v| v == "1") {
-            self.native_menu = Some(crate::native_menu::NativeMenu::new(&self.core.rt().project.name));
+        self.focused = window.has_focus();
+        self.core.rt().host.window_focused = Some(self.focused);
+        // The display VMs size their windows against, in the same logical
+        // units as the window. winit has no work-area query; the whole
+        // monitor is reported as the work area.
+        if let Some(monitor) = window.current_monitor().or_else(|| el.primary_monitor()) {
+            let size = monitor.size().to_logical::<f64>(monitor.scale_factor());
+            let (w, h) = (size.width.round() as u32, size.height.round() as u32);
+            if w > 0 && h > 0 {
+                self.core.rt().host.display = Some(crysirror_core::service::DisplayInfo {
+                    screen: [w, h],
+                    work: [0, 0, w as i32, h as i32],
+                });
+            }
+        }
+        // Engine menu bars are presented by the OS menu bar, outside the
+        // game canvas. CRYSIRROR_ENGINE_MENU=1 keeps the engine-drawn bar
+        // inside the window (debugging).
+        if !std::env::var_os("CRYSIRROR_ENGINE_MENU").is_some_and(|v| v == "1") {
+            let name = self.core.rt().project.name.clone();
+            match crate::native_menu::NativeMenu::new(&name, &window) {
+                Ok(menu) => self.native_menu = Some(menu),
+                Err(e) => log::warn!("native menu bar unavailable: {e:#}"),
+            }
         }
         let surface = self.instance.create_surface(window.clone())?;
         let gpu = Arc::new(pollster::block_on(Gpu::request_for(
@@ -501,6 +546,9 @@ impl App {
             caps.alpha_modes
         );
         let mut renderer = Renderer::new(gpu, format);
+        if std::env::var_os("CRYSIRROR_CPU_FRAME_HISTORY").is_none() {
+            self.core.rt().host.mesh_frame_history = Some(renderer.mesh_frame_history_provider());
+        }
         renderer.set_scene3d(self.core.rt().render_scene3d()?.as_ref())?;
         renderer.set_pbr_scene(self.core.rt().render_pbr()?)?;
         renderer.set_rendering_path(self.options.rendering_path)?;
@@ -515,6 +563,7 @@ impl App {
             renderer,
             config,
             minimized: false,
+            window_policy: None,
         });
         self.last_tick = Instant::now();
         self.remainder = Duration::ZERO;
@@ -629,6 +678,7 @@ impl App {
             )?;
             self.input.buttons_pressed = 0;
         }
+        materialize_canvases(&mut w.renderer, self.core.rt())?;
         if !self.core.poll_tick(&mut self.audio)? {
             w.window.request_redraw();
             return Ok(());
@@ -652,12 +702,26 @@ impl App {
         if let Some((_, visible)) = self.core.rt().host.engine.ui.cursor {
             w.window.set_cursor_visible(visible);
         }
+        self.cursor.sync(el, &w.window, &self.core.rt().host.engine.ui);
         if let Some((_, enabled)) = self.core.rt().host.engine.ui.fullscreen {
             if w.window.fullscreen().is_some()!=enabled{w.window.set_fullscreen(enabled.then_some(winit::window::Fullscreen::Borderless(None)));}
         }
         if let Some((_, policy)) = self.core.rt().host.engine.ui.window_policy {
-            w.window.set_decorations(policy.decorated);
-            w.window.set_resizable(policy.resizable);
+            let decorated = window_decorations(
+                policy.decorated,
+                w.window.fullscreen().is_some(),
+                self.options.allow_borderless,
+            );
+            let next = (decorated, policy.resizable);
+            if w.window_policy != Some(next) {
+                w.window.set_decorations(decorated);
+                w.window.set_resizable(policy.resizable);
+                log::info!(
+                    "window policy: requested decorations={}, applied decorations={}, resizable={}",
+                    policy.decorated, decorated, policy.resizable
+                );
+                w.window_policy = Some(next);
+            }
         }
         if let Some((_, title)) = &self.core.rt().host.engine.ui.title {
             w.window.set_title(title);
@@ -788,6 +852,7 @@ impl App {
             }
             WindowEvent::Focused(focused) => {
                 self.focused = focused;
+                self.core.rt().host.window_focused = Some(focused);
                 self.input = InputFrame::default();
                 #[cfg(feature = "gamepad")]
                 if let Some(backend) = &mut self.gamepad {
@@ -960,6 +1025,7 @@ impl ApplicationHandler for App {
     }
     fn suspended(&mut self, el: &ActiveEventLoop) {
         self.window = None;
+        self.core.rt().host.window_focused = None;
         if let Err(error) = self.audio.pause() {
             self.fail(el, error);
         }
@@ -1006,6 +1072,13 @@ mod audio_frame_tests {
         service::{AudioParameters, AudioRequest, HostServices, PcmAudio},
         state::ClientId,
     };
+    #[test]
+    fn desktop_title_bar_policy_preserves_fullscreen_and_explicit_opt_out() {
+        assert!(window_decorations(false, false, false));
+        assert!(!window_decorations(false, false, true));
+        assert!(!window_decorations(false, true, false));
+        assert!(window_decorations(true, false, true));
+    }
     fn runtime() -> (tempfile::TempDir, Runtime) {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("assets")).unwrap();

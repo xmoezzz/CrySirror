@@ -98,6 +98,9 @@ struct Instance {
     _resource: Arc<PreparedSound>,
 }
 impl AudioSource for Instance {
+    fn has_replay_gain(&self) -> bool {
+        self._resource.info.has_replay_gain
+    }
     fn sample_rate(&self) -> u32 {
         self.inner.sample_rate()
     }
@@ -274,6 +277,7 @@ impl AudioResources {
                 .rsplit_once('.')
                 .map(|v| v.1.to_owned());
             let mut source = decoder::open_asset(snapshot.clone(), extension.as_deref())?;
+            let mut has_replay_gain = source.has_replay_gain();
             let rate = source.sample_rate();
             let mut frame_limit = asset.frame_limit;
             let mut stored_len = len;
@@ -381,6 +385,7 @@ impl AudioResources {
                 }
                 frames = Some(count);
             }
+            has_replay_gain |= source.has_replay_gain();
             drop(source);
             frames = match (frame_limit, frames) {
                 (Some(a), Some(b)) => Some(a.min(b)),
@@ -401,6 +406,7 @@ impl AudioResources {
                     source_rate: rate,
                     source_frames: frames,
                     encoded_bytes: stored_len as u64,
+                    has_replay_gain,
                 },
             })))
         };

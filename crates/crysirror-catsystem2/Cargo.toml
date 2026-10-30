@@ -1,0 +1,27 @@
+[package]
+name = "crysirror-catsystem2"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "First-class CatSystem2 KCS bytecode and native semantic adapter"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+crysirror-core.workspace = true
+crysirror-tasks.workspace = true
+crysirror-resource.workspace = true
+crysirror-scene.workspace = true
+crysirror-runtime = { workspace = true, optional = true }
+quick-xml = "0.41"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+[features]
+runtime = ["dep:crysirror-runtime"]
+
+[dev-dependencies]
+crysirror-formats-arc.workspace = true
+

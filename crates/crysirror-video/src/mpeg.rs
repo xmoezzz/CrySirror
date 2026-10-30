@@ -42,10 +42,10 @@ pub fn sequence_info(reader: &mut (impl Read + Seek)) -> Result<Option<SequenceI
     read.context("MPEG sequence read")?;
     restored.context("restore MPEG sequence cursor")?;
     Ok(
-        siglus_assets::mpeg2::find_sequence_header(&head).map(|h| SequenceInfo {
+        crate::mpeg_probe::find_sequence_header(&head).map(|h| SequenceInfo {
             width: u32::from(h.width),
             height: u32::from(h.height),
-            frame_ms: siglus_assets::mpeg2::fps_from_frame_rate_code(h.frame_rate_code)
+            frame_ms: crate::mpeg_probe::fps_from_frame_rate_code(h.frame_rate_code)
                 .map_or(1000. / 29.97, |fps| 1000. / f64::from(fps)),
         }),
     )

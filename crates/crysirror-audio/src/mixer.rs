@@ -3,6 +3,7 @@
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Deterministic, device-free stereo mixer. All controls are client scoped;
 //! decoded PCM and decoder handles are derived playback resources, never saves.
+mod release;
 use crate::decoder::{AudioSource, Clip, SourceBufferStatus, SourceRead, StereoFrame};
 use crate::doppler::{DopplerInfo, DopplerSettings};
 use crate::envelope::Ramp;

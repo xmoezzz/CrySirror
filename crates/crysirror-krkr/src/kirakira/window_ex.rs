@@ -1534,17 +1534,19 @@ fn menu_item_property_set(
 }
 
 fn menu_item_popup_ex(
-    runtime: &mut Runtime<KrkrHost>,
+    _runtime: &mut Runtime<KrkrHost>,
     _this_obj: Option<ObjectHandle>,
     _args: Vec<Variant>,
 ) -> Result<Variant> {
     // `popupEx(flags, x, y, window, rect, menulist)` (`main.cpp:1369-1408`)
-    // builds a Win32 menu from the list and tracks it; the selection comes back
-    // as the MenuItem object. Building the menu is what needs the engine's menu
-    // backing, and with no menu to show the reference's own outcome is the
-    // cleared result — void.
-    log_gap_once(runtime, "MenuItem.popupEx", CAP_MENUS);
-    Ok(Variant::Void)
+    // builds and tracks a Win32 popup, returning the selected MenuItem object.
+    // No host popup was displayed here, so returning void would incorrectly
+    // acknowledge a user cancellation. Menu bars do not supply this synchronous
+    // popup continuation.
+    Err(crate::natives::unsupported(
+        "MenuItem.popupEx",
+        "native synchronous popup continuation",
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1664,10 +1666,31 @@ fn system_get_display_monitors(
     for value in &args {
         let _ = value.to_integer()?;
     }
-    // `EnumDisplayMonitors` with no host monitor backend enumerates nothing;
-    // the reference still hands back the array it filled.
-    log_gap_once(runtime, "System.getDisplayMonitors", CAP_MONITORS);
-    Ok(Variant::Object(runtime.alloc_array_object(Vec::new())))
+    // The presenting host's display is the one monitor (canvas when the host
+    // has no display model).
+    let info = monitor_info(runtime);
+    Ok(Variant::Object(runtime.alloc_array_object(vec![info])))
+}
+
+/// windowEx `MONITORINFOEX` dictionary: `monitor` and `work` rectangles as
+/// `%[x, y, w, h]`, `primary`, `name`.
+fn monitor_info(runtime: &mut Runtime<KrkrHost>) -> Variant {
+    let ([sw, sh], work) = runtime.host().display_rects();
+    let rect = |runtime: &mut Runtime<KrkrHost>, r: [i64; 4]| {
+        let d = runtime.alloc_dictionary_object();
+        for (k, v) in ["x", "y", "w", "h"].into_iter().zip(r) {
+            runtime.set_object_member(d, k, Variant::Integer(v));
+        }
+        Variant::Object(d)
+    };
+    let monitor = rect(runtime, [0, 0, sw, sh]);
+    let work = rect(runtime, work);
+    let d = runtime.alloc_dictionary_object();
+    runtime.set_object_member(d, "monitor", monitor);
+    runtime.set_object_member(d, "work", work);
+    runtime.set_object_member(d, "primary", Variant::Integer(1));
+    runtime.set_object_member(d, "name", Variant::String("CrySirror".into()));
+    Variant::Object(d)
 }
 
 fn system_get_monitor_info(
@@ -1676,9 +1699,9 @@ fn system_get_monitor_info(
     args: Vec<Variant>,
 ) -> Result<Variant> {
     // `getMonitorInfo(near, …)` (`main.cpp:1852-1893`). `near` is read before
-    // the parameter count is checked; the two-parameter form needs a `Window`
-    // object, which is the one type check in the member.
-    let _near = if args.is_empty() {
+    // the parameter count is checked. Preserve the original IsInstanceOf
+    // truthiness bug below: TJS_S_FALSE is 2, not zero.
+    let near = if args.is_empty() {
         false
     } else {
         args[0].to_integer()? != 0
@@ -1686,11 +1709,17 @@ fn system_get_monitor_info(
     match args.len() {
         0 => {}
         2 => {
-            let window = args[1]
-                .object_handle()
-                .filter(|handle| object_is_instance_of(runtime, *handle, "Window"));
-            if window.is_none() {
-                return Err(TjsError::invalid_param());
+            let object=args[1].object_handle().ok_or_else(TjsError::invalid_param)?;
+            if !object_is_instance_of(runtime,object,"Window") {
+                // main.cpp:1867 tests IsInstanceOf's HRESULT as a boolean:
+                // S_FALSE == 2 still passes. GetHWND ignores a missing member
+                // and converts its initially-void value to zero (main.cpp:47).
+                // A NULL handle with DEFAULTTONEAREST selects the primary
+                // display; DEFAULTTONULL returns no monitor. This uses only
+                // the client-owned display model, never an OS HWND lookup.
+                let handle=runtime.resolve_object_member(object,"HWND")?.to_integer()?;
+                if handle!=0 {return Err(crate::natives::unsupported("System.getMonitorInfo","foreign native window handles"));}
+                if !near {return Ok(Variant::Void);}
             }
         }
         3 => {
@@ -1704,10 +1733,8 @@ fn system_get_monitor_info(
         }
         _ => return Err(TjsError::bad_param_count()),
     }
-    // No monitor backend: `MonitorFromPoint`-style lookups find nothing and
-    // the result stays cleared.
-    log_gap_once(runtime, "System.getMonitorInfo", CAP_MONITORS);
-    Ok(Variant::Void)
+    // Every point maps to the host's single display.
+    Ok(monitor_info(runtime))
 }
 
 fn system_get_cursor_pos(

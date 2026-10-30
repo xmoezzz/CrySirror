@@ -74,6 +74,13 @@ const VFX_ALIASES: &[(&str, &str)] = &[
     ("EventHandler", "VfxEventHandler"),
     ("EmitterSpec", "VfxEmitterSpec"),
     ("SystemSpec", "VfxSystemSpec"),
+    ("ScreenSpriteTarget", "VfxScreenSpriteTarget"),
+    ("ScreenSpriteOptions", "VfxScreenSpriteOptions"),
+    ("SimulationClock", "VfxSimulationClock"),
+    ("SequenceRng", "VfxSequenceRng"),
+    ("SequenceExchange", "VfxSequenceExchange"),
+    ("FallingAtlasSpec", "VfxFallingAtlasSpec"),
+    ("SystemSequenceState", "VfxSystemSequenceState"),
     ("Particle", "VfxParticle"),
     ("ParticleEvent", "VfxParticleEvent"),
     ("VfxStats", "VfxStats"),
@@ -113,7 +120,7 @@ fn vfx_type_aliases(ty: &str) -> String {
 
 fn vfx_doc_items() -> Vec<api_doc::RustItem> {
     let mut result = Vec::new();
-    for file in ["schema", "simulation"] {
+    for file in ["schema", "simulation", "screen", "falling_atlas"] {
         let source = read(&format!("crates/crysirror-vfx/src/{file}.rs"));
         // Preserve serde's multiline tag/rename metadata for the deliberately
         // small generic parser, which normally sees single-line attributes.
@@ -169,7 +176,7 @@ fn vfx_doc_items() -> Vec<api_doc::RustItem> {
             }
             item.name = (*alias).to_owned();
             for member in &mut item.members {
-                member.ty = vfx_type_aliases(&member.ty);
+                member.ty = vfx_type_aliases(&member.ty.replace("crate::screen::", "").replace("crate::falling_atlas::", ""));
             }
             result.push(item);
         }
@@ -186,10 +193,16 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-scene/src/components.rs",
         "crates/crysirror-scene/src/world.rs",
         "crates/crysirror-scene/src/layer.rs",
+        "crates/crysirror-scene/src/layer/motion.rs",
+        "crates/crysirror-scene/src/layer/crossfade.rs",
+        "crates/crysirror-scene/src/layer/crossfade_effect.rs",
         "crates/crysirror-scene/src/canvas.rs",
         "crates/crysirror-core/src/service.rs",
+        "crates/crysirror-core/src/service/font.rs",
         "crates/crysirror-image/src/associated.rs",
         "crates/crysirror-image/src/effects.rs",
+        "crates/crysirror-image/src/sprite_alpha.rs",
+        "crates/crysirror-scene/src/sprite.rs",
         "crates/crysirror-image/src/vector.rs",
         "crates/crysirror-image/src/transition.rs",
         "crates/crysirror-image/src/row_copy.rs",
@@ -200,6 +213,8 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-resource/src/file.rs",
         "crates/crysirror-resource/src/lzss.rs",
         "crates/crysirror-resource/src/wave.rs",
+        "crates/crysirror-resource/src/pe.rs",
+        "crates/crysirror-resource/src/pe_menu.rs",
         "crates/crysirror-siglus-vm/src/message.rs",
         "crates/crysirror-runtime/src/media.rs",
         "crates/crysirror-runtime/src/assets_async.rs",
@@ -225,6 +240,7 @@ fn generate() -> api_doc::ApiDocs {
         "crates/crysirror-acoustics/src/direct.rs",
         "crates/crysirror-scene/src/ui/menu.rs",
         "crates/crysirror-scene/src/ui.rs",
+        "crates/crysirror-scene/src/ui/hit_mask.rs",
         "crates/crysirror-scene/src/material.rs",
         "crates/crysirror-scene/src/sequence.rs",
         "crates/crysirror-scene/src/physics.rs",
@@ -250,6 +266,11 @@ fn generate() -> api_doc::ApiDocs {
     let extent = json!({"extent": [1, 1, 1]});
     let data = vec![
         d("ImageEffect","Bitmap.applyEffectAsync; shared worker effects",None),
+        d("SpriteAlpha","ImageEffect.sprite_alpha.spec; reusable sprite alpha normalization",None),
+        d("StripeReveal","ImageEffect.stripe_reveal.spec; reusable stripe/stagger threshold masks",None),
+        d("SheetSequence","Rust shared sprite sheet timing and UV sequence",None),
+        d("SheetLoop","SheetSequence.mode",None),
+        d("WidgetInteraction","HostServices EngineQuery::UiInteraction; pointer/focus state and current-tick activation serial",None),
         d("VectorPath","ImageEffect.vector.path",None),
         d("PathCommand","VectorPath.commands",None),
         d("PathStroke","VectorPath.stroke",None),
@@ -571,6 +592,21 @@ fn generate() -> api_doc::ApiDocs {
             sample::<vfx::EmitterSpec>(e.clone()),
         ),
         d(
+            "VfxScreenSpriteTarget",
+            "`VfxEmitterSpec.screen`; owned CPU sprite publication into a retained pixel-plane mesh layer",
+            None,
+        ),
+        d(
+            "VfxScreenSpriteOptions",
+            "Rust screen-sprite packer canvas and anchor options",
+            None,
+        ),
+        d("VfxSimulationClock", "`VfxSystemSpec.clock`; separate engine or explicit tick/wall-time sources", None),
+        d("VfxSequenceRng", "`VfxSystemSpec.sequence_rng`; explicit serializable integer stream", None),
+        d("VfxSequenceExchange", "`VfxSystemSpec.sequence_exchange`; fenced stream replacement acknowledged by workers", None),
+        d("VfxFallingAtlasSpec", "`VfxEmitterSpec.falling_atlas`; bounded CPU pixel-motion and atlas node", None),
+        d("VfxSystemSequenceState", "Worker-completed state queried through `Vfx.sequenceStatus`", None),
+        d(
             "VfxParameterValue",
             "`VfxSystemSpec.parameters` typed values; `Vfx.setParameter` accepts the existing type's raw payload",
             None,
@@ -706,6 +742,10 @@ fn generate() -> api_doc::ApiDocs {
             None,
         ),
         d("Paint", "`LayerSpec.paint`", None),
+        d("SubtreeTransitionEffect", "`LayerCommand.begin_crossfade_effect.effect`; reusable isolated subtree effects", None),
+        d("RuleWipe", "Shared subtree rule image and soft-edge levels", None),
+        d("ImageSampling", "`LayerSpec.sampling`; independently addressed image axes", sample::<layer::ImageSampling>(json!({"address_u":"repeat","address_v":"clamp_to_edge"}))),
+        d("TextureAddressMode", "`ImageSampling.address_u` and `address_v`", None),
         d(
             "PositionedGlyph",
             "`Paint.glyph_run.glyphs`",
@@ -718,6 +758,8 @@ fn generate() -> api_doc::ApiDocs {
             sample::<layer::GlyphReveal>(json!({"interval_ms":40})),
         ),
         d("GlyphRevealStatus", "Engine glyph reveal query", None),
+        d("GlyphBlur", "`Paint.glyph_run.blur`; shared coverage resource", sample::<layer::GlyphBlur>(json!({"radius":2,"level":256,"kernel":"disk_outline"}))),
+        d("GlyphCoverageKernel", "`GlyphBlur.kernel`; defaults to weighted_blur for existing records", None),
         d(
             "CanvasSurface",
             "`Canvases.get`",
@@ -739,14 +781,15 @@ fn generate() -> api_doc::ApiDocs {
             "`HostServices.media_request` (script `Media.play` options use `loop`, `audio`, `gain`)",
             None,
         ),
-        d("MediaPhase", "`HostServices.media_status`", None),
-        d("MediaInfo", "`HostServices.media_status`", None),
+        d("MediaPhase", "`HostServices.media_info`", None),
+        d("MediaInfo", "`HostServices.media_info`", None),
         d(
             "MediaOptions",
             "Rust shared media service options (script uses `loop` instead of `looping`)",
             sample::<crysirror_runtime::media::MediaOptions>(e.clone()),
         ),
         d("MediaState", "`MediaStatus.state`", None),
+        d("MediaClock", "`MediaOptions.clock`, `Media.setClock`; engine or sampled external time", None),
         d("MediaStatus", "`Media.status`", None),
         d(
             "LayerFilter",
@@ -823,6 +866,21 @@ fn generate() -> api_doc::ApiDocs {
             None,
         ),
         d("OperationState", "OperationStatus.state", None),
+        d("FontJob", "HostServices.font_library asynchronous registration ticket", None),
+        d("FontHandle", "FontLibrary client-owned immutable face lease", None),
+        d("FontLoadSource", "FontLoadSpec.source capability path or immutable bytes", None),
+        d("FontLoadSpec", "FontLibrary.begin", None),
+        d("FontInfo", "FontLoadState.Ready / FontLibrary.resolve", None),
+        d("FontLoadState", "FontLibrary.status", None),
+        d("MotionProperty", "Layer/UI motion track component", None),
+        d("MotionTrackSpec", "Layers.beginMotion / Ui.beginMotion", sample::<layer::motion::MotionTrackSpec>(json!({"property":"x","to":100,"duration":20}))),
+        d("MotionTrackStatus", "MotionStatus.tracks", None),
+        d("MotionStatus", "Layers.motionStatus / Ui.motionStatus / EngineQuery", None),
+        d("WidgetHitMask", "WidgetSpec.hit_mask / Ui.setHitMask", sample::<ui::WidgetHitMask>(json!({"size":[1,1],"coverage":[255],"threshold":1}))),
+        d("MenuTemplate", "Shared PE standard menu template parser", None),
+        d("MenuTemplateItem", "MenuTemplate.items recursive native menu data", None),
+        d("PeMenuResource", "PeData.menu_templates resource identity/language/template", None),
+        d("PeResourceName", "PeMenuResource.name native resource identity", None),
         d("UiEvent", "Ui.events and native engine event queries", None),
         d("WidgetId", "UiEvent.widget client/local identity", None),
     ];
@@ -845,7 +903,12 @@ fn generate() -> api_doc::ApiDocs {
         data,
         adapters: vec![
             ("avg32".into(), config("crates/crysirror-avg32/src/lib.rs")),
+            ("bgi", config("crates/crysirror-bgi/src/lib.rs")),
+            ("circus", config("crates/crysirror-circus/src/adapter.rs")),
+            ("catsystem2", config("crates/crysirror-catsystem2/src/adapter.rs")),
             ("krkr", config("crates/crysirror-krkr/src/adapter.rs")),
+            ("nscripter", config("crates/crysirror-nscripter/src/lib.rs")),
+            ("rfvp", config("crates/crysirror-rfvp/src/adapter.rs")),
             (
                 "reallive",
                 config("crates/crysirror-reallive/src/adapter.rs"),
@@ -1090,6 +1153,9 @@ fn documented_text_input_methods_mutate_engine_owned_state_without_native_vm() {
     call("insertText", json!(["界"])).unwrap();
     call("setTitle", json!(["engine UI"])).unwrap();
     call("setCursorVisible", json!([false])).unwrap();
+    let frozen=call("snapshotLayers",json!([7])).unwrap().to_json();
+    assert!(frozen.as_array().unwrap().iter().any(|layer|layer["paint"]["text"]=="あ界"));
+    assert!(call("snapshotLayers",json!([999])).is_err());
     let ui = &app.runtime().unwrap().host.engine.ui;
     let owner = ui.focus.unwrap().owner;
     assert_eq!(ui.get(owner, 7).unwrap().text, "あ界");
@@ -1102,4 +1168,29 @@ fn audio_transport_keeps_existing_three_argument_typescript_calls_compatible() {
     let ts = generate().typescript;
     assert!(ts.contains("scheduleVoiceResume(handle: Record<string, any>, delay_ms: number, fade_ms: number): void;"));
     assert!(ts.contains("scheduleVoiceResumeWithOptions(handle: Record<string, any>, delay_ms: number, fade_ms: number, options: Record<string, any>): void;"));
+}
+
+#[test]
+fn documented_subtree_effect_is_engine_owned_without_a_native_vm() {
+    use crysirror_engine::{App,Value};
+    let root=tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("assets")).unwrap();
+    std::fs::write(root.path().join("project.json"),serde_json::to_vec(&json!({"schema":2,"name":"subtree-api","content_revision":"1","assets":"assets","canvas":[64,64],"clients":[{"name":"main","adapter":"crysirror-script-v1","game":"test"}]})).unwrap()).unwrap();
+    let rt=crysirror_runtime::Runtime::load(&root.path().join("project.json"),&root.path().join("state")).unwrap();
+    let mut app=App::new(rt,"main").unwrap(); app.init().unwrap(); app.start().unwrap();
+    let cx=app.context(); let layers=cx.singleton("Layers").unwrap();
+    for (id,color) in [(1,[255,0,0,255]),(2,[0,0,255,255])] {
+        cx.call(layers,"put",&[Value::from_json(json!({"id":id,"rect":[0,0,32,32],"paint":{"kind":"solid","color":color}}))]).unwrap();
+    }
+    let args=[Value::Int(1),Value::Int(2),Value::Int(1000),Value::from_json(json!({"kind":"blur","before":[2,1],"after":[0,2]}))];
+    cx.call(layers,"beginCrossfadeEffect",&args).unwrap();
+    let status=cx.call(layers,"crossfadeStatus",&[Value::Int(1)]).unwrap().to_json();
+    assert_eq!(status["effect"]["kind"],"blur");
+    assert_eq!(status["effect"]["before"],json!([2,1]));
+    assert_eq!(status["duration_ms"],1000);
+    cx.call(layers,"endCrossfade",&[Value::Int(1)]).unwrap();
+    assert!(cx.call(layers,"crossfadeStatus",&[Value::Int(1)]).unwrap().to_json().is_null());
+    let invalid=[Value::Int(1),Value::Int(2),Value::Int(1000),Value::from_json(json!({"kind":"blur","before":[129,1],"after":[0,2]}))];
+    assert!(cx.call(layers,"beginCrossfadeEffect",&invalid).is_err());
+    assert!(cx.call(layers,"crossfadeStatus",&[Value::Int(1)]).unwrap().to_json().is_null());
 }

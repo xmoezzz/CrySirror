@@ -38,7 +38,7 @@ impl TextSystem {
                 .all(|v| v.is_finite() && v.abs() <= 1_000_000.),
             "invalid glyph baseline"
         );
-        let (_, digest) = self.fonts.get(font).expect("glyph_metrics checked font");
+        let digest = self.font_digest(font)?;
         Ok(format!(
             "glyph:{digest}:{}:{:08x}:{:08x}:{:08x}",
             request.glyph_id,

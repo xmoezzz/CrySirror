@@ -105,6 +105,25 @@ fn actual_cxdec_archives_open_and_sample_entries_verify() {
                 }
             }
         }
+        // Opt-in local diagnostic: write entries whose names end with one of
+        // CRYSIRROR_CXDEC_DUMP_EXT under CRYSIRROR_CXDEC_DUMP/<archive>/.
+        if let Some(dir) = std::env::var_os("CRYSIRROR_CXDEC_DUMP") {
+            let exts: Vec<String> = std::env::var("CRYSIRROR_CXDEC_DUMP_EXT")
+                .unwrap_or_else(|_| ".tjs,.ks".into())
+                .split(',')
+                .map(|x| x.to_ascii_lowercase())
+                .collect();
+            for e in entries.iter() {
+                let lower = e.path.to_ascii_lowercase();
+                if !exts.iter().any(|x| lower.ends_with(x.as_str())) || e.path.contains("..") {
+                    continue;
+                }
+                let d = read_all(archive.open(e.id, &ctx).unwrap().as_ref(), 256 << 20).unwrap();
+                let out = PathBuf::from(&dir).join(&name).join(&e.path);
+                std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+                std::fs::write(out, d).unwrap();
+            }
+        }
         if let Some(s) = entries
             .iter()
             .find(|e| e.path.eq_ignore_ascii_case("startup.tjs"))

@@ -304,16 +304,10 @@ pub fn wrap_ranges(
 }
 
 impl TextSystem {
-    fn rich_face(&self, alias: &str) -> Result<rustybuzz::Face<'_>> {
-        let (bytes, index) = self
-            .font_sources
-            .get(alias)
-            .with_context(|| format!("font alias '{alias}' is not loaded"))?;
-        rustybuzz::Face::from_slice(bytes, *index).context("font shaping face")
-    }
     fn choose_font<'a>(&self, text: &str, style: &'a TextStyle) -> Result<&'a str> {
         for alias in &style.fonts {
-            let f = self.rich_face(alias)?;
+            let (bytes,index) = self.font_source(alias)?;
+            let f = rustybuzz::Face::from_slice(&bytes,index).context("shaping face")?;
             if text
                 .chars()
                 .all(|c| ignorably_missing(c) || f.glyph_index(c).is_some())
@@ -365,7 +359,8 @@ impl TextSystem {
             ..Default::default()
         };
         for (range, font, s) in groups {
-            let face = self.rich_face(&font)?;
+            let (bytes,index) = self.font_source(&font)?;
+            let face = rustybuzz::Face::from_slice(&bytes,index).context("shaping face")?;
             let scale = style.size / face.units_per_em() as f32;
             shaped.ascent = shaped.ascent.max(face.ascender() as f32 * scale);
             let mut buffer = rustybuzz::UnicodeBuffer::new();
@@ -432,7 +427,7 @@ impl TextSystem {
                 };
                 shaped.glyphs.push(GlyphPlacement {
                     font: font.clone(),
-                    font_digest: self.fonts[&font].1.clone(),
+                    font_digest: self.font_digest(&font)?,
                     glyph_id: info.glyph_id as u16,
                     size: style.size,
                     position: offset,

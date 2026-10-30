@@ -54,7 +54,7 @@ pub(crate) fn handle(owner: u32, value: &Value) -> Result<AudioResourceHandle> {
     })
 }
 fn info(i: AudioResourceInfo) -> serde_json::Value {
-    json!({"source_rate":i.source_rate,"source_frames":i.source_frames,"encoded_bytes":i.encoded_bytes})
+    json!({"source_rate":i.source_rate,"source_frames":i.source_frames,"encoded_bytes":i.encoded_bytes,"has_replay_gain":i.has_replay_gain})
 }
 fn arg(args: &[Value], i: usize) -> Result<&Value> {
     args.get(i).context("audio resource argument required")

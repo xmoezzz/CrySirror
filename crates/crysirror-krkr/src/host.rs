@@ -30,6 +30,7 @@ pub struct LayerState {
     /// Drawing clip (krkr setClip) in image pixels; `None` is the whole image.
     pub draw_clip: Option<[i64; 4]>,
     pub image_source: Option<crysirror_core::image_processing::ImageInput>,
+    pub source_lost: String,
     pub regions: crysirror_core::region_map::RegionMap,
     pub slot: u32,
     pub window: usize,
@@ -100,9 +101,13 @@ pub struct KrkrHost {
     pub executable: Option<String>,
     /// KAGParserEx linked: new parsers use the extended format.
     pub kag_ex: bool,
+    /// Decoder capability names validated against this client's shared host.
+    pub(crate) audio_codecs: BTreeSet<String>,
+    pub(crate) ext_kag: bool,
     pub(crate) text_render: crate::text_render_plugin::State,
     pub(crate) motion: crate::motion_plugin::State,
     pub(crate) csv: crate::csv_plugin::State,
+    pub(crate) line_parser: crate::line_plugin::State,
     pub(crate) psbfile: crate::psbfile_plugin::State,
     pub(crate) draws: crate::draw_plugin::State,
     pub image_job: Option<(usize, crysirror_core::image_processing::ImageJob, [bool; 2])>,
@@ -110,14 +115,23 @@ pub struct KrkrHost {
     pub writes: std::collections::VecDeque<Box<dyn crysirror_core::service::StorageWrite>>,
     pub can_suspend: bool,
     pub sounds: crate::sound::Sounds,
+    pub videos: crate::video::Videos,
+    pub alpha_movies: crate::alpha_movie::AlphaMovies,
+    pub(crate) cursors: crate::pointer::Cursors,
     pub client: u32,
     pub storage: Option<Storage>,
     pub images: Option<Arc<dyn ImageMetadata>>,
     pub text_measurement: Option<Arc<dyn TextMeasurement>>,
+    pub(crate) fonts:crate::font_resources::Fonts,
     pub input: crysirror_core::service::InputFrame,
     pub now: u64,
+    /// The presenting host's display (`System.screenWidth`, windowEx monitors);
+    /// `None` falls back to the canvas.
+    pub display: Option<crysirror_core::service::DisplayInfo>,
     pub canvas: [u32; 2],
     pub font: String,
+    /// Native Font.rasterizer preference; portable engine rendering is shared.
+    pub font_rasterizer_preference: i64,
     pub log: Vec<String>,
     pub batches: Vec<Batch>,
     pub layers: BTreeMap<usize, LayerState>,
@@ -159,10 +173,13 @@ impl KrkrHost {
             protect: Default::default(),
             executable: None,
             kag_ex: false,
+            audio_codecs: BTreeSet::new(),
+            ext_kag: false,
             text_render: Default::default(),
             motion: Default::default(),
             transitions: Default::default(),
             csv: Default::default(),
+            line_parser: Default::default(),
             psbfile: Default::default(),
             image_job: None,
             draws:Default::default(),
@@ -170,14 +187,20 @@ impl KrkrHost {
             writes: Default::default(),
             can_suspend: true,
             sounds: Default::default(),
+            videos: Default::default(),
+            alpha_movies: Default::default(),
+            cursors: Default::default(),
             client: 1,
             storage: None,
             images: None,
             text_measurement: None,
+            fonts:Default::default(),
             input: Default::default(),
             now: 0,
+            display: None,
             canvas,
             font,
+            font_rasterizer_preference: 1,
             log: Vec::new(),
             batches: Vec::new(),
             layers: BTreeMap::new(),
@@ -249,6 +272,10 @@ impl KrkrHost {
                 if let Some(l) = self.layers.values_mut().find(|l| l.slot as u64 == id) {
                     l.image_modified = true;
                     l.image_source = None;
+                    // Developer diagnostic (CRYSIRROR_KRKR_TRACE_SOURCE).
+                    if trace_source() {
+                        l.source_lost = op.to_string().chars().take(300).collect();
+                    }
                     match op["op"].as_str() {
                         Some("clear") => {
                             if let Ok(color)=serde_json::from_value::<[u8;4]>(op["color"].clone()){
@@ -354,6 +381,7 @@ impl KrkrHost {
         let state = LayerState {
             kind: if primary { 1 } else { 2 },
             image_source: None,
+            source_lost: String::new(),
             regions: crysirror_core::region_map::RegionMap::new(
                 self.client,
                 [size as u32, size as u32],
@@ -413,8 +441,6 @@ impl KrkrHost {
         Ok(())
     }
 
-    /// Resize a layer's image, discarding its contents (KiriKiri semantics of
-    /// `setImageSize` with a fresh transparent bitmap).
     /// krkr image resize: contents stay anchored at the top-left.
     pub fn resize_surface(&mut self, h: ObjectHandle, w: i64, height: i64) -> TjsResult<()> {
         if !(1..=8192).contains(&w) || !(1..=8192).contains(&height) {
@@ -427,10 +453,27 @@ impl KrkrHost {
                 .map_err(|e| TjsError::runtime(e.to_string()))?;
         let slot = {
             let l = self.layer_mut(h)?;
+            // Canvas Resize retains the old pixels. Keep its immutable CPU
+            // declaration in sync so subsequent engine image jobs see those
+            // same pixels, rather than losing the source after setImageSize.
+            let source = l.image_source.take().map(|input| {
+                use crysirror_core::image_processing::{ImageCompositeLayer, ImageCompositeMath, ImageInput};
+                if l.image_width == w && l.image_height == height {
+                    return input;
+                }
+                ImageInput::Composite {
+                    base: Box::new(ImageInput::Solid { size:[w as u32,height as u32],color:[0;4] }),
+                    layers: vec![ImageCompositeLayer {
+                        input:Box::new(input),
+                        source:[0,0,l.image_width as i32,l.image_height as i32],
+                        destination:[0,0],clip:None,opacity:255,math:ImageCompositeMath::Copy,
+                    }],
+                }
+            });
             l.regions = regions;
             l.full_alpha = None;
             l.image_modified = true;
-            l.image_source = None;
+            l.image_source = source;
             l.image_width = w;
             l.image_height = height;
             l.draw_clip = None;
@@ -708,6 +751,7 @@ impl TjsHost for KrkrHost {
             }
         }
         self.csv.gc_roots(out);
+        self.line_parser.gc_roots(out);
         self.text_render.gc_roots(out);
         self.psbfile.gc_roots(out);
         self.draws.gc_roots(out);
@@ -718,6 +762,7 @@ impl TjsHost for KrkrHost {
         // Registries that do not root their instances (see gc_roots).
         self.psbfile.invalidate(handle.0);
         self.csv.invalidate(handle.0);
+        self.line_parser.invalidate(handle.0);
         self.text_render.invalidate(handle.0);
     }
 
@@ -780,15 +825,7 @@ impl TjsHost for KrkrHost {
     }
 
     fn write_text(&mut self, name: &str, mode: &str, text: &str) -> TjsResult<()> {
-        if !mode.is_empty() {
-            return Err(TjsError::runtime(
-                "native text stream mode requires a shared codec mapping",
-            ));
-        }
-        let mut data = vec![0xff, 0xfe];
-        for unit in text.encode_utf16() {
-            data.extend_from_slice(&unit.to_le_bytes());
-        }
+        let data = encode_native_text(text,mode)?;
         self.begin_native_write(name, data)
     }
     fn write_binary(&mut self, name: &str, mode: &str, bytes: &[u8]) -> TjsResult<()> {
@@ -806,4 +843,40 @@ impl TjsHost for KrkrHost {
     fn log(&mut self, message: &str) {
         self.push_log(message.to_owned());
     }
+}
+
+/// `CRYSIRROR_KRKR_TRACE_SOURCE`: record which canvas op dropped a layer's
+/// CPU image source.
+fn trace_source() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("CRYSIRROR_KRKR_TRACE_SOURCE").is_some())
+}
+
+impl KrkrHost {
+    /// Screen size and work area: the host display, else the canvas.
+    pub fn display_rects(&self) -> ([i64; 2], [i64; 4]) {
+        match self.display {
+            Some(d) => (
+                [i64::from(d.screen[0]), i64::from(d.screen[1])],
+                d.work.map(i64::from),
+            ),
+            None => {
+                let [w, h] = self.canvas.map(i64::from);
+                ([w, h], [0, 0, w, h])
+            }
+        }
+    }
+}
+
+/// Native mode-string policy around the reusable text stream codec.
+pub(crate) fn encode_native_text(text:&str,mode:&str)->TjsResult<Vec<u8>> {
+    use crysirror_resource::text_stream::TextWriteMode;
+    let encoding=match mode {
+        ""=>TextWriteMode::PlainUtf16,
+        "c"|"c1"=>TextWriteMode::Cipher1,
+        "c2"|"z"=>TextWriteMode::Deflate{level:6},
+        mode if mode.len()==2&&mode.starts_with('z')&&mode.as_bytes()[1].is_ascii_digit()=>TextWriteMode::Deflate{level:mode.as_bytes()[1]-b'0'},
+        _=>return Err(TjsError::runtime("native text offset/unknown compression mode is unsupported")),
+    };
+    crysirror_resource::text_stream::encode(text,encoding,64*1024*1024).map_err(|e|TjsError::runtime(format!("text stream encoding: {e:#}")))
 }

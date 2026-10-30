@@ -63,3 +63,5 @@ pub use script::ScriptHost;
 pub use value::Value;
 
 pub use acoustics_api::AcousticMeshBindingSpec;
+
+mod text_font_api;

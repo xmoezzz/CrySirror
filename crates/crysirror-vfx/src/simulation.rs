@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Deterministic fixed-step CPU oracle and engine-owned particle frames.
+use crate::falling_atlas::{
+    CompiledFallingAtlas, FallingAtlasState, SequenceExchange, SequenceRng, SimulationClock,
+    SystemSequenceState,
+};
 use crate::*;
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
 use glam::{Mat4, Quat, Vec3};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -45,6 +49,10 @@ pub struct EmitterFrame {
     pub space: SimulationSpace,
     pub render: RenderSpec,
     pub particles: Arc<[Particle]>,
+    /// Optional client-scoped CPU screen-layer publication declaration.
+    pub screen: Option<crate::screen::ScreenSpriteTarget>,
+    /// Explicit normalized atlas UV rectangles, in particle snapshot order.
+    pub screen_uvs: Option<Arc<[[f32; 4]]>>,
 }
 #[derive(Clone, Debug, PartialEq)]
 /// One fixed-clock GPU command, retaining historical parameters and transform.
@@ -120,6 +128,8 @@ pub struct VfxStats {
 #[derive(Clone, Debug, Default, PartialEq)]
 /// Published immutable CPU particle and GPU command resources for one owner result.
 pub struct FrameSnapshot {
+    /// Shared sequence state acknowledged by this completed CPU result.
+    pub sequence_states: Vec<SystemSequenceState>,
     pub emitters: Vec<EmitterFrame>,
     pub gpu_emitters: Vec<GpuEmitterFrame>,
     pub events: Vec<ParticleEvent>,
@@ -398,6 +408,9 @@ pub fn update_particle(
 
 #[derive(Clone, Debug)]
 struct EmitterState {
+    falling: Option<CompiledFallingAtlas>,
+    atlas_states: Vec<Option<FallingAtlasState>>,
+    atlas_uvs: Vec<Option<[f32; 4]>>,
     client: u32,
     transform: [[f32; 4]; 4],
     system_key: u64,
@@ -415,6 +428,10 @@ struct EmitterState {
 }
 #[derive(Clone, Debug)]
 struct SystemState {
+    sequence_rng: Option<SequenceRng>,
+    last_exchange: Option<SequenceExchange>,
+    external_tick: u64,
+    completed_tick: u64,
     client: u32,
     spec: SystemSpec,
     pending: f64,
@@ -520,14 +537,17 @@ impl CpuWorld {
                     .checked_add(e.capacity as usize)
                     .ok_or_else(|| anyhow::anyhow!("VFX capacity overflow"))?;
             }
-            let old_pending = self
-                .systems
-                .get(&input.key)
-                .map_or(input.spec.warmup_seconds as f64, |s| s.pending);
+            let old = self.systems.get(&input.key);
+            let added_delta = input_delta(old, input, delta)?;
+            let old_pending = if restarting(old, input) {
+                input.spec.warmup_seconds as f64
+            } else {
+                old.unwrap().pending
+            };
             let added = if input.spec.paused {
                 0.
             } else {
-                delta * input.spec.time_scale as f64
+                added_delta * input.spec.time_scale as f64
             };
             ensure!(
                 old_pending + added <= self.budget.max_pending_seconds,
@@ -544,10 +564,16 @@ impl CpuWorld {
         frame.stats.emitters = emitters;
         frame.stats.reserved_particles = reserved;
         for input in instances {
+            let reset = restarting(self.systems.get(&input.key), input);
+            let added_delta = input_delta(self.systems.get(&input.key), input, delta)?;
             let state = self
                 .systems
                 .entry(input.key)
                 .or_insert_with(|| SystemState {
+                    sequence_rng: input.spec.sequence_rng.clone(),
+                    last_exchange: None,
+                    external_tick: 0,
+                    completed_tick: 0,
                     client: input.client,
                     spec: input.spec.clone(),
                     pending: input.spec.warmup_seconds as f64,
@@ -558,12 +584,27 @@ impl CpuWorld {
                 state.client == input.client,
                 "VFX system cannot transfer client authority"
             );
-            if state.spec.fixed_step_hz != input.spec.fixed_step_hz
-                || state.spec.revision != input.spec.revision
-            {
+            if reset {
                 state.emitters.clear();
                 state.pending_events.clear();
                 state.pending = input.spec.warmup_seconds as f64;
+                state.sequence_rng = input.spec.sequence_rng.clone();
+                state.last_exchange = None;
+                state.external_tick = 0;
+                state.completed_tick = 0;
+            }
+            if let Some(exchange) = &input.spec.sequence_exchange {
+                if state
+                    .last_exchange
+                    .as_ref()
+                    .is_none_or(|old| old.epoch < exchange.epoch)
+                {
+                    state.sequence_rng = Some(exchange.state.clone());
+                    state.last_exchange = Some(exchange.clone());
+                }
+            }
+            if let SimulationClock::External { tick, .. } = input.spec.clock {
+                state.external_tick = tick;
             }
             state.spec = input.spec.clone();
             let names = input
@@ -602,6 +643,21 @@ impl CpuWorld {
                     state.emitters.insert(
                         spec.id.clone(),
                         EmitterState {
+                            falling: spec
+                                .falling_atlas
+                                .clone()
+                                .map(CompiledFallingAtlas::compile)
+                                .transpose()?,
+                            atlas_states: if spec.falling_atlas.is_some() {
+                                vec![None; spec.capacity as usize]
+                            } else {
+                                vec![]
+                            },
+                            atlas_uvs: if spec.falling_atlas.is_some() {
+                                vec![None; spec.capacity as usize]
+                            } else {
+                                vec![]
+                            },
                             client: input.client,
                             transform: input.transform,
                             system_key: input.key,
@@ -628,7 +684,7 @@ impl CpuWorld {
             }
             let gpu_bootstrap = initialize_system(state, input, &self.budget, &mut frame)?;
             if !input.spec.paused && input.spec.time_scale > 0. {
-                state.pending += delta * input.spec.time_scale as f64;
+                state.pending += added_delta * input.spec.time_scale as f64;
             }
             let dt = 1. / input.spec.fixed_step_hz as f64;
             let mut steps = 0;
@@ -648,6 +704,10 @@ impl CpuWorld {
                 && steps < input.spec.max_steps_per_advance.min(gpu_budget)
             {
                 tick_system(state, input, dt as f32, &self.budget, &mut frame)?;
+                state.completed_tick = state
+                    .completed_tick
+                    .checked_add(1)
+                    .context("VFX completed tick exhausted")?;
                 state.pending = (state.pending - dt).max(0.);
                 steps += 1;
                 frame.stats.simulated_ticks += 1;
@@ -669,6 +729,25 @@ impl CpuWorld {
                         space: spec.space,
                         render: spec.render.clone(),
                         particles: Arc::from(particles),
+                        screen: spec.screen.clone(),
+                        screen_uvs: if emitter.falling.is_some() {
+                            Some(
+                                emitter
+                                    .slots
+                                    .iter()
+                                    .enumerate()
+                                    .filter_map(|(index, p)| {
+                                        p.as_ref().map(|_| {
+                                            emitter.atlas_uvs[index]
+                                                .context("VFX falling source UV missing")
+                                        })
+                                    })
+                                    .collect::<Result<Vec<_>>>()?
+                                    .into(),
+                            )
+                        } else {
+                            None
+                        },
                     });
                 } else {
                     frame.gpu_emitters.push(GpuEmitterFrame {
@@ -681,6 +760,18 @@ impl CpuWorld {
                         steps: emitter.history.iter().cloned().collect(),
                         tick: emitter.tick,
                         progress: emitter.progress.clone(),
+                    });
+                }
+            }
+            if state.emitters.values().all(|emitter| emitter.initialized) {
+                if let Some(sequence) = &state.sequence_rng {
+                    frame.sequence_states.push(SystemSequenceState {
+                        client: input.client,
+                        system_key: input.key,
+                        revision: input.spec.revision,
+                        completed_tick: state.completed_tick,
+                        exchange_epoch: state.last_exchange.as_ref().map_or(0, |e| e.epoch),
+                        sequence_rng: sequence.clone(),
                     });
                 }
             }
@@ -699,6 +790,75 @@ fn same_template(a: &EmitterSpec, b: &EmitterSpec) -> bool {
     a.spawn.rate = 0.0.into();
     b.spawn.rate = 0.0.into();
     a == b
+}
+fn restarting(old: Option<&SystemState>, input: &SystemInstance) -> bool {
+    old.is_none_or(|state| {
+        state.spec.revision != input.spec.revision
+            || state.spec.fixed_step_hz != input.spec.fixed_step_hz
+            || state.spec.sequence_rng != input.spec.sequence_rng
+            || std::mem::discriminant(&state.spec.clock)
+                != std::mem::discriminant(&input.spec.clock)
+    })
+}
+fn input_delta(old: Option<&SystemState>, input: &SystemInstance, delta: f64) -> Result<f64> {
+    let reset = restarting(old, input);
+    if let Some(old) = old.filter(|old| old.spec.revision == input.spec.revision) {
+        if old.spec.sequence_rng.is_some() || input.spec.sequence_rng.is_some() {
+            ensure!(
+                !reset
+                    && old.spec.emitters.len() == input.spec.emitters.len()
+                    && old
+                        .spec
+                        .emitters
+                        .iter()
+                        .zip(&input.spec.emitters)
+                        .all(|(a, b)| same_template(a, b)),
+                "VFX shared-sequence source/template changes require a new revision"
+            );
+        }
+    }
+    if let Some(exchange) = &input.spec.sequence_exchange {
+        let old = old
+            .filter(|_| !reset)
+            .context("VFX sequence exchange requires completed initialization")?;
+        let previous = old.last_exchange.as_ref().map_or(0, |e| e.epoch);
+        ensure!(
+            exchange.epoch >= previous,
+            "VFX stale sequence exchange epoch"
+        );
+        if exchange.epoch == previous {
+            ensure!(
+                old.last_exchange.as_ref() == Some(exchange),
+                "VFX repeated exchange epoch changed payload"
+            );
+        } else {
+            ensure!(
+                old.pending < 1e-9
+                    && old.completed_tick == exchange.base_tick
+                    && old.external_tick == exchange.base_tick
+                    && old.emitters.values().all(|e| e.initialized),
+                "VFX sequence exchange requires an acknowledged idle base tick"
+            );
+            ensure!(
+                matches!(input.spec.clock,SimulationClock::External{tick,..} if tick==exchange.base_tick),
+                "VFX sequence exchange cannot advance clock before acknowledgement"
+            );
+        }
+    }
+    Ok(match input.spec.clock {
+        SimulationClock::Engine => delta,
+        SimulationClock::External { tick, .. } => {
+            let previous = if reset { 0 } else { old.unwrap().external_tick };
+            ensure!(
+                !(input.spec.paused || input.spec.time_scale == 0.) || tick == previous,
+                "VFX external ticks cannot advance while the system is paused"
+            );
+            tick.checked_sub(previous)
+                .context("VFX external clock moved backwards without a new revision")?
+                as f64
+                / input.spec.fixed_step_hz as f64
+        }
+    })
 }
 fn event(
     frame: &mut FrameSnapshot,
@@ -839,6 +999,7 @@ fn initialize_system(
                 budget,
                 frame,
                 &mut next,
+                state.sequence_rng.as_mut(),
             )?;
             for event in next {
                 if state.pending_events.len() < budget.max_events {
@@ -897,11 +1058,35 @@ fn tick_system(
             budget,
             frame,
             &mut spawned_events,
+            state.sequence_rng.as_mut(),
         )?;
         for slot in 0..e.slots.len() {
             if let Some(mut particle) = e.slots[slot].take() {
-                let (alive, collision) =
-                    update_particle(&mut particle, &compiled, input.transform, dt, e.age as f32)?;
+                let (alive, collision) = if let Some(node) = &e.falling {
+                    let wall_ms = match input.spec.clock {
+                        SimulationClock::External { wall_time_ms, .. } => wall_time_ms,
+                        _ => anyhow::bail!("VFX falling clock unavailable"),
+                    };
+                    let result = node.step(
+                        &mut particle,
+                        e.atlas_states[slot]
+                            .as_mut()
+                            .context("VFX falling attributes missing")?,
+                        state
+                            .sequence_rng
+                            .as_mut()
+                            .context("VFX falling sequence missing")?,
+                        wall_ms,
+                        emission_enabled(&input.spec, spec),
+                    )?;
+                    e.atlas_uvs[slot] = Some(result.uv);
+                    if result.recycled {
+                        frame.stats.spawned += 1;
+                    }
+                    (result.alive, false)
+                } else {
+                    update_particle(&mut particle, &compiled, input.transform, dt, e.age as f32)?
+                };
                 if collision {
                     defer(
                         &mut spawned_events,
@@ -916,6 +1101,10 @@ fn tick_system(
                 if alive {
                     e.slots[slot] = Some(particle);
                 } else {
+                    if e.falling.is_some() {
+                        e.atlas_states[slot] = None;
+                        e.atlas_uvs[slot] = None;
+                    }
                     defer(
                         &mut spawned_events,
                         spec,
@@ -997,6 +1186,7 @@ fn tick_system(
                 budget,
                 frame,
                 &mut next_tick,
+                state.sequence_rng.as_mut(),
             )?;
             for event in next_tick {
                 if state.pending_events.len() < budget.max_events {
@@ -1046,6 +1236,7 @@ fn spawn_into(
     budget: &WorldBudget,
     frame: &mut FrameSnapshot,
     new_events: &mut Vec<(String, Particle, EventKind)>,
+    mut sequence: Option<&mut SequenceRng>,
 ) -> Result<()> {
     if requested == 0 {
         return Ok(());
@@ -1087,6 +1278,17 @@ fn spawn_into(
             defer(new_events, &e.spec, &old, EventKind::Death, budget, frame);
         }
         let mut particle = spawn_particle(compiled, first + k as u64, transform)?;
+        if let Some(node) = &e.falling {
+            let state = node.initialize(
+                &mut particle,
+                sequence
+                    .as_deref_mut()
+                    .context("VFX falling sequence unavailable")?,
+                0,
+            )?;
+            e.atlas_uvs[slot] = Some(node.initial_uv(&state));
+            e.atlas_states[slot] = Some(state);
+        }
         if let Some((parent, inherit)) = parent {
             let origin = if compiled.spec.space == SimulationSpace::World {
                 Mat4::from_cols_array_2d(&transform).w_axis.truncate()

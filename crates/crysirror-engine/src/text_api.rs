@@ -74,6 +74,7 @@ fn publish(state: &mut EngineState, owner: ClientId, block: &Block) -> Result<St
         .runtime
         .assets
         .text
+        .for_client(owner)
         .rasterize_rich(&block.layout, &raster, |asset| {
             let icon = block.icons.get(asset).context("text icon not loaded")?;
             Ok(IconBitmap {
@@ -95,7 +96,7 @@ fn build(state: &mut EngineState, markup: &str, options: TextOptions, slot: u32)
     let localizer = state.localization.client(client.0);
     let fonts = localizer.fonts()?;
     let locale = localizer.locale.clone();
-    let text = state.runtime.assets.text.clone();
+    let text = state.runtime.assets.text.for_client(state.client);
     build_from(&text, markup, options, slot, fonts, locale, |asset| {
         if let Some(surface) = state.runtime.assets.surface(client, asset) {
             return Ok(IconBitmap {
@@ -218,6 +219,11 @@ fn info() -> &'static ClassInfo {
     INFO.get_or_init(||{
         fn m(name:&'static str,params:Vec<(&'static str,T)>,returns:T,doc:&'static str)->MethodInfo {MethodInfo{name,params,returns,doc}}
         ClassInfo{name:"Text",doc:"CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed.",properties:vec![],methods:vec![
+            m("beginFont",vec![("alias",T::String),("asset",T::String),("faceIndex",T::Optional(Box::new(T::Int)))],T::Int,"Begin bounded asset read and font preparation. fontStatus publishes the immutable face to this client's measurement and renderer catalog."),
+            m("fontStatus",vec![("ticket",T::Int)],T::Map,"Poll font workers. Ready contains canonical alias, digest, revision, families and resource handle; failed contains an error."),
+            m("resolveFont",vec![("aliasOrFamily",T::String)],T::Any,"Resolve a client-owned logical alias or font family to immutable font metadata, or null."),
+            m("releaseFontJob",vec![("ticket",T::Int)],T::Void,"Cancel/release registration ticket. Published faces remain until releaseFont."),
+            m("releaseFont",vec![("handle",T::Int)],T::Void,"Release this client's dynamic face. Existing layer references must be removed or replaced before rendering."),
             m("beginDraw",vec![("name",T::String),("markup",T::String),("options",T::Optional(Box::new(T::Map)))],T::Int,"Prepare markup, shaping, icon decoding and initial raster on bounded workers. Returns a client/generation ticket; the old block remains until successful publication."),
             m("beginRestore",vec![("name",T::String),("state",T::Map)],T::Int,"Prepare saved text and reveal state on workers, publishing only after validation."),
             m("beginMeasure",vec![("font",T::String),("size",T::Number),("text",T::String)],T::Int,"Measure an arbitrarily sized bounded single line on a worker; status returns metrics after completion."),
@@ -249,6 +255,7 @@ impl Class for TextClass {
         method: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if let Some(value)=crate::text_font_api::call(cx.state()?,method,args)? {return Ok(value);}
         if let Some(value) = crate::text_async::call(cx.state()?, method, args)? {
             return Ok(value);
         }
@@ -262,15 +269,11 @@ impl Class for TextClass {
             );
             if method=="positionSimple" {
                 ensure!(size.is_finite() && size.fract()==0. && (1.0..=512.0).contains(&size),"integer font size 1..512");
-                let placements=cx.state()?.runtime.assets.text.position_simple(font,size as u16,text)?;
+                let placements={let state=cx.state()?;state.runtime.assets.text.for_client(state.client).position_simple(font,size as u16,text)?};
                 return Ok(Value::from_json(serde_json::json!(placements.into_iter().map(|g|serde_json::json!({"character":g.character.to_string(),"baseline":g.baseline})).collect::<Vec<_>>())));
             }
-            let metrics = cx
-                .state()?
-                .runtime
-                .assets
-                .text
-                .measure_simple(font, size, text)?;
+            let state=cx.state()?;
+            let metrics=state.runtime.assets.text.for_client(state.client).measure_simple(font,size,text)?;
             return Ok(Value::from_json(serde_json::json!({
                 "advance": metrics.advance, "line_height": metrics.line_height,
                 "ascent": metrics.ascent, "descent": metrics.descent,

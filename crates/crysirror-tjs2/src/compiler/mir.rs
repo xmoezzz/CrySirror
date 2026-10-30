@@ -1666,6 +1666,25 @@ enum StmtTask<'a> {
     },
 }
 
+#[derive(Clone, Copy)]
+enum LvalueAction {
+    Assign(syntax::AssignOp, Value),
+    Prefix(syntax::UnaryOp),
+    Postfix(syntax::UnaryOp),
+    Delete,
+}
+fn conditional_lvalue(expr: &syntax::Expr) -> bool {
+    let mut expr = expr;
+    while let syntax::ExprKind::Unary {
+        op: syntax::UnaryOp::IgnoreProp,
+        expr: inner,
+    } = &expr.kind
+    {
+        expr = inner;
+    }
+    matches!(expr.kind, syntax::ExprKind::Conditional { .. })
+}
+
 enum ExprTask<'a> {
     Expr(&'a syntax::Expr),
     PushValue(Value),
@@ -1674,6 +1693,31 @@ enum ExprTask<'a> {
     GotoIfOpen(BlockId),
     ReadPlaceToValue,
     WritePlace(&'a syntax::Expr),
+    LvalueAction {
+        target: &'a syntax::Expr,
+        action: LvalueAction,
+        ignore_prop: bool,
+    },
+    AfterLvalueRhs {
+        target: &'a syntax::Expr,
+        op: syntax::AssignOp,
+    },
+    AfterLvalueCondition {
+        then_expr: &'a syntax::Expr,
+        else_expr: &'a syntax::Expr,
+        action: LvalueAction,
+        ignore_prop: bool,
+    },
+    AfterConditionalSwapLeft {
+        left: &'a syntax::Expr,
+        right: &'a syntax::Expr,
+    },
+    AfterConditionalSwapRight {
+        left: &'a syntax::Expr,
+        right: &'a syntax::Expr,
+        old_left: Value,
+    },
+
     ApplyIgnorePropToPlace,
     MemberPlaceAfterObject {
         property: &'a str,
@@ -2874,6 +2918,128 @@ impl ObjectBuilder {
             ExprTask::WritePlace(expr) => {
                 self.push_write_place_task(lowerer, expr, tasks, places)?;
             }
+            ExprTask::AfterLvalueRhs { target, op } => {
+                let value = pop_value(values)?;
+                tasks.push(ExprTask::LvalueAction {
+                    target,
+                    action: LvalueAction::Assign(op, value),
+                    ignore_prop: false,
+                });
+            }
+            ExprTask::LvalueAction {
+                target,
+                action,
+                ignore_prop,
+            } => {
+                if let syntax::ExprKind::Unary {
+                    op: syntax::UnaryOp::IgnoreProp,
+                    expr,
+                } = &target.kind
+                {
+                    tasks.push(ExprTask::LvalueAction {
+                        target: expr,
+                        action,
+                        ignore_prop: true,
+                    });
+                } else if let syntax::ExprKind::Conditional {
+                    condition,
+                    then_expr,
+                    else_expr,
+                } = &target.kind
+                {
+                    tasks.push(ExprTask::AfterLvalueCondition {
+                        then_expr,
+                        else_expr,
+                        action,
+                        ignore_prop,
+                    });
+                    tasks.push(ExprTask::Expr(condition));
+                } else {
+                    match action {
+                        LvalueAction::Assign(op, value) => {
+                            tasks.push(ExprTask::AfterAssignment(op));
+                            tasks.push(ExprTask::PushValue(value));
+                        }
+                        LvalueAction::Prefix(op) => tasks.push(ExprTask::AfterPrefixUpdate(op)),
+                        LvalueAction::Postfix(op) => tasks.push(ExprTask::AfterPostfixUpdate(op)),
+                        LvalueAction::Delete => tasks.push(ExprTask::AfterDelete),
+                    }
+                    if ignore_prop {
+                        tasks.push(ExprTask::ApplyIgnorePropToPlace);
+                    }
+                    tasks.push(ExprTask::WritePlace(target));
+                }
+            }
+            ExprTask::AfterLvalueCondition {
+                then_expr,
+                else_expr,
+                action,
+                ignore_prop,
+            } => {
+                let cond = pop_value(values)?;
+                let then_block = self.new_block(Some(lowerer.add_span(then_expr.span)));
+                let else_block = self.new_block(Some(lowerer.add_span(else_expr.span)));
+                let done_block = self.new_block(None);
+                let result = self.temp();
+                self.set_terminator(Terminator::Branch {
+                    cond: Condition::Truthy(cond),
+                    then_block,
+                    else_block,
+                });
+                tasks.push(ExprTask::PushValue(Value::Slot(result)));
+                tasks.push(ExprTask::StartBlock(done_block));
+                tasks.push(ExprTask::AfterConditionalBranch { result, done_block });
+                tasks.push(ExprTask::LvalueAction {
+                    target: else_expr,
+                    action,
+                    ignore_prop,
+                });
+                tasks.push(ExprTask::StartBlock(else_block));
+                tasks.push(ExprTask::AfterConditionalBranch { result, done_block });
+                tasks.push(ExprTask::LvalueAction {
+                    target: then_expr,
+                    action,
+                    ignore_prop,
+                });
+                tasks.push(ExprTask::StartBlock(then_block));
+            }
+            ExprTask::AfterConditionalSwapLeft { left, right } => {
+                let value = pop_value(values)?;
+                let old_left = self.temp();
+                self.emit(MirInst::Copy {
+                    dst: old_left,
+                    src: value,
+                });
+                tasks.push(ExprTask::AfterConditionalSwapRight {
+                    left,
+                    right,
+                    old_left: Value::Slot(old_left),
+                });
+                tasks.push(ExprTask::Expr(right));
+            }
+            ExprTask::AfterConditionalSwapRight {
+                left,
+                right,
+                old_left,
+            } => {
+                let old_right = pop_value(values)?;
+                // Original T_SWAP reads both values, then reevaluates both
+                // lvalues for its two stores (tjsInterCodeGen.cpp:1230-1250).
+                tasks.push(ExprTask::PushValue(lowerer.const_void()));
+                tasks.push(ExprTask::DiscardValue);
+                tasks.push(ExprTask::LvalueAction {
+                    target: right,
+                    action: LvalueAction::Assign(syntax::AssignOp::Assign, old_left),
+                    ignore_prop: false,
+                });
+                tasks.push(ExprTask::DiscardValue);
+                tasks.push(ExprTask::LvalueAction {
+                    target: left,
+                    action: LvalueAction::Assign(syntax::AssignOp::Assign, old_right),
+                    ignore_prop: false,
+                });
+            }
+
             ExprTask::ApplyIgnorePropToPlace => {
                 let place = pop_place(places)?;
                 places.push(place_with_ignore_prop(place));
@@ -3372,6 +3538,22 @@ impl ObjectBuilder {
                     tasks.push(ExprTask::AfterPropAccess);
                     tasks.push(ExprTask::Expr(inner));
                 }
+                syntax::UnaryOp::Delete if conditional_lvalue(inner) => {
+                    tasks.push(ExprTask::LvalueAction {
+                        target: inner,
+                        action: LvalueAction::Delete,
+                        ignore_prop: false,
+                    })
+                }
+                syntax::UnaryOp::Increment | syntax::UnaryOp::Decrement
+                    if conditional_lvalue(inner) =>
+                {
+                    tasks.push(ExprTask::LvalueAction {
+                        target: inner,
+                        action: LvalueAction::Prefix(*op),
+                        ignore_prop: false,
+                    })
+                }
                 syntax::UnaryOp::Delete => {
                     tasks.push(ExprTask::AfterDelete);
                     tasks.push(ExprTask::WritePlace(inner));
@@ -3425,7 +3607,18 @@ impl ObjectBuilder {
                 }
             },
             syntax::ExprKind::Assignment { op, target, value } => {
-                if *op == syntax::AssignOp::Swap {
+                if *op == syntax::AssignOp::Swap
+                    && (conditional_lvalue(target) || conditional_lvalue(value))
+                {
+                    tasks.push(ExprTask::AfterConditionalSwapLeft {
+                        left: target,
+                        right: value,
+                    });
+                    tasks.push(ExprTask::Expr(target));
+                } else if conditional_lvalue(target) {
+                    tasks.push(ExprTask::AfterLvalueRhs { target, op: *op });
+                    tasks.push(ExprTask::Expr(value));
+                } else if *op == syntax::AssignOp::Swap {
                     tasks.push(ExprTask::AfterSwap);
                     tasks.push(ExprTask::WritePlace(value));
                     tasks.push(ExprTask::WritePlace(target));
@@ -3493,6 +3686,12 @@ impl ObjectBuilder {
                 if *op == syntax::UnaryOp::Eval {
                     tasks.push(ExprTask::AfterPostfixEval);
                     tasks.push(ExprTask::Expr(inner));
+                } else if conditional_lvalue(inner) {
+                    tasks.push(ExprTask::LvalueAction {
+                        target: inner,
+                        action: LvalueAction::Postfix(*op),
+                        ignore_prop: false,
+                    });
                 } else {
                     tasks.push(ExprTask::AfterPostfixUpdate(*op));
                     tasks.push(ExprTask::WritePlace(inner));

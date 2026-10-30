@@ -222,7 +222,7 @@ pub fn install(rt: &mut Rt) {
             }),
             ("onEval", |rt, _, a| {
                 let e = crate::natives::string(&a, 0, "TextRenderBase.onEval")?;
-                let v = crate::natives::run_source(rt, "TextRender eval", &format!("return ({e});"), None)?;
+                let v = crate::natives::run_source(rt, "TextRender eval", &crate::natives::expression_source(&e), None)?;
                 Ok(Variant::String(v.to_tjs_string()?))
             }),
             ("clear", |rt, t, _| {

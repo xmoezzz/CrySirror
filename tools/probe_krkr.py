@@ -51,7 +51,7 @@ def _companion(game, name):
 
 
 def probe(game, executable, binary, output, *, font=None, frames=300, canvas=(1280, 720),
-          protection="hxv4", modules=()):
+          protection="hxv4", modules=(), setup_profile="auto"):
     game, binary, output = Path(game).resolve(), Path(binary).resolve(), Path(output).resolve()
     if not game.is_dir() or not (game / "data.xp3").is_file():
         raise ValueError("game must contain data.xp3")
@@ -76,11 +76,19 @@ def probe(game, executable, binary, output, *, font=None, frames=300, canvas=(12
         # Parameters are recovered by the engine from these user-owned modules
         # at mount time; nothing title-specific is passed or stored here.
         companions = [_companion(game, m) for m in (modules or [executable])]
-        # The startup archive publishes the validated setupArchiveData profile.
-        bootstrap_profile = "__cxdec/protection.json"
-        config = dict(canvas=list(canvas), startup="startup.tjs", executable=executable,
-                      bootstrap_profile=bootstrap_profile)
-        options = dict(cxdec_modules=companions, cxdec_bootstrap_profile=bootstrap_profile)
+        # Newer CXDEC titles authenticate an encrypted filename index with
+        # Storages.setupArchiveData; the startup archive then publishes that
+        # validated profile. Classic CXDEC (a .tpm module) has no such index.
+        if setup_profile not in ("auto", "on", "off"):
+            raise ValueError("setup_profile must be auto, on or off")
+        if setup_profile == "auto":
+            setup_profile = "off" if all(m.lower().endswith(".tpm") for m in companions) else "on"
+        config = dict(canvas=list(canvas), startup="startup.tjs", executable=executable)
+        options = dict(cxdec_modules=companions)
+        if setup_profile == "on":
+            bootstrap_profile = "__cxdec/protection.json"
+            config["bootstrap_profile"] = bootstrap_profile
+            options["cxdec_bootstrap_profile"] = bootstrap_profile
         # data.xp3 is the root; every other archive is a shared container that
         # native `name.xp3>` storages resolve through its mount point.
         mounts = [("data.xp3", "")] + [(p.name, f"__xp3/{p.stem.lower()}")
@@ -138,6 +146,8 @@ def main():
     parser.add_argument("--protection", choices=("hxv4", "cxdec"), default="hxv4")
     parser.add_argument("--module", action="append", default=[],
                         help="CXDEC companion module (EXE/DLL/TPM) relative to the game; repeatable, default --exe")
+    parser.add_argument("--setup-profile", choices=("auto", "on", "off"), default="auto",
+                        help="CXDEC setupArchiveData profile; auto = off when every module is a .tpm")
     parser.add_argument("--binary", type=Path, default=ROOT / "target/release/crysirror")
     parser.add_argument("--output", type=Path, default=ROOT / "target/verification/krkr-probe")
     parser.add_argument("--font", type=Path)
@@ -146,7 +156,8 @@ def main():
     args = parser.parse_args()
     summary = probe(args.game, args.exe, args.binary, args.output,
                     font=args.font, frames=args.frames, canvas=args.canvas,
-                    protection=args.protection, modules=args.module)
+                    protection=args.protection, modules=args.module,
+                    setup_profile=args.setup_profile)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return summary["exit_code"]
 

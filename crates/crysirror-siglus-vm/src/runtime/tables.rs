@@ -5,7 +5,9 @@ const INIDEF_MWND_WAKU_FACE_CNT: usize = 1;
 const INIDEF_MWND_WAKU_OBJECT_CNT: usize = 1;
 #[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
 pub struct AssetTables {
-    pub gameexe: Option<GameexeConfig>,
+    /// Immutable native metadata is shared by transaction checkpoints instead
+    /// of re-copying every string and index for each bytecode instruction.
+    pub gameexe: Option<std::sync::Arc<GameexeConfig>>,
     pub mwnd_render: MwndRenderTemplate,
     pub waku_templates: Vec<WakuTemplate>,
     pub sel_btn_templates: Vec<SelBtnTemplate>,

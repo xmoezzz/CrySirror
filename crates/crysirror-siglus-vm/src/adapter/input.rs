@@ -19,6 +19,18 @@ impl SiglusVm {
                 (16, crysirror_scene::input::VmKey::ArrowUp),
                 (32, crysirror_scene::input::VmKey::ArrowDown),
                 (64, crysirror_scene::input::VmKey::Tab),
+                (
+                    crysirror_core::service::buttons::SHIFT,
+                    crysirror_scene::input::VmKey::Shift,
+                ),
+                (
+                    crysirror_core::service::buttons::CTRL,
+                    crysirror_scene::input::VmKey::Control,
+                ),
+                (
+                    crysirror_core::service::buttons::ESCAPE,
+                    crysirror_scene::input::VmKey::Escape,
+                ),
             ] {
                 if input.buttons_pressed & bit != 0 {
                     vm.ctx.input.on_key_down(key);
@@ -49,6 +61,12 @@ impl SiglusVm {
                                 vm.ctx.wait.notify_key(&mut vm.ctx.globals, &vm.ctx.ids);
                             }
                         }
+                    } else if key == crysirror_scene::input::VmKey::Escape
+                        && vm.ctx.input.vk_down_up_stock(0x1B)
+                    {
+                        vm.ctx
+                            .wait
+                            .notify_movie_down_up(&mut vm.ctx.globals, &vm.ctx.ids, 2);
                     }
                 }
             }
@@ -76,8 +94,25 @@ impl SiglusVm {
                     }
                 }
             }
+            let right = crysirror_core::service::buttons::MOUSE_RIGHT;
+            if input.buttons_pressed & right != 0 {
+                vm.ctx
+                    .input
+                    .on_mouse_down(crate::runtime::input::VmMouseButton::Right);
+            }
+            if sample.released & right != 0 {
+                vm.ctx
+                    .input
+                    .on_mouse_up(crate::runtime::input::VmMouseButton::Right);
+                if vm.ctx.input.vk_down_up_stock(0x02) {
+                    vm.ctx
+                        .wait
+                        .notify_movie_down_up(&mut vm.ctx.globals, &vm.ctx.ids, 2);
+                }
+            }
         }
         vm.ctx.sync_script_input_from_runtime();
+        crate::message::after_input(&mut vm.ctx);
         if let Some(receipt) = batch.receipt {
             self.state.inputs.0.acknowledge(owner, receipt)?;
         }

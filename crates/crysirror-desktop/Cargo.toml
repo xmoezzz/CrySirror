@@ -17,8 +17,13 @@ avg32 = ["dep:crysirror-avg32"]
 # KiriKiri TJS2 adapter (ADR 0053). AGPL-3.0-or-later: never in `default`;
 # a binary built with it is distributed under the AGPL. Pair with `arc-formats`
 # for TLG images.
-krkr = ["dep:crysirror-krkr"]
-rfvp = ["dep:crysirror-rfvp"]
+krkr = ["dep:crysirror-krkr", "dep:crysirror-tjs2"]
+rfvp = ["dep:crysirror-rfvp", "dep:crysirror-rfvp-vm"]
+# ONScripter-derived native semantics, GPL-2.0-or-later; opt-in distribution profile.
+nscripter = ["dep:crysirror-nscripter"]
+bgi = ["dep:crysirror-bgi"]
+circus = ["dep:crysirror-circus"]
+catsystem2 = ["dep:crysirror-catsystem2", "arc-formats"]
 audio = ["crysirror-audio/cpal-output"]
 gamepad = ["dep:gilrs", "scripting"]
 siglus-resources = ["dep:crysirror-siglus"]
@@ -26,14 +31,23 @@ siglus-resources = ["dep:crysirror-siglus"]
 # `puppet-import`: bake local E-mote PSB files into the engine puppet format (ADR 0029).
 emote-import = ["dep:crysirror-puppet-eluna", "dep:crysirror-puppet"]
 scripting = ["dep:crysirror-engine", "dep:crysirror-script-js"]
-arc-formats = ["scripting", "crysirror-engine/arc-formats"]
+arc-formats = ["scripting", "crysirror-engine/arc-formats", "dep:crysirror-formats-arc"]
 
 [dependencies]
 crysirror-reallive = {workspace=true,optional=true}
 crysirror-avg32 = {workspace=true,optional=true}
 crysirror-krkr = {workspace=true,optional=true}
 crysirror-rfvp = {workspace=true,optional=true}
+crysirror-rfvp-vm = {workspace=true,optional=true}
+crysirror-siglus-vm.workspace = true
+crysirror-nscripter = {workspace=true,optional=true}
+crysirror-bgi = {workspace=true,optional=true}
+crysirror-circus = {workspace=true,optional=true,features=["runtime"]}
+crysirror-catsystem2 = {workspace=true,optional=true,features=["runtime"]}
 crysirror-core.workspace = true
+crysirror-resource.workspace = true
+crysirror-formats-arc = { workspace = true, optional = true }
+crysirror-tjs2 = { workspace = true, optional = true }
 crysirror-runtime.workspace = true
 crysirror-wgpu.workspace = true
 crysirror-audio.workspace = true
@@ -56,10 +70,13 @@ cap-std.workspace = true
 gilrs = { version = "=0.11.2", optional = true }
 crysirror-scene.workspace = true
 
-# Native menu bar (Apache-2.0 OR MIT). macOS only: the Windows/Linux entry
-# points need unsafe window handles or GTK, so those keep the engine-drawn bar.
+# Native menu bar (Apache-2.0 OR MIT): macOS app menu, Windows HWND menu.
+# Linux needs a GTK window (not a winit surface), so Linux retains the visible engine menu fallback.
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "=0.19.3", default-features = false }
+[target.'cfg(target_os = "windows")'.dependencies]
+muda = { version = "=0.19.3", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 
 [dev-dependencies]
 tempfile = "3.12"

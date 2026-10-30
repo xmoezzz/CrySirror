@@ -1,0 +1,1593 @@
+#[cfg(feature = "no_std")]
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use anyhow::{anyhow, Result};
+#[cfg(feature = "old_school")]
+use core_maths::CoreFloat;
+use image::{DynamicImage, GenericImageView, ImageBuffer};
+use serde::{Deserialize, Serialize};
+
+use super::texture::NvsgTexture;
+use super::vfs::Vfs;
+
+/// How this [`GraphBuff`] was last populated.
+///
+/// Save/load needs this information because different NVSG payload types must be decoded
+/// using different loaders.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Default)]
+pub enum GraphBuffLoadKind {
+    /// Unknown or unloaded.
+    #[default]
+    Unknown,
+    /// Normal 24/32-bit NVSG texture.
+    Texture,
+    /// 8-bit mask NVSG texture.
+    Mask,
+    /// 1-bit gaiji glyph.
+    GaijiGlyph,
+    /// Raw RGBA8 pixel buffer.
+    RawRgba,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct TextTextureRegion {
+    pub draw_x: f32,
+    pub draw_y: f32,
+    pub draw_w: f32,
+    pub draw_h: f32,
+    pub tex_x: f32,
+    pub tex_y: f32,
+    pub tex_w: f32,
+    pub tex_h: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct GraphBuff {
+    pub texture: Option<DynamicImage>,
+    pub r_value: u8,
+    pub g_value: u8,
+    pub b_value: u8,
+    pub texture_ready: bool,
+    pub texture_path: String,
+    pub offset_x: u16,
+    pub offset_y: u16,
+    pub width: u16,
+    pub height: u16,
+    pub display_width: u16,
+    pub display_height: u16,
+    pub u: u16,
+    pub v: u16,
+
+    /// Pixel-space origin of a cropped HiDPI text backing surface inside its logical TextBuff.
+    /// These fields are zero for ordinary graph buffers and uncropped text surfaces.
+    pub text_origin_x_px: u16,
+    pub text_origin_y_px: u16,
+    /// Rasterization scale used by text surfaces. Zero means this graph is not carrying
+    /// explicit text-surface metadata and callers should use the legacy width/display ratio.
+    pub text_raster_scale: f32,
+
+    /// Monotonically increasing generation counter.
+    ///
+    /// Any CPU-side pixel mutation (including replacing the texture) must bump this counter so the
+    /// GPU cache can refresh the corresponding texture.
+    pub generation: u64,
+
+    /// Track how this graph was populated so it can be restored correctly.
+    pub load_kind: GraphBuffLoadKind,
+
+    /// CPU pixels are byte-identical to decoding `texture_path` (no GraphRGB / parts overlay
+    /// has modified them), so they can be dropped and re-decoded from the VFS on demand.
+    cpu_pristine: bool,
+    /// A parts overlay was drawn into the pixels. Unlike GraphRGB, which a restore replays from
+    /// the saved r/g/b, the V1 snapshot cannot replay this, so these pixels are saved as-is.
+    cpu_overlaid: bool,
+    /// CPU pixels were dropped after the GPU upload (see `evict_cpu_pixels`).
+    cpu_evicted: bool,
+    /// Alpha coverage (1 bit per pixel) kept for hit tests while CPU pixels are evicted.
+    /// `None` while evicted means the image has no alpha channel (fully opaque).
+    hit_mask: Option<Vec<u64>>,
+    /// Pixel dimensions of the evicted image.
+    evicted_dims: (u32, u32),
+    #[cfg(feature = "psx")]
+    pub(crate) streamed_clut: Option<alloc::boxed::Box<crate::rendering::ps1_stream::StreamedClut>>,
+}
+
+impl GraphBuff {
+    pub fn new() -> Self {
+        Self {
+            texture: None,
+            r_value: 0,
+            g_value: 0,
+            b_value: 0,
+            texture_ready: false,
+            texture_path: String::new(),
+            offset_x: 0,
+            offset_y: 0,
+            width: 0,
+            height: 0,
+            display_width: 0,
+            display_height: 0,
+            u: 0,
+            v: 0,
+            text_origin_x_px: 0,
+            text_origin_y_px: 0,
+            text_raster_scale: 0.0,
+            generation: 0,
+            load_kind: GraphBuffLoadKind::Unknown,
+            cpu_pristine: false,
+            cpu_overlaid: false,
+            cpu_evicted: false,
+            hit_mask: None,
+            evicted_dims: (0, 0),
+            #[cfg(feature = "psx")]
+            streamed_clut: None,
+        }
+    }
+
+    #[inline]
+    pub fn get_generation(&self) -> u64 {
+        self.generation
+    }
+
+    #[inline]
+    pub fn mark_dirty(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// Mark CPU pixels as modified in place (e.g. a parts overlay), so they are never evicted.
+    #[inline]
+    pub fn mark_pixels_modified(&mut self) {
+        self.cpu_pristine = false;
+        self.mark_dirty();
+    }
+
+    /// Mark CPU pixels as covered by a parts overlay (see `cpu_overlaid`).
+    #[inline]
+    pub fn mark_pixels_overlaid(&mut self) {
+        self.cpu_overlaid = true;
+        self.mark_pixels_modified();
+    }
+
+    pub fn get_r_value(&self) -> u8 {
+        self.r_value
+    }
+
+    pub fn get_g_value(&self) -> u8 {
+        self.g_value
+    }
+
+    pub fn get_b_value(&self) -> u8 {
+        self.b_value
+    }
+
+    pub fn get_texture_ready(&self) -> bool {
+        self.texture_ready
+    }
+
+    pub fn get_texture_path(&self) -> &str {
+        &self.texture_path
+    }
+
+    pub fn get_offset_x(&self) -> u16 {
+        self.offset_x
+    }
+
+    pub fn get_offset_y(&self) -> u16 {
+        self.offset_y
+    }
+
+    pub fn get_u(&self) -> u16 {
+        self.u
+    }
+
+    pub fn get_v(&self) -> u16 {
+        self.v
+    }
+
+    pub fn get_width(&self) -> u16 {
+        self.width
+    }
+
+    pub fn get_height(&self) -> u16 {
+        self.height
+    }
+
+    pub fn get_display_width(&self) -> u16 {
+        if self.display_width == 0 {
+            self.width
+        } else {
+            self.display_width
+        }
+    }
+
+    pub fn get_display_height(&self) -> u16 {
+        if self.display_height == 0 {
+            self.height
+        } else {
+            self.display_height
+        }
+    }
+
+    pub fn get_text_origin_x_px(&self) -> u16 {
+        self.text_origin_x_px
+    }
+
+    pub fn get_text_origin_y_px(&self) -> u16 {
+        self.text_origin_y_px
+    }
+
+    pub fn get_text_raster_scale(&self) -> f32 {
+        self.text_raster_scale
+    }
+
+    /// Resolve the visible portion of a possibly cropped HiDPI text surface.
+    /// Text primitive rectangle coordinates remain in the original logical TextBuff space.
+    pub fn text_texture_region(
+        &self,
+        texture_width: u32,
+        texture_height: u32,
+        use_rect: bool,
+        rect_u: f32,
+        rect_v: f32,
+        rect_w: f32,
+        rect_h: f32,
+    ) -> Option<TextTextureRegion> {
+        if texture_width == 0 || texture_height == 0 {
+            return None;
+        }
+
+        let display_w = self.get_display_width() as f32;
+        let display_h = self.get_display_height() as f32;
+        let scale = if self.text_raster_scale.is_finite() && self.text_raster_scale > 0.0 {
+            self.text_raster_scale
+        } else if display_w > 0.0 {
+            texture_width as f32 / display_w
+        } else {
+            1.0
+        };
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+
+        let content_x = self.text_origin_x_px as f32 / scale;
+        let content_y = self.text_origin_y_px as f32 / scale;
+        let content_w = texture_width as f32 / scale;
+        let content_h = texture_height as f32 / scale;
+        if content_w <= 0.0 || content_h <= 0.0 {
+            return None;
+        }
+
+        if !use_rect {
+            return Some(TextTextureRegion {
+                draw_x: content_x,
+                draw_y: content_y,
+                draw_w: content_w,
+                draw_h: content_h,
+                tex_x: 0.0,
+                tex_y: 0.0,
+                tex_w: texture_width as f32,
+                tex_h: texture_height as f32,
+            });
+        }
+
+        let requested_w = if rect_w > 0.0 { rect_w } else { display_w };
+        let requested_h = if rect_h > 0.0 { rect_h } else { display_h };
+        if requested_w <= 0.0 || requested_h <= 0.0 {
+            return None;
+        }
+
+        let x0 = rect_u.max(content_x);
+        let y0 = rect_v.max(content_y);
+        let x1 = (rect_u + requested_w).min(content_x + content_w);
+        let y1 = (rect_v + requested_h).min(content_y + content_h);
+        if x1 <= x0 || y1 <= y0 {
+            return None;
+        }
+
+        Some(TextTextureRegion {
+            // Rect selection changes the source region but keeps the destination origin at zero.
+            // Only the transparent prefix removed by cropping becomes a destination offset.
+            draw_x: x0 - rect_u,
+            draw_y: y0 - rect_v,
+            draw_w: x1 - x0,
+            draw_h: y1 - y0,
+            tex_x: (x0 - content_x) * scale,
+            tex_y: (y0 - content_y) * scale,
+            tex_w: (x1 - x0) * scale,
+            tex_h: (y1 - y0) * scale,
+        })
+    }
+
+    /// Export this graph as an 8-bit coverage mask (alpha plane) for text rendering.
+    ///
+    /// This is primarily used for gaiji (external glyph) rendering where the NVSG payload is
+    /// stored as `LumaA8` (coverage in alpha).
+    ///
+    /// Returns (w, h, offset_x, offset_y, mask), where mask is row-major and each byte is 0..255.
+    pub fn export_alpha_mask(&self) -> Option<(u16, u16, i16, i16, Vec<u8>)> {
+        let tex = self.texture.as_ref()?;
+        let (w, h) = tex.dimensions();
+        if w == 0 || h == 0 {
+            return None;
+        }
+
+        let ox = self.offset_x as i16;
+        let oy = self.offset_y as i16;
+
+        let px_count = (w as usize).checked_mul(h as usize)?;
+        let mut out = Vec::with_capacity(px_count);
+
+        match tex {
+            #[cfg(feature = "psx")]
+            DynamicImage::ImagePs1Mask(img) => out.extend(img.alpha.iter().copied()),
+            DynamicImage::ImageLumaA8(img) => {
+                let raw = img.as_raw();
+                if raw.len() < px_count * 2 {
+                    return None;
+                }
+                for i in 0..px_count {
+                    out.push(raw[i * 2 + 1]);
+                }
+            }
+            _ => {
+                let img = tex.to_rgba8();
+                let raw = img.as_raw();
+                if raw.len() < px_count * 4 {
+                    return None;
+                }
+                for i in 0..px_count {
+                    out.push(raw[i * 4 + 3]);
+                }
+            }
+        }
+
+        Some((w as u16, h as u16, ox, oy, out))
+    }
+
+    pub fn get_texture_mut(&mut self) -> &mut Option<DynamicImage> {
+        &mut self.texture
+    }
+
+    #[cfg(feature = "psx")]
+    pub fn load_streamed_clut(&mut self, vfs: &Vfs, path: &str, scale: f32) -> Result<bool> {
+        let Some((streamed, header, hits)) =
+            crate::rendering::ps1_stream::StreamedClut::load(vfs, path)?
+        else {
+            return Ok(false);
+        };
+        let field = |at| u16::from_le_bytes([header[at], header[at + 1]]);
+        self.unload();
+        self.width = field(20);
+        self.height = field(22);
+        self.offset_x = field(24);
+        self.offset_y = field(26);
+        self.u = field(28);
+        self.v = field(30);
+        self.apply_old_school_scale_metadata(scale);
+        self.texture_path = path.to_string();
+        self.texture_ready = true;
+        self.load_kind = GraphBuffLoadKind::Texture;
+        self.r_value = 100;
+        self.g_value = 100;
+        self.b_value = 100;
+        self.cpu_pristine = true;
+        self.cpu_evicted = true;
+        self.evicted_dims = (u32::from(self.width), u32::from(self.height));
+        self.hit_mask = if hits.is_empty() { None } else { Some(hits) };
+        self.streamed_clut = Some(alloc::boxed::Box::new(streamed));
+        self.mark_dirty();
+        Ok(true)
+    }
+
+    /// Recover only the offline GPU derivative. Original 8-bit CPU alpha stays resident.
+    #[cfg(feature = "psx")]
+    pub fn ensure_ps1_mask_gpu(&mut self, vfs: &Vfs) -> Result<()> {
+        let Some(DynamicImage::ImagePs1Mask(mask)) = &mut self.texture else {
+            return Ok(());
+        };
+        if !mask.gpu.is_empty() {
+            return Ok(());
+        }
+        let mut bytes = vfs.read_file(&self.texture_path)?;
+        let (start, length) = {
+            let plane = crate::ps1_mask::read(&bytes)
+                .map_err(|error| anyhow::anyhow!(error))?
+                .ok_or_else(|| anyhow::anyhow!("missing offline PS1 mask plane"))?;
+            if u32::from(plane.width) != mask.width || u32::from(plane.height) != mask.height {
+                anyhow::bail!("PS1 mask dimensions changed after upload");
+            }
+            let frame = plane
+                .frame(0)
+                .ok_or_else(|| anyhow::anyhow!("missing PS1 mask frame"))?;
+            (
+                frame.as_ptr() as usize - bytes.as_ptr() as usize,
+                frame.len(),
+            )
+        };
+        bytes.copy_within(start..start + length, 0);
+        bytes.truncate(length);
+        mask.gpu = bytes;
+        Ok(())
+    }
+
+    #[cfg(feature = "psx")]
+    pub fn evict_ps1_mask_gpu(&mut self) {
+        if let Some(DynamicImage::ImagePs1Mask(mask)) = &mut self.texture {
+            mask.gpu = Vec::new();
+        }
+    }
+
+    pub fn get_texture(&self) -> &Option<DynamicImage> {
+        &self.texture
+    }
+
+    pub fn unload(&mut self) {
+        #[cfg(feature = "psx")]
+        {
+            self.streamed_clut = None;
+        }
+        self.texture = None;
+        self.texture_ready = false;
+        self.texture_path = String::new();
+        self.offset_x = 0;
+        self.offset_y = 0;
+        self.width = 0;
+        self.height = 0;
+        self.display_width = 0;
+        self.display_height = 0;
+        self.u = 0;
+        self.v = 0;
+        self.text_origin_x_px = 0;
+        self.text_origin_y_px = 0;
+        self.text_raster_scale = 0.0;
+        self.load_kind = GraphBuffLoadKind::Unknown;
+        self.cpu_pristine = false;
+        self.cpu_overlaid = false;
+        self.cpu_evicted = false;
+        self.hit_mask = None;
+        self.mark_dirty();
+    }
+
+    /// Whether the CPU copy may be dropped once the GPU holds this graph.
+    ///
+    /// Only unmodified NVSG images loaded from a VFS path qualify: they can be restored exactly
+    /// by re-decoding the file. Raw RGBA (text, movie, save UI) and gaiji glyphs are read back on
+    /// the CPU and are never evicted.
+    pub fn can_evict_cpu_pixels(&self) -> bool {
+        self.texture_ready
+            && self.texture.is_some()
+            && self.cpu_pristine
+            && !self.texture_path.is_empty()
+            && matches!(
+                self.load_kind,
+                GraphBuffLoadKind::Texture | GraphBuffLoadKind::Mask
+            )
+    }
+
+    pub fn is_cpu_evicted(&self) -> bool {
+        self.cpu_evicted
+    }
+
+    /// The image's size in pixels, also while its CPU pixels are evicted.
+    pub fn image_dimensions(&self) -> Option<(u32, u32)> {
+        match self.texture.as_ref() {
+            Some(img) => Some(img.dimensions()),
+            None if self.cpu_evicted => Some(self.evicted_dims),
+            None => None,
+        }
+    }
+
+    /// Drop the CPU copy of an already-uploaded graph, keeping a 1-bit alpha mask for hit tests.
+    /// Does not bump `generation`: the GPU texture stays valid.
+    pub fn evict_cpu_pixels(&mut self) {
+        if !self.can_evict_cpu_pixels() {
+            return;
+        }
+        let Some(img) = self.texture.take() else {
+            return;
+        };
+        self.hit_mask = build_hit_mask(&img);
+        self.evicted_dims = img.dimensions();
+        self.cpu_evicted = true;
+    }
+
+    /// Restore CPU pixels dropped by `evict_cpu_pixels` by re-decoding the source file.
+    /// The result is identical to the evicted pixels, so `generation` is left unchanged.
+    pub fn ensure_cpu_pixels(&mut self, vfs: &Vfs) -> Result<()> {
+        if !self.cpu_evicted {
+            return Ok(());
+        }
+        let _timing = crate::perf::scope(crate::perf::CPU_RESTORE);
+        crate::perf::event(format_args!("restore graph path={:?}", self.texture_path));
+        let buff = vfs.read_file(&self.texture_path)?;
+        let mut nvsg_texture = NvsgTexture::new(&self.texture_path);
+        #[cfg(feature = "psx")]
+        let buff = match nvsg_texture.read_single_clut(buff) {
+            Ok(img) => {
+                self.texture = Some(img);
+                self.cpu_evicted = false;
+                self.hit_mask = None;
+                return Ok(());
+            }
+            Err(buff) => buff,
+        };
+        match self.load_kind {
+            GraphBuffLoadKind::Mask => nvsg_texture
+                .read_texture(&buff, |typ| typ == super::texture::TextureType::Single8Bit)?,
+            _ => nvsg_texture
+                .read_texture(&buff, |typ| super::texture::TextureType::is_picture(typ))?,
+        }
+        #[cfg(feature = "psx")]
+        let texture = if self.load_kind == GraphBuffLoadKind::Mask {
+            nvsg_texture.get_ps1_mask_texture(0, &buff)?
+        } else {
+            nvsg_texture.get_texture(0)?
+        };
+        #[cfg(not(feature = "psx"))]
+        let texture = nvsg_texture.get_texture(0)?;
+        self.texture = Some(texture);
+        self.cpu_evicted = false;
+        self.hit_mask = None;
+        Ok(())
+    }
+
+    /// Alpha at a pixel, for hit tests. Works while CPU pixels are evicted.
+    pub fn hit_alpha(&self, x: u32, y: u32) -> Option<u8> {
+        if let Some(tex) = self.texture.as_ref() {
+            let (w, h) = tex.dimensions();
+            if x >= w || y >= h {
+                return None;
+            }
+            return Some(tex.get_pixel(x, y).0[3]);
+        }
+        if !self.cpu_evicted {
+            return None;
+        }
+        let (w, h) = self.evicted_dims;
+        if x >= w || y >= h {
+            return None;
+        }
+        match self.hit_mask.as_ref() {
+            None => Some(255),
+            Some(mask) => {
+                let idx = (y as usize) * (w as usize) + x as usize;
+                let set = mask
+                    .get(idx / 64)
+                    .map_or(false, |word| word & (1u64 << (idx % 64)) != 0);
+                Some(if set { 255 } else { 0 })
+            }
+        }
+    }
+
+    pub fn load_texture(&mut self, file_name: &str, buff: Vec<u8>) -> Result<()> {
+        let _timing = crate::perf::scope(crate::perf::GRAPH_DECODE);
+        crate::perf::event(format_args!(
+            "graph decode path={file_name:?} bytes={}",
+            buff.len()
+        ));
+        let mut nvsg_texture = NvsgTexture::new(file_name);
+        // The PlayStation makes a one-frame CLUT file into its picture in place: a picture is
+        // never in its 2 MiB twice.
+        #[cfg(feature = "psx")]
+        let image = match nvsg_texture.read_single_clut(buff) {
+            Ok(image) => image,
+            Err(buff) => {
+                nvsg_texture
+                    .read_texture(&buff, |typ| super::texture::TextureType::is_picture(typ))?;
+                nvsg_texture.get_texture(0)?
+            }
+        };
+        #[cfg(not(feature = "psx"))]
+        let image = {
+            nvsg_texture.read_texture(&buff, |typ| super::texture::TextureType::is_picture(typ))?;
+            nvsg_texture.get_texture(0)?
+        };
+
+        self.unload();
+        // we don't need to split the texture into multiple 256x256 textures
+        self.texture = Some(image);
+        self.r_value = 100;
+        self.g_value = 100;
+        self.b_value = 100;
+        self.texture_ready = true;
+        self.offset_x = nvsg_texture.get_offset_x();
+        self.offset_y = nvsg_texture.get_offset_y();
+        self.width = nvsg_texture.get_width();
+        self.height = nvsg_texture.get_height();
+        self.display_width = self.width;
+        self.display_height = self.height;
+        self.u = nvsg_texture.get_u();
+        self.v = nvsg_texture.get_v();
+        self.texture_path = file_name.to_string();
+        self.load_kind = GraphBuffLoadKind::Texture;
+        self.cpu_pristine = true;
+        self.mark_dirty();
+
+        Ok(())
+    }
+
+    #[cfg(feature = "old_school")]
+    pub fn load_texture_old_school(
+        &mut self,
+        file_name: &str,
+        buff: Vec<u8>,
+        scale: f32,
+    ) -> Result<()> {
+        self.load_texture(file_name, buff)?;
+        self.apply_old_school_scale_metadata(scale);
+        Ok(())
+    }
+
+    pub fn load_gaiji_fontface_glyph(&mut self, file_name: &str, buff: Vec<u8>) -> Result<()> {
+        let mut nvsg_texture = NvsgTexture::new(file_name);
+        nvsg_texture.read_texture(&buff, |typ| typ == super::texture::TextureType::Single1Bit)?;
+
+        self.unload();
+        self.texture = Some(nvsg_texture.get_texture(0)?);
+        self.r_value = 100;
+        self.g_value = 100;
+        self.b_value = 100;
+        self.texture_ready = true;
+        self.offset_x = nvsg_texture.get_offset_x();
+        self.offset_y = nvsg_texture.get_offset_y();
+        self.width = nvsg_texture.get_width();
+        self.height = nvsg_texture.get_height();
+        self.display_width = self.width;
+        self.display_height = self.height;
+        self.u = nvsg_texture.get_u();
+        self.v = nvsg_texture.get_v();
+        self.texture_path = file_name.to_string();
+        self.load_kind = GraphBuffLoadKind::GaijiGlyph;
+        self.mark_dirty();
+
+        Ok(())
+    }
+
+    #[cfg(feature = "old_school")]
+    pub fn load_gaiji_fontface_glyph_old_school(
+        &mut self,
+        file_name: &str,
+        buff: Vec<u8>,
+        scale: f32,
+    ) -> Result<()> {
+        self.load_gaiji_fontface_glyph(file_name, buff)?;
+        self.apply_old_school_scale_metadata(scale);
+        Ok(())
+    }
+
+    pub fn load_mask(&mut self, file_name: &str, buff: Vec<u8>) -> Result<()> {
+        let mut nvsg_texture = NvsgTexture::new(file_name);
+        #[cfg(feature = "psx")]
+        let texture = match nvsg_texture.read_single_ps1_mask(buff) {
+            Ok(texture) => texture,
+            Err(buff) => {
+                nvsg_texture
+                    .read_texture(&buff, |typ| typ == super::texture::TextureType::Single8Bit)?;
+                nvsg_texture.get_ps1_mask_texture(0, &buff)?
+            }
+        };
+        #[cfg(not(feature = "psx"))]
+        let texture = {
+            nvsg_texture
+                .read_texture(&buff, |typ| typ == super::texture::TextureType::Single8Bit)?;
+            nvsg_texture.get_texture(0)?
+        };
+        self.unload();
+        self.texture = Some(texture);
+        self.r_value = 100;
+        self.g_value = 100;
+        self.b_value = 100;
+        self.texture_ready = true;
+        self.offset_x = nvsg_texture.get_offset_x();
+        self.offset_y = nvsg_texture.get_offset_y();
+        self.width = nvsg_texture.get_width();
+        self.height = nvsg_texture.get_height();
+        self.display_width = self.width;
+        self.display_height = self.height;
+        self.u = nvsg_texture.get_u();
+        self.v = nvsg_texture.get_v();
+        self.texture_path = file_name.to_string();
+        self.load_kind = GraphBuffLoadKind::Mask;
+        self.cpu_pristine = true;
+        self.mark_dirty();
+
+        Ok(())
+    }
+
+    #[cfg(feature = "old_school")]
+    pub fn load_mask_old_school(
+        &mut self,
+        file_name: &str,
+        buff: Vec<u8>,
+        scale: f32,
+    ) -> Result<()> {
+        self.load_mask(file_name, buff)?;
+        self.apply_old_school_scale_metadata(scale);
+        Ok(())
+    }
+
+    #[cfg(feature = "old_school")]
+    fn apply_old_school_scale_metadata(&mut self, scale: f32) {
+        if !scale.is_finite() || scale <= 0.0 {
+            return;
+        }
+        // The repacker shrinks the pixels but leaves the header's placement fields (offset and
+        // pivot) in the original resolution; bring them to the scaled screen like everything else.
+        self.offset_x = scale_old_school_u16(self.offset_x, scale);
+        self.offset_y = scale_old_school_u16(self.offset_y, scale);
+        self.u = scale_old_school_u16(self.u, scale);
+        self.v = scale_old_school_u16(self.v, scale);
+        self.display_width = self.width;
+        self.display_height = self.height;
+    }
+
+    pub fn load_from_buff(&mut self, buff: Vec<u8>, width: u32, height: u32) -> Result<()> {
+        self.load_from_buff_with_display_size(buff, width, height, width, height)
+    }
+
+    pub fn load_from_buff_ref(&mut self, buff: &[u8], width: u32, height: u32) -> Result<()> {
+        self.load_from_buff_ref_with_display_size(buff, width, height, width, height)
+    }
+
+    pub fn load_from_buff_with_display_size(
+        &mut self,
+        buff: Vec<u8>,
+        width: u32,
+        height: u32,
+        display_width: u32,
+        display_height: u32,
+    ) -> Result<()> {
+        self.load_from_owned_rgba(
+            buff,
+            width,
+            height,
+            display_width,
+            display_height,
+            0,
+            0,
+            0.0,
+        )
+    }
+
+    pub fn load_text_from_buff_with_display_size(
+        &mut self,
+        buff: Vec<u8>,
+        width: u32,
+        height: u32,
+        display_width: u32,
+        display_height: u32,
+        origin_x_px: u32,
+        origin_y_px: u32,
+        raster_scale: f32,
+    ) -> Result<()> {
+        self.load_from_owned_rgba(
+            buff,
+            width,
+            height,
+            display_width,
+            display_height,
+            origin_x_px,
+            origin_y_px,
+            raster_scale,
+        )
+    }
+
+    pub fn load_text_from_buff_ref_with_display_size(
+        &mut self,
+        buff: &[u8],
+        width: u32,
+        height: u32,
+        display_width: u32,
+        display_height: u32,
+        origin_x_px: u32,
+        origin_y_px: u32,
+        raster_scale: f32,
+    ) -> Result<()> {
+        self.validate_raw_rgba_size(
+            buff.len(),
+            width,
+            height,
+            display_width,
+            display_height,
+            origin_x_px,
+            origin_y_px,
+        )?;
+
+        let reused = match self.texture.as_mut() {
+            Some(DynamicImage::ImageRgba8(img))
+                if img.width() == width && img.height() == height =>
+            {
+                img.as_mut().copy_from_slice(buff);
+                true
+            }
+            _ => false,
+        };
+
+        if !reused {
+            self.texture = None;
+            let img =
+                image::RgbaImage::from_raw(width, height, buff.to_vec()).ok_or_else(|| {
+                    anyhow!(
+                        "load_from_buff: RgbaImage::from_raw failed ({}x{})",
+                        width,
+                        height
+                    )
+                })?;
+            self.texture = Some(DynamicImage::ImageRgba8(img));
+        }
+
+        self.finish_raw_rgba_load(
+            width,
+            height,
+            display_width,
+            display_height,
+            origin_x_px,
+            origin_y_px,
+            raster_scale,
+        )
+    }
+
+    pub fn load_from_buff_ref_with_display_size(
+        &mut self,
+        buff: &[u8],
+        width: u32,
+        height: u32,
+        display_width: u32,
+        display_height: u32,
+    ) -> Result<()> {
+        self.load_text_from_buff_ref_with_display_size(
+            buff,
+            width,
+            height,
+            display_width,
+            display_height,
+            0,
+            0,
+            0.0,
+        )
+    }
+
+    fn load_from_owned_rgba(
+        &mut self,
+        buff: Vec<u8>,
+        width: u32,
+        height: u32,
+        display_width: u32,
+        display_height: u32,
+        origin_x_px: u32,
+        origin_y_px: u32,
+        raster_scale: f32,
+    ) -> Result<()> {
+        self.validate_raw_rgba_size(
+            buff.len(),
+            width,
+            height,
+            display_width,
+            display_height,
+            origin_x_px,
+            origin_y_px,
+        )?;
+        self.texture = None;
+        let img = image::RgbaImage::from_raw(width, height, buff).ok_or_else(|| {
+            anyhow!(
+                "load_from_buff: RgbaImage::from_raw failed ({}x{})",
+                width,
+                height
+            )
+        })?;
+        self.texture = Some(DynamicImage::ImageRgba8(img));
+        self.finish_raw_rgba_load(
+            width,
+            height,
+            display_width,
+            display_height,
+            origin_x_px,
+            origin_y_px,
+            raster_scale,
+        )
+    }
+
+    fn validate_raw_rgba_size(
+        &self,
+        buffer_len: usize,
+        width: u32,
+        height: u32,
+        display_width: u32,
+        display_height: u32,
+        origin_x_px: u32,
+        origin_y_px: u32,
+    ) -> Result<()> {
+        if width == 0 || height == 0 || display_width == 0 || display_height == 0 {
+            return Err(anyhow!(
+                "load_from_buff: invalid size {}x{} (display {}x{})",
+                width,
+                height,
+                display_width,
+                display_height
+            ));
+        }
+
+        let expected = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|v| v.checked_mul(4))
+            .ok_or_else(|| anyhow!("load_from_buff: size overflow ({}x{}x4)", width, height))?;
+        if buffer_len != expected {
+            return Err(anyhow!(
+                "load_from_buff: invalid buffer length: got {}, expected {} ({}x{}x4)",
+                buffer_len,
+                expected,
+                width,
+                height
+            ));
+        }
+
+        if width > u16::MAX as u32
+            || height > u16::MAX as u32
+            || display_width > u16::MAX as u32
+            || display_height > u16::MAX as u32
+            || origin_x_px > u16::MAX as u32
+            || origin_y_px > u16::MAX as u32
+        {
+            return Err(anyhow!(
+                "load_from_buff: size or origin too large for u16: {}x{} (display {}x{}, origin {},{})",
+                width,
+                height,
+                display_width,
+                display_height,
+                origin_x_px,
+                origin_y_px
+            ));
+        }
+        Ok(())
+    }
+
+    fn finish_raw_rgba_load(
+        &mut self,
+        width: u32,
+        height: u32,
+        display_width: u32,
+        display_height: u32,
+        origin_x_px: u32,
+        origin_y_px: u32,
+        raster_scale: f32,
+    ) -> Result<()> {
+        self.texture_ready = true;
+        self.texture_path.clear();
+        self.offset_x = 0;
+        self.offset_y = 0;
+        self.width = width as u16;
+        self.height = height as u16;
+        self.display_width = display_width as u16;
+        self.display_height = display_height as u16;
+        self.u = 0;
+        self.v = 0;
+        self.text_origin_x_px = origin_x_px as u16;
+        self.text_origin_y_px = origin_y_px as u16;
+        self.text_raster_scale = if raster_scale.is_finite() && raster_scale > 0.0 {
+            raster_scale
+        } else {
+            0.0
+        };
+        self.mark_dirty();
+        self.load_kind = GraphBuffLoadKind::RawRgba;
+        self.cpu_pristine = false;
+        self.cpu_evicted = false;
+        self.hit_mask = None;
+        Ok(())
+    }
+
+    pub fn set_color_tone(&mut self, red_value: i32, green_value: i32, blue_value: i32) {
+        // IDA: GraphRGB -> color_tone_texture -> apply_color_tone.
+        // apply_color_tone operates on premultiplied-alpha BGRA pixels and clamps channels to alpha.
+        // For RGBA8 in Rust, we apply the same math per channel, clamping to A.
+
+        // Match the original engine: no-op if the texture is not ready.
+        if !self.texture_ready {
+            return;
+        };
+
+        #[cfg(feature = "psx")]
+        if let Some(streamed) = &mut self.streamed_clut {
+            streamed.palette.tone(
+                red_value.clamp(0, 200) as u32,
+                green_value.clamp(0, 200) as u32,
+                blue_value.clamp(0, 200) as u32,
+            );
+            self.r_value = red_value.clamp(0, 200) as u8;
+            self.g_value = green_value.clamp(0, 200) as u8;
+            self.b_value = blue_value.clamp(0, 200) as u8;
+            self.mark_dirty();
+            return;
+        }
+
+        let Some(texture) = &mut self.texture else {
+            return;
+        };
+        // PlayStation: tone the palette.
+        #[cfg(feature = "psx")]
+        if let DynamicImage::ImageClut(clut) = texture {
+            let changed = (red_value, green_value, blue_value) != (100, 100, 100);
+            if changed {
+                clut.tone(
+                    red_value.clamp(0, 200) as u32,
+                    green_value.clamp(0, 200) as u32,
+                    blue_value.clamp(0, 200) as u32,
+                );
+            }
+            self.r_value = red_value.clamp(0, 200) as u8;
+            self.g_value = green_value.clamp(0, 200) as u8;
+            self.b_value = blue_value.clamp(0, 200) as u8;
+            if changed {
+                self.mark_pixels_modified();
+            }
+            return;
+        }
+        let Some(texture) = texture.as_mut_rgba8() else {
+            return;
+        };
+
+        // In the original engine, (100,100,100) is a no-op on pixels.
+        // Avoid bumping generation in this specific case to prevent misleading debug noise.
+        if red_value == 100 && green_value == 100 && blue_value == 100 {
+            self.r_value = 100;
+            self.g_value = 100;
+            self.b_value = 100;
+            return;
+        }
+
+        // Clamp inputs to the script contract (0..=200). This matches the syscall layer.
+        let r_adj = red_value.clamp(0, 200) as u32;
+        let g_adj = green_value.clamp(0, 200) as u32;
+        let b_adj = blue_value.clamp(0, 200) as u32;
+
+        if let Err(error) = crysirror_image::associated::tone_channels_percent(
+            texture.as_mut(),
+            [red_value, green_value, blue_value],
+        ) {
+            log::error!("GraphRGB: {error}");
+            return;
+        }
+
+        self.r_value = r_adj as u8;
+        self.g_value = g_adj as u8;
+        self.b_value = b_adj as u8;
+        self.cpu_pristine = false;
+        self.mark_dirty();
+    }
+}
+
+#[cfg(feature = "old_school")]
+fn scale_old_school_u16(value: u16, scale: f32) -> u16 {
+    // Round half up, as the scripts' coordinates are (GameData::scale_old_school_i32).
+    ((value as f32 * scale + 0.5) as u32).min(u16::MAX as u32) as u16
+}
+
+/// 1-bit alpha coverage (alpha != 0) for hit tests; `None` when the image has no alpha channel.
+fn build_hit_mask(img: &DynamicImage) -> Option<Vec<u64>> {
+    let (w, h) = img.dimensions();
+    let n = (w as usize) * (h as usize);
+    let mut mask = vec![0u64; (n + 63) / 64];
+    match img {
+        #[cfg(feature = "psx")]
+        DynamicImage::ImagePs1Mask(img) => {
+            for (i, alpha) in img.alpha.iter().enumerate() {
+                if *alpha != 0 {
+                    mask[i / 64] |= 1u64 << (i % 64);
+                }
+            }
+        }
+        DynamicImage::ImageRgba8(rgba) => {
+            for (i, px) in rgba.as_raw().chunks_exact(4).enumerate() {
+                if px[3] != 0 {
+                    mask[i / 64] |= 1u64 << (i % 64);
+                }
+            }
+        }
+        // A CLUT picture: by each entry's real alpha.
+        #[cfg(feature = "psx")]
+        DynamicImage::ImageClut(clut) => {
+            for y in 0..h {
+                for x in 0..w {
+                    let index = clut.index(x, y) as usize;
+                    if clut.alpha.get(index).copied().unwrap_or(0) != 0 {
+                        let i = (y as usize) * (w as usize) + x as usize;
+                        mask[i / 64] |= 1u64 << (i % 64);
+                    }
+                }
+            }
+        }
+        DynamicImage::ImageLumaA8(_) => {
+            for y in 0..h {
+                for x in 0..w {
+                    if img.get_pixel(x, y).0[3] != 0 {
+                        let i = (y as usize) * (w as usize) + x as usize;
+                        mask[i / 64] |= 1u64 << (i % 64);
+                    }
+                }
+            }
+        }
+        #[allow(unreachable_patterns)]
+        _ => return None,
+    }
+    Some(mask)
+}
+
+pub fn copy_rect(
+    src: &DynamicImage,
+    src_x: u32,
+    src_y: u32,
+    src_w: u32,
+    src_h: u32,
+    dest: &mut DynamicImage,
+    dest_x: u32,
+    dest_y: u32,
+) -> Result<()> {
+    let (sw, sh) = src.dimensions();
+    let (dw, dh) = dest.dimensions();
+    anyhow::ensure!(
+        u64::from(src_x) + u64::from(src_w) <= u64::from(sw)
+            && u64::from(src_y) + u64::from(src_h) <= u64::from(sh),
+        "copy_rect source bounds"
+    );
+    anyhow::ensure!(
+        u64::from(dest_x) + u64::from(src_w) <= u64::from(dw)
+            && u64::from(dest_y) + u64::from(src_h) <= u64::from(dh),
+        "copy_rect destination bounds"
+    );
+    copy_rect_clipped(
+        src,
+        src_x,
+        src_y,
+        src_w,
+        src_h,
+        dest,
+        i32::try_from(dest_x)?,
+        i32::try_from(dest_y)?,
+    )
+}
+
+/// Copy a source rectangle into destination with clipping.
+///
+/// - `dest_x`/`dest_y` are allowed to be negative.
+/// - Pixels outside the destination are silently dropped.
+/// - This is the semantic required by the original engine's Parts overlay path.
+pub fn copy_rect_clipped(
+    src: &DynamicImage,
+    src_x: u32,
+    src_y: u32,
+    src_w: u32,
+    src_h: u32,
+    dest: &mut DynamicImage,
+    dest_x: i32,
+    dest_y: i32,
+) -> Result<()> {
+    // PlayStation: a CLUT part onto a CLUT picture, its colors mapped to the picture's palette.
+    #[cfg(feature = "psx")]
+    if let (DynamicImage::ImageClut(s), DynamicImage::ImageClut(d)) = (src, &mut *dest) {
+        let map = d.palette_map(s);
+        let (dw, dh) = (d.width as i32, d.height as i32);
+        for y in 0..src_h as i32 {
+            for x in 0..src_w as i32 {
+                let (tx, ty) = (dest_x + x, dest_y + y);
+                if tx < 0 || ty < 0 || tx >= dw || ty >= dh {
+                    continue;
+                }
+                let (sx, sy) = (src_x + x as u32, src_y + y as u32);
+                if sx >= s.width || sy >= s.height {
+                    continue;
+                }
+                d.set_index(tx as u32, ty as u32, map[s.index(sx, sy) as usize]);
+            }
+        }
+        return Ok(());
+    }
+    use crysirror_image::bitmap::{BitmapRect, BlitOptions, PixelMath};
+    let converted;
+    let source = if let DynamicImage::ImageRgba8(rgba) = src {
+        rgba
+    } else {
+        converted = src.to_rgba8();
+        &converted
+    };
+    let destination = dest
+        .as_mut_rgba8()
+        .ok_or_else(|| anyhow!("copy_rect_clipped: dest image is not RGBA8"))?;
+    let size = [destination.width(), destination.height()];
+    crysirror_image::bitmap::blit_rgba8(
+        destination.as_mut(),
+        size,
+        source.as_raw(),
+        [source.width(), source.height()],
+        BlitOptions {
+            source_rect: BitmapRect {
+                x: i32::try_from(src_x)?,
+                y: i32::try_from(src_y)?,
+                width: src_w,
+                height: src_h,
+            },
+            destination: [dest_x, dest_y],
+            mode: PixelMath::Copy,
+            opacity: 255,
+            color_key: None,
+        },
+    )
+}
+
+// ----------------------------
+// Save/Load snapshots
+// ----------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphBuffSnapshotV1 {
+    pub id: u16,
+    pub r_value: u8,
+    pub g_value: u8,
+    pub b_value: u8,
+    pub texture_ready: bool,
+    pub texture_path: String,
+    pub offset_x: u16,
+    pub offset_y: u16,
+    pub width: u16,
+    pub height: u16,
+    pub display_width: u16,
+    pub display_height: u16,
+    pub u: u16,
+    pub v: u16,
+    pub load_kind: GraphBuffLoadKind,
+    /// Raw RGBA8 pixels (width*height*4) for in-memory textures and parts-overlaid sources.
+    pub rgba: Option<Vec<u8>>,
+}
+
+impl GraphBuff {
+    pub fn capture_snapshot_with_id(&self, id: u16) -> GraphBuffSnapshotV1 {
+        // Skip empty graphs.
+        if !self.texture_ready && self.texture.is_none() && self.texture_path.is_empty() {
+            return GraphBuffSnapshotV1 {
+                id,
+                r_value: self.r_value,
+                g_value: self.g_value,
+                b_value: self.b_value,
+                texture_ready: self.texture_ready,
+                texture_path: self.texture_path.clone(),
+                offset_x: self.offset_x,
+                offset_y: self.offset_y,
+                width: self.width,
+                height: self.height,
+                display_width: self.get_display_width(),
+                display_height: self.get_display_height(),
+                u: self.u,
+                v: self.v,
+                load_kind: self.load_kind,
+                rgba: None,
+            };
+        }
+
+        GraphBuffSnapshotV1 {
+            id,
+            r_value: self.r_value,
+            g_value: self.g_value,
+            b_value: self.b_value,
+            texture_ready: self.texture_ready,
+            texture_path: self.texture_path.clone(),
+            offset_x: self.offset_x,
+            offset_y: self.offset_y,
+            width: self.width,
+            height: self.height,
+            display_width: self.get_display_width(),
+            display_height: self.get_display_height(),
+            u: self.u,
+            v: self.v,
+            load_kind: self.load_kind,
+            rgba: if self.texture_path.is_empty() || self.cpu_overlaid {
+                // Path graphs are otherwise rebuilt from the asset plus r/g/b, as the
+                // original engine does.
+                self.texture.as_ref().map(|img| match img {
+                    DynamicImage::ImageRgba8(rgba) => rgba.as_raw().clone(),
+                    _ => img.to_rgba8().into_raw(),
+                })
+            } else {
+                None
+            },
+        }
+    }
+
+    pub fn apply_snapshot_v1(&mut self, snap: &GraphBuffSnapshotV1, vfs: &Vfs) -> Result<()> {
+        // Always reset, then rehydrate.
+        self.unload();
+
+        self.r_value = snap.r_value;
+        self.g_value = snap.g_value;
+        self.b_value = snap.b_value;
+
+        // Original engine (sub_429190): reload the file, then replay GraphRGB once.
+        if !snap.texture_path.is_empty() && snap.rgba.is_none() {
+            let bytes = match vfs.read_file(&snap.texture_path) {
+                Ok(b) => b,
+                Err(e) => {
+                    return Err(anyhow!(
+                        "apply_snapshot_v1: failed to read {} from vfs: {}",
+                        snap.texture_path,
+                        e
+                    ));
+                }
+            };
+
+            match snap.load_kind {
+                GraphBuffLoadKind::Mask => self.load_mask(&snap.texture_path, bytes)?,
+                GraphBuffLoadKind::GaijiGlyph => {
+                    self.load_gaiji_fontface_glyph(&snap.texture_path, bytes)?
+                }
+                _ => self.load_texture(&snap.texture_path, bytes)?,
+            }
+
+            self.set_color_tone(
+                snap.r_value as i32,
+                snap.g_value as i32,
+                snap.b_value as i32,
+            );
+            return Ok(());
+        }
+
+        // Restore embedded pixels: in-memory textures and parts-overlaid sources.
+        if let Some(rgba) = &snap.rgba {
+            self.load_from_buff_ref_with_display_size(
+                rgba,
+                snap.width as u32,
+                snap.height as u32,
+                snap.display_width as u32,
+                snap.display_height as u32,
+            )?;
+            self.offset_x = snap.offset_x;
+            self.offset_y = snap.offset_y;
+            self.u = snap.u;
+            self.v = snap.v;
+            self.texture_path = snap.texture_path.clone();
+            self.cpu_overlaid = !snap.texture_path.is_empty();
+            self.texture_ready = snap.texture_ready;
+            self.load_kind = snap.load_kind;
+            self.mark_dirty();
+            return Ok(());
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(all(test, not(feature = "no_std")))]
+mod hidpi_text_region_tests {
+    use super::*;
+
+    #[test]
+    fn cropped_text_region_preserves_logical_position_and_scale() {
+        let mut graph = GraphBuff::new();
+        graph.display_width = 810;
+        graph.display_height = 120;
+        graph.text_origin_x_px = 35;
+        graph.text_origin_y_px = 14;
+        graph.text_raster_scale = 3.5;
+
+        let region = graph
+            .text_texture_region(700, 140, false, 0.0, 0.0, 0.0, 0.0)
+            .unwrap();
+        assert!((region.draw_x - 10.0).abs() < 0.0001);
+        assert!((region.draw_y - 4.0).abs() < 0.0001);
+        assert!((region.draw_w - 200.0).abs() < 0.0001);
+        assert!((region.draw_h - 40.0).abs() < 0.0001);
+        assert_eq!(region.tex_x, 0.0);
+        assert_eq!(region.tex_y, 0.0);
+        assert_eq!(region.tex_w, 700.0);
+        assert_eq!(region.tex_h, 140.0);
+    }
+
+    #[test]
+    fn text_rect_keeps_destination_origin_when_source_starts_inside_content() {
+        let mut graph = GraphBuff::new();
+        graph.display_width = 810;
+        graph.display_height = 120;
+        graph.text_origin_x_px = 35;
+        graph.text_origin_y_px = 14;
+        graph.text_raster_scale = 3.5;
+
+        let region = graph
+            .text_texture_region(700, 140, true, 20.0, 10.0, 40.0, 20.0)
+            .unwrap();
+        assert!((region.draw_x - 0.0).abs() < 0.0001);
+        assert!((region.draw_y - 0.0).abs() < 0.0001);
+        assert!((region.draw_w - 40.0).abs() < 0.0001);
+        assert!((region.draw_h - 20.0).abs() < 0.0001);
+        assert!((region.tex_x - 35.0).abs() < 0.0001);
+        assert!((region.tex_y - 21.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn cropped_text_region_intersects_legacy_text_rect() {
+        let mut graph = GraphBuff::new();
+        graph.display_width = 810;
+        graph.display_height = 120;
+        graph.text_origin_x_px = 35;
+        graph.text_origin_y_px = 14;
+        graph.text_raster_scale = 3.5;
+
+        let region = graph
+            .text_texture_region(700, 140, true, 0.0, 0.0, 60.0, 30.0)
+            .unwrap();
+        assert!((region.draw_x - 10.0).abs() < 0.0001);
+        assert!((region.draw_y - 4.0).abs() < 0.0001);
+        assert!((region.draw_w - 50.0).abs() < 0.0001);
+        assert!((region.draw_h - 26.0).abs() < 0.0001);
+        assert!((region.tex_w - 175.0).abs() < 0.0001);
+        assert!((region.tex_h - 91.0).abs() < 0.0001);
+    }
+}
+
+#[cfg(all(test, not(feature = "no_std")))]
+mod cpu_eviction_tests {
+    use super::*;
+
+    fn file_backed_rgba(w: u32, h: u32) -> GraphBuff {
+        let mut img = image::RgbaImage::new(w, h);
+        // Opaque only at (1, 0) and (w-1, h-1).
+        img.put_pixel(1, 0, image::Rgba([10, 20, 30, 255]));
+        img.put_pixel(w - 1, h - 1, image::Rgba([1, 1, 1, 7]));
+        let mut g = GraphBuff::new();
+        g.texture = Some(DynamicImage::ImageRgba8(img));
+        g.texture_ready = true;
+        g.texture_path = "bg/test".to_string();
+        g.width = w as u16;
+        g.height = h as u16;
+        g.load_kind = GraphBuffLoadKind::Texture;
+        g.cpu_pristine = true;
+        g
+    }
+
+    #[test]
+    fn eviction_keeps_hit_test_alpha_and_generation() {
+        let mut g = file_backed_rgba(70, 3);
+        let expected: Vec<Option<u8>> = (0..3)
+            .flat_map(|y| (0..70).map(move |x| (x, y)))
+            .map(|(x, y)| g.hit_alpha(x, y).map(|a| if a != 0 { 255 } else { 0 }))
+            .collect();
+        let gen = g.get_generation();
+
+        assert!(g.can_evict_cpu_pixels());
+        g.evict_cpu_pixels();
+        assert!(g.get_texture().is_none());
+        assert!(g.is_cpu_evicted());
+        assert_eq!(g.get_generation(), gen);
+
+        let got: Vec<Option<u8>> = (0..3)
+            .flat_map(|y| (0..70).map(move |x| (x, y)))
+            .map(|(x, y)| g.hit_alpha(x, y))
+            .collect();
+        assert_eq!(got, expected);
+        assert_eq!(g.hit_alpha(70, 0), None);
+    }
+
+    #[test]
+    fn opaque_images_hit_everywhere_after_eviction() {
+        let mut g = file_backed_rgba(4, 4);
+        g.texture = Some(DynamicImage::ImageRgb8(image::RgbImage::new(4, 4)));
+        g.evict_cpu_pixels();
+        assert!(g.is_cpu_evicted());
+        assert_eq!(g.hit_alpha(3, 3), Some(255));
+    }
+
+    #[test]
+    fn modified_or_raw_graphs_are_never_evicted() {
+        let mut g = file_backed_rgba(4, 4);
+        g.mark_pixels_modified();
+        assert!(!g.can_evict_cpu_pixels());
+        g.evict_cpu_pixels();
+        assert!(g.get_texture().is_some());
+
+        let mut raw = GraphBuff::new();
+        raw.load_from_buff(vec![0u8; 16], 2, 2).unwrap();
+        assert!(!raw.can_evict_cpu_pixels());
+
+        let mut unloaded = file_backed_rgba(4, 4);
+        unloaded.evict_cpu_pixels();
+        unloaded.unload();
+        assert!(!unloaded.is_cpu_evicted());
+        assert_eq!(unloaded.hit_alpha(0, 0), None);
+    }
+}
+
+/// The engine's 4096 graph slots. On the PlayStation they are allocated when first written
+/// (a game uses a few hundred; 4096 GraphBuffs are hundreds of KiB of its 2 MiB), and read as
+/// one shared empty graph until then.
+#[cfg(feature = "psx")]
+pub struct GraphSlots {
+    slots: Vec<Option<alloc::boxed::Box<GraphBuff>>>,
+    /// The ids of the allocated slots, in order: the passes over the graphs every frame visit
+    /// these rather than all 4096.
+    used: Vec<u16>,
+    empty: GraphBuff,
+}
+
+#[cfg(feature = "psx")]
+impl GraphSlots {
+    pub fn new(count: usize) -> Self {
+        let mut slots = Vec::with_capacity(count);
+        slots.resize_with(count, || None);
+        Self {
+            slots,
+            used: Vec::new(),
+            empty: GraphBuff::new(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    pub fn get(&self, id: usize) -> Option<&GraphBuff> {
+        self.slots
+            .get(id)
+            .map(|s| s.as_deref().unwrap_or(&self.empty))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &GraphBuff> + '_ {
+        self.slots
+            .iter()
+            .map(move |s| s.as_deref().unwrap_or(&self.empty))
+    }
+
+    /// The slots in use, with their ids.
+    pub fn present_mut(&mut self) -> impl Iterator<Item = (usize, &mut GraphBuff)> + '_ {
+        let slots = self.slots.as_mut_ptr();
+        self.used.iter().filter_map(move |&id| {
+            // SAFETY: each id is in `used` once, so no two items borrow the same slot, and the
+            // slots stay put while the iterator borrows `self`.
+            unsafe {
+                (*slots.add(id as usize))
+                    .as_deref_mut()
+                    .map(|g| (id as usize, g))
+            }
+        })
+    }
+
+    /// Every slot back to empty.
+    pub fn clear(&mut self) {
+        self.slots.iter_mut().for_each(|s| *s = None);
+        self.used.clear();
+    }
+}
+
+#[cfg(feature = "psx")]
+impl core::ops::Index<usize> for GraphSlots {
+    type Output = GraphBuff;
+    fn index(&self, id: usize) -> &GraphBuff {
+        self.slots[id].as_deref().unwrap_or(&self.empty)
+    }
+}
+
+#[cfg(feature = "psx")]
+impl core::ops::IndexMut<usize> for GraphSlots {
+    fn index_mut(&mut self, id: usize) -> &mut GraphBuff {
+        if self.slots[id].is_none() {
+            let at = self.used.partition_point(|&u| (u as usize) < id);
+            self.used.insert(at, id as u16);
+        }
+        self.slots[id].get_or_insert_with(|| alloc::boxed::Box::new(GraphBuff::new()))
+    }
+}
+
+/// What renderers read the graphs through.
+#[cfg(feature = "psx")]
+pub type Graphs = GraphSlots;
+#[cfg(not(feature = "psx"))]
+pub type Graphs = [GraphBuff];
+
+impl crysirror_text::vn_slot::InlineBitmap for GraphBuff {
+    fn get_width(&self) -> u16 {
+        GraphBuff::get_width(self)
+    }
+    fn export_alpha_mask(&self) -> Option<(u16, u16, i16, i16, Vec<u8>)> {
+        GraphBuff::export_alpha_mask(self)
+    }
+}

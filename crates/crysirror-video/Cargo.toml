@@ -7,12 +7,12 @@ rust-version = "1.95"
 description = "Device-free video decoding: OMV/Theora, MPEG-1/2, WMV/VC-1 and MP4 AVC/HEVC/AV1"
 
 [dependencies]
+crysirror-image.workspace = true
 anyhow.workspace = true
-siglus_omv_decoder = { path = "../siglus-upstream/siglus_omv_decoder" }
-siglus_assets = { path = "../siglus-upstream/siglus_assets" }
-siglus_scene_vm = { path = "../siglus-upstream/siglus_scene_vm", default-features = false }
-na_mpeg2_decoder = { path = "../siglus-upstream/na_mpeg2_decoder" }
-wmv-decoder = { path = "../siglus-upstream/na_wmv_player", default-features = false }
+amv_decoder = { package = "crysirror-codec-amv", path = "../crysirror-codec-amv" }
+siglus_omv_decoder = { package = "crysirror-codec-omv", path = "../crysirror-codec-omv" }
+na_mpeg2_decoder = { package = "crysirror-codec-mpeg", path = "../crysirror-codec-mpeg" }
+wmv-decoder = { package = "crysirror-codec-wmv", path = "../crysirror-codec-wmv", default-features = false, features = ["audio"] }
 
 # Native Rust codecs; exact versions keep the source audit reproducible.
 oxideav-core = "=0.1.42"

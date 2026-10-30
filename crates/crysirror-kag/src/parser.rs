@@ -6,6 +6,11 @@ use crate::{
     tag::{Attribute, AttributeValue, Tag, TagOrigin},
 };
 
+mod ext;
+mod native_save;
+pub use native_save::{NativeCall, NativeExtControl, NativePosition};
+use ext::{ExtState, WhileFrame};
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DebugLevel {
     #[default]
@@ -36,7 +41,38 @@ impl Default for ParserOptions {
 }
 
 pub trait KagHost {
+    /// Execute an ExtKAGParser loop initializer/increment without string coercion.
+    fn eval_void(&mut self, expression: &str) -> Result<()> {
+        self.eval_string(expression).map(|_| ())
+    }
+
+    /// ExtKAGParser's native local dictionary operations. The VM owns values.
+    fn local_variables(&mut self, _tag: &Tag, _push: bool, _copy: bool) -> Result<()> {
+        Err(KagError::host(
+            "ExtKAGParser local variable host is unavailable",
+        ))
+    }
+
+    fn local_variable(&mut self, _name: &str) -> Result<Option<String>> {
+        Err(KagError::host(
+            "ExtKAGParser local variable host is unavailable",
+        ))
+    }
+
     fn sync_parser_state(&mut self, _parser: &KagParser) -> Result<()> {
+        Ok(())
+    }
+    /// A native host may retain typed macro dictionaries and project their
+    /// current values into the parser only when resolving textual attributes.
+    fn macro_argument_values(&mut self) -> Result<Option<Vec<Attribute>>> {
+        Ok(None)
+    }
+    /// Preserve native `%arg` and `*` value identities separately from the
+    /// textual attribute projection used by this parser.
+    fn resolved_tag_values(&mut self, _original: &Tag, _resolved: &Tag) -> Result<()> {
+        Ok(())
+    }
+    fn restore_macro_argument_state(&mut self, _parser: &KagParser) -> Result<()> {
         Ok(())
     }
 
@@ -245,6 +281,7 @@ pub struct ParserSnapshot {
     macro_params: Vec<Attribute>,
     condition_stack: Vec<ConditionFrame>,
     interrupted: bool,
+    ext: Option<ExtState>,
 }
 
 impl ParserSnapshot {
@@ -268,7 +305,11 @@ impl ParserSnapshot {
     pub fn to_persistent_string(&self) -> String {
         let mut writer = SnapshotWriter::new();
         writer.bytes(Self::PERSISTENT_MAGIC);
-        writer.u32(Self::PERSISTENT_VERSION);
+        writer.u32(if self.ext.is_some() {
+            2
+        } else {
+            Self::PERSISTENT_VERSION
+        });
         writer.opt_string(self.current_storage.as_deref());
         writer.usize(self.cursor.offset);
         writer.opt_string(self.current_label.as_deref());
@@ -278,9 +319,16 @@ impl ParserSnapshot {
         writer.attributes(&self.macro_params);
         writer.condition_frames(&self.condition_stack);
         writer.bool(self.interrupted);
+        if let Some(ext) = &self.ext {
+            writer.ext_state(ext, &self.call_stack);
+        }
         format!(
             "{}{}",
-            Self::PERSISTENT_PREFIX,
+            if self.ext.is_some() {
+                "kag-snapshot-v2:"
+            } else {
+                Self::PERSISTENT_PREFIX
+            },
             hex_encode(&writer.into_bytes())
         )
     }
@@ -288,6 +336,7 @@ impl ParserSnapshot {
     pub fn from_persistent_string(value: &str) -> Result<Self> {
         let encoded = value
             .strip_prefix(Self::PERSISTENT_PREFIX)
+            .or_else(|| value.strip_prefix("kag-snapshot-v2:"))
             .ok_or_else(|| KagError::host("invalid KAGParser snapshot encoding"))?;
         let bytes = hex_decode(encoded)?;
         let mut reader = SnapshotReader::new(&bytes);
@@ -295,12 +344,12 @@ impl ParserSnapshot {
             return Err(KagError::host("invalid KAGParser snapshot header"));
         }
         let version = reader.u32()?;
-        if version != Self::PERSISTENT_VERSION {
+        if version != Self::PERSISTENT_VERSION && version != 2 {
             return Err(KagError::host(format!(
                 "unsupported KAGParser snapshot version {version}"
             )));
         }
-        let snapshot = Self {
+        let mut snapshot = Self {
             current_storage: reader.opt_string()?,
             cursor: Cursor {
                 offset: reader.usize()?,
@@ -312,7 +361,11 @@ impl ParserSnapshot {
             macro_params: reader.attributes()?,
             condition_stack: reader.condition_frames()?,
             interrupted: reader.bool()?,
+            ext: None,
         };
+        if version == 2 {
+            snapshot.ext = Some(reader.ext_state(&mut snapshot.call_stack)?);
+        }
         reader.finish()?;
         Ok(snapshot)
     }
@@ -367,6 +420,8 @@ impl ParserSnapshot {
                             macro_stack: Vec::new(),
                             macro_params: Vec::new(),
                             condition_stack: condition_state.to_frames(),
+                            while_stack: Vec::new(),
+                            local_depth: 1,
                         },
                     },
                 )
@@ -386,6 +441,7 @@ impl ParserSnapshot {
             macro_params: Vec::new(),
             condition_stack: condition_state.to_frames(),
             interrupted: false,
+            ext: None,
         }
     }
 
@@ -661,6 +717,8 @@ impl<'a> SnapshotReader<'a> {
             macro_stack: self.expansion_frames()?,
             macro_params: self.attributes()?,
             condition_stack: self.condition_frames()?,
+            while_stack: Vec::new(),
+            local_depth: 1,
         })
     }
 
@@ -807,6 +865,7 @@ pub struct KagParser {
     macro_params: Vec<Attribute>,
     condition_stack: Vec<ConditionFrame>,
     interrupted: bool,
+    ext: Option<ExtState>,
 }
 
 impl Default for KagParser {
@@ -834,6 +893,7 @@ impl KagParser {
             macro_params: Vec::new(),
             condition_stack: Vec::new(),
             interrupted: false,
+            ext: None,
         }
     }
 
@@ -879,9 +939,20 @@ impl KagParser {
         self.macro_params.clear();
         self.condition_stack.clear();
         self.interrupted = false;
+        self.reset_ext_flow();
     }
 
     pub fn assign(&mut self, source: &Self) {
+        // ExtKAGParser::operator= deliberately does not copy these per-owner
+        // switches or Interrupted (0.1.4.3 KAGParser.cpp:422-503).
+        let owner_options = self.ext.as_ref().map(|ext| {
+            (
+                ext.multi_line,
+                ext.numeric_arguments,
+                self.options.process_special_tags,
+                self.interrupted,
+            )
+        });
         self.options = source.options.clone();
         self.debug_level = source.debug_level;
         self.scenarios = source.scenarios.clone();
@@ -894,6 +965,15 @@ impl KagParser {
         self.macro_params = source.macro_params.clone();
         self.condition_stack = source.condition_stack.clone();
         self.interrupted = source.interrupted;
+        self.ext = source.ext.clone();
+        if let (Some((multi_line, numeric_arguments, special, interrupted)), Some(ext)) =
+            (owner_options, self.ext.as_mut())
+        {
+            ext.multi_line = multi_line;
+            ext.numeric_arguments = numeric_arguments;
+            self.options.process_special_tags = special;
+            self.interrupted = interrupted;
+        }
     }
 
     pub fn load_scenario_text(
@@ -926,6 +1006,7 @@ impl KagParser {
         self.cursor = Cursor::default();
         self.current_label = None;
         self.condition_stack.clear();
+        self.break_ext_flow();
         self.macro_stack.clear();
         self.macro_params.clear();
         Ok(())
@@ -1046,9 +1127,14 @@ impl KagParser {
         &self.macro_params
     }
 
+    pub fn set_macro_params(&mut self, params: Vec<Attribute>) {
+        self.macro_params = params;
+    }
+
     pub fn clear_call_stack(&mut self) {
         self.call_stack.clear();
         self.macro_params.clear();
+        self.reset_ext_flow();
     }
 
     pub fn pop_macro_args(&mut self) -> Result<()> {
@@ -1066,10 +1152,16 @@ impl KagParser {
             macro_params: self.macro_params.clone(),
             condition_stack: self.condition_stack.clone(),
             interrupted: self.interrupted,
+            ext: self.ext.as_ref().map(|state| {
+                let mut state = state.clone();
+                state.ignore_cr = self.ignore_cr();
+                state
+            }),
         }
     }
 
     pub fn restore(&mut self, snapshot: ParserSnapshot) -> Result<()> {
+        self.validate_ext_restore(&snapshot)?;
         if let Some(storage) = &snapshot.current_storage
             && !self.scenarios.contains_key(storage)
         {
@@ -1087,6 +1179,10 @@ impl KagParser {
         self.macro_params = snapshot.macro_params;
         self.condition_stack = snapshot.condition_stack;
         self.interrupted = snapshot.interrupted;
+        self.ext = snapshot.ext;
+        if let Some(ext) = &self.ext {
+            self.options.ignore_cr = ext.ignore_cr;
+        }
         Ok(())
     }
 
@@ -1141,6 +1237,9 @@ impl KagParser {
         H: KagHost,
     {
         let preserved_params = self.macro_params.clone();
+        let mut tag = Tag::interrupt();
+        tag.tagname = "call".into();
+        self.push_ext_locals(&tag, host)?;
         self.push_call_frame()?;
         self.move_to(storage, target, Some(host))?;
         self.macro_params = preserved_params;
@@ -1156,7 +1255,14 @@ impl KagParser {
     where
         H: KagHost,
     {
+        let mut steps = 0usize;
         loop {
+            steps += 1;
+            if self.is_ext_kag() && steps > 1_000_000 {
+                return Err(KagError::host(
+                    "ExtKAGParser non-yielding instruction limit",
+                ));
+            }
             if self.interrupted {
                 self.interrupted = false;
                 return Ok(Some(Tag::interrupt()));
@@ -1177,6 +1283,9 @@ impl KagParser {
                     error @ (KagError::ResourcePending { .. } | KagError::HostSuspended { .. }),
                 ) => {
                     self.restore(checkpoint)?;
+                    if self.is_ext_kag() {
+                        host.restore_macro_argument_state(self)?;
+                    }
                     return Err(error);
                 }
                 Err(error) => return Err(error),
@@ -1189,6 +1298,15 @@ impl KagParser {
         H: KagHost,
     {
         let item = self.next_raw_item()?;
+        if self.is_ext_kag() {
+            // next_raw_item may finish an expansion. Publish its pop before
+            // another macro is pushed at the same depth, and refresh live mp
+            // values without round-tripping native objects through strings.
+            host.sync_parser_state(self)?;
+            if let Some(values) = host.macro_argument_values()? {
+                self.macro_params = values;
+            }
+        }
 
         let mut tag = match item {
             RawItem::Eof => return Ok(NextItem::Eof),
@@ -1207,6 +1325,15 @@ impl KagParser {
             }
             RawItem::Label(label) => {
                 let storage = self.current_storage_name()?.to_owned();
+                if self.ext.is_some()
+                    && (!self.condition_stack.is_empty()
+                        || self.local_variables_depth() != self.local_scope_base())
+                {
+                    return Err(self.parse_error(
+                        label.span,
+                        "label in ExtKAGParser conditional/loop/local scope",
+                    ));
+                }
                 self.current_label = Some(label.name.clone());
                 host.sync_parser_state(self)?;
                 host.on_label(LabelEvent {
@@ -1218,6 +1345,13 @@ impl KagParser {
             RawItem::Tag(tag) => tag,
         };
 
+        if self.options.process_special_tags && self.handle_ext_loop(&tag, host)? {
+            return Ok(NextItem::Consumed);
+        }
+
+        if self.options.process_special_tags {
+            self.validate_ext_condition(&tag)?;
+        }
         if self.options.process_special_tags && self.handle_condition_tag(&tag, host)? {
             return Ok(NextItem::Consumed);
         }
@@ -1226,7 +1360,11 @@ impl KagParser {
             return Ok(NextItem::Consumed);
         }
 
+        self.validate_ext_macro_arguments(&tag)?;
+        self.expand_parameter_macros(&mut tag)?;
+        let native_value_origins = self.is_ext_kag().then(||tag.clone());
         self.apply_macro_arguments(&mut tag);
+        self.resolve_local_arguments(&mut tag, host)?;
 
         if self.options.process_cond
             && tag_supports_cond(&tag.tagname, self.options.process_special_tags)
@@ -1238,9 +1376,16 @@ impl KagParser {
         if self.options.resolve_entities {
             self.resolve_entities(&mut tag, host)?;
         }
+        if let Some(original)=native_value_origins {
+            host.resolved_tag_values(&original,&tag)?;
+        }
 
         if !self.options.process_special_tags && self.macros.contains_key(&tag.tagname) {
             self.expand_macro(tag)?;
+            return Ok(NextItem::Consumed);
+        }
+
+        if self.options.process_special_tags && self.handle_ext_tag(&tag, host)? {
             return Ok(NextItem::Consumed);
         }
 
@@ -1258,6 +1403,7 @@ impl KagParser {
         self.cursor = Cursor::default();
         self.current_label = None;
         self.condition_stack.clear();
+        self.break_ext_flow();
         self.macro_stack.clear();
         self.macro_params.clear();
         Ok(())
@@ -1523,6 +1669,9 @@ impl KagParser {
     }
 
     fn read_command_line(&mut self) -> Result<RawItem> {
+        if self.is_ext_kag() {
+            return self.read_extended_tag(false);
+        }
         let start = self.active_offset();
         let (tag, next) = {
             let storage = self.current_storage_name()?.to_owned();
@@ -1539,6 +1688,7 @@ impl KagParser {
                 content_start,
                 span,
                 TagOrigin::CommandLine,
+                self.is_ext_kag(),
             )?;
             (tag, line_end_with_newline_in(source, start))
         };
@@ -1547,6 +1697,9 @@ impl KagParser {
     }
 
     fn read_bracket_tag(&mut self) -> Result<RawItem> {
+        if self.is_ext_kag() {
+            return self.read_extended_tag(true);
+        }
         let start = self.active_offset();
         let (tag, next) = {
             let storage = self.current_storage_name()?.to_owned();
@@ -1597,6 +1750,7 @@ impl KagParser {
                 content_start,
                 span,
                 self.active_origin(TagOrigin::Bracket),
+                self.is_ext_kag(),
             )?;
             (tag, close + 1)
         };
@@ -1773,7 +1927,24 @@ impl KagParser {
                 attribute: "name".to_owned(),
             })?
             .to_lowercase();
-        let source = self.capture_macro_body(&tag)?;
+        let mut source = String::new();
+        if self.is_ext_kag() {
+            for attribute in &tag.attributes {
+                if let Attribute::Named { name, value } = attribute {
+                    if name == "name" || name == "tagname" {
+                        continue;
+                    }
+                    let lookup = format!("mp[{}]", ext::tjs_quote(name));
+                    let expression = format!("{lookup}={}", ext::tjs_quote(value.raw()));
+                    source.push_str(&format!(
+                        "[eval exp={} cond={}]",
+                        ext::kag_quote(&expression),
+                        ext::kag_quote(&format!("{lookup}===void"))
+                    ));
+                }
+            }
+        }
+        source.push_str(&self.capture_macro_body(&tag)?);
         self.macros.insert(name, MacroDefinition { source });
         Ok(())
     }
@@ -1789,8 +1960,13 @@ impl KagParser {
                 RawItem::Label(label) => {
                     return Err(self.parse_error(label.span, "label cannot be used inside a macro"));
                 }
-                RawItem::ScriptStart { span, .. } => {
-                    return Err(self.parse_error(span, "iscript cannot be used inside a macro"));
+                RawItem::ScriptStart { script_start, span } => {
+                    if !self.is_ext_kag() {
+                        return Err(self.parse_error(span, "iscript cannot be used inside a macro"));
+                    }
+                    let (script, _) = self.collect_script_block_from(script_start, span)?;
+                    body.push_str(&format!("[eval exp={}]", ext::kag_quote(&script)));
+                    continue;
                 }
                 RawItem::Tag(tag) => tag,
             };
@@ -1815,12 +1991,30 @@ impl KagParser {
                 span: Some(invocation.span),
                 message: format!("unknown macro {:?}", invocation.tagname),
             })?;
-        let params: Vec<_> = invocation
+        let mut params: Vec<_> = invocation
             .attributes
             .iter()
             .filter(|attribute| attribute.name() != Some("cond"))
             .cloned()
             .collect();
+        if self.numeric_macro_arguments_enabled() {
+            let names: Vec<_> = params
+                .iter()
+                .filter_map(|a| a.name().map(str::to_owned))
+                .collect();
+            for (i, name) in names.into_iter().enumerate() {
+                params.push(Attribute::named(
+                    (i + 1).to_string(),
+                    AttributeValue::literal(name),
+                ));
+            }
+        }
+        if self.is_ext_kag() {
+            params.push(Attribute::named(
+                "tagname",
+                AttributeValue::literal(invocation.tagname.clone()),
+            ));
+        }
         let previous_params = std::mem::replace(&mut self.macro_params, params);
         self.push_expansion(invocation.tagname, definition.source, Some(previous_params))?;
         Ok(())
@@ -1904,6 +2098,7 @@ impl KagParser {
         let target = self.optional_attr_string(&tag, "target", host)?;
         host.sync_parser_state(self)?;
         if host.on_call(&tag, storage.as_deref(), target.as_deref())? {
+            self.push_ext_locals(&tag, host)?;
             let preserved_params = self.macro_params.clone();
             self.push_call_frame()?;
             self.move_to(storage.as_deref(), target.as_deref(), Some(host))?;
@@ -1931,6 +2126,9 @@ impl KagParser {
                 .is_some_and(|value| !value.trim().is_empty());
 
         let frame = self.call_stack.pop().ok_or(KagError::ReturnStackEmpty)?;
+        if let Some(ext) = &mut self.ext {
+            ext.local_depth = frame.resume.local_depth;
+        }
         if explicit_target {
             let preserved_params = frame.resume.macro_params.clone();
             self.move_to(storage.as_deref(), target.as_deref(), Some(host))?;
@@ -1961,8 +2159,18 @@ impl KagParser {
                 macro_stack: self.macro_stack.clone(),
                 macro_params: self.macro_params.clone(),
                 condition_stack: self.condition_stack.clone(),
+                while_stack: self
+                    .ext
+                    .as_ref()
+                    .map(|s| s.while_stack.clone())
+                    .unwrap_or_default(),
+                local_depth: self.local_variables_depth(),
             },
         });
+        if let Some(ext) = &mut self.ext {
+            ext.local_depth += 1;
+            ext.while_stack.clear();
+        }
         Ok(())
     }
 
@@ -1991,6 +2199,10 @@ impl KagParser {
         self.macro_stack = frame.resume.macro_stack.clone();
         self.macro_params = frame.resume.macro_params.clone();
         self.condition_stack = frame.resume.condition_stack.clone();
+        if let Some(ext) = &mut self.ext {
+            ext.while_stack = frame.resume.while_stack.clone();
+            ext.local_depth = frame.resume.local_depth;
+        }
         Ok(())
     }
 
@@ -2047,6 +2259,7 @@ impl KagParser {
         }
 
         self.condition_stack.clear();
+        self.break_ext_flow();
         self.macro_stack.clear();
         self.macro_params.clear();
         Ok(())
@@ -2126,7 +2339,11 @@ impl KagParser {
             }
         }
 
-        AttributeValue::Literal(default.unwrap_or_default())
+        match default {
+            Some(value) => AttributeValue::Literal(value),
+            None if self.is_ext_kag() => AttributeValue::Void,
+            None => AttributeValue::Literal(String::new()),
+        }
     }
 
     fn eval_bool_attr<H>(&self, tag: &Tag, attr: &str, host: &mut H) -> Result<bool>
@@ -2212,6 +2429,8 @@ struct ResumeState {
     macro_stack: Vec<ExpansionFrame>,
     macro_params: Vec<Attribute>,
     condition_stack: Vec<ConditionFrame>,
+    while_stack: Vec<WhileFrame>,
+    local_depth: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2570,13 +2789,27 @@ fn parse_tag_content(
     base_offset: usize,
     span: SourceSpan,
     origin: TagOrigin,
+    extended: bool,
 ) -> Result<Tag> {
     let mut parser = AttributeParser {
         storage,
         content,
         base_offset,
         pos: 0,
+        mark_bare: extended,
     };
+    if extended && content.trim_start().starts_with('&') {
+        return Ok(Tag::new(
+            "emb",
+            vec![Attribute::named(
+                "exp",
+                AttributeValue::literal(content.trim_start()[1..].to_owned()),
+            )],
+            origin,
+            span,
+            location_in(source, line_starts, span.start),
+        ));
+    }
     parser.skip_space();
     let tag_start = parser.pos;
     while let Some(ch) = parser.peek() {
@@ -2618,6 +2851,7 @@ struct AttributeParser<'a> {
     content: &'a str,
     base_offset: usize,
     pos: usize,
+    mark_bare: bool,
 }
 
 impl AttributeParser<'_> {
@@ -2657,7 +2891,7 @@ impl AttributeParser<'_> {
             }
             self.bump();
         }
-        let name = self.content[name_start..self.pos].to_lowercase();
+        let mut name = self.content[name_start..self.pos].to_lowercase();
         if name.is_empty() {
             return Err(self.error_here("attribute name is empty"));
         }
@@ -2676,6 +2910,9 @@ impl AttributeParser<'_> {
                 self.parse_value()?
             }
         } else {
+            if self.mark_bare {
+                name.insert(0, '\0');
+            }
             AttributeValue::Literal("true".to_owned())
         };
 

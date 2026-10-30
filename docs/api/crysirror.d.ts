@@ -501,12 +501,22 @@ declare class Layers {
   crossfadeStatus(id: number): Record<string, any> | null;
   /** Crossfade two isolated sibling subtrees using the engine clock. */
   beginCrossfade(id: number, source: number, durationMs: number): void;
+  /** Isolated subtree effect: blur {before:[x,y],after:[x,y],dynamic?}, or dim {rule:{asset,vague},blur:[x,y],negative?,acceleration?}; engine-owned time and GPU resources. */
+  beginCrossfadeEffect(id: number, source: number, durationMs: number, effect: Record<string, any>): void;
   /** Release a subtree crossfade; leaves original nodes intact. */
   endCrossfade(id: number): void;
   /** Set an externally clocked crossfade's progress (clamped to its duration). */
   setCrossfadeElapsed(id: number, elapsedMs: number): void;
   /** Finish this client's transition now (skip). */
   endTransition(): void;
+  /** Animate x/y/scale_x/scale_y with a shared MotionTrackSpec; engine duration uses milliseconds, external duration uses caller units. */
+  beginMotion(id: number, track: Record<string, any>): void;
+  /** Sample an externally clocked motion track at caller elapsed units. */
+  setMotionElapsed(id: number, property: string, elapsed: number): void;
+  /** Cancel one track or all tracks; finish optionally applies the target before removal. */
+  endMotion(id: number, property: string | null, finish: boolean): void;
+  /** Current owned motion tracks and completion; a missing target fails. */
+  motionStatus(id: number): Record<string, any>;
 }
 /** Client-scoped string catalogs, CLDR plurals and locale font aliases; no filesystem or GPU ownership. */
 declare class Localization {
@@ -533,7 +543,17 @@ declare class Media {
   play(id: number, asset: string, options: Record<string, any> | null): string;
   /** Stop only this client's media resource. */
   stop(id: number): void;
-  /** Media state, position_ms, frame_pts_ms, published/decoded frames, audio_started, loops_completed and error, or null when absent. */
+  /** Release this client's media resource and decoded surface after detaching its image references. */
+  remove(id: number): void;
+  /** Freeze the media clock; audio stops and the current picture stays. */
+  pause(id: number): void;
+  /** Continue a paused media clock; audio restarts at the matching offset. */
+  resume(id: number): void;
+  /** Select a monotonic external video clock before first playback, then supply clock samples. Exact nonnegative integers or decimal strings are accepted. The engine owns pause/seek/loop offsets; decoded audio tracks require audio-master mapping and currently fail explicitly. */
+  setClock(id: number, nowMs: any): void;
+  /** Restart decoding and present the picture due at position_ms (stream time); earlier pictures are decoded but not published. A paused resource stays paused there. */
+  seek(id: number, position_ms: number): void;
+  /** Media state, position_ms, frame_pts_ms, published/decoded frames, audio_started, loops_completed, paused, validated size, declared duration_ms and error, or null when absent. Size/duration remain null while pending or unknown. */
   status(id: number): Record<string, any> | null;
 }
 /** Persistent client-isolated rigid bodies, CCD, collision queries and joints. Simulation runs in every Runtime 16 ms world step, including pure data projects. Snapshots rebuild from saved pose, velocity, forces and joint declarations; solver warm starts are not serialized. */
@@ -670,6 +690,16 @@ declare class Save {
 }
 /** CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed. */
 declare class Text {
+  /** Begin bounded asset read and font preparation. fontStatus publishes the immutable face to this client's measurement and renderer catalog. */
+  beginFont(alias: string, asset: string, faceIndex: number | null): number;
+  /** Poll font workers. Ready contains canonical alias, digest, revision, families and resource handle; failed contains an error. */
+  fontStatus(ticket: number): Record<string, any>;
+  /** Resolve a client-owned logical alias or font family to immutable font metadata, or null. */
+  resolveFont(aliasOrFamily: string): any;
+  /** Cancel/release registration ticket. Published faces remain until releaseFont. */
+  releaseFontJob(ticket: number): void;
+  /** Release this client's dynamic face. Existing layer references must be removed or replaced before rendering. */
+  releaseFont(handle: number): void;
   /** Prepare markup, shaping, icon decoding and initial raster on bounded workers. Returns a client/generation ticket; the old block remains until successful publication. */
   beginDraw(name: string, markup: string, options: Record<string, any> | null): number;
   /** Prepare saved text and reveal state on workers, publishing only after validation. */
@@ -707,6 +737,8 @@ declare class Ui {
   readonly focus: any;
   /** Consume this client's retained events once, preserving other clients' events. Use this for action dispatch; events only reads a snapshot of the queue. */
   drainEvents(): Record<string, any>[];
+  /** Freeze owned UI into independent logical LayerSpec records on the project canvas. Pass null for all owned UI, or a widget id for its subtree; current values, style and clip are preserved. */
+  snapshotLayers(root: number | null): Record<string, any>[];
   /** Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state. */
   setMenu(menu: Record<string, any>): void;
   /** Remove a client menu tree. */
@@ -723,6 +755,8 @@ declare class Ui {
   warpPointer(position: number[]): void;
   /** Update checked state with shared sibling radio-group semantics. */
   setMenuChecked(id: number, item: number, checked: boolean): void;
+  /** Enable or disable an owned menu item, closing invalid popup branches and canceling ineligible gestures. */
+  setMenuEnabled(id: number, item: number, enabled: boolean): void;
   /** Insert/replace a widget spec {id, parent?, rect, kind, flow?, text?, ...}. */
   put(widget: Record<string, any>): void;
   /** Remove a widget and its children. */
@@ -733,8 +767,14 @@ declare class Ui {
   setEnabled(id: number, enabled: boolean): void;
   /** Toggle/slider value. */
   setValue(id: number, value: number): void;
+  /** Bind an immutable WidgetHitMask coverage grid to pointer input, or clear it with null; keyboard focus remains independent. */
+  setHitMask(id: number, mask: Record<string, any> | null): void;
   /** Set engine cursor presentation visibility. */
   setCursorVisible(visible: boolean): void;
+  /** Define or replace a client cursor {frames:[{width,height,hotspot:[x,y],rgba:[bytes]}], steps:[[frame,ms]]} (edges 1..256, straight RGBA8; one 0 ms step for a still cursor). */
+  defineCursor(id: number, cursor: Record<string, any>): void;
+  /** Select the pointer shape: {kind:'standard', shape:'default'|'pointer'|'text'|'wait'|...} or {kind:'custom', id} for a cursor this client defined. */
+  setCursor(cursor: Record<string, any>): void;
   /** Request borderless desktop fullscreen. Headless hosts retain client-owned state; the desktop applies it at frame publication. */
   setFullscreen(enabled: boolean): void;
   /** Request desktop decorations and resizing through engine-owned client state. Headless hosts retain the request; the desktop applies it at frame publication. */
@@ -747,8 +787,16 @@ declare class Ui {
   insertText(text: string): void;
   /** Remove the final Unicode scalar from a client-owned text field. */
   backspace(id: number): void;
-  /** Label/button text and font alias. */
+  /** Label/button text and optional font alias; null preserves the existing font. */
   setText(id: number, text: string, font: string | null): void;
+  /** Animate widget x/y using a shared MotionTrackSpec; engine duration uses milliseconds, external duration uses caller units. */
+  beginMotion(id: number, track: Record<string, any>): void;
+  /** Sample an external widget motion before engine hit testing. */
+  setMotionElapsed(id: number, property: string, elapsed: number): void;
+  /** Cancel one or all widget motion tracks, optionally applying their targets. */
+  endMotion(id: number, property: string | null, finish: boolean): void;
+  /** Current owned widget motion tracks and completion; a missing target fails. */
+  motionStatus(id: number): Record<string, any>;
 }
 /** Engine-owned modular visual effects. Systems are data, particles execute on bounded CPU workers or native GPU compute; JS/TS controls instances and parameters. */
 declare class Vfx {
@@ -766,6 +814,8 @@ declare class Vfx {
   restart(entity: Entity): void;
   /** Read this client's published CPU counts, GPU timeline pressure and pending worker status. GPU capacity is not reported as a measured live count. */
   stats(): Record<string, any>;
+  /** Query a completed worker RNG receipt for a live owned entity/revision. Counters accept exact nonnegative integers or decimal strings; large returned counters use decimal strings. Pending work never exposes the declared seed as completed state. */
+  sequenceStatus(entity: Entity, revision: any, completedTick: any, exchangeEpoch: any): Record<string, any>;
   /** Drain this client's bounded CPU birth, death and collision event queue. GPU event records remain on device; they are not fabricated as CPU callbacks. */
   drainEvents(): Record<string, any>[];
 }

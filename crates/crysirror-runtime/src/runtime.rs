@@ -99,6 +99,8 @@ pub struct TraceEvent {
     pub commands: Vec<String>,
 }
 pub struct SharedHost {
+    /// Presenter capability, independent of VM/project data and snapshots.
+    pub mesh_frame_history: Option<Arc<dyn crysirror_core::service::MeshFrameHistoryProvider>>,
     pub scene: SceneState,
     pub engine: crysirror_scene::EngineSystems,
     pub fs: DiskVfs,
@@ -111,11 +113,18 @@ pub struct SharedHost {
     pcm: BTreeMap<ClientId, Vec<[f32; 2]>>,
     pub channel_audio: crysirror_audio::channels::ChannelAudio,
     pub media: crate::media::MediaManager,
+    pub fonts: crate::font_resources::FontResources,
     pub text: crysirror_text::TextSystem,
     decoders: crysirror_image::DecoderRegistry,
     image_dimensions: BTreeMap<(ClientId, String), ([u32; 2], bool)>,
     image_tasks: crysirror_tasks::TaskPool,
     image_memory: Arc<std::sync::atomic::AtomicUsize>,
+    /// Display reported by the presenting host (desktop monitor, or a
+    /// headless render's virtual display).
+    pub display: Option<crysirror_core::service::DisplayInfo>,
+    pub window_focused: Option<bool>,
+    /// Derived worker receipts, never VM/snapshot declarations or device state.
+    pub(crate) vfx_sequences: BTreeMap<(u32, u32), serde_json::Value>,
 }
 impl SharedHost {
     /// Drain all client PCM blocks for one host frame, mixing without clipping.
@@ -151,6 +160,14 @@ impl FileSystem for SharedHost {
     }
 }
 impl HostServices for SharedHost {
+    fn audio_codec_supported(&self, client: ClientId, codec: &str) -> crysirror_core::Result<bool> {
+        if !self.clients.contains(&client) { return Err(Error::NotFound); }
+        Ok(crysirror_audio::decoder::codec_supported(codec))
+    }
+    fn mesh_frame_history(&self, client: ClientId) -> crysirror_core::Result<Option<Arc<dyn crysirror_core::service::MeshFrameHistory>>> {
+        if !self.clients.contains(&client) { return Err(Error::NotFound); }
+        self.mesh_frame_history.clone().map(|p| p.client(client)).transpose()
+    }
     fn capture_audio_sequence(
         &self,
         client: ClientId,
@@ -384,10 +401,20 @@ impl HostServices for SharedHost {
             return Err(Error::NotFound);
         }
         let result = match query {
+            Q::VfxSequence { entity, revision, completed_tick, exchange_epoch } => {
+                Ok(self.query_vfx_sequence(client, entity, revision, completed_tick, exchange_epoch)
+                    .map_err(|e| Error::Io(e.to_string()))?)
+            }
             Q::LayerCrossfade(id) => serde_json::to_value(self.engine.layers.crossfade(client, id)),
+            Q::LayerMotion(id) => serde_json::to_value(self.engine.layers.motion_status(client, id).map_err(|e|Error::Io(e.to_string()))?),
             Q::Layer(id) => serde_json::to_value(self.engine.layers.get(client, id)),
             Q::Canvas(id) => serde_json::to_value(self.engine.canvases.surface(client, id)),
             Q::UiWidget(id) => serde_json::to_value(self.engine.ui.get(client.0, id)),
+            Q::UiInteraction(id)=>serde_json::to_value(self.engine.ui.interaction(client.0,id)),
+            Q::UiMotion(id) => serde_json::to_value(self.engine.ui.motion_status(client, id).map_err(|e|Error::Io(e.to_string()))?),
+            Q::UiSnapshot {canvas,root} => serde_json::to_value(
+                self.engine.ui.snapshot_layers(client.0,canvas,root).map_err(|e|Error::Io(e.to_string()))?
+            ),
             Q::UiEvents | Q::MenuEvents | Q::DialogEvents => serde_json::to_value(
                 self.engine.ui.drain_events(
                     client.0,
@@ -454,9 +481,7 @@ impl HostServices for SharedHost {
         if !self.clients.contains(&client) {
             return Err(Error::NotFound);
         }
-        let id = match &request {
-            MediaRequest::Play { id, .. } | MediaRequest::Stop { id } => *id,
-        };
+        let id = request.id();
         if id >= 1024 {
             return Err(Error::Limit("media identity"));
         }
@@ -482,6 +507,7 @@ impl HostServices for SharedHost {
                             audio,
                             gain,
                             audio_channel: 0x7000_0000 + id,
+                            clock: crate::media::MediaClock::Engine,
                         },
                         self.clock_ms,
                     )
@@ -492,6 +518,25 @@ impl HostServices for SharedHost {
                 .media
                 .stop(client, id)
                 .map_err(|e| Error::Io(e.to_string()))?,
+            MediaRequest::Remove { .. } => {
+                self.media.remove(client, id).map_err(|e| Error::Io(e.to_string()))?;
+                self.surfaces.push((client, slot, None));
+            }
+            MediaRequest::SetClock { now_ms, .. } => {
+                self.media.set_clock(client, id, now_ms).map_err(|e| Error::Io(e.to_string()))?;
+            }
+            MediaRequest::Pause { .. } => self
+                .media
+                .pause(client, id, self.clock_ms)
+                .map_err(|e| Error::Io(e.to_string()))?,
+            MediaRequest::Resume { .. } => self
+                .media
+                .resume(client, id, self.clock_ms)
+                .map_err(|e| Error::Io(e.to_string()))?,
+            MediaRequest::Seek { position_ms, .. } => self
+                .media
+                .seek(client, id, position_ms, self.clock_ms)
+                .map_err(|e| Error::Io(e.to_string()))?,
         }
         for audio in self.media.take_audio() {
             self.channel_audio
@@ -499,6 +544,13 @@ impl HostServices for SharedHost {
                 .map_err(|e| Error::Io(e.to_string()))?;
         }
         VfsPath::new(Mount::Asset, &format!("__surface/{slot}"))
+    }
+    fn display_info(&self) -> Option<crysirror_core::service::DisplayInfo> {
+        self.display
+    }
+    fn window_focused(&self, client: ClientId) -> crysirror_core::Result<Option<bool>> {
+        if !self.clients.contains(&client) { return Err(Error::NotFound); }
+        Ok(self.window_focused)
     }
     fn media_info(
         &self,
@@ -521,7 +573,17 @@ impl HostServices for SharedHost {
             },
             position_ms: state.position_ms,
             published_frames: state.published_frames,
+            paused: state.paused,
+            frame_ms: state.frame_ms,
+            size: state.size,
+            duration_ms: state.duration_ms,
         })
+    }
+
+    fn media_frame(&self, client:ClientId, id:u32) -> crysirror_core::Result<Option<crysirror_core::service::MediaFrame>> {
+        if !self.clients.contains(&client) {return Err(Error::NotFound);}
+        if self.media.status(client,id).is_none() {return Err(Error::NotFound);}
+        Ok(self.media.frame(client,id))
     }
 
     fn begin_audio(
@@ -726,7 +788,16 @@ impl HostServices for SharedHost {
         if !self.clients.contains(&client) {
             return Err(Error::NotFound);
         }
-        Ok(Arc::new(self.text.clone()))
+        Ok(self.fonts.measurement(client))
+    }
+    fn font_library(
+        &mut self,
+        client: ClientId,
+    ) -> crysirror_core::Result<Arc<dyn crysirror_core::service::FontLibrary>> {
+        if !self.clients.contains(&client) {
+            return Err(Error::NotFound);
+        }
+        Ok(self.fonts.for_client(client, self.fs.storage(client)?))
     }
     fn storage(
         &mut self,
@@ -744,6 +815,11 @@ impl HostServices for SharedHost {
         frame.validate().map_err(|e| Error::Io(e.to_string()))?;
         for texture in &frame.textures {
             VfsPath::new(crysirror_core::path::Mount::Asset, texture)?;
+            if let Some(layer) = crysirror_core::service::frame_history_layer(texture) {
+                if !self.mesh_frame_history.as_ref().is_some_and(|p|p.registered(client, layer)) {
+                    return Err(Error::Unsupported("unreserved mesh frame-history resource"));
+                }
+            }
         }
         self.engine.layers.set_dynamic_puppet(client.0, layer, Arc::new(frame)).map_err(|e| Error::Io(e.to_string()))
     }
@@ -783,7 +859,11 @@ impl HostServices for SharedHost {
 }
 // Restore grants immutable uploads only. It cannot read/write files, submit
 // commands, advance clocks or touch the live scene while staging a VM.
-struct RestoreResources<'a>(&'a mut SharedHost);
+struct RestoreResources<'a> {
+    source: &'a mut SharedHost,
+    engine: &'a mut crysirror_scene::EngineSystems,
+    clock_ms: u64,
+}
 impl crysirror_core::service::FileSystem for RestoreResources<'_> {
     fn read(&mut self, _: ClientId, _: &VfsPath) -> crysirror_core::Result<Vec<u8>> {
         Err(Error::Unsupported("restore resource file read"))
@@ -794,7 +874,7 @@ impl crysirror_core::service::FileSystem for RestoreResources<'_> {
 }
 impl HostServices for RestoreResources<'_> {
     fn now_ms(&self) -> u64 {
-        self.0.clock_ms
+        self.clock_ms
     }
     fn submit(
         &mut self,
@@ -811,7 +891,7 @@ impl HostServices for RestoreResources<'_> {
         h: u32,
         b: &[u8],
     ) -> crysirror_core::Result<VfsPath> {
-        self.0.upload_rgba(c, id, w, h, b)
+        self.source.upload_rgba(c, id, w, h, b)
     }
     fn upload_encoded_image(
         &mut self,
@@ -820,7 +900,23 @@ impl HostServices for RestoreResources<'_> {
         name: &str,
         b: &[u8],
     ) -> crysirror_core::Result<crysirror_core::service::UploadedImage> {
-        self.0.upload_encoded_image(c, id, name, b)
+        self.source.upload_encoded_image(c, id, name, b)
+    }
+    fn submit_engine(&mut self, client: ClientId, schema: u32, data: &[u8]) -> crysirror_core::Result<()> {
+        use crysirror_scene::ui::UiCommand as U;
+        if !self.source.clients.contains(&client) { return Err(Error::NotFound); }
+        if schema != 1 { return Err(Error::Unsupported("restore engine batch schema")); }
+        let batch: crysirror_scene::ServiceBatch = serde_json::from_slice(data).map_err(|e|Error::Io(e.to_string()))?;
+        if !batch.world.is_empty() || !batch.layers.is_empty() || !batch.canvases.is_empty()
+            || !batch.ui.iter().all(|command| matches!(command,
+                U::SetFullscreen { .. } | U::DefineCursor { .. } |
+                U::SetCursor { .. } | U::SetCursorVisible { .. }))
+        {
+            return Err(Error::Unsupported("restore resource batch contains scene mutation"));
+        }
+        // Rebinding is staged with the decoded engine state. A later failure
+        // cannot alter the running session's cursor/presentation preferences.
+        self.engine.submit(client, &batch).map_err(|e|Error::Io(e.to_string()))
     }
 }
 struct Session {
@@ -1030,7 +1126,20 @@ impl Runtime {
         writable: &Path,
         registry: AdapterRegistry,
     ) -> Result<Self> {
+        let root = asset_root(path, &project)?;
+        Self::with_asset_root(project, &root, writable, registry)
+    }
+    /// A project whose asset root the user chose explicitly (a game folder
+    /// launched in place), instead of one relative to a project file.
+    pub fn with_asset_root(
+        project: Project,
+        root: &Path,
+        writable: &Path,
+        registry: AdapterRegistry,
+    ) -> Result<Self> {
         project.validate()?;
+        let root = root.canonicalize().context("asset directory missing")?;
+        ensure!(root.is_dir(), "asset root is not a directory");
         let mut sessions = Vec::new();
         let mut engine = crysirror_scene::EngineSystems::default();
         // Reject missing factories before creating writable state directories.
@@ -1046,7 +1155,6 @@ impl Runtime {
                 engine.install(id, systems)?;
             }
         }
-        let root = asset_root(path, &project)?;
         let mut assets = Assets::new(&root)?;
         let mut fs = core(DiskVfs::new(&root, writable))?;
         for (session, spec) in sessions.iter().zip(&project.clients) {
@@ -1065,6 +1173,10 @@ impl Runtime {
             text.add_font(alias, bytes.clone())?;
             assets.text.add_font(alias, bytes)?;
         }
+        assets.text.attach_dynamic_fonts(&text);
+        let fonts = crate::font_resources::FontResources::new(
+            text.clone(), assets.io_tasks(), assets.cpu_tasks(),
+        );
         let clients = sessions.iter().map(|s| s.id).collect();
         let fingerprint = project.fingerprint()?;
         Ok(Self {
@@ -1072,8 +1184,12 @@ impl Runtime {
             vfx: Default::default(),
             project,
             host: SharedHost {
+                mesh_frame_history: None,
                 image_tasks: assets.cpu_tasks(),
                 image_memory: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                display: None,
+                window_focused: None,
+                vfx_sequences: BTreeMap::new(),
                 scene: SceneState::default(),
                 engine,
                 fs,
@@ -1085,6 +1201,7 @@ impl Runtime {
                 pcm: BTreeMap::new(),
                 channel_audio: Default::default(),
                 media: Default::default(),
+                fonts,
                 text,
                 decoders: assets.decoders.clone(),
                 image_dimensions: BTreeMap::new(),
@@ -1244,6 +1361,7 @@ impl Runtime {
 
         let profile_frame = self.profiler.begin_frame();
         let _tick_span = self.profiler.span(profile_frame, "runtime.tick");
+        self.host.fonts.advance()?;
         {
             let _span = self.profiler.span(profile_frame, "assets.poll");
             self.assets.poll_tasks();
@@ -1336,6 +1454,8 @@ impl Runtime {
                 self.host.clock_ms,
                 &self.assets.cpu_tasks(),
             )?;
+            self.vfx.publish_screen(&mut self.host.engine.layers)?;
+            self.host.vfx_sequences = self.vfx.sequence_receipts(&self.host.engine.world)?;
         }
         core(self.host.scene.advance_frame())?;
         Ok(())
@@ -1482,6 +1602,18 @@ impl Runtime {
     }
     pub fn capture_snapshot(&self) -> Result<SnapshotCapture> {
         ensure!(
+            !self.host.fonts.has_resources(),
+            "engine dynamic font snapshot requires resource reconstruction support"
+        );
+        ensure!(
+            !self.vfx.has_sequence_state(&self.host.engine.world),
+            "engine VFX sequence snapshot requires completed worker-state reconstruction support"
+        );
+        ensure!(
+            !self.vfx.has_screen_state(&self.host.engine.world),
+            "engine screen-sprite VFX snapshot requires producer/resource reconstruction support"
+        );
+        ensure!(
             !self.host.media.has_resources(),
             "engine media snapshot requires resource reconstruction support (including retained EOF frames)"
         );
@@ -1566,6 +1698,10 @@ impl Runtime {
     }
     pub fn commit_restore(&mut self, prepared: PreparedRestore) -> Result<()> {
         ensure!(
+            !self.host.fonts.has_resources(),
+            "engine dynamic font restore requires resource reconstruction support"
+        );
+        ensure!(
             self.restored == prepared.plan.generation && self.identity() == prepared.plan.identity,
             "obsolete prepared restore generation/identity"
         );
@@ -1607,7 +1743,11 @@ impl Runtime {
         let next_restored = self.restored.checked_add(1).context("restore counter")?;
         let previous_uploads = std::mem::take(&mut self.host.generated);
         let rebuild = (|| -> Result<()> {
-            let mut host = RestoreResources(&mut self.host);
+            let mut host = RestoreResources {
+                source: &mut self.host,
+                engine: &mut engine,
+                clock_ms: services.clock_ms,
+            };
             for s in &mut staged_sessions {
                 core(s.vm.restore_resources(&mut host))?;
             }
@@ -1628,6 +1768,7 @@ impl Runtime {
         self.host.engine = engine;
         self.physics.invalidate();
         self.vfx.reset(self.host.clock_ms);
+        self.host.vfx_sequences.clear();
         self.host.trace.clear();
         if let Some((_, mut frame)) = self.audio_frame.take() {
             frame.cancel(&mut [&mut self.host.channel_audio.mixer]);
@@ -1673,7 +1814,7 @@ impl Runtime {
         if t.generated_mask {
             if self.transition_mask != Some(t.serial) {
                 let [w, h] = self.project.canvas;
-                let gray = siglus_scene_vm::runtime::wipe_mask::generate(
+                let gray = crysirror_image::wipe_mask::generate(
                     t.code,
                     &t.options,
                     w,
@@ -1726,7 +1867,10 @@ impl Runtime {
             &self.host.engine.world,
             self.host.clock_ms,
             &self.assets.cpu_tasks(),
-        )
+        )?;
+        self.vfx.publish_screen(&mut self.host.engine.layers)?;
+        self.host.vfx_sequences = self.vfx.sequence_receipts(&self.host.engine.world)?;
+        Ok(())
     }
     pub fn render_scene3d(&self) -> Result<Option<crate::model::Scene3d>> {
         self.host
@@ -1744,6 +1888,40 @@ mod tests {
         let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/desktop/project.json");
         let r = Runtime::load(&p, tmp.path()).unwrap();
         (tmp, r)
+    }
+    #[test]
+    fn window_focus_is_client_scoped_live_host_state_after_restore() {
+        let (_tmp, mut r) = runtime();
+        assert_eq!(r.host.window_focused(ClientId(1)).unwrap(), None);
+        assert!(r.host.window_focused(ClientId(999)).is_err());
+        r.tick(0, InputFrame::default()).unwrap();
+        r.host.window_focused = Some(false);
+        assert_eq!(r.host.window_focused(ClientId(2)).unwrap(), Some(false));
+        let snapshot = r.snapshot().unwrap();
+        r.host.window_focused = Some(true);
+        r.restore(&snapshot).unwrap();
+        assert_eq!(r.host.window_focused(ClientId(1)).unwrap(), Some(true));
+        r.host.window_focused = None;
+        assert_eq!(r.host.window_focused(ClientId(1)).unwrap(), None);
+    }
+    #[test]
+    fn ui_snapshot_query_is_detached_and_client_scoped() {
+        let (_tmp, mut r) = runtime();
+        for (owner,id,text) in [(1,7,"owned"),(2,8,"foreign")] {
+            let command=serde_json::from_value(serde_json::json!({"op":"put","widget":{
+                "id":id,"rect":[10,10,100,30],"kind":"label","text":text,"font":"default"
+            }})).unwrap();
+            r.host.engine.ui.apply_batch(ClientId(owner),&[command]).unwrap();
+        }
+        let query=crysirror_core::service::EngineQuery::UiSnapshot{canvas:[640,360],root:Some(7)};
+        let frozen=r.host.query_engine(ClientId(1),query).unwrap();
+        let layers:Vec<crysirror_scene::layer::LayerSpec>=serde_json::from_slice(&frozen).unwrap();
+        assert!(layers.iter().any(|layer|matches!(&layer.paint,crysirror_scene::layer::Paint::Text{text,..} if text=="owned")));
+        let command=serde_json::from_value(serde_json::json!({"op":"set_text","id":7,"text":"changed"})).unwrap();
+        r.host.engine.ui.apply_batch(ClientId(1),&[command]).unwrap();
+        assert!(layers.iter().any(|layer|matches!(&layer.paint,crysirror_scene::layer::Paint::Text{text,..} if text=="owned")));
+        assert!(r.host.query_engine(ClientId(2),query).is_err());
+        assert!(r.host.query_engine(ClientId(999),query).is_err());
     }
     #[test]
     fn two_clients_share_services_but_not_ids() {
@@ -1821,6 +1999,43 @@ mod engine_tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/desktop/systems.json");
         let rt = Runtime::load(&path, t.path()).unwrap();
         (t, rt)
+    }
+    #[test]
+    fn restore_presentation_rebinding_is_staged_and_rejects_scene_mutation() {
+        use crysirror_scene::{ServiceBatch, WorldCommand, ui::UiCommand};
+        let (_temp, mut runtime) = systems();
+        let live = serde_json::to_value(&runtime.host.engine).unwrap();
+        let mut staged = runtime.host.engine.clone();
+        {
+            let mut host = RestoreResources { source: &mut runtime.host, engine: &mut staged, clock_ms: 17 };
+            assert_eq!(host.now_ms(), 17);
+            let allowed = serde_json::to_vec(&ServiceBatch { ui: vec![UiCommand::SetFullscreen { enabled: true }], ..Default::default() }).unwrap();
+            host.submit_engine(ClientId(1), 1, &allowed).unwrap();
+            assert!(host.submit_engine(ClientId(999), 1, &allowed).is_err());
+            let forbidden = serde_json::to_vec(&ServiceBatch { world: vec![WorldCommand::Despawn { id: 1 }], ..Default::default() }).unwrap();
+            assert!(host.submit_engine(ClientId(1), 1, &forbidden).is_err());
+        }
+        assert_eq!(staged.ui.fullscreen, Some((1, true)));
+        assert_eq!(serde_json::to_value(&runtime.host.engine).unwrap(), live);
+    }
+    #[test]
+    fn dynamic_font_jobs_gate_snapshots_and_stale_prepared_restore() {
+        use crysirror_core::service::{FontLoadSource, FontLoadSpec};
+        let (_temp, mut runtime) = systems();
+        assert!(runtime.host.font_library(ClientId(999)).is_err());
+        let snapshot = runtime.snapshot().unwrap();
+        let prepared = runtime.restore_plan().decode(&snapshot).unwrap();
+        let fonts = runtime.host.font_library(ClientId(1)).unwrap();
+        let job = fonts.begin(FontLoadSpec {
+            name: "temporary-face".into(),
+            source: FontLoadSource::Bytes(Arc::from(&b"invalid font"[..])),
+            face_index: 0,
+        }).unwrap();
+        assert!(runtime.capture_snapshot().err().unwrap().to_string().contains("dynamic font"));
+        assert!(runtime.commit_restore(prepared).unwrap_err().to_string().contains("dynamic font"));
+        fonts.release_job(job).unwrap();
+        assert_eq!(runtime.snapshot().unwrap(), snapshot);
+        runtime.restore(&snapshot).unwrap();
     }
     #[test]
     fn systems_keep_running_after_data_vm_halt_and_restore_exactly() {

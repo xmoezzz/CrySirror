@@ -1,0 +1,29 @@
+[package]
+name = "crysirror-codec-amv"
+version = "0.2.0"
+edition = "2024"
+license.workspace = true
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "AJPM / AlphaMovie (KiriKiri AlphaMovie.dll) decoder, adopted from the owner's amv_decoder 0.2.0"
+
+[lib]
+name = "amv_decoder"
+path = "src/lib.rs"
+doctest = false
+
+[features]
+# Path-based open and packet dump tooling (upstream CLI support).
+files = []
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints.rust]
+# Upstream code is kept as adopted.
+unused = "allow"

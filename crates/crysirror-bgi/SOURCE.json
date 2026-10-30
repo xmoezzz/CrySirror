@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/xmoezzz/ethornell-rs",
+  "commit": "0cfff1d274ecc4554d0af8af1c7b1c7908595e96",
+  "license": "MPL-2.0",
+  "vm": "../crysirror-bgi-vm",
+  "shared_capabilities": [
+    "crysirror-tasks bounded capability resource jobs",
+    "HostServices image_size, engine Canvas/Layer retained resources",
+    "crysirror-text grid and engine GlyphRun resources",
+    "HostServices audio resource preparation, channel transport and source decoder"
+  ],
+  "hosted_legacy_engine": false,
+  "real_game_verified": false,
+  "implementation_sha256": {
+    "src/lib.rs": "9ac6c6d5e8b78afe2ffbe1d0dc9ba1925678b0788e09fd0e077962fa6c667a28",
+    "src/fixture.rs": "d19c6f5b9bdb573fcbd99447a3a7a62aeb5cd93ae0f8f5ac4578e69b31de0ef0"
+  }
+}

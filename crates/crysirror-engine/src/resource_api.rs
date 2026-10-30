@@ -42,6 +42,8 @@ impl Default for ResourceRuntime {
     fn default() -> Self {
         #[allow(unused_mut)]
         let mut formats = FormatRegistry::default();
+        formats.register(Arc::new(crysirror_resource::circus_pck::CircusPck))
+            .expect("built-in Circus PCK identifier is unique");
         #[cfg(feature = "arc-formats")]
         crysirror_formats_arc::register(&mut formats)
             .expect("built-in archive identifiers are unique");

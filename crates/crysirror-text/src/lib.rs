@@ -5,13 +5,15 @@
 use ab_glyph::{Font, FontArc, Glyph, GlyphId, PxScale, ScaleFont, point};
 use anyhow::{Context, Result, ensure};
 use crysirror_core::{
-    service::{Glyph as PositionedGlyph, SIMPLE_TEXT_LAYOUT, UNWRAPPED_TEXT_LAYOUT, TextService},
+    service::{Glyph as PositionedGlyph, SIMPLE_TEXT_LAYOUT, TextService, UNWRAPPED_TEXT_LAYOUT},
     state::TextRun,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
+pub mod dynamic;
 pub mod glyph;
 pub mod glyph_blur;
+pub mod glyph_coverage;
 pub mod grid;
 pub mod layout;
 pub mod markup;
@@ -22,9 +24,11 @@ pub mod sdf;
 
 #[derive(Clone, Default)]
 pub struct TextSystem {
-    fonts: BTreeMap<String, (FontArc, String)>,
+    fonts: Arc<BTreeMap<String, (FontArc, String)>>,
     // Font bytes remain CPU resources, never project/save data or atlas output.
-    font_sources: BTreeMap<String, (Arc<[u8]>, u32)>,
+    font_sources: Arc<BTreeMap<String, (Arc<[u8]>, u32)>>,
+    dynamic: dynamic::Catalog,
+    scope: Option<crysirror_core::state::ClientId>,
 }
 impl TextSystem {
     /// Measure one unwrapped simple-layout line with the exact kerning and
@@ -35,8 +39,14 @@ impl TextSystem {
         size: f32,
         text: &str,
     ) -> Result<crysirror_core::service::TextExtent> {
-        ensure!(size.is_finite() && (1.0..=512.0).contains(&size), "text metric size");
-        ensure!(text.len() <= 1024 * 1024 && !text.contains(['\n', '\r']), "single-line text metric limit");
+        ensure!(
+            size.is_finite() && (1.0..=512.0).contains(&size),
+            "text metric size"
+        );
+        ensure!(
+            text.len() <= 1024 * 1024 && !text.contains(['\n', '\r']),
+            "single-line text metric limit"
+        );
         let font = self.font(alias)?;
         let scaled = font.as_scaled(PxScale::from(size));
         let mut advance = 0.;
@@ -48,7 +58,11 @@ impl TextSystem {
                 continue;
             }
             let id = font.glyph_id(ch);
-            ensure!(id.0 != 0, "font '{alias}' has no glyph for U+{:04X}", ch as u32);
+            ensure!(
+                id.0 != 0,
+                "font '{alias}' has no glyph for U+{:04X}",
+                ch as u32
+            );
             advance += previous.map_or(0., |p| scaled.kern(p, id)) + scaled.h_advance(id);
             previous = Some(id);
         }
@@ -60,11 +74,38 @@ impl TextSystem {
         })
     }
     /// Reuse the exact unwrapped simple painter placements for retained runs.
-    pub fn position_simple(&self,font:&str,size:u16,text:&str)->Result<Vec<crysirror_core::service::SimpleTextPlacement>> {
-        self.measure_simple(font,size as f32,text)?;
-        let run=TextRun{text:text.into(),font:font.into(),size_px:size,bounds:crysirror_core::state::Rect{x:0,y:0,width:1,height:size as u32*2},color:crysirror_core::state::Color([255;4]),layout_profile:UNWRAPPED_TEXT_LAYOUT.into()};
-        let glyphs=self.positioned(&run)?;
-        Ok(text.chars().filter(|c|*c!='\t').zip(glyphs).map(|(character,g)|crysirror_core::service::SimpleTextPlacement{character,baseline:[g.position.x,g.position.y]}).collect())
+    pub fn position_simple(
+        &self,
+        font: &str,
+        size: u16,
+        text: &str,
+    ) -> Result<Vec<crysirror_core::service::SimpleTextPlacement>> {
+        self.measure_simple(font, size as f32, text)?;
+        let run = TextRun {
+            text: text.into(),
+            font: font.into(),
+            size_px: size,
+            bounds: crysirror_core::state::Rect {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: size as u32 * 2,
+            },
+            color: crysirror_core::state::Color([255; 4]),
+            layout_profile: UNWRAPPED_TEXT_LAYOUT.into(),
+        };
+        let glyphs = self.positioned(&run)?;
+        Ok(text
+            .chars()
+            .filter(|c| *c != '\t')
+            .zip(glyphs)
+            .map(
+                |(character, g)| crysirror_core::service::SimpleTextPlacement {
+                    character,
+                    baseline: [g.position.x, g.position.y],
+                },
+            )
+            .collect())
     }
     /// Metrics from the same engine font resource used by retained glyph runs.
     pub fn metrics(
@@ -92,6 +133,7 @@ impl TextSystem {
     pub fn add_font_face(&mut self, alias: &str, bytes: Vec<u8>, face_index: u32) -> Result<()> {
         ensure!(
             !alias.is_empty()
+                && !alias.starts_with("__font/")
                 && alias.len() <= 256
                 && !alias.chars().any(char::is_control)
                 && bytes.len() <= 32 * 1024 * 1024,
@@ -113,41 +155,35 @@ impl TextSystem {
         let font: FontArc = ab_glyph::FontVec::try_from_vec_and_index(bytes.clone(), face_index)
             .map_err(|e| anyhow::anyhow!("font {alias}: {e}"))?
             .into();
-        self.font_sources
+        Arc::make_mut(&mut self.font_sources)
             .insert(alias.into(), (Arc::from(bytes), face_index));
-        self.fonts.insert(alias.into(), (font, digest));
+        Arc::make_mut(&mut self.fonts).insert(alias.into(), (font, digest));
         Ok(())
     }
-    /// Content digest of the face loaded under `alias`.
-    pub fn font_digest(&self, alias: &str) -> Result<&str> {
-        Ok(self
-            .fonts
-            .get(alias)
-            .with_context(|| format!("font alias '{alias}' is not loaded"))?
-            .1
-            .as_str())
+    /// Content digest of a static or client-authorized dynamic face.
+    pub fn font_digest(&self, alias: &str) -> Result<String> {
+        if let Some((_, digest)) = self.fonts.get(alias) { return Ok(digest.clone()); }
+        Ok(self.dynamic_face(alias)?.digest.clone())
     }
-    fn font(&self, alias: &str) -> Result<&FontArc> {
-        Ok(&self
-            .fonts
-            .get(alias)
-            .with_context(|| {
-                format!("font alias '{alias}' is not loaded; provide --font or project.fonts")
-            })?
-            .0)
+    fn font(&self, alias: &str) -> Result<FontArc> {
+        if let Some((font, _)) = self.fonts.get(alias) { return Ok(font.clone()); }
+        Ok(self.dynamic_face(alias)?.font.clone())
+    }
+    fn font_source(&self, alias: &str) -> Result<(Arc<[u8]>,u32)> {
+        if let Some(source) = self.font_sources.get(alias) { return Ok(source.clone()); }
+        let face = self.dynamic_face(alias)?;
+        Ok((face.bytes.clone(), face.face_index))
     }
     pub fn key(&self, text: &TextRun) -> Result<String> {
         ensure!(
-            matches!(text.layout_profile.as_str(), SIMPLE_TEXT_LAYOUT | UNWRAPPED_TEXT_LAYOUT),
+            matches!(
+                text.layout_profile.as_str(),
+                SIMPLE_TEXT_LAYOUT | UNWRAPPED_TEXT_LAYOUT
+            ),
             "layout '{}' is not implemented; native RFVP/Siglus layout must be provided by its adapter",
             text.layout_profile
         );
-        let (_, digest) = self.fonts.get(&text.font).with_context(|| {
-            format!(
-                "font alias '{}' is not loaded; provide --font or project.fonts",
-                text.font
-            )
-        })?;
+        let digest = self.font_digest(&text.font)?;
         Ok(format!(
             "text:{}",
             blake3::hash(format!("{digest}:{text:?}").as_bytes()).to_hex()
@@ -199,7 +235,10 @@ impl TextSystem {
             );
             let kern = previous.map(|p| scaled.kern(p, id)).unwrap_or(0.);
             let advance = scaled.h_advance(id);
-            if text.layout_profile == SIMPLE_TEXT_LAYOUT && x > 0. && x + kern + advance > text.bounds.width as f32 {
+            if text.layout_profile == SIMPLE_TEXT_LAYOUT
+                && x > 0.
+                && x + kern + advance > text.bounds.width as f32
+            {
                 x = 0.;
                 baseline += line_height;
                 previous = None;
@@ -222,7 +261,8 @@ impl TextSystem {
     }
     pub fn layout_glyphs(&self, text: &TextRun) -> Result<Vec<PositionedGlyph>> {
         let glyphs = self.positioned(text)?;
-        let scaled = self.font(&text.font)?.as_scaled(f32::from(text.size_px));
+        let font = self.font(&text.font)?;
+        let scaled = font.as_scaled(f32::from(text.size_px));
         Ok(glyphs
             .into_iter()
             .map(|g| PositionedGlyph {
@@ -237,7 +277,7 @@ impl TextSystem {
     pub fn rasterize(&self, text: &TextRun) -> Result<Vec<u8>> {
         let glyphs = self.positioned(text)?;
         Self::paint(
-            self.font(&text.font)?,
+            &self.font(&text.font)?,
             [text.bounds.width, text.bounds.height],
             &glyphs,
         )
@@ -268,7 +308,7 @@ impl TextSystem {
                 position: point(g.x_26_6 as f32 / 64., g.y_26_6 as f32 / 64.),
             });
         }
-        Self::paint(font, canvas, &positioned)
+        Self::paint(&font, canvas, &positioned)
     }
     fn paint(font: &FontArc, canvas: [u32; 2], glyphs: &[Glyph]) -> Result<Vec<u8>> {
         let (w, h) = (canvas[0], canvas[1]);
@@ -295,15 +335,31 @@ impl TextSystem {
     }
 }
 impl crysirror_core::service::TextMeasurement for TextSystem {
-    fn position_simple(&self,font:&str,size:u16,text:&str)->crysirror_core::Result<Vec<crysirror_core::service::SimpleTextPlacement>>{TextSystem::position_simple(self,font,size,text).map_err(|e|crysirror_core::Error::Io(e.to_string()))}
-    fn measure_simple(&self, font: &str, size: f32, text: &str) -> crysirror_core::Result<crysirror_core::service::TextExtent> {
+    fn position_simple(
+        &self,
+        font: &str,
+        size: u16,
+        text: &str,
+    ) -> crysirror_core::Result<Vec<crysirror_core::service::SimpleTextPlacement>> {
+        TextSystem::position_simple(self, font, size, text)
+            .map_err(|e| crysirror_core::Error::Io(e.to_string()))
+    }
+    fn measure_simple(
+        &self,
+        font: &str,
+        size: f32,
+        text: &str,
+    ) -> crysirror_core::Result<crysirror_core::service::TextExtent> {
         TextSystem::measure_simple(self, font, size, text)
             .map_err(|e| crysirror_core::Error::Io(e.to_string()))
     }
 }
 impl TextService for TextSystem {
     fn layout(&mut self, text: &TextRun) -> crysirror_core::Result<Vec<PositionedGlyph>> {
-        if !matches!(text.layout_profile.as_str(), SIMPLE_TEXT_LAYOUT | UNWRAPPED_TEXT_LAYOUT) {
+        if !matches!(
+            text.layout_profile.as_str(),
+            SIMPLE_TEXT_LAYOUT | UNWRAPPED_TEXT_LAYOUT
+        ) {
             return Err(crysirror_core::Error::Unsupported("text layout profile"));
         }
         self.layout_glyphs(text)
@@ -365,25 +421,58 @@ mod tests {
     #[test]
     fn simple_measurement_rejects_invalid_requests_before_font_lookup() {
         let system = TextSystem::default();
-        assert!(system.measure_simple("none", f32::NAN, "a").unwrap_err().to_string().contains("size"));
-        assert!(system.measure_simple("none", 24., "a\nb").unwrap_err().to_string().contains("single-line"));
+        assert!(
+            system
+                .measure_simple("none", f32::NAN, "a")
+                .unwrap_err()
+                .to_string()
+                .contains("size")
+        );
+        assert!(
+            system
+                .measure_simple("none", 24., "a\nb")
+                .unwrap_err()
+                .to_string()
+                .contains("single-line")
+        );
     }
     #[test]
     #[ignore = "requires licensed runtime font in CRYSIRROR_TEST_FONT; no font bundled"]
     fn measurements_match_simple_glyph_positions_and_can_run_on_workers() {
         let mut system = TextSystem::default();
-        system.add_font("fixture", std::fs::read(std::env::var_os("CRYSIRROR_TEST_FONT").unwrap()).unwrap()).unwrap();
+        system
+            .add_font(
+                "fixture",
+                std::fs::read(std::env::var_os("CRYSIRROR_TEST_FONT").unwrap()).unwrap(),
+            )
+            .unwrap();
         let text = TextRun {
-            text: "AVATAR".into(), font: "fixture".into(), size_px: 24,
-            bounds: crysirror_core::state::Rect { x: 0, y: 0, width: 512, height: 64 },
-            color: crysirror_core::state::Color([255; 4]), layout_profile: SIMPLE_TEXT_LAYOUT.into(),
+            text: "AVATAR".into(),
+            font: "fixture".into(),
+            size_px: 24,
+            bounds: crysirror_core::state::Rect {
+                x: 0,
+                y: 0,
+                width: 512,
+                height: 64,
+            },
+            color: crysirror_core::state::Color([255; 4]),
+            layout_profile: SIMPLE_TEXT_LAYOUT.into(),
         };
         let glyphs = system.positioned(&text).unwrap();
         let last = glyphs.last().unwrap();
-        let expected = last.position.x + system.font("fixture").unwrap().as_scaled(24.).h_advance(last.id);
+        let expected = last.position.x
+            + system
+                .font("fixture")
+                .unwrap()
+                .as_scaled(24.)
+                .h_advance(last.id);
         let metrics = system.measure_simple("fixture", 24., &text.text).unwrap();
         assert!((metrics.advance - expected).abs() < 0.001);
-        assert_eq!(system.measure_simple("fixture", 24., "").unwrap().advance, 0.);
+        assert_eq!(
+            system.measure_simple("fixture", 24., "").unwrap().advance,
+            0.
+        );
         let mut narrow = text.clone();
         narrow.bounds.width = 20;
         narrow.bounds.height = 128;
@@ -392,11 +481,18 @@ mod tests {
         narrow.layout_profile = UNWRAPPED_TEXT_LAYOUT.into();
         let single_line = system.positioned(&narrow).unwrap();
         assert_eq!(single_line.len(), text.text.chars().count());
-        assert!(single_line.iter().all(|g| g.position.y == single_line[0].position.y));
+        assert!(
+            single_line
+                .iter()
+                .all(|g| g.position.y == single_line[0].position.y)
+        );
         assert!(single_line.last().unwrap().position.x > 20.);
         assert_eq!(system.rasterize(&narrow).unwrap().len(), 20 * 128 * 4);
         let handle: Arc<dyn crysirror_core::service::TextMeasurement> = Arc::new(system.clone());
-        let measured = std::thread::spawn(move || handle.measure_simple("fixture", 24., "AVATAR").unwrap()).join().unwrap();
+        let measured =
+            std::thread::spawn(move || handle.measure_simple("fixture", 24., "AVATAR").unwrap())
+                .join()
+                .unwrap();
         assert_eq!(metrics, measured);
         // A handle owns its font resource snapshot, not a pointer to a host.
         drop(system);
@@ -445,3 +541,9 @@ mod tests {
         );
     }
 }
+
+pub mod bitmap_font;
+
+pub mod slot_color;
+
+pub mod vn_slot;

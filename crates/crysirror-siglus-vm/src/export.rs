@@ -8,10 +8,14 @@ use crysirror_scene::{
     layer::{Blend, LayerCommand, LayerSpec, Paint, SpriteTransform},
 };
 use std::collections::BTreeSet;
+#[path = "export_tree.rs"]
+mod tree;
 pub fn publish(
     ctx: &mut CommandContext,
     client: ClientId,
     old: &mut BTreeSet<u32>,
+    old_widgets: &mut BTreeSet<u32>,
+    movie_pictures: &crate::adapter::object_movie::Pictures,
     host: &mut dyn HostServices,
 ) -> Result<()> {
     ensure!(
@@ -30,15 +34,84 @@ pub fn publish(
     let mut needed = Vec::new();
     let mut ids = BTreeSet::new();
     for stage in ctx.globals.stage_forms.values() {
-        if let Some(objects) = stage.object_lists.get(&1) {
-            for (index, obj) in objects.iter().enumerate() {
-                if !obj.used || obj.object_type == 0 {
+        let mut out = tree::Output {
+            layers: &mut layers,
+            images: &mut needed,
+            ids: &mut ids,
+            next: 0x8100_0000,
+            movies: None,
+            path: Vec::new(),
+        };
+        if let Some(windows) = stage.mwnd_lists.get(&1) {
+            for (index, window) in windows.iter().enumerate() {
+                ensure!(
+                    window
+                        .face_list
+                        .iter()
+                        .all(|o| o.object_type == 0 && o.runtime.child_objects.is_empty()),
+                    "native MWND face/button mapping required"
+                );
+                if window
+                    .object_list
+                    .iter()
+                    .all(|o| o.object_type == 0 && o.runtime.child_objects.is_empty())
+                {
                     continue;
                 }
-                let b = &obj.base;
+                ensure!(index == 0, "native embedded MWND supports window zero only");
+                let visible = window.open || ctx.ui.window_tween.is_some();
                 ensure!(
-                    obj.runtime.child_objects.is_empty() && !obj.button.enabled,
-                    "native child/button rendering unsupported"
+                    !visible
+                        || (window.window_pos.is_some()
+                            && window.window_size.is_some()
+                            && ctx.ui.window.is_some()),
+                    "native visible embedded MWND requires configured geometry"
+                );
+                let pos = window.window_pos.unwrap_or((0, 0));
+                let (offset, alpha) = if ctx.ui.window.is_some() {
+                    crate::message::embedded_window_visual(ctx)
+                } else {
+                    ([0., 0.], 0)
+                };
+                let order = [
+                    i32::try_from(if window.order <= 0 {
+                        ctx.tables.mwnd_render.order.max(1)
+                    } else {
+                        window.order
+                    })?,
+                    i32::try_from(window.layer)?,
+                ];
+                let parent = out.window_group(
+                    [pos.0 as f32 + offset[0], pos.1 as f32 + offset[1], 1., 1.],
+                    if visible { alpha } else { 0 },
+                    order,
+                )?;
+                for object in &window.object_list {
+                    out.object(&mut ctx.images, object, Some(parent), order, 0)?;
+                }
+            }
+        }
+        if let Some(objects) = stage.object_lists.get(&1) {
+            for (index, obj) in objects.iter().enumerate() {
+                if (!obj.used || obj.object_type == 0) && obj.runtime.child_objects.is_empty() {
+                    continue;
+                }
+                if !obj.runtime.child_objects.is_empty() || obj.object_type == 9 {
+                    tree::Output {
+                        layers: &mut layers,
+                        images: &mut needed,
+                        ids: &mut ids,
+                        next: 0x8200_0000 + (index as u32) * 4096,
+                        movies: Some(movie_pictures),
+                        path: vec![index],
+                    }
+                    .object(&mut ctx.images, obj, None, [0, 0], 0)?;
+                    continue;
+                }
+                let b = &effective_base(obj)?;
+                ensure!(
+                    !obj.button.enabled,
+                    "native button rendering requires shared UI mapping"
                 );
                 ensure!(
                     b.world == -1
@@ -138,13 +211,15 @@ pub fn publish(
                         Blend::Screen,
                     ][b.blend as usize],
                     uv: None,
+                    sampling: Default::default(),
                     filter: object_filter(b),
                 });
             }
         }
     }
     // Shared text layout/metrics validate before any visible scene mutation.
-    let message_layers = crate::message::project(ctx, host)?;
+    let mut message_layers = crate::message::project(ctx, host)?;
+    message_layers.extend(crate::message::project_frame(ctx, client, host)?);
     ids.extend(message_layers.iter().map(|layer| layer.id));
     // Complete decoding/validation before any visible scene mutation.
     for (layer, image) in layers.iter_mut().zip(needed) {
@@ -169,20 +244,132 @@ pub fn publish(
         }
     }
     layers.extend(message_layers);
+    if ctx.globals.mov.playing && ctx.movie.ready {
+        const MOV_LAYER: u32 = 0xA000_0000;
+        let mov = &ctx.globals.mov;
+        ids.insert(MOV_LAYER);
+        layers.push(LayerSpec {
+            id: MOV_LAYER,
+            parent: None,
+            rect: [
+                mov.x as f32,
+                mov.y as f32,
+                mov.width as f32,
+                mov.height as f32,
+            ],
+            paint: Paint::Image {
+                asset: ctx
+                    .movie
+                    .surface
+                    .clone()
+                    .context("native MOV surface missing")?,
+                tint: [255; 4],
+            },
+            transform: SpriteTransform::default(),
+            order: [i32::MAX - 16, 0],
+            clip: None,
+            opacity: 255,
+            visible: true,
+            blend: Blend::Normal,
+            uv: None,
+            sampling: Default::default(),
+            filter: None,
+        });
+    }
+    let (button_layers, mut button_widgets, widget_ids) =
+        crate::message::buttons::project(ctx, client, host)?;
+    ids.extend(button_layers.iter().map(|l| l.id));
+    layers.extend(button_layers);
     let mut batch = ServiceBatch::default();
+    batch.ui.extend(
+        old_widgets
+            .difference(&widget_ids)
+            .map(|id| crysirror_scene::ui::UiCommand::Remove { id: *id }),
+    );
+    batch.ui.append(&mut button_widgets);
     batch.layers.extend(
-        old.difference(&ids)
+        old.iter()
+            // Tree ids are assigned in preorder. Remove descendants first:
+            // shared Layer removal also removes its still-attached subtree.
+            .rev()
+            .filter(|id| !ids.contains(*id))
             .map(|id| LayerCommand::Remove { id: *id }),
     );
     batch
         .layers
         .extend(layers.into_iter().map(|layer| LayerCommand::Put { layer }));
-    if !batch.layers.is_empty() {
+    if !batch.layers.is_empty() || !batch.ui.is_empty() {
         host.submit_engine(client, 1, &serde_json::to_vec(&batch)?)?;
     }
     *old = ids;
+    *old_widgets = widget_ids;
     ctx.ui.published_message = old.contains(&crate::message::MESSAGE_LAYER);
     Ok(())
+}
+
+/// Native additive/multiplicative offset-list policy; values/timing are owned
+/// by the shared IntEvent implementation, matrices by the shared layer service.
+fn effective_base(
+    object: &crate::runtime::globals::ObjectState,
+) -> Result<crate::runtime::globals::ObjectBaseState> {
+    let mut b = object.base.clone();
+    // Pinned native collector reads engine event totals even after completion.
+    let event = &object.runtime.prop_events;
+    macro_rules! value { ($($field:ident),* $(,)?) => { $(b.$field=i64::from(event.$field.get_total_value());)* }; }
+    value!(
+        patno,
+        x,
+        y,
+        z,
+        center_x,
+        center_y,
+        center_z,
+        center_rep_x,
+        center_rep_y,
+        center_rep_z,
+        scale_x,
+        scale_y,
+        scale_z,
+        rotate_x,
+        rotate_y,
+        rotate_z,
+        clip_left,
+        clip_top,
+        clip_right,
+        clip_bottom,
+        src_clip_left,
+        src_clip_top,
+        src_clip_right,
+        src_clip_bottom,
+        tr,
+        mono,
+        reverse,
+        bright,
+        dark,
+        color_r,
+        color_g,
+        color_b,
+        color_rate,
+        color_add_r,
+        color_add_g,
+        color_add_b
+    );
+    let lists = &object.runtime.prop_event_lists;
+    for (target, list) in [
+        (&mut b.x, &lists.x_rep),
+        (&mut b.y, &lists.y_rep),
+        (&mut b.z, &lists.z_rep),
+    ] {
+        for value in list {
+            *target = target
+                .checked_add(i64::from(value.get_total_value()))
+                .context("native offset sum overflow")?;
+        }
+    }
+    for value in &lists.tr_rep {
+        b.tr = b.tr.clamp(0, 255) * i64::from(value.get_total_value()).clamp(0, 255) / 255;
+    }
+    Ok(b)
 }
 
 /// Match apply_object_render_info_to_sprite followed by
@@ -196,7 +383,7 @@ fn native_anchor_component(position: i64, center_rep: i64) -> f32 {
 
 /// Siglus object color effects as an engine layer filter. Units follow
 /// siglus_scene_vm's render plan: every channel/rate is value / 255.
-fn object_filter(
+pub(crate) fn object_filter(
     b: &crate::runtime::globals::ObjectBaseState,
 ) -> Option<crysirror_scene::layer::LayerFilter> {
     let u = |v: i64| (v.clamp(0, 255) as f32) / 255.;

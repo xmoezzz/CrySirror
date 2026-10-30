@@ -114,22 +114,27 @@ fn fixed_count_is_explicit(ctx: &CommandContext, form_id: u32) -> bool {
     global.contains(&form_id) && configured_count_info(ctx, true).1
 }
 
-fn list_mut(ctx: &mut CommandContext, form_id: u32) -> &mut Vec<i64> {
+pub(super) fn list(ctx: &mut CommandContext, form_id: u32) -> &Vec<i64> {
     let fixed_len = fixed_default_len(ctx, form_id);
     let initial_len = fixed_len.unwrap_or(0);
     let list = ctx
         .globals
         .int_lists
         .entry(form_id)
-        .or_insert_with(|| vec![0; initial_len]);
+        .or_insert_with(|| std::sync::Arc::new(vec![0; initial_len]));
     // Old saves and the previous compatibility layer could leave these lists at
     // 32 words. The original engine always restores the configured fixed size.
     if let Some(fixed_len) = fixed_len
         && list.len() < fixed_len
     {
-        list.resize(fixed_len, 0);
+        std::sync::Arc::make_mut(list).resize(fixed_len, 0);
     }
     list
+}
+
+pub(super) fn list_mut(ctx: &mut CommandContext, form_id: u32) -> &mut Vec<i64> {
+    let _ = list(ctx, form_id);
+    std::sync::Arc::make_mut(ctx.globals.int_lists.get_mut(&form_id).unwrap())
 }
 
 fn required_storage_words(width: u32, index: i64) -> Option<usize> {
@@ -159,7 +164,7 @@ fn ensure_compatible_access_capacity(
     // original engine. When Gameexe was unavailable, grow only inside that
     // legal envelope so valid titles are not constrained by the fallback 1000.
     if required <= 10000 {
-        let list = list_mut(ctx, form_id);
+        let list = list(ctx, form_id);
         if list.len() < required {
             log::warn!(
                 "Gameexe flag count unavailable; extending INTLIST compatibility storage: form_id={} old_words={} new_words={}",
@@ -167,7 +172,7 @@ fn ensure_compatible_access_capacity(
                 list.len(),
                 required
             );
-            list.resize(required, 0);
+            list_mut(ctx, form_id).resize(required, 0);
         }
     }
 }
@@ -176,7 +181,7 @@ pub(super) fn ensure_fixed_direct_index(ctx: &mut CommandContext, form_id: u32, 
     if let Ok(index) = i64::try_from(index) {
         ensure_compatible_access_capacity(ctx, form_id, 32, index);
     }
-    let _ = list_mut(ctx, form_id);
+    let _ = list(ctx, form_id);
 }
 
 fn is_fixed(ctx: &CommandContext, form_id: u32) -> bool {
@@ -310,7 +315,7 @@ pub fn dispatch(ctx: &mut CommandContext, form_id: u32, args: &[Value]) -> Resul
                 ctx.push(Value::Int(0));
             } else {
                 let value = {
-                    let list = list_mut(ctx, form_id);
+                    let list = list(ctx, form_id);
                     bit_get(form_id, list.as_slice(), width, index)
                 };
                 ctx.push(Value::Int(value));
@@ -328,7 +333,7 @@ pub fn dispatch(ctx: &mut CommandContext, form_id: u32, args: &[Value]) -> Resul
             }
             intlist_op::GET_SIZE => {
                 let size = {
-                    let list = list_mut(ctx, form_id);
+                    let list = list(ctx, form_id);
                     logical_size(list.len(), width)
                 };
                 ctx.push(Value::Int(size));
@@ -402,4 +407,53 @@ pub fn dispatch(ctx: &mut CommandContext, form_id: u32, args: &[Value]) -> Resul
     }
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod cow_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn rollback_flag_reads_share_storage_and_writes_detach_one_list() {
+        let mut current = CommandContext::new("asset".into());
+        let a = codes::ELM_GLOBAL_A as u32;
+        let b = codes::ELM_GLOBAL_B as u32;
+        list_mut(&mut current, a)[3] = 17;
+        list_mut(&mut current, b)[5] = 29;
+        let before = current.clone();
+        // Both indexed access routes must retain the shared arrays on reads.
+        ensure_fixed_direct_index(&mut current, a, 3);
+        ensure_compatible_access_capacity(&mut current, a, 32, 3);
+        assert_eq!(list(&mut current, a)[3], 17);
+        assert!(Arc::ptr_eq(
+            &before.globals.int_lists[&a],
+            &current.globals.int_lists[&a]
+        ));
+        list_mut(&mut current, a)[3] = 41;
+        assert_eq!(before.globals.int_lists[&a][3], 17);
+        assert_eq!(current.globals.int_lists[&a][3], 41);
+        assert!(!Arc::ptr_eq(
+            &before.globals.int_lists[&a],
+            &current.globals.int_lists[&a]
+        ));
+        assert!(Arc::ptr_eq(
+            &before.globals.int_lists[&b],
+            &current.globals.int_lists[&b]
+        ));
+    }
+
+    #[test]
+    fn shared_flags_preserve_plain_vec_binary_wire() {
+        let plain = vec![0i64, -1, i32::MIN.into(), i32::MAX.into()];
+        let shared = Arc::new(plain.clone());
+        let wire = bincode::serialize(&plain).unwrap();
+        assert_eq!(wire, bincode::serialize(&shared).unwrap());
+        let restored: Arc<Vec<i64>> = bincode::deserialize(&wire).unwrap();
+        assert_eq!(restored.as_ref(), &plain);
+        assert_eq!(
+            bincode::deserialize::<Vec<i64>>(&bincode::serialize(&restored).unwrap()).unwrap(),
+            plain
+        );
+    }
 }

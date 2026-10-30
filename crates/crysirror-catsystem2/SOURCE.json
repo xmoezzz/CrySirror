@@ -1,0 +1,82 @@
+{
+  "implementation": "Independent Rust VM/adapter; no upstream engine source or renderer adopted.",
+  "references": [
+    {
+      "repository": "https://github.com/trigger-segfault/TriggersTools.CatSystem2",
+      "commit": "47fdcb605c16a5d93a97cb2894684326f21885c8",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "License.md",
+          "sha256": "01b1d9244ff7c67b3c4dd93fcfc90f8d74acd5b06099320bf1465a1a92713dcd"
+        },
+        {
+          "path": "src/TriggersTools.CatSystem2.Shared/VCodes.cs",
+          "sha256": "a8fdce72552d2534da83b815430e08f2f94bed8b5950f1f44efb2b94bf092257"
+        },
+        {
+          "path": "src/TriggersTools.CatSystem2.Shared/VCodes.Find.cs",
+          "sha256": "5bb1194c95f430ccc5b1c75ccc2d8599cbdde7f314f616e731f9e4c315caed3e"
+        },
+        {
+          "path": "src/TriggersTools.CatSystem2.Shared/Extract/KifintArchive.Extract.Private.cs",
+          "sha256": "3ab0cca63e9254b96b37942ad1cae7631310237a3d2f9dbae94d1838379cb30d"
+        },
+        {
+          "path": "src/TriggersTools.CatSystem2.Shared/Extract/Structs/CstScene.Structs.cs",
+          "sha256": "d21573ec4cdb7ed6dbe700faac703588f6d639836bedde90adcea95aab0eecfe"
+        },
+        {
+          "path": "src/TriggersTools.CatSystem2.Shared/Extract/CstScene.Extract.cs",
+          "sha256": "cbfafc19875eed9eb34cbef0858cd85e107f1c76425b5449ae456a44e74d33da"
+        },
+        {
+          "path": "src/TriggersTools.CatSystem2.Shared/Decompile/CstScene.Decompile.cs",
+          "sha256": "9be7713733c00a63c113607ec159675dbbbc80867ae81771106a0fd36c75e264"
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/trigger-segfault/catsystem-py",
+      "commit": "70ad39f9c0f46e74e656b405ec1f0879e9dea3b5",
+      "usage": "Documentation/reference only; no source copied or linked. KCS opcode name table and read-only archive inspection."
+    },
+    {
+      "repository": "https://github.com/kokseen1/FelineSystem2",
+      "commit": "ce7aeafd7cc6e65763832f7414e4d69d2c9ba48d",
+      "usage": "Read-only architecture reference. No license supplied; no source adopted. Implements CST rather than original KCS boot, so not used as a host."
+    }
+  ],
+  "native_static_evidence": {
+    "module": "owner-supplied cs2.exe; not distributed",
+    "sha256": "f8a1fb4fed8a0c64c3fbc0bcf009f63e8f3181cfbc1a0dbd60f9ddefc8e25b3d",
+    "tool": "local IDA Professional 9.0 idalib + Hex-Rays; binary read as data only",
+    "functions": {
+      "0x876FB0": "KCS signature, 52-byte header, zlib body; globals, stack, static string initialization",
+      "0x877130": "static string index entries are table-relative offset and VM global destination",
+      "0x876300": "opcode loop, 0x3B native exit boundary and 69-slot dispatch table at 0xB49A00",
+      "0x876B70": "five-byte typed operand, stack-indirect, byte/word/dword loads/sign extension",
+      "0x877170": "numeric global/heap offset resolution, never a host pointer in this implementation",
+      "0x87A150": "native call frame: return PC/base/end, argument-adjusted local base",
+      "0x87A1E0": "gcall argument slice and pending return/yield semantics",
+      "0x87A370": "native return frame restoration",
+      "0x64F840": "first actual main gcall 393 posts window message 0x464",
+      "0x530230": "message 0x464 calls EnableMenuItem on native RT_MENU command119; now mapped onto shared UI menu state",
+      "0x64FF10": "gcall465 returns native debug configuration flag; absent debug key selects observed production branch",
+      "0x5DD580": "native task allocation scans first unused logical integer ID",
+      "0x5DC340": "native task base constructor stores caller-provided task ID at +4"
+    },
+    "scope": "Generated complete 69-slot dispatch inventory and handler decompilations. Reviewed implemented loader, typed operands, arithmetic, address, stack and original call/return handlers. Unimplemented compound/debug/native handlers remain explicit failures.",
+    "file_version": "2.6.1.76 (fixed version resource 0x00020006/0x0001004c, read as file data)"
+  },
+  "public_docs": [
+    "https://cs2.suki.jp/manual/system/startup.html",
+    "https://github.com/trigger-segfault/TriggersTools.CatSystem2/wiki/CST-Scene"
+  ],
+  "limits": [
+    "No complete CatSystem2 integration claimed.",
+    "Mapped native393 uses shared retained menu enabled state with void ACK; native465 requires reviewed module ABI and confirmed absent debug key. Other native calls remain unsupported.",
+    "KCS mutating compound operators/debug opcodes, FES/CST execution, original saves and framework snapshots remain unsupported.",
+    "No original EXE/DLL execution, game content/font distribution, GPU/window/audio output or full-game validation."
+  ]
+}

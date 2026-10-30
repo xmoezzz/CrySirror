@@ -12,6 +12,21 @@ pub struct PcmBuilder {
     limit: usize,
     frames: Vec<[f32; 2]>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn float_append_preserves_samples_and_failed_blocks_are_atomic() {
+        let mut builder=PcmBuilder::new(44100,1,3).unwrap();
+        builder.append_f32(&[0.123456,-0.4]).unwrap();
+        assert!(builder.append_f32(&[f32::NAN]).is_err());
+        assert!(builder.append_f32(&[0.1,0.2]).is_err());
+        builder.append_f32(&[0.5]).unwrap();
+        let pcm=builder.finish().unwrap();
+        assert_eq!(pcm.frames(),&[[0.123456,0.123456],[-0.4,-0.4],[0.5,0.5]]);
+    }
+}
 impl PcmBuilder {
     pub fn new(rate: u32, channels: u16, max_frames: usize) -> Result<Self> {
         ensure!(
@@ -49,6 +64,29 @@ impl PcmBuilder {
     }
     pub fn frame_count(&self) -> usize {
         self.frames.len()
+    }
+    /// Append decoded float PCM without an intermediate integer quantization.
+    pub fn append_f32(&mut self, samples: &[f32]) -> Result<()> {
+        ensure!(
+            samples.len() % self.channels == 0,
+            "PCM partial interleaved frame"
+        );
+        ensure!(
+            samples.len() / self.channels <= self.limit - self.frames.len(),
+            "PCM builder frame budget"
+        );
+        ensure!(
+            samples
+                .iter()
+                .all(|x| x.is_finite() && (-16.0..=16.0).contains(x)),
+            "nonfinite or excessive PCM"
+        );
+        self.frames.extend(
+            samples
+                .chunks_exact(self.channels)
+                .map(|r| [r[0], r[usize::from(self.channels > 1)]]),
+        );
+        Ok(())
     }
     pub fn byte_len(&self) -> usize {
         self.frames.len() * 8

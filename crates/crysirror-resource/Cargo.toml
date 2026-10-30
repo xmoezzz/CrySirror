@@ -25,6 +25,12 @@ base64 = "0.22.1"
 blake2 = "=0.10.6"
 lz4_flex = "=0.11.6"
 xxhash-rust = { version = "0.8", features = ["xxh32"] }
+# Pure Rust content identification; embedded rules, no libmagic runtime/FFI.
+pure-magic = "=0.4.1"
+magic-db = "=0.6.0"
+encoding_rs = "0.8"
+quick-xml = "0.41"
+pelite = { version = "=0.10.0", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3.12"

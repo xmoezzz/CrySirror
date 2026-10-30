@@ -10,9 +10,11 @@
 //! binary .tjs2 ------------------------^
 //! ```
 //!
-//! The bytecode parser, verifier, disassembler, and the frontend-to-MIR
-//! lowering path are wired and tested. Bytecode emission from MIR is still a
-//! later compatibility layer.
+//! Source compilation includes MIR lowering and bytecode emission. Both source
+//! and installed binary scripts execute in the portable interpreter after
+//! verification; decoded instructions and branch indices are cached per object.
+//! This pipeline does not emit or execute host machine code. Native plugin
+//! facades and archive extraction filters are separate compatibility boundaries.
 
 pub mod bytecode;
 pub mod compiler;

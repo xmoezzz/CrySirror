@@ -102,19 +102,7 @@ fn str_map(ctx: &mut CommandContext, form_id: u32) -> &mut HashMap<i32, String> 
 }
 
 fn int_list(ctx: &mut CommandContext, form_id: u32) -> &mut Vec<i64> {
-    let fixed_len = fixed_int_list_len(ctx, form_id);
-    let initial_len = fixed_len.unwrap_or(0);
-    let list = ctx
-        .globals
-        .int_lists
-        .entry(form_id)
-        .or_insert_with(|| vec![0; initial_len]);
-    if let Some(fixed_len) = fixed_len
-        && list.len() < fixed_len
-    {
-        list.resize(fixed_len, 0);
-    }
-    list
+    super::int_list::list_mut(ctx, form_id)
 }
 
 fn str_list(ctx: &mut CommandContext, form_id: u32) -> &mut Vec<String> {
@@ -144,7 +132,7 @@ fn fixed_str_list_len(ctx: &CommandContext, form_id: u32) -> Option<usize> {
 fn ensure_int_index(ctx: &mut CommandContext, form_id: u32, index: usize) -> bool {
     super::int_list::ensure_fixed_direct_index(ctx, form_id, index);
     if let Some(fixed_len) = fixed_int_list_len(ctx, form_id) {
-        let list = int_list(ctx, form_id);
+        let list = super::int_list::list(ctx, form_id);
         if index < list.len() {
             return true;
         }
@@ -158,7 +146,7 @@ fn ensure_int_index(ctx: &mut CommandContext, form_id: u32, index: usize) -> boo
         return false;
     }
 
-    let list = int_list(ctx, form_id);
+    let list = super::int_list::list(ctx, form_id);
     if index < list.len() {
         return true;
     }
@@ -349,7 +337,7 @@ pub fn store_or_push_indexed(
             return;
         }
         let value = {
-            let list = int_list(ctx, form_id);
+            let list = super::int_list::list(ctx, form_id);
             list.get(index).copied().unwrap_or(0)
         };
         ctx.push(Value::Int(value));

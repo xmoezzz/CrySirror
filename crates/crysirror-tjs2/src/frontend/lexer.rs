@@ -273,6 +273,24 @@ pub fn lex(source: &str) -> Result<Vec<Token>> {
     Lexer::new(source).lex_all()
 }
 
+/// Lexes with an engine-instance preprocessor store: starts from its values
+/// and writes every `@set` back, even when lexing later fails.
+pub fn lex_with(
+    source: &str,
+    shared: Option<&super::diagnostic::PreprocessorValues>,
+) -> Result<Vec<Token>> {
+    let Some(shared) = shared else {
+        return lex(source);
+    };
+    let mut lexer = Lexer::new(source);
+    lexer.pp_values = shared.lock().map(|v| v.clone()).unwrap_or_default();
+    let result = lexer.lex_all_ref();
+    if let Ok(mut values) = shared.lock() {
+        *values = std::mem::take(&mut lexer.pp_values);
+    }
+    result
+}
+
 pub struct Lexer<'a> {
     source: &'a str,
     chars: std::str::CharIndices<'a>,
@@ -285,9 +303,7 @@ impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
         let mut chars = source.char_indices();
         let lookahead = chars.next();
-        let mut pp_values = BTreeMap::new();
-        pp_values.insert("kirikiriz".to_string(), 1);
-        pp_values.insert("version".to_string(), 0x02040009);
+        let pp_values = super::diagnostic::initial_preprocessor_values();
         Self {
             source,
             chars,
@@ -339,6 +355,10 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_all(mut self) -> Result<Vec<Token>> {
+        self.lex_all_ref()
+    }
+
+    fn lex_all_ref(&mut self) -> Result<Vec<Token>> {
         let mut tokens = Vec::new();
         let mut expect_operand = true;
         let mut statement_start = true;

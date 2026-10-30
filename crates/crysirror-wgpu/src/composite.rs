@@ -4,10 +4,22 @@
 //! child opacity is applied before the crossfade, never independently faded.
 use super::*;
 use wgpu::util::DeviceExt;
+#[path = "composite_filter.rs"]
+mod filter;
+use crysirror_scene::layer::SubtreeTransitionEffect;
+struct Snapshot {
+    before: wgpu::TextureView,
+    after: wgpu::TextureView,
+    _a: wgpu::Texture,
+    _b: wgpu::Texture,
+}
+
 pub(super) struct Compositor {
     renderer: Box<Renderer>,
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
+    filter: Option<filter::Filter>,
+    snapshots: BTreeMap<(String, u64, [u32; 2]), Snapshot>,
 }
 impl Compositor {
     fn new(gpu: Arc<Gpu>, format: wgpu::TextureFormat) -> Self {
@@ -92,10 +104,61 @@ impl Compositor {
             renderer: Box::new(Renderer::new(gpu.clone(), format)),
             layout,
             pipeline,
+            filter: None,
+            snapshots: BTreeMap::new(),
         }
     }
 }
 impl Renderer {
+    fn transition_inputs_ready(
+        &mut self,
+        assets: &mut Assets,
+        inputs: &[crysirror_scene::layer::Primitive],
+    ) -> Result<bool> {
+        let mut ready = true;
+        for primitive in inputs {
+            if let Some(composite) = &primitive.composite {
+                ready &= self.transition_inputs_ready(assets, &composite.before)?;
+                ready &= self.transition_inputs_ready(assets, &composite.after)?;
+                continue;
+            }
+            match &primitive.paint {
+                Paint::Image { asset, .. } => {
+                    let key = Self::sampled_image_key(
+                        assets,
+                        primitive.owner,
+                        asset,
+                        primitive.sampling,
+                    )?;
+                    ready &= self.ensure_sampled_image(
+                        assets,
+                        primitive.owner,
+                        asset,
+                        &key,
+                        primitive.sampling,
+                    )?;
+                }
+                Paint::Snapshot { size, layers } => {
+                    let key = Self::snapshot_key(assets, primitive.owner, *size, layers)?;
+                    ready &= self.textures.contains_key(&key);
+                }
+                _ => {}
+            }
+            if let Some(filter) = &primitive.filter {
+                for asset in filter
+                    .mask
+                    .as_ref()
+                    .map(|m| m.asset.as_str())
+                    .into_iter()
+                    .chain(filter.tone_curve.as_ref().map(|m| m.asset.as_str()))
+                {
+                    let key = Self::image_key(assets, primitive.owner, asset)?;
+                    ready &= self.ensure_image(assets, primitive.owner, asset, &key)?;
+                }
+            }
+        }
+        Ok(ready)
+    }
     pub(super) fn prepare_composites(
         &mut self,
         assets: &mut Assets,
@@ -107,6 +170,9 @@ impl Renderer {
             .filter_map(|p| p.composite.as_ref().map(|f| (p.owner, p.id, f.clone())))
             .collect();
         if composites.is_empty() {
+            if let Some(compositor) = self.compositor.as_mut() {
+                compositor.snapshots.clear();
+            }
             if !self
                 .engine_frame
                 .iter()
@@ -130,7 +196,18 @@ impl Renderer {
         );
         // All retained products, two isolated inputs and the child renderer's
         // depth target share one explicit working-set budget.
-        let work_bytes = pixel_count * (bytes_per_pixel * (composites.len() as u64 + 2) + 4);
+        let effect_bytes: u64 = composites
+            .iter()
+            .map(|(_, _, frame)| match frame.effect.as_ref() {
+                Some((SubtreeTransitionEffect::Blur { dynamic, .. }, _)) => {
+                    32 + if !dynamic { 2 * bytes_per_pixel } else { 0 }
+                }
+                Some((SubtreeTransitionEffect::Dim { .. }, _)) => 24,
+                None => 0,
+            })
+            .sum();
+        let work_bytes =
+            pixel_count * (bytes_per_pixel * (composites.len() as u64 + 2) + 4 + effect_bytes);
         ensure!(
             work_bytes <= 128 * 1024 * 1024,
             "composite working set exceeds 128 MiB"
@@ -139,8 +216,53 @@ impl Renderer {
             .compositor
             .take()
             .unwrap_or_else(|| Compositor::new(self.gpu.clone(), self.format));
+        if composites
+            .iter()
+            .any(|(_, _, frame)| frame.effect.is_some())
+            && c.filter.is_none()
+        {
+            for format in [
+                wgpu::TextureFormat::Rgba32Float,
+                wgpu::TextureFormat::Rgba16Float,
+            ] {
+                let usages = self
+                    .gpu
+                    .adapter
+                    .get_texture_format_features(format)
+                    .allowed_usages;
+                ensure!(
+                    usages.contains(
+                        wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING
+                    ),
+                    "GPU lacks storage/sample support for subtree filter {format:?}"
+                );
+            }
+            let limits = self.gpu.device.limits();
+            ensure!(
+                limits.max_compute_workgroup_size_x >= 64
+                    && limits.max_compute_invocations_per_workgroup >= 64
+                    && limits.max_compute_workgroup_storage_size >= 5120,
+                "GPU lacks bounded transition filter workgroup limits"
+            );
+            c.filter = Some(filter::Filter::new(&self.gpu));
+        }
+        let desired_snapshots: std::collections::BTreeSet<_> = composites
+            .iter()
+            .filter_map(|(owner, id, frame)| {
+                matches!(
+                    frame.effect.as_ref(),
+                    Some((SubtreeTransitionEffect::Blur { dynamic: false, .. }, _))
+                )
+                .then(|| {
+                    Self::image_key(assets, *owner, &format!("__crysirror_composite/{id}"))
+                        .map(|key| (key, frame.serial, canvas))
+                })
+            })
+            .collect::<Result<_>>()?;
+        c.snapshots.retain(|key, _| desired_snapshots.contains(key));
         let result = (|| {
             let mut products = BTreeMap::new();
+            let mut active_snapshots = std::collections::BTreeSet::new();
             for (owner, id, frame) in composites {
                 ensure!(
                     frame.progress.is_finite() && (0.0..=1.0).contains(&frame.progress),
@@ -149,7 +271,11 @@ impl Renderer {
                 // Nested composites (an inner crossfade inside this one's
                 // inputs) are prepared by the child renderer's own compositor.
                 ensure!(
-                    frame.before.iter().chain(&frame.after).all(|p| p.owner == owner),
+                    frame
+                        .before
+                        .iter()
+                        .chain(&frame.after)
+                        .all(|p| p.owner == owner),
                     "foreign-client compositor input"
                 );
                 // The rule image is an ordinary immutable image texture.
@@ -173,7 +299,7 @@ impl Renderer {
                     "composite name collides with a dynamic surface"
                 );
                 // Match prepare's ordinary Paint::Image cache namespace.
-                let key = format!("image:{}", assets.key(ClientId(owner), &asset)?);
+                let key = Self::image_key(assets, owner, &asset)?;
                 ensure!(!products.contains_key(&key), "duplicate composite product");
                 let cached: u64 = self.textures.values().map(|t| t.bytes).sum();
                 let child_cached: u64 = c.renderer.textures.values().map(|t| t.bytes).sum();
@@ -198,24 +324,118 @@ impl Renderer {
                         view_formats: &[],
                     })
                 };
-                let a = texture("subtree before");
-                let b = texture("subtree after");
+                let snapshot_key = (key.clone(), frame.serial, canvas);
+                let static_input = matches!(
+                    frame.effect.as_ref(),
+                    Some((SubtreeTransitionEffect::Blur { dynamic: false, .. }, _))
+                );
+                let retained = static_input
+                    .then(|| c.snapshots.get(&snapshot_key))
+                    .flatten();
+                let a = retained
+                    .map(|snapshot| snapshot._a.clone())
+                    .unwrap_or_else(|| texture("subtree before"));
+                let b = retained
+                    .map(|snapshot| snapshot._b.clone())
+                    .unwrap_or_else(|| texture("subtree after"));
                 let output = texture("subtree crossfade product");
                 let av = a.create_view(&Default::default());
                 let bv = b.create_view(&Default::default());
                 let view = output.create_view(&Default::default());
-                for (primitives, target) in [(&frame.before, &av), (&frame.after, &bv)] {
-                    c.renderer.set_engine_frame(primitives.clone())?;
-                    c.renderer.render(
-                        &SceneState::default(),
-                        assets,
-                        RenderTarget {
-                            view: target,
-                            size: canvas,
+
+                if static_input {
+                    active_snapshots.insert(snapshot_key.clone());
+                }
+                let inputs_ready = if static_input && !c.snapshots.contains_key(&snapshot_key) {
+                    c.renderer.transition_inputs_ready(assets, &frame.before)?
+                        && c.renderer.transition_inputs_ready(assets, &frame.after)?
+                } else {
+                    true
+                };
+                let capture_inputs = !static_input || !c.snapshots.contains_key(&snapshot_key);
+                if capture_inputs {
+                    for (primitives, target) in [(&frame.before, &av), (&frame.after, &bv)] {
+                        c.renderer.set_engine_frame(primitives.clone())?;
+                        c.renderer.render(
+                            &SceneState::default(),
+                            assets,
+                            RenderTarget {
+                                view: target,
+                                size: canvas,
+                            },
+                            canvas,
+                            [0; 4],
+                        )?;
+                    }
+                }
+                if static_input && capture_inputs && inputs_ready {
+                    c.snapshots.insert(
+                        snapshot_key.clone(),
+                        Snapshot {
+                            before: av.clone(),
+                            after: bv.clone(),
+                            _a: a.clone(),
+                            _b: b.clone(),
                         },
-                        canvas,
-                        [0; 4],
-                    )?;
+                    );
+                }
+                let (mut input_a, mut input_b) =
+                    if static_input && c.snapshots.contains_key(&snapshot_key) {
+                        let snapshot = &c.snapshots[&snapshot_key];
+                        (snapshot.before.clone(), snapshot.after.clone())
+                    } else {
+                        (av.clone(), bv.clone())
+                    };
+                let mut _processed_inputs = Vec::new();
+                let mut _processed_rule = Vec::new();
+                let mut rule_view = self.textures[&rule_key].view.clone();
+                let mut mode = if frame.rule.is_some() && rule_ready {
+                    1.
+                } else {
+                    0.
+                };
+                let mut progress = frame.progress;
+                let mut phase = 0.;
+                if let Some((effect, rect)) = &frame.effect {
+                    effect.validate()?;
+                    progress = effect.progress(frame.timing[0], frame.timing[1]) as f32;
+                    match effect {
+                        SubtreeTransitionEffect::Blur { .. } => {
+                            let (before, after) = effect.radii(frame.timing[0], frame.timing[1]);
+                            _processed_inputs = c.filter.as_ref().unwrap().process(
+                                &self.gpu,
+                                &[(&input_a, before), (&input_b, after)],
+                                canvas,
+                                *rect,
+                                false,
+                                false,
+                            );
+                            input_a = _processed_inputs[0].view.clone();
+                            input_b = _processed_inputs[1].view.clone();
+                            mode = 2.;
+                        }
+                        SubtreeTransitionEffect::Dim {
+                            rule,
+                            blur,
+                            negative,
+                            ..
+                        } if rule_ready => {
+                            _processed_rule = c.filter.as_ref().unwrap().process(
+                                &self.gpu,
+                                &[(&rule_view, *blur)],
+                                canvas,
+                                *rect,
+                                true,
+                                *negative,
+                            );
+                            rule_view = _processed_rule[0].view.clone();
+                            mode = 3.;
+                            phase = (effect.progress(frame.timing[0], frame.timing[1])
+                                * (255. + f64::from(rule.vague)))
+                            .floor() as f32;
+                        }
+                        SubtreeTransitionEffect::Dim { .. } => {}
+                    }
                 }
                 let uniform =
                     self.gpu
@@ -223,16 +443,20 @@ impl Renderer {
                         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("crossfade progress"),
                             contents: bytemuck::cast_slice(&{
-                                let (vague, on, rect) = match &frame.rule {
+                                let (vague, _, mut rect) = match &frame.rule {
                                     Some((r, rect)) if rule_ready => (r.vague as f32, 1., *rect),
                                     _ => (0., 0., [0., 0., 1., 1.]),
                                 };
-                                let pending = frame.rule.is_some() && !rule_ready;
+                                if let Some((_, effect_rect)) = &frame.effect {
+                                    rect = *effect_rect;
+                                }
+                                let pending =
+                                    (frame.rule.is_some() && !rule_ready) || !inputs_ready;
                                 [
-                                    if pending { 0. } else { frame.progress.clamp(0., 1.) },
+                                    if pending { 0. } else { progress.clamp(0., 1.) },
                                     vague,
-                                    on,
-                                    0.,
+                                    mode,
+                                    phase,
                                     rect[0],
                                     rect[1],
                                     rect[2].max(1.),
@@ -250,11 +474,11 @@ impl Renderer {
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&av),
+                                resource: wgpu::BindingResource::TextureView(&input_a),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&bv),
+                                resource: wgpu::BindingResource::TextureView(&input_b),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 2,
@@ -262,9 +486,7 @@ impl Renderer {
                             },
                             wgpu::BindGroupEntry {
                                 binding: 3,
-                                resource: wgpu::BindingResource::TextureView(
-                                    &self.textures[&rule_key].view,
-                                ),
+                                resource: wgpu::BindingResource::TextureView(&rule_view),
                             },
                         ],
                     });
@@ -320,11 +542,12 @@ impl Renderer {
                     Texture {
                         bind,
                         view,
-                        _texture: output,
+                        texture: output,
                         bytes: pixel_count * bytes_per_pixel,
                     },
                 );
             }
+            c.snapshots.retain(|key, _| active_snapshots.contains(key));
             self.textures
                 .retain(|key, _| !key.contains(":__crysirror_composite/"));
             self.textures.extend(products);
@@ -356,7 +579,10 @@ impl Renderer {
         // Text is rasterized from the shared fonts: their content digests
         // are part of the key, so replacing a font alias re-keys the snapshot.
         let mut fonts = BTreeSet::new();
-        fn collect<'a>(layers: &'a [crysirror_scene::layer::LayerSpec], out: &mut BTreeSet<&'a str>) {
+        fn collect<'a>(
+            layers: &'a [crysirror_scene::layer::LayerSpec],
+            out: &mut BTreeSet<&'a str>,
+        ) {
             for layer in layers {
                 match &layer.paint {
                     Paint::Text { font, .. } | Paint::GlyphRun { font, .. } => {
@@ -372,7 +598,7 @@ impl Renderer {
         hash.update(&definition);
         for font in fonts {
             hash.update(font.as_bytes());
-            hash.update(assets.text.font_digest(font)?.as_bytes());
+            hash.update(assets.text.for_client(crysirror_core::state::ClientId(owner)).font_digest(font)?.as_bytes());
         }
         Ok(format!(
             "snapshot:{}:{owner}:{}",
@@ -393,7 +619,10 @@ impl Renderer {
         // Nested snapshot payloads are rasterized first by the isolated
         // renderer; their images are dependencies of this snapshot too.
         let mut all = Vec::new();
-        fn flatten<'a>(layers: &'a [crysirror_scene::layer::LayerSpec], out: &mut Vec<&'a crysirror_scene::layer::LayerSpec>) {
+        fn flatten<'a>(
+            layers: &'a [crysirror_scene::layer::LayerSpec],
+            out: &mut Vec<&'a crysirror_scene::layer::LayerSpec>,
+        ) {
             for layer in layers {
                 if let Paint::Snapshot { layers, .. } = &layer.paint {
                     flatten(layers, out);
@@ -410,7 +639,7 @@ impl Renderer {
                 }
                 // Fonts are pinned by content digest in the snapshot key.
                 Paint::Text { font, .. } | Paint::GlyphRun { font, .. } => {
-                    assets.text.font_digest(font)?;
+                    assets.text.for_client(crysirror_core::state::ClientId(owner)).font_digest(font)?;
                 }
                 Paint::Snapshot { .. } => {}
                 Paint::Puppet { .. } => anyhow::bail!("dynamic snapshot dependency"),
@@ -432,11 +661,14 @@ impl Renderer {
             // container are immutable while mounted; plain files are refused.
             if !assets.container_backed(ClientId(owner), name) {
                 if name.starts_with("__crysirror/") {
-                    let bytes = assets
-                        .generated_for(ClientId(owner), name)?
-                        .with_context(|| {
-                            format!("snapshot requires a published immutable engine image: {name}")
-                        })?;
+                    let bytes =
+                        assets
+                            .generated_for(ClientId(owner), name)?
+                            .with_context(|| {
+                                format!(
+                                    "snapshot requires a published immutable engine image: {name}"
+                                )
+                            })?;
                     ensure!(
                         bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
                         "snapshot immutable image profile requires self-contained PNG: {name}"
@@ -482,7 +714,11 @@ impl Renderer {
         if snapshots.is_empty() {
             return Ok(());
         }
-        ensure!(snapshots.len() <= MAX_FRAME_SNAPSHOTS, "snapshot frame count limit ({} > {MAX_FRAME_SNAPSHOTS})", snapshots.len());
+        ensure!(
+            snapshots.len() <= MAX_FRAME_SNAPSHOTS,
+            "snapshot frame count limit ({} > {MAX_FRAME_SNAPSHOTS})",
+            snapshots.len()
+        );
         ensure!(
             snapshots
                 .iter()
@@ -528,7 +764,13 @@ impl Renderer {
                         <= 256 * 1024 * 1024,
                     "snapshot and texture caches exceed 256 MiB"
                 );
-                let Some(_pins) = Self::snapshot_dependencies(&mut self.snapshot_plain_images, assets, owner, &layers)? else {
+                let Some(_pins) = Self::snapshot_dependencies(
+                    &mut self.snapshot_plain_images,
+                    assets,
+                    owner,
+                    &layers,
+                )?
+                else {
                     continue;
                 };
                 let mut isolated = crysirror_scene::layer::LayerSystem::default();
@@ -546,8 +788,10 @@ impl Renderer {
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
                         format: self.format,
+                        // COPY_SRC: compacted canvases are materialized from it.
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                            | wgpu::TextureUsages::TEXTURE_BINDING
+                            | wgpu::TextureUsages::COPY_SRC,
                         view_formats: &[],
                     })
                 };
@@ -650,7 +894,7 @@ impl Renderer {
                     Texture {
                         bind,
                         view,
-                        _texture: output,
+                        texture: output,
                         bytes: pixels * pixel_bytes,
                     },
                 );
@@ -663,9 +907,72 @@ impl Renderer {
     }
 }
 
+impl Renderer {
+    /// The straight-alpha pixels of a snapshot this renderer has rasterized
+    /// (a compacted canvas), or `None` while it has not been drawn yet.
+    pub fn read_snapshot(
+        &self,
+        assets: &Assets,
+        owner: u32,
+        size: [u32; 2],
+        layers: &[crysirror_scene::layer::LayerSpec],
+    ) -> Result<Option<image::RgbaImage>> {
+        let key = Self::snapshot_key(assets, owner, size, layers)?;
+        let Some(texture) = self.textures.get(&key) else {
+            return Ok(None);
+        };
+        self.read_texture(&texture.texture, size[0], size[1])
+            .map(Some)
+    }
+
+    /// Rasterize one snapshot now, outside a frame (a compacted canvas a
+    /// headless host has not drawn yet), and read its pixels back. `None`
+    /// while its image dependencies are still loading.
+    pub fn materialize_snapshot(
+        &mut self,
+        assets: &mut Assets,
+        owner: u32,
+        size: [u32; 2],
+        layers: &std::sync::Arc<Vec<crysirror_scene::layer::LayerSpec>>,
+    ) -> Result<Option<image::RgbaImage>> {
+        let key = Self::snapshot_key(assets, owner, size, layers)?;
+        if !self.textures.contains_key(&key) {
+            let probe = crysirror_scene::layer::Primitive {
+                composite: None,
+                owner,
+                id: 0,
+                sub: 0,
+                order: [0, 0],
+                size,
+                extent: [size[0] as f32, size[1] as f32],
+                paint: Paint::Snapshot {
+                    size,
+                    layers: layers.clone(),
+                },
+                quad: [[0.; 4]; 4],
+                clip: None,
+                opacity: 255,
+                blend: crysirror_scene::layer::Blend::Normal,
+                uv: [0., 0., 1., 1.],
+                sampling: Default::default(),
+                filter: None,
+                puppet: None,
+            };
+            let saved = std::mem::replace(&mut self.engine_frame, vec![probe]);
+            let result = self.prepare_snapshots(assets);
+            self.engine_frame = saved;
+            result?;
+        }
+        self.read_snapshot(assets, owner, size, layers)
+    }
+}
+
 /// Image files whose decode reads no other file.
 fn self_contained_image(name: &str, bytes: &[u8]) -> bool {
-    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
     bytes.starts_with(b"\x89PNG\r\n\x1a\n")
         || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
         || bytes.starts_with(b"BM")

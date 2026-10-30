@@ -151,6 +151,9 @@ pub(crate) fn input(rt: &Rt, h: ObjectHandle) -> Result<ImageInput> {
             color: [255, 255, 255, 0],
         });
     }
+    if std::env::var_os("CRYSIRROR_KRKR_TRACE_SOURCE").is_some() {
+        eprintln!("[source] layer {} slot {} lost: {:?}", h.0, l.slot, l.source_lost);
+    }
     Err(unsupported(
         "image processing source",
         "a shared loaded, processed or uniform image; composed Canvas readback remains open",

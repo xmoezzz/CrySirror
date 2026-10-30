@@ -39,9 +39,7 @@ fn init(rt: &mut Rt, h: ObjectHandle, a: &[Variant], storage: bool) -> Result<()
     if storage {
         let utf8 = a.get(1).map(Variant::to_integer).transpose()?.unwrap_or(0) != 0;
         let bytes = rt
-            .host()
-            .storage()?
-            .read_named(&input)
+            .read_storage_binary(&input, "")
             .map_err(|e| err(format!("{e:#}")))?;
         // The native reader is a KiriKiri TextStream: a BOM or the ciphered
         // `FE FE` header selects text decoding; otherwise raw bytes (CP932,

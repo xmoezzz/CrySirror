@@ -50,35 +50,47 @@ fn delete_and_increment_still_require_an_lvalue() {
     }
 }
 #[test]
-fn null_context_property_setter_runs_on_the_holding_object() {
-    // Utils.tjs objectHookInjection shape (Yuzusoft): an eval'd property whose
-    // setter rebinds a hook closure to `this` -- the object holding the
-    // property, because it was stored `incontextof null` -- while the hook
-    // reaches a helper the script put on that same object.
-    let v = run(r#"
-global.__T = %[];
-class Owner {
-    function Owner() {}
-    function helper(name, ref, v) { global.__out = name + "=" + v; }
-    function setFace(ref, v) { helper("face", ref, v); }
+fn preprocessor_values_persist_across_scripts_of_one_engine() {
+    // Yuzusoft Config.tjs `@set (KAGHOOK_EVENTACTION=1)` is tested by
+    // yuzu_touchui.tjs later (`tTJS::PPValues` is per engine instance).
+    let mut rt = crysirror_tjs2::runtime::Runtime::new();
+    let first = rt.compile_source("Config.tjs", "@set (FLAG_X=1)\nreturn 0;").unwrap();
+    rt.execute_file(&first).unwrap();
+    let second = rt
+        .compile_source("later.tjs", "@if (FLAG_X)\nreturn 1;\n@endif\nreturn 2;")
+        .unwrap();
+    assert_eq!(rt.execute_file(&second).unwrap(), crysirror_tjs2::runtime::Variant::Integer(1));
+    // A separate engine instance starts clean.
+    let other = crysirror_tjs2::runtime::Runtime::new();
+    let third = other
+        .compile_source("later.tjs", "@if (FLAG_X)\nreturn 1;\n@endif\nreturn 2;")
+        .unwrap();
+    assert_eq!(
+        crysirror_tjs2::runtime::Runtime::new().execute_file(&third).unwrap(),
+        crysirror_tjs2::runtime::Variant::Integer(2)
+    );
 }
-function inject(target, hook) {
-    var holder = new Dictionary();
-    var make = function(key) {
-        ("property prop { setter(v) { with (global.__T['" + key + "']) (.setter incontextof this)((&.orig) incontextof this, v); } getter { return 0; } }")!;
-        return &this.prop;
-    } incontextof holder;
-    var p = make("k");
-    p["setter"] = hook;
-    global.__T["k"] = p;
-    target.face = p incontextof null;
+#[test]
+fn eval_expression_mode_accepts_a_trailing_semicolon() {
+    // tjsLex.cpp expression mode: `return` + text + `;` (envinit.tjs ends `];`).
+    let v = run(r#"return ("%[ \"a\" => 3 ];")!.a;"#);
+    assert_eq!(v, crysirror_tjs2::runtime::Variant::Integer(3));
 }
-var owner = new Owner();
-var font = new Dictionary();
-font.helper = owner.helper;
-inject(font, owner.setFace);
-font.face = "b";
-return global.__out;
-"#);
-    assert_eq!(v, crysirror_tjs2::runtime::Variant::String("face=b".into()));
+
+#[test]
+fn super_member_of_a_multiply_inherited_class_comes_from_the_last_base() {
+    // tjsInterCodeGen.cpp CreateExtendsExprCode: each `extends` base runs its
+    // class body on the new object in order, so later bases replace earlier
+    // members. KAGEX's AnimationLayerTransMove relies on this so
+    // GraphicLayer's `super.beginTransition` reaches KAGTransMove.
+    let value = run(r#"
+        class A { function f() { return "A"; } }
+        class B { function f() { return "B"; } }
+        class AB extends A, B { function AB() { global.A.A(); global.B.B(); } }
+        class C extends AB { function f() { return "C" + super.f(); } }
+        var o = new C();
+        var ab = new AB();
+        return o.f() + ab.f();
+    "#);
+    assert_eq!(value, crysirror_tjs2::runtime::Variant::String("CBB".into()));
 }

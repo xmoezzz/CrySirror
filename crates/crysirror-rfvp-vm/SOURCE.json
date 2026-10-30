@@ -1,0 +1,320 @@
+{
+  "repository": "https://github.com/xmoezzz/rfvp.git",
+  "commit": "062fec82033b554b9eb3b5da069518c0c96a354e",
+  "license": "MPL-2.0",
+  "crates": [
+    "rfvp (crates/rfvp at the pinned commit)"
+  ],
+  "excluded": [
+    "rfvp/src/subsystem/resources/fonts (Microsoft fonts; never distributed)",
+    "Cargo.toml (replaced: no_std profile only)",
+    "every other upstream crate, platform port and tool",
+    "Unused original portable CPU mixer and software rasterizer removed.",
+    "Original general text/font/image kernels now live in shared engine crates."
+  ],
+  "patched": {
+    "src/font.rs": {
+      "origin_sha256": "7b8798d5d4beee047e89c8e5acf3655e15c835a3f88ff63e535e18d7e061edb3",
+      "current_sha256": "9ed5e36a7e9b0f564b935c9c65df8c90db2a4e5490e8952e4a125124cdefdd48",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/host_api/audio.rs": {
+      "origin_sha256": "f1d19319d3493c3cc06d2ff035350c864e677d8dce45079b885f0ae28f51c7b4",
+      "current_sha256": "821b29925b15786fd24f97c713f1540d7fcc09271bd940ad87da59ce10eacc95",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/host_api/mod.rs": {
+      "origin_sha256": "7b493b1cd2ae452fae1404ea853a45e23a951d0211e54fd018e08814942d8f9e",
+      "current_sha256": "cedb48e9df5fc502bc98529b983e7652a1593a376c0976ae28ca246b26d23ecb",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/host_api/render.rs": {
+      "origin_sha256": "7d48b6c26c9df092573ccb8a006625d97f635b35b3714a9763f322d2971c3e2b",
+      "current_sha256": "8efaa3ec57ef79b38891c2790ccb60cccf218708418b3ec893bb56154b93c6d3",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly. Bind Sprt -1 to client-scoped shared presenter history, retaining the device-free capture fallback and explicit native save readback."
+    },
+    "src/lib.rs": {
+      "origin_sha256": "b6e97211689f4e2148dfe5d82d02102188604928a7f89ee6255664db36c11259",
+      "current_sha256": "3f62e83b86fce8951783e06ebf913c5b7313d489eabc4ee7072587c79515e66c",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/no_std_core.rs": {
+      "origin_sha256": "dd680ca69c34926b912983e090f4a9e06fea0f07e7022d1bbadc7eb1190fdc83",
+      "current_sha256": "3ccc23dd5cd9a4975ae0c69e6be4643c2ccf022c2371f06902cf0328061272c3",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly. Expose native cursor index and consume visibility/warp requests for shared engine cursor presentation. Bind Sprt -1 to client-scoped shared presenter history, retaining the device-free capture fallback and explicit native save readback."
+    },
+    "src/rendering/mask_dissolve.rs": {
+      "origin_sha256": "a64eecb0bf78409348bb6397dc7159e7da0819dbde07ba39a0f3ce4986da00a0",
+      "current_sha256": "ae9b0bd560ef2f396e36632199907e993c0b8bad7214ae1435249acb62c0c7f9",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/rendering/prim_commands.rs": {
+      "origin_sha256": "cc2d76258fbe03b8f2b031082e7100c0ae7d9f748099422503432f80cb3154ff",
+      "current_sha256": "18a1aaf0d283cc82b278792c6916513ae16091c377f8e6d404422ecf0b0b8266",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly. Bind Sprt -1 to client-scoped shared presenter history, retaining the device-free capture fallback and explicit native save readback."
+    },
+    "src/rfvp_audio/commands.rs": {
+      "origin_sha256": "b9ae2df8da08345ce532bb9e7a6738d17aba7f9092cb3a22c44f3a693795b8c5",
+      "current_sha256": "30b7c006f10e36677325150258e5d1e0bae5f8bd12bfd6c338c134a55ecad396",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/rfvp_audio/mod.rs": {
+      "origin_sha256": "6f51dbc94e961a63d85f4de20ef526cefaab2f9a69a7617b8fbf2dc1c4eb4ae4",
+      "current_sha256": "76379f7822e06278ff510f993c53d0d656e59dd60fdd34d10d4e1bc8b6260f0f",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/script/context.rs": {
+      "origin_sha256": "301af59354983fd2ae8d252903536ab7d3f234a947ed4f6c7f6ea2236e707922",
+      "current_sha256": "86a86afbe1a800c57806273b8e25379b108ce2d2578a617de1c7dc7c398e6633",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/script/global.rs": {
+      "origin_sha256": "5e2f975183764a8db0e8cbaf18ccd0d315c869fc7f2087ea8b2976be6579ea17",
+      "current_sha256": "52ddc85463cbe6724203d2649e8e89b3ce711f8b9208cb1701fb56f1fec988b0",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/script/mod.rs": {
+      "origin_sha256": "a90b4eb034a021134047bba4bab4b88ca2604bfee143bc9b3eaa4ed5cc6625f4",
+      "current_sha256": "c483e740a27ff7fe58533ce46063548673037714b55e6b78ff957e6c295a3175",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/anzu_scene.rs": {
+      "origin_sha256": "08c9d62d61ad18bba65fd0bc65ca2896717aa1cc3416c67c303c2d76ff2e96c4",
+      "current_sha256": "2f4cffbf5c487c801c2db2387bfb27a99b1276c88c7a574b47473a384b83eb00",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/components/syscalls/cursor.rs": {
+      "origin_sha256": "848281f98e53a72ef66887106bd4e03cd96f1c7c3dae364bc7244b343a72db63",
+      "current_sha256": "296522bfa89b0501129ca311d08120e11a99f2f4335e7fe6dbf96f3421db9504",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/components/syscalls/legacy.rs": {
+      "origin_sha256": "50d04c823bf04e59082f307261a922bd3ec132594762aff33a2b4fd7bb29e9ac",
+      "current_sha256": "ad87562f2583a1130f52cf459f3398c03203718324cb62b2b88c5f4246dd7206",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/components/syscalls/movie.rs": {
+      "origin_sha256": "d949e3f1d67030859e7a518c2fb5c56cf7c9549f26e70813b5199ba767f4c01b",
+      "current_sha256": "a4e0f7ef864a7c7de86ffedaeb3ec51bead251962155e2497d81b6f63c14df5c",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/components/syscalls/text.rs": {
+      "origin_sha256": "6e7dc0620fe8fa85a8b990d774bb878fdf20598ca945123b2d147a49ba366758",
+      "current_sha256": "2168e47a2513c5d6da8a9a12f5e7df8ebde90006bf72681d58852d2c7e6bb5ab",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/components/syscalls/utils.rs": {
+      "origin_sha256": "10ebfa8628fca938c44d79e6de6788e0399a5b9ed53dbf968a5dd60649634af7",
+      "current_sha256": "62b061b8fa51b57cc376ee168fc1cb20fabee40025c6d11a0f930e396f0eedc3",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/global_savedata.rs": {
+      "origin_sha256": "0b409809e3af2673d087e1c65513544d3d2f142e6e275ab0a42b01f4e2383dd2",
+      "current_sha256": "29134fb14ba8c91b38466fd54ac21d80f8e3c0c6c9d0ac5d68bffab52ab36ad1",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/resources/color_manager.rs": {
+      "origin_sha256": "970b00f6cfa638aa2740300cce4ccbe14a56887c1a1c0fc362ba7bc167d73cc4",
+      "current_sha256": "c428741b96944897a10827a72013e897ea59db3a046038cad3eabec4dedd1a9a",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/resources/gaiji_manager.rs": {
+      "origin_sha256": "a5015c37828227c838d7e6a39ec0c2cd816c2fda81806e2ef128484c98c605d2",
+      "current_sha256": "267294227552bfaf8c571ad9c80bb917cdb9c2471150b39bda47daa5c7c9f2d2",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/resources/graph_buff.rs": {
+      "origin_sha256": "d88e1225b6ac14de534785327220e8a41aefc057e95a3f447437d87927592573",
+      "current_sha256": "814f477e509c233c98094789d9ce61821e7e2fdd7a27b507e6a48db7adcde4d4",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/resources/text_manager.rs": {
+      "origin_sha256": "0df7a643f6d150b22a053f16a5168b5d94076874b221dbdf6078b44fc6dd7e95",
+      "current_sha256": "4a2ba8a9c977fca860a66f2825805715412b97f47de4a2e914b2588aa7c13f9d",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/resources/texture.rs": {
+      "origin_sha256": "db18159015472d36a3ff2d3c9843f5a20ef15df3b956176274bc8be6068c4234",
+      "current_sha256": "44822f746edfef884bffe80f81be85b34303bdb5a868c3764c429f19d7ac43e7",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/resources/videoplayer/mod.rs": {
+      "origin_sha256": "0a7bd6eb9c505971f9b88d4be48798942a6ce165c0190cf8806ce0eb6dedbb53",
+      "current_sha256": "9b43c1cbedb8de68a51e36a12a3f8398ee1c709eaf7d94905936ead9a4eaa907",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/save_state.rs": {
+      "origin_sha256": "4f590c5dd3a7f7c07238a1a184a2db060773c3664509934bb3049a8bf22d046d",
+      "current_sha256": "8c462595095dd1ebeeb8e397bc8f0cad1aff858d75c3b30e727399eea9071d94",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/subsystem/world.rs": {
+      "origin_sha256": "048493fecf8c1ad7e51ce92662f526ef4e9d6edf62862029f8e32cffa46f8b41",
+      "current_sha256": "81daeb49fec11fe03147bdecea08cee4a297a75734fb8fb78a38baa5285b3a34",
+      "reason": "First-class native ownership and shared image/text/audio/capture services; original valid opcode/value/wait/save layouts retained. Missing backend operations fail visibly."
+    },
+    "src/vm_runner.rs": {
+      "origin_sha256": "f2c0661ec51dac8604b097b6451fd039132e32150d7fb1c2cef8e28f85aafec7",
+      "reason": "First-class native ownership; shared engine resource, text, image, Media and capture services. Unsupported or failed native operations propagate errors.",
+      "current_sha256": "eac4ee455d456940bf98b4b5f17ecc84a52495a23e5094c42e3f32bca145aa1c"
+    }
+  },
+  "source_sha256": {
+    "src/audio_player/bgm_player.rs": "85c5424fe276bfd4620110b1308ab9b6ecb42c9f7281af022bd92558a8f04572",
+    "src/audio_player/channels.rs": "3733be7caf122076edf7199baa5f8ce3d46b96dba50026a5aaa5b7dc814c5c99",
+    "src/audio_player/mod.rs": "72f525671eabc4cb8adb92c9b936abaa4358ca2a85b0981e3059c82e58cde714",
+    "src/audio_player/se_player.rs": "bb2dc5606e68ce88f7095f3cd840728a75f9e8c1513bfaf7c8ef4d8a6b659e27",
+    "src/font.rs": "7b8798d5d4beee047e89c8e5acf3655e15c835a3f88ff63e535e18d7e061edb3",
+    "src/game_config.rs": "79ef30af5c1ee7b3b73c4babadfb00cdb08572b5dd155458e310b1e1c394a65b",
+    "src/host_api/audio.rs": "f1d19319d3493c3cc06d2ff035350c864e677d8dce45079b885f0ae28f51c7b4",
+    "src/host_api/clock.rs": "af681642becf655b08b696dda6397f8b6a1a44cf4716145af2cd15229c70c0cb",
+    "src/host_api/error.rs": "1ccaed9373abea8fba2d2ef6efe6864b6d83686c9ec9c8d658a25d07de8a785c",
+    "src/host_api/event.rs": "be10e8fa1d24e41b949ea52b26178ce691a34d85c05fb4f6f0b271ac22d7e529",
+    "src/host_api/fs.rs": "d0fb1d6c4bf49035d513a945b8a351ab3a443cf881703f130fee314fd414e945",
+    "src/host_api/host.rs": "740a643b79b111477668926c722a9912d2f9e3c0424bc48c9a906e3f36ea97b5",
+    "src/host_api/mod.rs": "7b493b1cd2ae452fae1404ea853a45e23a951d0211e54fd018e08814942d8f9e",
+    "src/host_api/render.rs": "7d48b6c26c9df092573ccb8a006625d97f635b35b3714a9763f322d2971c3e2b",
+    "src/lib.rs": "b6e97211689f4e2148dfe5d82d02102188604928a7f89ee6255664db36c11259",
+    "src/no_std_core.rs": "dd680ca69c34926b912983e090f4a9e06fea0f07e7022d1bbadc7eb1190fdc83",
+    "src/perf.rs": "7f638d4faca463a90c513be1d203e9fa65eb1e21c865e9a402997d74389de718",
+    "src/platform_random.rs": "ce7b7ef299b557e3d1521400a66eb7504fa51608526c53347d68a17e1be1f34a",
+    "src/platform_time.rs": "3032fdd54ab545bcbb0f2a1bc7ca78b631a633d2704f7ab35fd7e680d3b1bfd8",
+    "src/rendering/mask_dissolve.rs": "a64eecb0bf78409348bb6397dc7159e7da0819dbde07ba39a0f3ce4986da00a0",
+    "src/rendering/mod.rs": "eeaaf22927e19389e54c304388fa76620edfe0329b7b5e7da8427955782b75d0",
+    "src/rendering/prim_commands.rs": "cc2d76258fbe03b8f2b031082e7100c0ae7d9f748099422503432f80cb3154ff",
+    "src/rfvp_audio/commands.rs": "b9ae2df8da08345ce532bb9e7a6738d17aba7f9092cb3a22c44f3a693795b8c5",
+    "src/rfvp_audio/mod.rs": "6f51dbc94e961a63d85f4de20ef526cefaab2f9a69a7617b8fbf2dc1c4eb4ae4",
+    "src/ring_log.rs": "29c91b3422a6d507569a077398bf95e131fd78b7f89293187a640be2b3046359",
+    "src/script/context.rs": "301af59354983fd2ae8d252903536ab7d3f234a947ed4f6c7f6ea2236e707922",
+    "src/script/global.rs": "5e2f975183764a8db0e8cbaf18ccd0d315c869fc7f2087ea8b2976be6579ea17",
+    "src/script/inst/add.rs": "73918ee70e3836b5d35ce5b1b35c225f466c385dde89c7ef3afc2dde5ea3b785",
+    "src/script/inst/and.rs": "5ccacb8f05e0599d4fd551c2881357d207465341afa9103a1b2b278f7f6bbc4d",
+    "src/script/inst/bittest.rs": "6b2ba41a77450d5b65b1b0512a8346699cd4162ffdd88f09c83faed9330f7e5d",
+    "src/script/inst/call.rs": "42c9257e6a41fd0f1f2348dae66c51ffb4a24e0fc9c5788bbf6cdb78860cb063",
+    "src/script/inst/div.rs": "66edc887335ae8f36974d179ceb5be7cea1e39f0597d79b99880f662f20ea0d8",
+    "src/script/inst/initstack.rs": "4a4170e7595bb078fc8ac588e4fc073c7193293ae6f8c4709b2a71fdb151fcc8",
+    "src/script/inst/jmp.rs": "e9bc8e2a21eb29cdaf13eee8731553300ed8a834763486cefa3ca8b6fd5e6ea2",
+    "src/script/inst/jz.rs": "260c1bf391e8e46e884b41afc895038d07d0276f838b616d02623bf264b7ec36",
+    "src/script/inst/mod.rs": "3aab898dfbe169a9a36296fad53fd326181ac18f2604e9f07da0ad713d5a4851",
+    "src/script/inst/mod_.rs": "1e3c4354ee2d77cf768b69ed08bcd12d72fb2012c65cb4dfcd1c49744e2da43d",
+    "src/script/inst/mul.rs": "4c0dae14775a559c3c33bf0a9ff4390069ca957f18de1a09ff3c90440bc667bc",
+    "src/script/inst/neg.rs": "044963dbef72d3a761646238bf62cb69d658ae387ded0440248c5730a4d2326c",
+    "src/script/inst/nop.rs": "b88217031c59d8534ac7408384f1b63a2320044210e0b0f3969bf22279cab39b",
+    "src/script/inst/or.rs": "23edc06ce92835764803513d5f3a990e8e1ba9c27a5898f4bb79ad43b41a354c",
+    "src/script/inst/pop_global.rs": "edcc25d097adb51f09811ed04631d2df98668efcd951743338cb448ec53c71fa",
+    "src/script/inst/pop_global_table.rs": "0077fa72ec5622493ed709771f5572ad444cf26bce93687c46702a3e769a4fd0",
+    "src/script/inst/pop_local_table.rs": "8747ebf241900039363d5afd61115313ec2ea5e511dd8657df25ace59a385bd6",
+    "src/script/inst/pop_stack.rs": "769015cff73a14c549eaa9e918e5a87673a71e74f00c2a8d85a488a1f76b1ccb",
+    "src/script/inst/push_f32.rs": "a59073ac498a3c477f8c1b6ff363ef3e29cf23d068c7fe1c84d1f0b3c455f76c",
+    "src/script/inst/push_global.rs": "1b3d4c80a9bb7d7d8d5d4b4f5c017af89bc5fb82376fe37231f7f3cde5876940",
+    "src/script/inst/push_global_table.rs": "d9951ebe639054899d3f81a68091ed508455c568a2776a300a6e495d0105273f",
+    "src/script/inst/push_i16.rs": "053c1e0558f1955dc1451879eb3209413f2d3eb3661ecae7687543ece3164e90",
+    "src/script/inst/push_i32.rs": "34329d090dc8298d4056492b1e9f547f775d470eada1546514fb5b448899f7de",
+    "src/script/inst/push_i8.rs": "1acb6b1110dcdb607df3a773b025b4a6aa652850eb39da107d9ad4cae68932cf",
+    "src/script/inst/push_local_table.rs": "c5540d8809a90d14c92c785e38ccd4bee7f6cbd45693bf4f9179d5e50b0cd99d",
+    "src/script/inst/push_nil.rs": "f8483f8f2eb8c72797800516d97edcf065cc132f3121b122a421c94bbdc7d835",
+    "src/script/inst/push_return.rs": "883535fea6dd208c0933451af3b2805d9788e227b02b5ae45dc801c053a85ed6",
+    "src/script/inst/push_stack.rs": "eb1b0ba505a8b4dee89ca5f8c26c499b93c1cad1af7240bc85f6944893fc0076",
+    "src/script/inst/push_string.rs": "5ae0079ad46eb549640e9254c7f8c72d78f301d981f906f8daa88689614ef5f5",
+    "src/script/inst/push_top.rs": "c63488883e695c1bb1474e26c4ebaea23931bc12bf5ef6ca796f5b08301df283",
+    "src/script/inst/push_true.rs": "3a2ced3deabe255ecc01e9a6f14751958a090da3307da17a146e9a3a6802d813",
+    "src/script/inst/ret.rs": "e7b7ce9702f88df95fc97bfee86722f743ad9d59424f1eb448718e196d0a8fdb",
+    "src/script/inst/ret_value.rs": "3c2757501781495f5b3102edaf24cf5fe01fc935f1280d4a8b0e7cedc419ffd0",
+    "src/script/inst/sete.rs": "748acdc2a649c1046350174117f5799e3758eb48f1b920e95081ddef155a8067",
+    "src/script/inst/setg.rs": "73d35027cdecb2312391ad7acf7745cbc5592781b6588b0c2c1a6739c48b853c",
+    "src/script/inst/setge.rs": "eef34f3c8455d36937559a9d39fb17d890d05f23c9f6c2a79efbf97e05907b97",
+    "src/script/inst/setl.rs": "c41223a129a1d8ebbcc1f4cdc5ee293f9d9ef254e57202d65b13323845d08d0b",
+    "src/script/inst/setle.rs": "e47850c56ac1858df928928b7192feca6ee12349277a9ae8c04de61a81242d57",
+    "src/script/inst/setne.rs": "52ddbd1dd9fe90c08435cb146d289c72ef4c95617e2a8dc6eeb2b9d4a7f920de",
+    "src/script/inst/sub.rs": "accb208dc04ef422575d18c5151849018cce4936cf9cb241238b21ae05e2e4dc",
+    "src/script/inst/syscall.rs": "ed6df56de8de12a0acd20d688732de42cf6da75c56ac5d37e1e5bc067c72de4b",
+    "src/script/mod.rs": "a90b4eb034a021134047bba4bab4b88ca2604bfee143bc9b3eaa4ed5cc6625f4",
+    "src/script/opcode.rs": "2d58ddd3e9dbec48f7f31b947de0cf1981adaa3d352db3b490d90f3e4384e9ad",
+    "src/script/parser.rs": "e2932aeb71662e3c4ea1ea2c93a1af8ee6e5fe82347b93ff35d09371d27598e9",
+    "src/subsystem/anzu_scene.rs": "08c9d62d61ad18bba65fd0bc65ca2896717aa1cc3416c67c303c2d76ff2e96c4",
+    "src/subsystem/components/mod.rs": "f5438b96f3159637da2b743b6d493509310cb3fa2f1b1f593c59a443eba5ef74",
+    "src/subsystem/components/syscalls/color.rs": "94191736eff64d1176cf9a7302c15b9873758c9801375cf6334c16e5845f9889",
+    "src/subsystem/components/syscalls/cursor.rs": "848281f98e53a72ef66887106bd4e03cd96f1c7c3dae364bc7244b343a72db63",
+    "src/subsystem/components/syscalls/flag.rs": "9b13d30fdbe41f5b3b31f0f52b4b6c756a7ae6a3738af71510d9fb8b7c5f6bdf",
+    "src/subsystem/components/syscalls/generated.rs": "f7eece45aa01888a08dd7e736eba513169ae8bd2639224a361d379ad267fd75b",
+    "src/subsystem/components/syscalls/graph.rs": "872fef64c328b6756c7051abc6be69c8dd5a73d6d6d597e37a2d074172033bfb",
+    "src/subsystem/components/syscalls/history.rs": "a73be179c9efed8724d9c0deef1ce20f26366c49f9c935b7dbef05a5599d642e",
+    "src/subsystem/components/syscalls/input.rs": "fdbd8ed64067b69a0f125a0423c8db93a307a90328349a51283e12cfee7cde3e",
+    "src/subsystem/components/syscalls/legacy.rs": "50d04c823bf04e59082f307261a922bd3ec132594762aff33a2b4fd7bb29e9ac",
+    "src/subsystem/components/syscalls/mod.rs": "1fa19d144169ddb8b5b69356c1177524d6ebcc296eed3d7076723066b188e17e",
+    "src/subsystem/components/syscalls/motion.rs": "6c60c650ffefeec9107280f56d3245861480b62668a509c4b57b210fc2a0d7eb",
+    "src/subsystem/components/syscalls/movie.rs": "d949e3f1d67030859e7a518c2fb5c56cf7c9549f26e70813b5199ba767f4c01b",
+    "src/subsystem/components/syscalls/other_anm.rs": "0ac5839f2a77fef404a6afcbb5f146065acea8f8528fe89a3455bf9411b29c97",
+    "src/subsystem/components/syscalls/parts.rs": "2a8bd0cec451d639933e75684b96670ddc376230b384fdfa025525b06eb5367b",
+    "src/subsystem/components/syscalls/saveload.rs": "35a28f5839cf270a7f76638347fabf5e478a0cc95338f3975374fdb8dc7fd4fe",
+    "src/subsystem/components/syscalls/sound.rs": "d67fca03e977ac13170b042685d62e88678e2897f70027aeb2642b27f300767d",
+    "src/subsystem/components/syscalls/text.rs": "6e7dc0620fe8fa85a8b990d774bb878fdf20598ca945123b2d147a49ba366758",
+    "src/subsystem/components/syscalls/thread.rs": "5338e10affea37e8fdd8f9b9aa88b6ce4812092e85008ee3fdc1804be4741334",
+    "src/subsystem/components/syscalls/timer.rs": "ecb41301a85b435ce44ee1d88a37554ea8309cdfb4fab74fb9f977d4e48f1195",
+    "src/subsystem/components/syscalls/utils.rs": "10ebfa8628fca938c44d79e6de6788e0399a5b9ed53dbf968a5dd60649634af7",
+    "src/subsystem/global_savedata.rs": "0b409809e3af2673d087e1c65513544d3d2f142e6e275ab0a42b01f4e2383dd2",
+    "src/subsystem/mod.rs": "2078a873bfd7a01eaf8b33d5afb833a202a901373af368fa5af2079d06910db0",
+    "src/subsystem/resources/color_manager.rs": "970b00f6cfa638aa2740300cce4ccbe14a56887c1a1c0fc362ba7bc167d73cc4",
+    "src/subsystem/resources/flag_manager.rs": "43e574e306aeb0fab54afae9efdaf01812bc7806b92c0c56b27d93e566b6d1f2",
+    "src/subsystem/resources/gaiji_manager.rs": "a5015c37828227c838d7e6a39ec0c2cd816c2fda81806e2ef128484c98c605d2",
+    "src/subsystem/resources/graph_buff.rs": "d88e1225b6ac14de534785327220e8a41aefc057e95a3f447437d87927592573",
+    "src/subsystem/resources/history_manager.rs": "b71acf2d7818e308779b67d662893279c7c9533422fade3dee18f0cca170cfd8",
+    "src/subsystem/resources/input_manager.rs": "09553d00bc2033f5bb38c6f17037b9e0e52c3f3e15fbce258d53b752dcf8c858",
+    "src/subsystem/resources/mod.rs": "c9ecda34d098269e89bc7e158d94531c24954106466df4bf0ca3f082fd09754c",
+    "src/subsystem/resources/motion_manager/alpha.rs": "3f5fbe8669bb3af8e3c2354e0de51d236e8fff54cbf6865c2185a1ec914f7258",
+    "src/subsystem/resources/motion_manager/anim.rs": "92687253c58952130cadb2fad31eae08d223a7b07ff96a812ea3cb3a2520eec8",
+    "src/subsystem/resources/motion_manager/dissolve2.rs": "0319623f9839be462f0bff8b1b410c6956e2a72b9ddbcd3e7c4ec74a4ecc77c5",
+    "src/subsystem/resources/motion_manager/lip.rs": "da0f06b9cb84045d2324a84651a1dce14fbd111d91bdf45322a6bc067b4fe2fc",
+    "src/subsystem/resources/motion_manager/mod.rs": "a187af88b81269946398a8f13cb2402dadff249bbefcb1eea14aed0756dfee3e",
+    "src/subsystem/resources/motion_manager/normal_move.rs": "52ebbe371f5ef1296b8b4795ccdda91e9c15dd1bcf7019ca7e299eab1b9927dd",
+    "src/subsystem/resources/motion_manager/rotation_move.rs": "50f57da59a22cb681915846b54b44bdf4a0ddb7ce91a3409e21d90cd84e0605f",
+    "src/subsystem/resources/motion_manager/s2_move.rs": "489a86c3c66a7865e88c84b035f4fc0f2a10b39fb321b089278155e8071f572b",
+    "src/subsystem/resources/motion_manager/snow.rs": "edb54a77d0da1f58ab021bf85979223c92a17820d77ffc13f8153a0b71fae1d4",
+    "src/subsystem/resources/motion_manager/v3d.rs": "cc86d7df9012bb49c24f9a6d6724f0a3aa3eeff64964a1dbe024529bc4bbe9d7",
+    "src/subsystem/resources/motion_manager/z_move.rs": "fee7f74a391024b3ac5e9acf45e0bcf3b81f5b5b782724c202652330b4f040da",
+    "src/subsystem/resources/parts_manager.rs": "1500b4db37140d7db27fbff5de0601eeb2a58cbb51a88dcb72e9d00a5eb6d037",
+    "src/subsystem/resources/prim.rs": "6eff101a3b2b24053a38b2eb9b9222888320e1f0f7119d40ce32ce2bbe883b8d",
+    "src/subsystem/resources/save_manager.rs": "fc42eb04b1620942fddcdd2d1414e81eea780d46e07e50d33cbc111e40bda96a",
+    "src/subsystem/resources/text_manager.rs": "0df7a643f6d150b22a053f16a5168b5d94076874b221dbdf6078b44fc6dd7e95",
+    "src/subsystem/resources/texture.rs": "db18159015472d36a3ff2d3c9843f5a20ef15df3b956176274bc8be6068c4234",
+    "src/subsystem/resources/thread_manager.rs": "73d75c1fd5d3d0c32f0a51d1ca5e1b57047af5ab92b6465b327cbf60b0af86ca",
+    "src/subsystem/resources/thread_wrapper.rs": "57a0ec4d94f48dfcb6fdbcb89d28eaaa1ad3f659793df62a383a00df73957b97",
+    "src/subsystem/resources/time.rs": "27def364c62e45a8673f28dec47bd761ca5b162085bb165dc6262e5f5c775868",
+    "src/subsystem/resources/timer_manager.rs": "0fb2d0c9794e70c06a59a653463772134a06ce5384ad9141ee906cbe2a34d7da",
+    "src/subsystem/resources/vfs.rs": "8184e1d9315a44e43f9e69cfa692b76c9fb7d0ff28f6b6a6f652175acde1b219",
+    "src/subsystem/resources/videoplayer/mod.rs": "0a7bd6eb9c505971f9b88d4be48798942a6ce165c0190cf8806ce0eb6dedbb53",
+    "src/subsystem/resources/window.rs": "74e7f195ea8ab1c762b27e9e057758ce5b534f74ea0029f539f873a3df61da88",
+    "src/subsystem/save_state.rs": "4f590c5dd3a7f7c07238a1a184a2db060773c3664509934bb3049a8bf22d046d",
+    "src/subsystem/scene.rs": "85b32e152f74720e6200584fe415708a14675de80a77029755244cf7fcc54959",
+    "src/subsystem/scheduler.rs": "7fc2cc37bac9b0b8bd7d9314987047fcb75d795344c14917703ae90864ffbac7",
+    "src/subsystem/snapshot_codec.rs": "2c41e6269ab983e1aba0fdf693c7850e64b6e85c3a5665214969d8379d6745aa",
+    "src/subsystem/state.rs": "874c468980445fcb3df615134801f954d082299a7649315f9f9b9a036891fe39",
+    "src/subsystem/world.rs": "048493fecf8c1ad7e51ce92662f526ef4e9d6edf62862029f8e32cffa46f8b41",
+    "src/text_codec.rs": "61fa0d682c10b849ddafde730af6ff297ff42d9723ff1a6d053e5f0699b310cd",
+    "src/trace.rs": "ed4dcbd041d666cab37936b6f57379bef7a77279f419929f95a7aaa0909b0a52",
+    "src/utils/maths.rs": "84b81a8a725804cdf37b5806f682d14424de96a12c81bf07013ed7b7b3761181",
+    "src/utils/stable_hash.rs": "c68b7cf496242dfb5f12af6a51c4d4a239ee3d6181993cf87848cc0797cfe81a",
+    "src/utils/time.rs": "4e8f4e02ba6d9e58ae2b9492b6d302f1cf0ace06f54a62688619a0d5d6f7b551",
+    "src/utils_no_std.rs": "65f5419d88e5f64b9be55073caa8d29054f4509800c139faeeaa69e0ea7dfeeb",
+    "src/vm_runner.rs": "f2c0661ec51dac8604b097b6451fd039132e32150d7fb1c2cef8e28f85aafec7"
+  },
+  "adoption": "Compiled native VM/syscall/resource/save policy adopted as first-class CrySirror source. Origin hashes document the pinned baseline; patched hashes identify local maintenance. The former upstream runtime directory, software rasterizer/mixer, private pixel storage, font raster and text bank implementations are not retained as a second engine.",
+  "removed_sources": {
+    "src/host_api/soft_raster.rs": "aa68a031b7b4dba950292b6cb1039894c065a25c05f02e67f919962236d03b41",
+    "src/host_api/srgb_tables.rs": "6079b94fd7aed6a34bae073734c7ae2dc6460d49420db2f38c9d00706dc3a8fa"
+  },
+  "ownership": "HCB globals belong to GameData and are passed explicitly to opcodes through VmSyscall. No process-wide GLOBAL or unsafe singleton remains. Existing original save envelopes keep their field order and select the same regions from the owning VM. Character tables, history/config staging and exit requests are also per GameData. Immutable syscall registrations and diagnostic counters remain process services; full scheduling/ownership audit is not claimed complete.",
+  "engine_capabilities": [
+    "crysirror-image::nvsg / pixels / bitmap::blit_rgba8 / associated tone and coverage operations",
+    "crysirror-image::buffer backing types; no private unsafe pixel storage",
+    "crysirror-text::bitmap_font / slot_color / vn_slot",
+    "CrySirror channel audio, mix groups, source EOF observations, surfaces and PuppetFrame rendering",
+    "crysirror-puppet::cpu_snapshot immutable engine mesh captures; original rasterizer not reused"
+  ],
+  "remaining_limits": [
+    "Native engine task scheduling, async image/font/scenario admission and audio preparation waits are not complete.",
+    "Native video/PCM streaming, full font-face selection, framework snapshots and complete game/save coverage are unproven or unsupported.",
+    "Legacy slot-picker/title-cache/menu-shell and exit-dialog UI require engine mappings and now fail explicitly. Native local saves are not claimed fully validated.",
+    "Frame snapshots use shared engine CPU MeshSnapshot; GPU-reference parity and a live async completion boundary remain unproven."
+  ]
+}

@@ -669,27 +669,35 @@ fn push_exprs<'a>(tasks: &mut Vec<AnalyzeTask<'a>>, exprs: &'a mut [syntax::Expr
 }
 
 fn is_lvalue(expr: &syntax::Expr) -> bool {
-    let mut current = expr;
-    loop {
+    // T_QUESTION forwards the requested write operation into the selected
+    // branch in the reference compiler. Validate both arms without recursion.
+    let mut pending = vec![expr];
+    while let Some(current) = pending.pop() {
         match &current.kind {
             syntax::ExprKind::Identifier(_)
             | syntax::ExprKind::Member { .. }
             | syntax::ExprKind::WithMember { .. }
-            | syntax::ExprKind::Index { .. } => return true,
-            // `*expr` writes the operand's default property. The operand is an
-            // rvalue — KAGEX emits `(*Current.prop("skipSpeed")) = ...` where
-            // the call returns a property proxy.
+            | syntax::ExprKind::Index { .. } => {}
             syntax::ExprKind::Unary {
                 op: syntax::UnaryOp::PropAccess,
                 ..
-            } => return true,
+            } => {}
             syntax::ExprKind::Unary {
                 op: syntax::UnaryOp::IgnoreProp,
                 expr,
-            } => current = expr,
+            } => pending.push(expr),
+            syntax::ExprKind::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                pending.push(else_expr);
+                pending.push(then_expr);
+            }
             _ => return false,
         }
     }
+    true
 }
 
 #[cfg(test)]

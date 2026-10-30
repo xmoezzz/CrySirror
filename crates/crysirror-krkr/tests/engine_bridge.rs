@@ -137,6 +137,74 @@ fn tjs_layers_timers_and_clicks_drive_engine_owned_nodes() {
     );
 }
 
+#[test]
+fn clipped_native_copy_keeps_shared_image_source_for_following_soft_light() {
+    let (_dir,mut r)=fixture(r#"
+        var w=new Window();var base=new Layer(w,null);
+        var a=new Layer(w,base);a.setImageSize(4,4);a.fillRect(0,0,4,4,0x80402010);
+        var b=new Layer(w,base);b.setImageSize(4,4);b.fillRect(0,0,4,4,0xffc08040);
+        a.setClip(1,1,2,2);a.copyRect(0,0,b,0,0,4,4);a.setClip();
+        a.setImageSize(4,4);a.setImageSize(5,5);a.setImageSize(4,4);
+        a.fillRect(0,0,1,1,0x80602010);
+        a.holdAlpha=true;a.fillRect(0,0,1,1,0x00402010);
+        a.holdAlpha=true;a.operateRect(0,0,b,0,0,4,4,20,128);
+        Debug.message('clipped-soft-light-complete');
+    "#,&[]);
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+    loop {
+        r.tick(16,InputFrame::default()).unwrap();
+        let state=r.inspect();
+        if state["sessions"][0]["native"]["log_tail"].to_string().contains("clipped-soft-light-complete") {
+            break;
+        }
+        assert!(std::time::Instant::now()<deadline,"native image worker failed to complete");
+        std::thread::yield_now();
+    }
+    let surface=r.host.engine.canvases.surface(ClientId(1),2).unwrap();
+    let [crysirror_scene::canvas::CanvasNode::Draw { layer }] = surface.nodes.as_slice() else {
+        panic!("shared worker result must replace the native surface");
+    };
+    let Paint::Image { asset, .. } = &layer.paint else { panic!("processed image absent") };
+    let image=r.assets.surface(ClientId(1),asset).expect("engine owns processed pixels");
+    assert_eq!(image.rgba[3],128,"clipped copy changed pixels outside its clip");
+    assert_eq!(image.rgba[(4+1)*4+3],255,"native clip was lost before SoftLight");
+}
+
+#[test]
+fn copy_rect_resolves_native_faces_and_only_opaque_face_holds_alpha() {
+    for (kind, face, hold, expected_alpha) in [
+        (2, 0, true, 64), (2, 4, true, 64), (2, 128, true, 64),
+        (13, 128, true, 64), (1, 128, true, 128),
+        (2, 1, true, 128), (2, 1, false, 64),
+    ] {
+        let source = format!(r#"
+            var w=new Window();var base=new Layer(w,null);
+            var a=new Layer(w,base);a.setImageSize(1,1);a.fillRect(0,0,1,1,0x80000000);
+            var b=new Layer(w,base);b.setImageSize(1,1);b.fillRect(0,0,1,1,0x40ff00ff);
+            a.type={kind};a.face={face};a.holdAlpha={hold};
+            a.copyRect(0,0,b,0,0,1,1);
+            a.type=ltAlpha; // Inspect stored pixels through the shared straight-alpha worker.
+            a.adjustGamma(2,0,255,2,0,255,2,0,255);
+            Debug.message("face-copy-published");
+        "#);
+        let (_dir, mut r) = fixture(&source, &[]);
+        let until=std::time::Instant::now()+std::time::Duration::from_secs(10);
+        loop {
+            r.tick(16,InputFrame::default()).unwrap();
+            if r.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("face-copy-published") {break;}
+            assert!(std::time::Instant::now()<until);
+            std::thread::yield_now();
+        }
+        let surface=r.host.engine.canvases.surface(ClientId(1),2).unwrap();
+        let [crysirror_scene::canvas::CanvasNode::Draw { layer }] = surface.nodes.as_slice()
+            else {panic!("image worker did not publish face={face}");};
+        let Paint::Image {asset,..}=&layer.paint else {panic!("processed resource missing");};
+        let image=r.assets.surface(ClientId(1),asset).unwrap();
+        assert_eq!(&image.rgba[..],&[255,0,255,expected_alpha],
+            "kind={kind},face={face},hold={hold}");
+    }
+}
+
 fn failure(r: &mut Runtime) -> String {
     assert!(r.tick(0, InputFrame::default()).is_err());
     r.inspect()["sessions"][0]["native"]["error"].to_string()

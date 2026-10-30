@@ -91,6 +91,27 @@ const PLAYER_METHODS: &[&str] = &[
 struct Resource {
     model: Arc<MotionModel>,
     textures: Vec<String>,
+    /// This model's share of the client texture budget, returned when the
+    /// last manager entry, player or draw job drops it.
+    _budget: TextureLease,
+}
+/// Live motion texture bytes/count of one client.
+#[derive(Default)]
+struct TextureLedger {
+    bytes: std::sync::atomic::AtomicU64,
+    count: std::sync::atomic::AtomicU64,
+}
+struct TextureLease {
+    ledger: Arc<TextureLedger>,
+    bytes: u64,
+    count: u64,
+}
+impl Drop for TextureLease {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering::AcqRel;
+        self.ledger.bytes.fetch_sub(self.bytes, AcqRel);
+        self.ledger.count.fetch_sub(self.count, AcqRel);
+    }
 }
 struct Loaded {
     refs: usize,
@@ -141,7 +162,9 @@ pub struct State {
     published: std::collections::BTreeSet<usize>,
     clears: BTreeMap<usize, [f32; 2]>,
     next_texture: u32,
-    texture_bytes: u64,
+    /// Textures of models still referenced (budget is for live models; a
+    /// load/unload cycle, e.g. while skipping, returns its share).
+    textures: Arc<TextureLedger>,
     cancelled_load: bool,
 }
 impl State {
@@ -409,7 +432,7 @@ fn load(rt: &mut Rt, h: ObjectHandle, name: &str) -> Result<Variant> {
     if rt.host().motion.loading.is_some() {
         return Err(err("motion load already pending"));
     }
-    let bytes = rt.host().storage()?.read_named(name).map_err(err)?;
+    let bytes = rt.read_storage_binary(name, "").map_err(err)?;
     let job = rt.host_mut().motion.workers()?.load(bytes).map_err(err)?;
     let result = resource_object(rt, name, None);
     rt.host_mut().motion.loading = Some(PendingLoad {
@@ -832,15 +855,22 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                     .iter()
                     .map(|t| t.rgba.len() as u64)
                     .sum::<u64>();
-                anyhow::ensure!(
-                    rt.host().motion.texture_bytes + bytes <= 512 * 1024 * 1024,
-                    "motion client texture budget exceeded"
-                );
-                anyhow::ensure!(
-                    rt.host().motion.next_texture as usize + model.textures().len() <= 4096,
-                    "motion client texture count exceeded"
-                );
-                rt.host_mut().motion.texture_bytes += bytes;
+                let ledger = rt.host().motion.textures.clone();
+                let count = model.textures().len() as u64;
+                {
+                    use std::sync::atomic::Ordering::Acquire;
+                    anyhow::ensure!(
+                        ledger.bytes.load(Acquire) + bytes <= 512 * 1024 * 1024,
+                        "motion client texture budget exceeded"
+                    );
+                    anyhow::ensure!(
+                        ledger.count.load(Acquire) + count <= 4096,
+                        "motion client texture count exceeded"
+                    );
+                }
+                ledger.bytes.fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
+                ledger.count.fetch_add(count, std::sync::atomic::Ordering::AcqRel);
+                let lease = TextureLease { ledger, bytes, count };
                 let mut textures = Vec::new();
                 for texture in model.textures() {
                     let counter = rt.host().motion.next_texture;
@@ -895,7 +925,7 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                         pending.name,
                         Loaded {
                             refs: 1,
-                            resource: Arc::new(Resource { model, textures }),
+                            resource: Arc::new(Resource { model, textures, _budget: lease }),
                         },
                     );
             }

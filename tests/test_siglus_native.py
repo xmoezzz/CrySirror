@@ -43,7 +43,7 @@ class NativeProjects(unittest.TestCase):
             p=copy.deepcopy(self.project); p['clients'][0]['config']['message_window'][key]=value
             with self.subTest(key=key),self.assertRaises(d.ProjectError):d.validate(p)
         self.project['clients'][0]['config']['gameexe']='Gameexe.ini'
-        with self.assertRaisesRegex(d.ProjectError,'Gameexe MWND'):d.validate(self.project)
+        d.validate(self.project)  # Explicit profile overrides native layout; Gameexe still supplies boot metadata.
     def test_native_inventory_includes_declared_scene_and_alias_sources(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t);base=root/'assets/game';(base/'pictures').mkdir(parents=True)
@@ -54,6 +54,22 @@ class NativeProjects(unittest.TestCase):
             self.assertEqual(result['asset_scope'],'declared');self.assertFalse(result['native_vms_verified'])
             with self.assertRaisesRegex(d.ProjectError,'complete resource inventory'):
                 package_game.package(path,root/'native.zip',data_only=True)
+    def test_private_decode_material_is_scoped_and_not_packaged(self):
+        self.project['clients'][0]['config']['key_file'] = 'local-key.toml'
+        d.validate(self.project)
+        self.project['clients'][0]['config']['key_file'] = '../key.toml'
+        with self.assertRaises(d.ProjectError): d.validate(self.project)
+        self.project['clients'][0]['config']['key_file'] = 'local-key.toml'
+        with tempfile.TemporaryDirectory() as t:
+            root = Path(t); (root/'assets/game').mkdir(parents=True)
+            (root/'assets/game/Scene.pck').write_bytes(b'authored scene')
+            (root/'assets/game/pictures').mkdir()
+            (root/'assets/game/pictures/native.g00').write_bytes(b'authored image')
+            self.assertNotIn('game/local-key.toml', d.asset_inventory(root/'project.json', self.project))
+            (root/'project.json').write_text(json.dumps(self.project))
+            with self.assertRaisesRegex(d.ProjectError, 'complete resource inventory'):
+                package_game.package(root/'project.json', root/'private.zip', data_only=True)
+
     def test_native_alias_symlink_escape_fails(self):
         with tempfile.TemporaryDirectory() as t,tempfile.TemporaryDirectory() as outside:
             root=Path(t);base=root/'assets/game';base.mkdir(parents=True);(base/'Scene.pck').write_bytes(b'synthetic')
@@ -77,3 +93,35 @@ class NativeProjects(unittest.TestCase):
         self.assertIn('crates/siglus_scene_vm/src/vm.rs',origin['files'])
         self.assertNotIn('crates/siglus_assets/src/keys.rs',origin['files'])
         self.assertIn('pub struct SceneVm',(crate/'src/vm.rs').read_text())
+        current=json.loads((crate/'SOURCE.json').read_text())
+        self.assertEqual(current['commit'],origin['commit'])
+        self.assertEqual(current['snapshot_schema'],11)
+        expected={str(p.relative_to(crate)) for p in crate.rglob('*.rs')}|{'Cargo.toml'}
+        self.assertEqual(set(current['workspace_sha256']),expected)
+        for rel,digest in current['workspace_sha256'].items():
+            self.assertEqual(hashlib.sha256((crate/rel).read_bytes()).hexdigest(),digest,rel)
+
+    def test_shared_capabilities_do_not_link_a_second_siglus_engine(self):
+        # The original interpreter remains first-class; generic helpers must be
+        # usable by unrelated clients without depending on that interpreter.
+        self.assertFalse((ROOT/'crates/siglus-upstream').exists())
+        for name in ('crysirror-runtime', 'crysirror-image', 'crysirror-audio',
+                     'crysirror-video', 'crysirror-puppet-eluna'):
+            manifest = (ROOT/'crates'/name/'Cargo.toml').read_text()
+            self.assertNotIn('siglus_scene_vm', manifest, name)
+            self.assertNotIn('siglus_assets', manifest, name)
+            self.assertNotIn('siglus-upstream', manifest, name)
+        provenance = json.loads((ROOT/'docs/shared-native-capability-sources.json').read_text())
+        self.assertIn('crysirror-image/src/wipe_mask.rs', provenance['siglus']['engine_sources'])
+        self.assertIn('crysirror-audio/src/nwa.rs', provenance['siglus']['engine_sources'])
+        self.assertIn('crysirror-video/src/omv.rs', provenance['siglus']['engine_sources'])
+        for name in ('mpeg', 'wmv', 'omv', 'theora', 'emote'):
+            codec = ROOT/'crates'/('crysirror-codec-'+name)
+            source = json.loads((codec/'SOURCE.json').read_text())
+            self.assertFalse((codec/'src/bin').exists())
+            for rel, digest in source['baseline_sha256'].items():
+                patch = source.get('patches', {}).get(rel)
+                if patch:
+                    self.assertEqual(patch['origin_sha256'], digest, rel)
+                    self.assertTrue(patch['reason'], rel)
+                self.assertEqual(hashlib.sha256((codec/rel).read_bytes()).hexdigest(), patch['current_sha256'] if patch else digest, rel)

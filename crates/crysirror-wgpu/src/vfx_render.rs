@@ -933,6 +933,11 @@ impl VfxRenderer {
     ) -> Result<()> {
         self.check_store(assets);
         for e in &frame.emitters {
+            // Pixel-plane emitters are already published as ordinary retained
+            // mesh layers by Runtime, independently of a world-space camera.
+            if e.screen.is_some() {
+                continue;
+            }
             if e.particles.is_empty() {
                 continue;
             }
@@ -1750,6 +1755,7 @@ mod tests {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
             });
         let emitter = EmitterFrame {
+            screen:None,screen_uvs:None,
             system_key: 1,
             key: 1,
             client: 1,

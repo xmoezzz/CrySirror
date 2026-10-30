@@ -186,7 +186,7 @@ impl TextSystem {
         };
         let (mut x, mut y, mut row) = (1, 1, 0);
         for g in &layout.glyphs {
-            let (_, digest) = self.fonts.get(&g.font).context("SDF font is not loaded")?;
+            let digest = self.font_digest(&g.font)?;
             let key = GlyphKey {
                 font: g.font.clone(),
                 digest: digest.clone(),

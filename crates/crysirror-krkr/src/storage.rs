@@ -223,6 +223,37 @@ impl Storage {
         }
         None
     }
+    /// krkr `TVPGetPlacedPath`: the full storage name of `name` as found,
+    /// in archive form (`file://./data.xp3>startup.tjs`) when a mounted
+    /// container serves it. Hashed-name containers report the logical name.
+    pub fn placed_path(&self, name: &str) -> Option<String> {
+        let path = self.resolve(name)?;
+        let full = if self.root.is_empty() { path.clone() } else { format!("{}/{path}", self.root) };
+        let served = VfsPath::new(Mount::Asset, &full)
+            .ok()
+            .and_then(|p| self.files.serving_container(&p));
+        let Some((source, point)) = served else {
+            return Some(format!("file://./{path}"));
+        };
+        let strip_root = |v: &str| -> String {
+            if self.root.is_empty() {
+                v.to_owned()
+            } else {
+                v.strip_prefix(&format!("{}/", self.root)).unwrap_or(v).to_owned()
+            }
+        };
+        let source = strip_root(&source);
+        let inner = if point.is_empty() {
+            full.as_str()
+        } else {
+            full.strip_prefix(&format!("{point}/")).unwrap_or(&full)
+        };
+        let inner = match &self.hashed_root {
+            Some(root) if inner.starts_with(&format!("{root}/")) => normalize(name),
+            _ => inner.to_owned(),
+        };
+        Some(format!("file://./{source}>{inner}"))
+    }
     /// Container source of a plain `file://` archive name that is mounted.
     pub fn archive_source(&self, name: &str) -> Result<Option<String>> {
         let uri = self.full_uri(name)?;
@@ -440,6 +471,26 @@ impl Storage {
         }
         Ok(out)
     }
+    /// The first `len` bytes of an asset, streamed (container probing
+    /// without reading a whole movie).
+    pub fn read_prefix(&self, path: &str, len: usize) -> Result<Vec<u8>> {
+        let reader = self
+            .files
+            .open_asset(&VfsPath::new(Mount::Asset, path).map_err(err)?)
+            .map_err(err)?;
+        let mut out = vec![0; len];
+        let mut filled = 0;
+        while filled < len {
+            let n = reader.read_at(filled as u64, &mut out[filled..]).map_err(err)?;
+            if n == 0 {
+                break;
+            }
+            filled += n;
+        }
+        out.truncate(filled);
+        Ok(out)
+    }
+
     pub fn read(&self, path: &str) -> Result<Vec<u8>> {
         if let Some(path) = save_path(path)? {
             return self.files.read(&path).map_err(err);
@@ -522,30 +573,8 @@ pub fn normalize(name: &str) -> String {
 /// Decode a script text the way KiriKiri does: a UTF-16LE/UTF-8 BOM wins,
 /// then valid UTF-8, then Shift_JIS (the platform default of most titles).
 pub fn decode_text(bytes: &[u8]) -> Result<String> {
-    if let Some(text) = crysirror_resource::text_stream::decode(bytes, 64 * 1024 * 1024)? {
-        return Ok(text);
-    }
-    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
-        ensure!(rest.len() % 2 == 0, "odd UTF-16LE script length");
-        let units: Vec<u16> = rest
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
-        return String::from_utf16(&units).context("invalid UTF-16LE script");
-    }
-    if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
-        return String::from_utf8(rest.to_vec()).context("invalid UTF-8 script");
-    }
-    ensure!(
-        !bytes.starts_with(b"TJS2"),
-        "compiled TJS2 bytecode must be executed, not decoded as text"
-    );
-    if let Ok(text) = std::str::from_utf8(bytes) {
-        return Ok(text.to_owned());
-    }
-    let (text, _, errors) = encoding_rs::SHIFT_JIS.decode(bytes);
-    ensure!(!errors, "script is neither UTF-8 nor Shift_JIS");
-    Ok(text.into_owned())
+    ensure!(!bytes.starts_with(b"TJS2"),"compiled TJS2 bytecode must be executed, not decoded as text");
+    crysirror_resource::text_stream::decode_auto(bytes,64*1024*1024)
 }
 
 fn err(e: crysirror_core::Error) -> anyhow::Error {

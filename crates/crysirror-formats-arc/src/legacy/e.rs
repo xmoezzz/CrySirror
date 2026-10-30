@@ -9,6 +9,7 @@ mod images;
 mod pac3;
 mod profiles;
 mod structured;
+mod int_executable;
 pub(crate) static FORMATS: &[Legacy] = &[
     Legacy {
         id: "unity/assets",
@@ -468,9 +469,15 @@ fn int(s: &dyn AssetReader, cx: &DecodeContext) -> Result<Vec<Row>> {
         let alias = profile
             .and_then(|p| p.get("game_id_key_id"))
             .and_then(|v| v.as_str());
-        if let Some(alias) = alias {
-            let game_id = cx.keys.key(cx.client, alias)?;
-            let seed = game_id.with_bytes(|b| {
+        let executable = profile.and_then(|p| p.get("executable")).and_then(|v| v.as_str());
+        let game_id = if let Some(alias) = alias {
+            Some(cx.keys.key(cx.client, alias)?.with_bytes(|b| b.to_vec()))
+        } else if let Some(path) = executable {
+            Some(int_executable::game_id(cx, path)?)
+        } else { None };
+        if let Some(game_id) = game_id {
+            let seed = {
+                let b = &game_id;
                 let mut seed = 0xffffffffu32;
                 for v in b {
                     seed ^= (*v as u32) << 24;
@@ -484,7 +491,7 @@ fn int(s: &dyn AssetReader, cx: &DecodeContext) -> Result<Vec<Row>> {
                     seed = !seed;
                 }
                 seed
-            });
+            };
             let file_key = mt_classic_first(le32(key_record, 68)?).to_le_bytes();
             for (i, p) in raw.chunks_exact(72).enumerate() {
                 if zstr(&p[..64]) == b"__key__.dat" {

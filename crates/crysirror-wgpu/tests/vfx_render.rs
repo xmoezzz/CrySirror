@@ -87,6 +87,7 @@ fn sprite(
 }
 fn emitter(id: u64, render: RenderSpec, particles: Vec<Particle>) -> EmitterFrame {
     EmitterFrame {
+        screen:None,screen_uvs:None,
         system_key: 1,
         key: id,
         client: 1,

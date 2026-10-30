@@ -11,11 +11,11 @@
 //! `psb://<lowercased extractStorageName>/<id>.tlg`.
 use crate::natives::{Rt, methods, native_class, read_only, string, this_of, unsupported};
 use crysirror_core::{service::HostServices, state::ClientId};
-use eluna::psb::{PsbFile, PsbNormalizeOptions, PsbValue};
 use crysirror_tjs2::{
     Result, TjsError,
     runtime::{ObjectHandle, Variant},
 };
+use eluna::psb::{PsbFile, PsbNormalizeOptions, PsbValue};
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -91,17 +91,27 @@ pub fn install(rt: &mut Rt) {
 }
 
 fn load(rt: &mut Rt, h: ObjectHandle, name: &str) -> Result<bool> {
-    let bytes = match rt.host().storage()?.read_named(name) {
+    let bytes = match rt.read_storage_binary(name, "") {
         Ok(b) => b,
         Err(_) => return Ok(false),
     };
     let (plain, psb) = PsbFile::parse_normalized(&bytes, &PsbNormalizeOptions::default())
         .map_err(|e| err(format!("{name}: {e}")))?;
-    let key = name.rsplit(['/', '>']).next().unwrap_or(name).to_lowercase();
+    let key = name
+        .rsplit(['/', '>'])
+        .next()
+        .unwrap_or(name)
+        .to_lowercase();
     let root = crate::motion_plugin::value(rt, &psb.root);
     rt.set_object_member(h, "__root", root);
     let state = &mut rt.host_mut().psbfile;
-    state.files.insert(key.clone(), Arc::new(Loaded { plain: plain.into(), psb: Arc::new(psb) }));
+    state.files.insert(
+        key.clone(),
+        Arc::new(Loaded {
+            plain: plain.into(),
+            psb: Arc::new(psb),
+        }),
+    );
     state.order.retain(|k| *k != key);
     state.order.push(key.clone());
     state.owners.insert(h.0, key);
@@ -129,15 +139,23 @@ fn evict(state: &mut State) {
 
 /// `psb://<file>/<key>` → encoded resource bytes of a loaded PSBFile.
 fn resource(rt: &Rt, uri: &str) -> Result<Vec<u8>> {
-    let rest = uri.strip_prefix("psb://").ok_or_else(|| err("not a psb:// name"))?;
-    let (file, key) = rest.split_once('/').ok_or_else(|| err(format!("{uri}: missing resource key")))?;
+    let rest = uri
+        .strip_prefix("psb://")
+        .ok_or_else(|| err("not a psb:// name"))?;
+    let (file, key) = rest
+        .split_once('/')
+        .ok_or_else(|| err(format!("{uri}: missing resource key")))?;
     let loaded = rt
         .host()
         .psbfile
         .files
         .get(&file.to_lowercase())
         .ok_or_else(|| err(format!("{uri}: no loaded PSBFile `{file}`")))?;
-    let value = loaded.psb.root.field(key).ok_or_else(|| err(format!("{uri}: no root entry `{key}`")))?;
+    let value = loaded
+        .psb
+        .root
+        .field(key)
+        .ok_or_else(|| err(format!("{uri}: no root entry `{key}`")))?;
     let PsbValue::Resource(index) = value else {
         return Err(err(format!("{uri}: root entry is not a resource")));
     };
@@ -151,15 +169,32 @@ fn resource(rt: &Rt, uri: &str) -> Result<Vec<u8>> {
 /// Layer.loadImages on a `psb://` name: suspend until the engine decodes the
 /// resource, then attach it as the layer's image.
 pub fn load_image(rt: &mut Rt, layer: ObjectHandle, uri: &str) -> Result<Variant> {
-    if !rt.host().can_suspend {
-        return Err(unsupported("Layer.loadImages(psb://) in this callback", "a resumable TJS boundary"));
-    }
     let bytes = resource(rt, uri)?;
+    load_encoded_image(rt, layer, uri, bytes)
+}
+
+/// Native encoded-resource/wait policy; actual decode/upload is engine owned.
+pub(crate) fn load_encoded_image(
+    rt: &mut Rt,
+    layer: ObjectHandle,
+    uri: &str,
+    bytes: Vec<u8>,
+) -> Result<Variant> {
+    if !rt.host().can_suspend {
+        return Err(unsupported(
+            "Layer.loadImages(encoded resource) in this callback",
+            "a resumable TJS boundary",
+        ));
+    }
     let state = &mut rt.host_mut().psbfile;
     if state.pending.is_some() {
         return Err(err("image load already pending"));
     }
-    state.pending = Some(PendingImage { layer, name: uri.to_owned(), bytes });
+    state.pending = Some(PendingImage {
+        layer,
+        name: uri.to_owned(),
+        bytes,
+    });
     rt.request_suspend();
     Ok(Variant::Void)
 }
@@ -177,15 +212,19 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
     let image = host.upload_encoded_image(client, slot, &name, &p.bytes)?;
     let [w, h] = image.size.map(i64::from);
     let e = |e: TjsError| anyhow::anyhow!("{e}");
-    rt.host_mut().reset_surface(p.layer, w, h, [255, 255, 255, 0]).map_err(e)?;
+    rt.host_mut()
+        .reset_surface(p.layer, w, h, [255, 255, 255, 0])
+        .map_err(e)?;
     let host_state = rt.host_mut();
     let l = host_state.layer_mut(p.layer).map_err(e)?;
     (l.width, l.height) = (w, h);
     l.blank = false;
-    l.full_alpha = image.opaque.then_some(255);
     l.image_source = None;
     let slot = l.slot;
     host_state.canvas_op(json!({"op":"set","id":slot,"layer":{"id":0,"rect":[0,0,w,h],"paint":{"kind":"image","asset":image.path.relative()}}}));
+    // Canvas writes invalidate retained alpha metadata. Publish the decoder's
+    // verified coverage only after that write, as ordinary loadImages does.
+    host_state.layer_mut(p.layer).map_err(e)?.full_alpha = image.opaque.then_some(255);
     host_state.api_calls += 1;
     Ok(true)
 }
