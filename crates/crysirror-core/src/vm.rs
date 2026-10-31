@@ -17,6 +17,12 @@ pub enum VmYield {
 /// The data VM and independent original Siglus interpreter implement this port.
 /// Device handles remain outside private logical state.
 pub trait VmAdapter {
+    /// True only during dormant boot/resource preparation, before ordinary VM
+    /// execution. step with empty input may poll/prepare this phase, but must
+    /// not execute normal game instructions after it becomes ready. Offline
+    /// hosts can settle this dependency without replaying other clients/input
+    /// or advancing simulated time. Window hosts keep polling normally.
+    fn preparation_pending(&self) -> bool { false }
     fn engine_id(&self) -> &'static str;
     fn snapshot_schema(&self) -> u32;
     fn step(

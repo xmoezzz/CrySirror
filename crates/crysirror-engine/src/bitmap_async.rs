@@ -44,7 +44,7 @@ pub struct BitmapJobs {
 pub(crate) fn call(state: &mut EngineState, name: &str, args: &[Value]) -> Result<Option<Value>> {
     if !matches!(
         name,
-        "beginEffect" | "beginTransition" | "beginRowCopy" | "effectStatus" | "cancelEffect"
+        "beginEffect" | "beginTransition" | "beginRowCopy" | "beginAlphaClip" | "effectStatus" | "cancelEffect"
     ) {
         return Ok(None);
     }
@@ -55,7 +55,7 @@ pub(crate) fn call(state: &mut EngineState, name: &str, args: &[Value]) -> Resul
         .first()
         .context("bitmap operation argument")?
         .as_i64()?;
-    if matches!(name, "beginEffect" | "beginTransition" | "beginRowCopy") {
+    if matches!(name, "beginEffect" | "beginTransition" | "beginRowCopy" | "beginAlphaClip") {
         ensure!(
             state.bitmap_jobs.entries.len() < 32
                 && state
@@ -80,9 +80,9 @@ pub(crate) fn call(state: &mut EngineState, name: &str, args: &[Value]) -> Resul
             pixels: surface.rgba.clone(),
         });
         let revision = surface.revision;
-        let (input, effects) = if name == "beginRowCopy" {
-            let slot = u32::try_from(args.get(1).context("row-copy source slot")?.as_i64()?)?;
-            let path = format!("{}{}", crysirror_runtime::assets::SURFACE_PREFIX, slot);
+        let (input, effects) = if matches!(name,"beginRowCopy"|"beginAlphaClip") {
+            let source_slot = u32::try_from(args.get(1).context("pair source slot")?.as_i64()?)?;
+            let path = format!("{}{}", crysirror_runtime::assets::SURFACE_PREFIX, source_slot);
             let source = state
                 .runtime
                 .assets
@@ -93,14 +93,20 @@ pub(crate) fn call(state: &mut EngineState, name: &str, args: &[Value]) -> Resul
                 size: [source.width, source.height],
                 pixels: source.rgba.clone(),
             });
-            let spec =
-                serde_json::from_value(args.get(2).context("row-copy parameters")?.to_json())?;
+            let options=args.get(2).context("pair image parameters")?.to_json();
+            let effect=if name=="beginRowCopy" {
+                crysirror_image::effects::ImageEffect::SineRowCopy{spec:serde_json::from_value(options)?}
+            }else{
+                let spec:crysirror_image::alpha_clip::AlphaClipRect=serde_json::from_value(options)?;
+                ensure!(!spec.self_source||source_slot==slot,"self-source alpha clip requires the same bitmap slot");
+                crysirror_image::effects::ImageEffect::AlphaClipRect{spec}
+            };
             (
                 ImageInput::Raster {
                     destination: Box::new(ImageInput::Resource(input)),
                     source: Box::new(ImageInput::Resource(source)),
                 },
-                vec![crysirror_image::effects::ImageEffect::SineRowCopy { spec }],
+                vec![effect],
             )
         } else if name == "beginTransition" {
             let other = u32::try_from(args.get(1).context("transition second slot")?.as_i64()?)?;

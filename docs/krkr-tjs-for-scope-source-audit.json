@@ -1,0 +1,19 @@
+{
+  "scope": "Original TJS lexical namespace for the for statement, expressed by an existing Block HIR scope. No game-specific metadata repair.",
+  "reference": {
+    "repository": "https://github.com/krkrz/krkrz",
+    "commit": "fd5c4baa6a2ef5978db1bd043634351f48667daf",
+    "file": "tjs2/tjsInterCodeGen.cpp",
+    "sha256": "53f70d067b7a44b6e2ebc07d0e1654563dc94ce52e0918cd501e4afdb81bd409",
+    "notice": "docs/third-party/krkrz.txt"
+  },
+  "evidence": {
+    "EnterForCode": "Lines2907-2918 call EnterBlock before the initializing clause, explicitly even when no variables are introduced.",
+    "ExitForCode": "Lines2956-2991 emit step/backedge, patch exits and call ExitBlock.",
+    "namespace": "Lines3526-3555 EnterBlock pushes Namespace; ExitBlock pops it and clears native local variable registers."
+  },
+  "implementation": "HIR enters an existing ScopeKind::Block before initializer/condition/step/body analysis and leaves it after the loop. Binding IDs preserve outer lookup after nested loops, continue/break and return; no new host/GPU dependency. This patch corrects lexical binding resolution; it does not claim newly implemented deterministic object-finalizer timing for all block forms.",
+  "actual_trigger": "Original StandInformation metadata initialization nests two for(var i...) loops and then assigns info[i]; the leaking inner binding caused baseInfo to be void, later failing StandImage.updateImage filename access. Owner script data remain unchanged.",
+  "verification": "Four self-authored release VM tests cover nested metadata selection and continue/break, declaration-free outer index updates and unbraced-body declaration shadowing, break/return lookup, and TopLevel global-vs-loop-local binding. Full 426-test library suite passed; actual owner-game progression is logged separately.",
+  "decompiler_regression": "Correct loop locals now occupy negative registers at TopLevel. The decompiler must declare them once in the object prologue and then assign; emitting var again in a while body shadows the live counter. Native named global declaration and positive temporary policies remain unchanged. Full 426-test library suite, including control-flow round-trip and fuzz cases, passed after this fix."
+}

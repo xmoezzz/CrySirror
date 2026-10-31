@@ -342,6 +342,10 @@ impl Analyzer {
                 step,
                 body,
             } => {
+                // Native TJS EnterForCode/ExitForCode wrap the entire for
+                // statement in a namespace, including declaration-free init.
+                // An inner `for (var i...)` must leave its outer i visible.
+                tasks.push(AnalyzeTask::LeaveScope);
                 tasks.push(AnalyzeTask::LeaveLoop);
                 tasks.push(AnalyzeTask::Stmt(body.as_mut()));
                 tasks.push(AnalyzeTask::EnterLoop);
@@ -354,6 +358,7 @@ impl Analyzer {
                 if let Some(init) = init {
                     tasks.push(AnalyzeTask::ForInit(init));
                 }
+                tasks.push(AnalyzeTask::EnterScope(ScopeKind::Block, statement.span));
             }
             syntax::StmtKind::With { object, body } => {
                 let body_span = body.span;

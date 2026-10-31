@@ -6,12 +6,13 @@ use crate::{
     value::Value,
 };
 use anyhow::{Context, Result};
-use crysirror_core::{service::InputFrame, state::ClientId};
+use crysirror_core::{service::{InputFrame, HostServices, LogViewStamp}, state::ClientId};
 use crysirror_runtime::Runtime;
 use std::collections::VecDeque;
 
 /// Everything the OOP API can reach. Device handles never live here.
 pub struct EngineState {
+    pub(crate) media_probes:crate::media_probe_api::MediaProbes,
     pub bitmap_jobs: crate::bitmap_async::BitmapJobs,
     pub streaming: crate::systems::StreamingRuntime,
     /// Project/VM scheduler: shared World/Layer/UI, VFS and native VM sessions.
@@ -24,7 +25,9 @@ pub struct EngineState {
     pub input: InputFrame,
     pub frame: u64,
     pub fixed_step_ms: u64,
+    /// Compatibility view of the canonical Runtime log for this client.
     pub log: VecDeque<String>,
+    pub(crate) log_stamp: LogViewStamp,
     pub quit_requested: bool,
     pub actions: crate::input_api::ActionMap,
     pub input_events: crate::input_events_api::InputEvents,
@@ -46,6 +49,7 @@ pub struct EngineState {
     >,
 }
 impl EngineState {
+    pub(crate) fn sync_log_view(&mut self) {self.runtime.host.logs.sync_view(self.client,&mut self.log_stamp,&mut self.log);}
     /// Sync derived physics with the current world and return it.
     pub fn physics(&mut self) -> anyhow::Result<&crate::physics::Physics> {
         self.runtime.physics.set_query_client(self.client.0);
@@ -55,7 +59,7 @@ impl EngineState {
         Ok(&self.runtime.physics)
     }
 }
-pub const MAX_LOG: usize = 1024;
+pub const MAX_LOG: usize = crysirror_core::service::MAX_LOG_LINES;
 
 /// A context is either occupied or vacant. Script hosts temporarily move the
 /// occupied state into a thread-local slot while foreign code runs, so native
@@ -123,10 +127,9 @@ impl EngineContext {
     }
     pub fn log(&mut self, line: impl Into<String>) -> Result<()> {
         let s = self.state()?;
-        if s.log.len() == MAX_LOG {
-            s.log.pop_front();
-        }
-        s.log.push_back(line.into());
+        let line=line.into();
+        s.runtime.host.append_log(s.client,&line).map_err(|e|anyhow::anyhow!("{e}"))?;
+        s.sync_log_view();
         Ok(())
     }
     fn class_of(&mut self, this: ObjectId) -> Result<std::sync::Arc<dyn crate::object::Class>> {

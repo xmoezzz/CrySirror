@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/morkt/GARbro",
+  "commit": "b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0",
+  "licence": "MIT",
+  "copyright": "morkt, 2015-2017",
+  "review": "Complete four implementations read; bounded Rust format plugins derived from their layouts/algorithms. No .NET/WPF, original engine, window, renderer, audio playback or ambient filesystem implementation adopted.",
+  "files": {
+    "ArcGPK.cs": "7aa38659a44aa63a1984127cc071fd67a54fa76030e82b714ce80263aaaf296d",
+    "ArcVPK.cs": "1d3609326e9b0084dfa92e38f3f5a3605d86bd672ccba5fc79ddc5ce2f78d3bd",
+    "ImageDWQ.cs": "96e5dcc9523febc370b339e5c29deeb29c55b86d76c73bcbb65f9a17b9a60152",
+    "AudioVAW.cs": "5aef44ed0a66c67a63097fd63c2561be6fec92c5d8d87177dd17308e02cfd219"
+  },
+  "limits": [
+    "GPK/VPK signatureless archives require explicit format and scoped companion source_name/resolver",
+    "over-2GiB/64-bit-footer archive profiles unsupported",
+    "DWQ plain RGB and packed BGR/top-down layouts are explicit; nonstandard DIB/palette layouts fail",
+    "VAW packet truncation fails instead of manufacturing silence"
+  ]
+}

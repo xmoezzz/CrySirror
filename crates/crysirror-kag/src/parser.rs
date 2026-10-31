@@ -8,8 +8,8 @@ use crate::{
 
 mod ext;
 mod native_save;
-pub use native_save::{NativeCall, NativeExtControl, NativePosition};
 use ext::{ExtState, WhileFrame};
+pub use native_save::{NativeCall, NativeExtControl, NativePosition};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum DebugLevel {
@@ -1362,7 +1362,7 @@ impl KagParser {
 
         self.validate_ext_macro_arguments(&tag)?;
         self.expand_parameter_macros(&mut tag)?;
-        let native_value_origins = self.is_ext_kag().then(||tag.clone());
+        let native_value_origins = self.is_ext_kag().then(|| tag.clone());
         self.apply_macro_arguments(&mut tag);
         self.resolve_local_arguments(&mut tag, host)?;
 
@@ -1376,8 +1376,8 @@ impl KagParser {
         if self.options.resolve_entities {
             self.resolve_entities(&mut tag, host)?;
         }
-        if let Some(original)=native_value_origins {
-            host.resolved_tag_values(&original,&tag)?;
+        if let Some(original) = native_value_origins {
+            host.resolved_tag_values(&original, &tag)?;
         }
 
         if !self.options.process_special_tags && self.macros.contains_key(&tag.tagname) {
@@ -2513,6 +2513,13 @@ impl Scenario {
         let mut label_counts: BTreeMap<String, usize> = BTreeMap::new();
         while offset < self.source.len() {
             if let Some(mut label) = self.parse_label_line(offset, previous_label.as_deref())? {
+                // Native EnsureLabelCache excludes a physical one-character
+                // `*` line. SkipCommentOrLabel still emits its empty alias.
+                if label.name.is_empty() {
+                    self.labels_by_offset.insert(offset, label);
+                    offset = self.line_end_with_newline(offset);
+                    continue;
+                }
                 let base_name = label.name.clone();
                 let count = label_counts.entry(base_name.clone()).or_insert(0);
                 *count += 1;
@@ -2603,9 +2610,20 @@ impl Scenario {
         let pipe = line.find('|');
         let raw_name = pipe.map_or(line, |index| &line[..index]);
         let name = if raw_name == "*" {
-            // A leading bare `*` is a valid anonymous scenario entry label in
-            // krkr. Later bare labels continue to alias the preceding label.
-            previous_label.unwrap_or("*")
+            // KAGParser c2269b26 EnsureLabelCache requires Length >= 2.
+            // A bare `*` therefore has an empty alias even after a named label;
+            // `*|page` aliases the preceding named label and cannot be first.
+            if line == "*" {
+                ""
+            } else {
+                previous_label.ok_or_else(|| {
+                    KagError::parse_at(
+                        self.storage.clone(),
+                        SourceSpan::new(line_start, line_end),
+                        "the first label name cannot be omitted",
+                    )
+                })?
+            }
         } else {
             raw_name
         };
@@ -3294,18 +3312,24 @@ mod tests {
     }
 
     #[test]
-    fn accepts_anonymous_first_label() {
+    fn bare_label_callback_uses_empty_alias_without_creating_a_jump_target() {
         let mut parser = KagParser::new();
         parser.set_ignore_cr(true);
         parser
-            .load_scenario_text("custom.ks", "*\n[setup]\n*named\n[done]")
+            .load_scenario_text("custom.ks", "*\n[setup]\n*named\n*\n[done]")
             .unwrap();
         let mut host = TestHost::default();
 
         assert_eq!(next_with(&mut parser, &mut host).tagname, "setup");
-        assert_eq!(host.labels, vec!["*"]);
+        assert_eq!(host.labels, vec![""]);
         assert_eq!(next_with(&mut parser, &mut host).tagname, "done");
-        assert_eq!(host.labels, vec!["*", "*named"]);
+        assert_eq!(host.labels, vec!["", "*named", ""]);
+        assert!(parser.go_to_label("*").is_err());
+        assert!(
+            KagParser::new()
+                .load_scenario_text("bad.ks", "*|Page\nA")
+                .is_err()
+        );
     }
 
     #[test]

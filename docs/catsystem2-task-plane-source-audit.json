@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-01",
+  "module_sha256": "f8a1fb4fed8a0c64c3fbc0bcf009f63e8f3181cfbc1a0dbd60f9ddefc8e25b3d",
+  "method": "Owner-authorized local static IDA9 review; original EXE never run",
+  "scope": "Reviewed type2 Plane,type6 controller,type15 image-list andtype34 FES constructor/attach/26;79/88/92 shared plane behavior. FES first native child tick maps lowerbutton through shared InputRouting;449 binds real manager geometry/XY.447/FES load remains unsupported.",
+  "functions": {
+    "659dc0": "Format task name; send synchronous message1 to requested task parent with requested class; return real allocated logical task ID; send message26 with current KCS argument-state address",
+    "5dd130/5dd210/5de540": "Parent routing and class construction; message1 becomes message2 with allocated native ID and object",
+    "5dd580": "First unused ID search across root/task registry; class2 constructs5DF070",
+    "5dc340/5dd350/5dc9d0": "Original base task construction, message2 registers actual task ID/object in requested parent and sets its task-parent pointer",
+    "5df070/5de590": "Empty plane constructor: empty native rectangle, independent graph parent-1, no image resource, native enabled default1 and zero origin/default scale; renderer ownership is translated to a shared Layer",
+    "8cdae4/5dcc80/5e01f0/5de8e0/5dc9d0": "Complete vtable/message chain reviewed for message26: Plane delegates to base and generic task handler, neither implements26. Only script-task consumers interpret that parameter. No VM address becomes an engine pointer.",
+    "63fde0/674030/679140/682460/682710": "native79 message42 creates two XYZ+packed diffuse ARGB triangles;679140 initializes Src[1]=0, so geometry creation is disabled until native visibility event. Shared Solid owns geometry; native empty rectangle remains unchanged.",
+    "640d60/675b80/67c260/681ed0": "native88 reads original XYZ for mode1 resource, retaining XY;49 message routes through676B00/67D780/682050, float equality avoids replacing equal signed-zero Z, marks native sorter dirty",
+    "678600/678570/678ef0/67b810": "Renderer stable linked-list merge compares first Z < second Z and draws ascending.67E450 is unrelated convex polygon angular sort, excluded. Native task ancestry does not define draw sort hierarchy.",
+    "67f5b0/67f960/67fb80": "Normal display explicitly uses0<=Z<1000000 (0x49742400). Native capture separately uses0<=Z<65536 (0x47800000), still unsupported. Native88 maps normal display range into shared payload visibility, never swallows capture range.",
+    "640ff0/5e01f0/5e3840/5e3610/6770f0": "native92 message47 stores own flag, recursively emits48 with same raw event flag to task descendants. Backend enabled=recipient own flag AND event flag. This is imperative delivery; direct child show may override previous parent hide. Default plane has no grid/button/hover side effects; mutations enabling these remain unmapped.",
+    "5dd580/5de590/8cdaa8": "Class6 constructs5DE590 alone(0xA4), not5DF070Plane;empty rect,binding target-1,event mode0,result0,own enabled1,relative0,full-canvas-rect marker0. Full8CDAA8 vtable=[5DE6A0,5DD350,5DE8A0,5DC9B0,5DD130,5DD210,5DCC80,5DE8E0]. Message26 unhandled through5DE8E0+5DC9D0, hence no input registration or draw resource at construction.",
+    "648a50/5de8e0/5e6f50": "Native104 supplies[task,x,y,w,h,priority,eventmode] to89;fixedsource mask7(all),prioritysignedi32 preserved. Fullcanvas canonicalRECT8CDAD0 is[-100000,-100000,100000,100000], matching sharedrect[x,y,w,h]=[-100000,-100000,200000,200000]. Native rect retains sourcecanonicalvalue. SharedInputRouting owns registry,hit/coverage/capture/receipt;104ACKafterenginecommit.",
+    "5e7a30/5e7bf0/5e7d10/5e6020/5e5fb0": "Input registry stable priority sort (first high), per-source eligibility, pointerhalf-openrect/coverage filtering, captured down receiver/up handling, hover distinct from press;native parent handled receipt controls trying next. Must be engine shared capability; no private hit tester."
+  },
+  "shared_owner": "Existing client-scoped LayerSystem owns transparent group resource, transform, graph ancestry, paint, visibility and later payload composition",
+  "native_owner": "Original task ID/class/name/task-parent, native empty rectangle and graph binding policy; task ancestry never silently becomes graph ancestry",
+  "group_convention": "Transparent solid group at[0,0,1,1], default transform and no clip. Shared Layer requires positive extents;1x1 is not native GET_SIZE or rectangle data. Original source default visible=true. Future image/effect/graph operations must be separately source-reviewed and translated through shared APIs.",
+  "limits": "65536 logical task IDs; native32-byte task name field accepts at most31 non-NUL bytes. Unsupported classes and operations preserve pending original PC. Current XY/native graph/capture/text/image/effect/hit-test setters remain unmapped. Native visibility supported boolean profile0/1; other values explicitly rejected.",
+  "validation": "native66-fes-owner.log andnative449-canonical-runtime-owner.log eachrelease1/1,20,227instructions then447/1926/[8,406]/flow,pendingretained;lib23/23. CanonicalRuntime all31INTs/sharedatlas clientisolation/baseLayer andfourRuntime.tick inputedges verified. No Cat title/GPU-pixel/input callback success claim.",
+  "depth_mapping": "Only payload receives shared SetDepth; transparent native group never receives depth automatically. Native Task parent is not graph parent. This preserves native global flat payload Z, while generic engine depth scopes independently support subtree inheritance. Future native graph/relative cases require further evidence and may not silently inherit depth.",
+  "public_capabilities": [
+    "client-scoped shared Layer Solid/transform/visible/parent commands",
+    "shared stable finite float SetDepth canonical side-map and commit_frame_order",
+    "shared comparison used by frame/crossfade/WGPU merge; frozen snapshots bake order"
+  ]
+}

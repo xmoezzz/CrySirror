@@ -17,7 +17,7 @@ and a test keeps it current.
   `ClassInfo` docs, property types and method signatures. The same registry
   generates the JS bindings and the `.d.ts`, so the three cannot disagree.
 - **Commands.** `services::COMMAND_API` maps every typed `WorldCommand`,
-  `LayerCommand`, `CanvasCommand` and `UiCommand` to the API member that issues it.
+  `LayerCommand`, `CanvasCommand`, `UiCommand` and `InputRouteCommand` to the API member that issues it.
   `tests/api_coverage.rs` fails on an unmapped variant.
 - **Data specs.** Field names and Rust types come from the `pub struct` and
   `pub enum` declarations in `crysirror-scene`, plus shared media/asset declarations in core/runtime and task statistics in
@@ -33,6 +33,20 @@ and a test keeps it current.
 
 Rust crate internals are not part of this reference. For those, use
 `cargo doc --workspace --no-deps`.
+
+The native Rust contract also documents `HostServices.begin_pattern` and
+`begin_canvas_image`. Their immutable resources and nonblocking completion
+receipts use the shared image workers. Canvas capture needs an enabled
+presenter; live Puppet and replaceable surface/history dependencies explicitly
+fail in the current immutable profile. Releasing a published image ends caller
+ownership while retained scene references and already-admitted capture leases
+continue to keep their actual generation alive.
+
+`Text.beginPrecomputedFont(alias, asset, pixelSize)` uses the same FontLibrary
+jobs/catalog as ordinary font loading. TFT v0/v1 stores coverage and metrics;
+pixel size is explicit and participates in resource identity. Fixed-size or
+missing-glyph violations fail rather than silently choosing a system face.
+This resource API is usable independently of KiriKiri's native Font facade.
 
 ## Modular VFX declarations
 
@@ -665,9 +679,12 @@ on the existing bounded Media workers, including cancellation and error
 publication. Audio uses the common float PCM builder/mixer. Native resource
 lookup, frame placement, return values and wait/skip semantics stay in adapters.
 
-Current reflective fingerprint: `1af7e309b18b2933`. The latest additions include
-menu enable state, bounded native menu template data and the partial KCS config;
-earlier additions include font jobs, Layer/UI motion and pointer coverage.
+Current reflective fingerprint: `61f9f936ff0989a4`. The latest additions include
+owner-clock voice release, measured passive tooltips and exact bounded canvas
+pixel queries. Shared data also documents frozen Mesh paint, XML and sprite
+cursors. RealLive exposes its portable-host optical-disc policy explicitly;
+continuation under that policy is not disc authentication. Earlier additions
+include menu enable state, native menu templates, font jobs and Layer/UI motion.
 Media picture publication itself remains a Rust host API. See the adapter
 READMEs and STATUS for supported native profiles and real-game results.
 
@@ -931,3 +948,103 @@ retain their existing rectangle behavior. Local bytes, dimensions and aggregate
 owner/Runtime memory are bounded, and masks are logical saved UI state.
 `ImageResource::alpha_region(rect)` extracts checked stored source alpha in the
 shared image contract; native adapters do not implement their own pixel loops.
+
+Shared resource format `windows/msi` exposes embedded-cabinet installed files
+through the normal archive/worker/mount APIs. Directory components and media
+ranges are validated; external cabinets, unknown layouts and decoder failures
+remain explicit errors. Individual decoded members retain common memory leases.
+The host VFS keeps a hard limit of 256 provider mounts per client, including
+RealLive voice banks. No MSI actions or original executable code are run.
+
+The partial first-class Majiro adapter configuration is documented alongside the
+other native configurations. System 4 and System-NNN currently expose native
+program readers, not runnable VM factories. Their current boundaries are explicit
+in the crate READMEs and STATUS.
+
+
+The current fingerprint is `1dbdf921cc54e571`. `Engine.logs()` reads the same
+client ring used by native Output and Engine.log; completion records an owner
+append, not file/device output. `Input.setKeyboardLocks` patches only logical
+Caps/Num/Scroll state. Physical state is null and control unsupported unless a
+future host explicitly supplies that capability. Logical state is reset only
+after successful Runtime restore.
+
+`ImageEffect.rgb_lookup` accepts three256-byte tables and `straight_rgba`.
+The recognized premultiplied profile is rejected because ImageSurface carries
+no association metadata. ImageJobs transform immutable inputs on workers.
+`HostServices.publish_image_resource` publishes a completed resource without
+owner encoding/copying; paths are unique, scoped and explicitly releasable.
+Frozen frames retain their resource lease. Further processing can use
+`ImageInput::Resource`; these paths are not encoded VFS files. Runtime saves
+with live publications explicitly require unsupported reconstruction.
+`HostServices.begin_civil_time` samples actual host local civil time on a
+cancellable worker, separately from virtual simulation time.
+
+
+Shared Rust interaction maps support `RegionMap.copy_from` and `resize`, with
+client validation and atomic bounded copies. `clip_region_copy` preserves
+source/destination correspondence; zero source holes overwrite old labels.
+These are logical interaction identifiers, independent of visible RGBA pixels.
+`XmlDocument.children` returns children in document order and checks that its
+input node is borrowed from that document; cloned/foreign nodes are rejected.
+
+Host audio loop metadata explicitly declares decoded-frame or reference-rate
+coordinates. Publication is atomic and client scoped; playback consults it only
+when the caller explicitly requests lookup. Live catalogs reject Runtime
+capture/restore until reconstruction is supported. Decode-only shared image
+jobs allow16MP resources/compositions; actual image-effect outputs retain their
+4MP limit. Jobs retain graph limits and the common512MiB reservation budget;
+decode-only scratch omits Gaussian planes that are never used.
+
+
+`crysirror_text::format::format_one_bytes` is a shared bounded Rust byte formatter,
+independent of VM/font/device state. It handles one compatible integer `%d` or
+byte-string `%s` at a time. Encoded text is preserved; widths count bytes,
+precision is ignored in this profile, and string zero-padding is ignored.
+String-value embedded NUL bytes are retained; NUL templates are unsupported.
+Width/precision fields are limited to510 and template/output to1MiB. Supported
+number zero-padding places a negative sign before its zeros. Unsupported
+compatible conversions fail without changing caller state. ByteFormatOutput's
+matched field lets a VM preserve its own argument/refcount policy. This is a
+Rust host API, with no automatic script formatter or native-adapter registration.
+
+
+`ImageEffect.piecewise_resample` samples immutable input using explicit16.16
+source origins/steps and signed destination steps. Regions compose in order,
+with independent /256 weights and an explicit alpha policy. The shared worker
+checks both source/destination endpoints, at most64 regions and4Mi pixel writes;
+row cancellation never mutates the input. This operation supports quadrant zoom,
+mirrored tiles and fixed raster sampling independently of any native adapter.
+
+`ProgressCurve` is a device-free normalized envelope with at most64 ordered
+knots and double-precision shapes. Repeated times form right-continuous steps;
+sampling reads caller-supplied time and never advances a clock or consumes RNG.
+`Canvases.getLimits()` reports the same per-client4096-surface budget enforced
+by Core, Scene and Runtime; existing canvas size, node and byte limits remain.
+
+
+`InputRouteSpec.drag_enabled`, `InputRoutePhase.Drag` and the event's `origin`
+model explicit backend drag delivery and bubbling. Hardware input does not yet
+automatically synthesize drag events; callers supplying Drag must include origin.
+
+
+`Canvases.apply([{op: "destroy", id}])` releases an existing owned surface after
+all live presentations have been hidden. Destroying a still-presented or absent
+surface fails atomically. Previously frozen copies retain their independent
+nodes and admitted image/resource leases; destroying the source does not alter
+those copies. The same command is available to native adapters and ordinary
+engine clients for resource retirement.
+
+`ImageCompositeMath::MaskSeparate256` and bitmap `mask_separate256` expose
+independent /256 product truncation with zero/full mask endpoints, preserving
+destination alpha. They require opacity255; graph admission rejects unsupported
+opacity before starting a worker. This is an explicit stored-byte arithmetic
+profile, usable independently of any VM, with existing scope and memory limits.
+
+`Bitmap.beginAlphaClip(slot, source, options)` is a shared two-input image worker
+operation described by `AlphaClipRect`. It multiplies stored coverage using exact
+integer endpoint rules and optionally clears the exterior or multiplies RGB.
+The `self_source` profile deliberately reads the destination in forward order,
+including overlap feedback, and requires identical bitmap slots. It shares
+client/epoch/revision checks and status/cancellation with other bitmap jobs. It
+is a coverage operation, rather than an alpha bounding-box query.

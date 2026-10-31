@@ -17,6 +17,7 @@ pub use asynchronous::{AssetKind, AssetLease, AssetState, AssetStatus, AssetTick
 /// Immutable assets with a capability root per client, not merely a string prefix.
 /// Explicit reload constructs a new store/runtime. This is not a native-code sandbox.
 pub struct Assets {
+    pub(crate) published_images: crate::published_images::PublishedImages,
     frame_surfaces: Option<SurfaceSnapshot>,
     pub profiler: crysirror_tasks::profile::Profiler,
     asynchronous: asynchronous::AsyncAssets,
@@ -38,28 +39,45 @@ pub struct Surface {
     pub height: u32,
     pub rgba: Arc<[u8]>,
     pub revision: u64,
+    pub(crate) _resource: Option<Arc<dyn crysirror_core::image_processing::ImageResource>>,
 }
 /// Immutable dynamic texture generations retained by a render snapshot.
 #[derive(Clone)]
 pub struct SurfaceSnapshot {
     store: u64,
     surfaces: BTreeMap<(ClientId, u32), Surface>,
+    published: BTreeMap<(ClientId,String), Surface>,
 }
 impl SurfaceSnapshot {
     pub fn surface(&self, client: ClientId, asset: &str) -> Option<&Surface> {
+        if asset.starts_with("__image_resource/") {return self.published.get(&(client,asset.into()));}
         let slot = asset.strip_prefix(SURFACE_PREFIX)?.parse::<u32>().ok()?;
         self.surfaces.get(&(client, slot))
     }
 }
 pub const SURFACE_PREFIX: &str = "__surface/";
-pub const MAX_SURFACES_PER_CLIENT: usize = 4096;
+pub const MAX_SURFACES_PER_CLIENT: usize = crysirror_core::service::MAX_CANVAS_SURFACES_PER_CLIENT;
 impl Assets {
+    /// Run a presenter against an admitted capture's immutable dynamic images
+    /// and font catalog. Restores live resource lookup even on unwind.
+    pub(crate) fn with_capture_resources<T>(&mut self, store: u64, published: BTreeMap<(ClientId, String), Surface>, text: crysirror_text::TextSystem, work: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        ensure!(store == self.store_id(), "foreign Canvas capture resources");
+        struct Restore<'a> { assets: &'a mut Assets, text: Option<crysirror_text::TextSystem> }
+        impl Drop for Restore<'_> { fn drop(&mut self) { self.assets.text = self.text.take().unwrap(); } }
+        let previous = std::mem::replace(&mut self.text, text);
+        let guard = Restore { assets: self, text: Some(previous) };
+        let frame = SurfaceSnapshot { store, surfaces: BTreeMap::new(), published };
+        guard.assets.with_frame_surfaces(frame, work)
+    }
     pub fn new(path: &Path) -> Result<Self> {
         #[allow(unused_mut)]
         let mut decoders = crysirror_image::DecoderRegistry::default();
         #[cfg(feature = "arc-formats")]
         crysirror_formats_arc::register_images(&mut decoders)?;
+        #[cfg(feature = "blackcyc-formats")]
+        crysirror_formats_blackcyc::register_images(&mut decoders)?;
         Ok(Self {
+            published_images: Default::default(),
             frame_surfaces: None,
             profiler: Default::default(),
             asynchronous: asynchronous::AsyncAssets::new()?,
@@ -295,6 +313,7 @@ impl Assets {
                 height,
                 rgba,
                 revision,
+                _resource: None,
             },
         );
         Ok(format!("{SURFACE_PREFIX}{slot}"))
@@ -303,17 +322,21 @@ impl Assets {
         self.surfaces.remove(&(client, slot)).is_some()
     }
     /// Resolve an image asset path that names a surface.
-    pub fn surface(&self, client: ClientId, asset: &str) -> Option<&Surface> {
+    pub fn surface(&self, client: ClientId, asset: &str) -> Option<Surface> {
+        if asset.starts_with("__image_resource/") {
+            return match &self.frame_surfaces {Some(frame)=>frame.published.get(&(client,asset.into())).cloned(),None=>self.published_images.get(client,asset)};
+        }
         let slot = asset.strip_prefix(SURFACE_PREFIX)?.parse().ok()?;
         match &self.frame_surfaces {
-            Some(frame) => frame.surfaces.get(&(client, slot)),
-            None => self.surfaces.get(&(client, slot)),
+            Some(frame) => frame.surfaces.get(&(client, slot)).cloned(),
+            None => self.surfaces.get(&(client, slot)).cloned(),
         }
     }
     pub fn freeze_surfaces(&self) -> SurfaceSnapshot {
         SurfaceSnapshot {
             store: self.store_id(),
             surfaces: self.surfaces.clone(),
+            published: self.published_images.snapshot(),
         }
     }
     /// Scope a renderer to frozen surfaces, restoring live lookup on error/unwind.

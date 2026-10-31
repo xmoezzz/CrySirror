@@ -16,6 +16,8 @@ fn child_paths_are_explicit_first_sibling_and_case_sensitive() {
     assert!(d.child_path("X/y").unwrap().is_none());
     assert!(d.child_path("x/y[1]").is_err());
     assert!(d.child_path("../x").is_err());
+    let d = XmlDocument::parse(b"<r><x><z/></x><x><y>later</y></x></r>").unwrap();
+    assert_eq!(d.child_path("x/y").unwrap().unwrap().text, "later");
 }
 #[test]
 fn malformed_dtd_external_and_unknown_entity_documents_fail() {
@@ -27,6 +29,10 @@ fn malformed_dtd_external_and_unknown_entity_documents_fail() {
         b"<!DOCTYPE r [<!ENTITY x SYSTEM 'file:///tmp/private'>]><r>&x;</r>",
         b"<r>&unknown;</r>",
         b"<r a='x' a='y'/>",
+        b"<1bad/>",
+        b"<r 1bad='v'/>",
+        b"<r>&#xFFFF;</r>",
+        b"<r a='&#0;'/>",
         b"<?xml version='1.1'?><r/>",
     ] {
         assert!(
@@ -43,4 +49,13 @@ fn depth_node_and_source_budgets_apply_without_a_vm() {
     let many = format!("<r>{}</r>", "<x/>".repeat(32768));
     assert!(XmlDocument::parse(many.as_bytes()).is_err());
     assert!(XmlDocument::parse(&vec![b' '; 8 * 1024 * 1024 + 1]).is_err());
+}
+
+#[test]
+fn child_iteration_retains_source_order_and_rejects_foreign_nodes() {
+    let a=crysirror_resource::xml::XmlDocument::parse(b"<document><row id='1'/><row id='2'/><tail/></document>").unwrap();
+    let b=crysirror_resource::xml::XmlDocument::parse(b"<document><foreign/></document>").unwrap();
+    let names=a.children(a.root()).unwrap().map(|n|n.name.as_str()).collect::<Vec<_>>();assert_eq!(names,["row","row","tail"]);
+    assert!(a.children(b.root()).is_err());assert!(a.children(&a.root().clone()).is_err());
+    let first=a.children(a.root()).unwrap().next().unwrap();assert_eq!(first.attributes.get("id").unwrap(),"1");assert_eq!(a.children(first).unwrap().count(),0);
 }

@@ -322,6 +322,7 @@ impl LayerSystem {
                 Some(r) => Some((r.clone(), absolute_rect(owner, id)?)),
                 None => None,
             };
+            p.depth_order=self.depth_key(client,id)?;
             p.composite = Some(Arc::new(CompositeFrame {
                 serial: fade.serial,
                 timing: [fade.elapsed_ms, fade.duration_ms],
@@ -333,7 +334,7 @@ impl LayerSystem {
             }));
             out.push(p);
         }
-        out.sort_by_key(|p| (p.order, p.owner, p.id, p.sub));
+        out.sort_by(compare_primitives);
         Ok(out)
     }
 }

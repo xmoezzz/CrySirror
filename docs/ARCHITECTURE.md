@@ -36,6 +36,7 @@ The previous RFVP/BGI/RealLive hosting paths were removed on 2026-10-26.
 | crysirror-bgi-vm / crysirror-bgi | Optional first-class bounded native BP executor and semantic adapter; shared Canvas/Layer/GlyphRun, capability tasks, audio admission and input; no original BGI App or renderer |
 | crysirror-nscripter | Optional GPL-2.0-or-later native text-script interpreter; shared Layer/GlyphRun/UI, resource workers, audio and cyclic XOR; no ONScripter runtime or renderer linked |
 | crysirror-circus | First-class bounded DC4PH MES native interpreter and semantic/resource/wait adapter, registered by desktop feature `circus` for ABI0xabb6; shared Image/Layer/UI/Audio/VFX own presentation. ABI0xaab6 remains parse-only; original saves and later native operations remain unsupported |
+| crysirror-catsystem2 | First-class original KCS v2 stack VM and pending-native adapter; shared INT/PE MENU/XML/task/UI resources, reviewed module ABI guard and visible opcode/native frontiers. CST/FES execution and original saves remain unsupported |
 | crysirror-siglus-vm | Independent original SceneVm subset registered as `siglus`; native operations call shared engine services, including the explicit plain TEXT/NAME profile (ADR 0061) |
 | crysirror-engine | Unity-style public API: reflective classes/objects, App lifecycle, behaviours, plugins, ScriptHost contract (ADR 0004/0005) |
 | crysirror-script-js | Default JS/TS script host (Boa + Oxc) bound to the class registry; desktop feature `scripting` (ADR 0005) |
@@ -574,3 +575,23 @@ stay in the adapter. Storage line encoding and capability metadata are shared
 Runtime/Core contracts. MP4 AVC/HEVC/AV1 CPU decoding belongs to crysirror-video
 and the existing bounded Media workers; the unused crysirror-mp4 prototype was
 retired. MP4 audio and hardware video decoding are not part of this profile.
+
+
+## Scoped host capabilities added during native adapter extraction
+
+Native Output and `Engine.log` append to one bounded client log; `Engine.logs`
+reads that canonical ring. The pre-existing App deque is only a derived view.
+Append completion is an owner-committed receipt, not external device/file output.
+Logical keyboard locks are client session state with revisions; physical state
+is unknown unless imported, and physical control remains unsupported. Successful
+Runtime restore resets logical locks; a rejected restore does not.
+
+Host local civil time is a separate cancellable worker dependency, recording its
+actual Unix instant, local UTC offset and calendar fields. It never substitutes
+virtual simulation time. Shared image workers may publish immutable ImageResource
+leases under unique client-scoped paths without owner-side PNG encoding or pixel
+copies. Frozen frames retain those leases after explicit path release. Runtime
+save/restore rejects live publications until reconstruction is supported.
+Arbitrary RGB LUT processing lives in crysirror-image; RealLive retains only TCC,
+filename, region and pending-opcode policy. These services are usable without
+any native VM; native success still requires their actual completion.

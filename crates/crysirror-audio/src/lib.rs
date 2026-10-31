@@ -6,6 +6,7 @@ use anyhow::{Result, ensure};
 use crysirror_core::state::{AudioVoice, ObjectId, SceneState};
 use std::{collections::BTreeMap, sync::Arc};
 
+pub mod loop_catalog;
 pub mod buffered;
 pub mod channels;
 mod channel_async;

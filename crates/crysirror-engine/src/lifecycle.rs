@@ -102,6 +102,7 @@ impl App {
         builtin::register(&mut classes)?;
         Ok(Self {
             cx: EngineContext::new(EngineState {
+                media_probes:Default::default(),
                 bitmap_jobs:Default::default(),
                 streaming: Default::default(),
                 runtime,
@@ -112,6 +113,7 @@ impl App {
                 frame: 0,
                 fixed_step_ms: DEFAULT_FIXED_STEP_MS,
                 log: VecDeque::new(),
+                log_stamp: Default::default(),
                 quit_requested: false,
                 actions: Default::default(),
                 input_events: Default::default(),
@@ -380,12 +382,16 @@ impl App {
         ensure!(dt_ms <= 60_000, "frame delta exceeds 60 s");
         let profiler = self.runtime()?.profiler();
         let _span = profiler.span(profiler.frame() + 1, "engine.frame");
-        let step = {
+        let physical_input=input;
+        let (input,routed_at_start,step) = {
             let s = self.cx.state()?;
+            s.runtime.host.engine.preflight_input(physical_input,s.runtime.project.canvas)?;
+            let routed=s.runtime.host.engine.input_routes.active();
+            let input=if routed {InputFrame{buttons_down:0,buttons_pressed:0,..physical_input}}else{physical_input};
             crate::input_events_api::observe(s,input)?;
             s.input = input;
             s.actions.begin_frame(input);
-            s.fixed_step_ms
+            (input,routed,s.fixed_step_ms)
         };
         self.accumulator_ms += dt_ms;
         let mut steps = self.accumulator_ms / step;
@@ -408,12 +414,23 @@ impl App {
         crate::systems::spatial_audio(&mut self.cx).context("spatial audio")?;
         {
             let s = self.cx.state()?;
+            let routed_now=s.runtime.host.engine.input_routes.active();
+            let runtime_input=if routed_at_start&&!routed_now {
+                // Releasing ownership never falls back to raw delivery of the
+                // current event after it was assigned to the routing phase.
+                InputFrame{buttons_down:0,buttons_pressed:0,..physical_input}
+            }else if !routed_at_start&&routed_now {
+                // Behaviours already observed this frame. Prime existing held
+                // state without offering their pressed edges to new receivers.
+                InputFrame{buttons_pressed:0,..physical_input}
+            }else{physical_input};
             if worker_audio {
-                s.runtime.tick_control(dt_ms, input)
+                s.runtime.tick_control(dt_ms, runtime_input)
             } else {
-                s.runtime.tick(dt_ms, input)
+                s.runtime.tick(dt_ms, runtime_input)
             }
             .context("runtime tick")?;
+            s.sync_log_view();
         }
         self.each("on_late_update", false, |b, cx| b.on_late_update(cx, dt_ms))?;
         crate::text_api::update(&mut self.cx, dt_ms).context("rich text reveal")?;

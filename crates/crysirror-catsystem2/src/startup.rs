@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: MPL-2.0
 use anyhow::{ensure, Context, Result};
 use crysirror_core::path::{Mount, VfsPath};
-use quick_xml::{events::Event, Reader};
+use crysirror_resource::xml::XmlDocument;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Original startup configuration projected onto the native VM boundary.
 pub struct Startup {
+    /// Capability-relative original SCRIPT/start path.
     pub script: String,
+    /// Original virtual width and height, falling back to physical dimensions.
     pub canvas: [u32; 2],
+    /// Original ETC/heap size in bytes.
     pub heap_bytes: u32,
 }
 /// Bounded native startup policy. XML is data; external entities and doctypes
@@ -18,51 +22,24 @@ pub fn parse_startup(bytes: &[u8]) -> Result<Startup> {
         bytes.len() <= 1024 * 1024,
         "CatSystem2 startup XML byte budget"
     );
-    let source = std::str::from_utf8(bytes).context("CatSystem2 startup XML must be UTF-8")?;
-    let mut xml = Reader::from_str(source.trim_start_matches('\u{feff}'));
-    xml.config_mut().trim_text(true);
-    let mut stack = Vec::<String>::new();
+    let document = XmlDocument::parse(bytes)?;
+    ensure!(
+        document.root().name == "document",
+        "CatSystem2 startup root must be document"
+    );
     let mut fields = BTreeMap::<String, String>::new();
-    let wanted = [
-        "document/SCRIPT/start",
-        "document/SCREEN/width",
-        "document/SCREEN/height",
-        "document/SCREEN/v_width",
-        "document/SCREEN/v_height",
-        "document/ETC/heap",
-    ];
-    let mut events = 0;
-    loop {
-        events += 1;
-        ensure!(events <= 100_000, "CatSystem2 startup XML event budget");
-        match xml.read_event()? {
-            Event::Start(e) => {
-                ensure!(stack.len() < 32, "CatSystem2 startup XML depth budget");
-                stack.push(std::str::from_utf8(e.name().as_ref())?.to_owned());
-            }
-            Event::End(_) => {
-                stack
-                    .pop()
-                    .context("CatSystem2 startup XML closing element")?;
-            }
-            Event::Text(e) => {
-                let key = stack.join("/");
-                if wanted.contains(&key.as_str()) {
-                    let text = quick_xml::escape::unescape(&e.xml10_content()?)?.into_owned();
-                    ensure!(
-                        fields.insert(key, text).is_none(),
-                        "duplicate CatSystem2 startup field"
-                    );
-                }
-            }
-            Event::DocType(_) | Event::GeneralRef(_) => {
-                anyhow::bail!("CatSystem2 startup external/entity declarations unsupported")
-            }
-            Event::Eof => break,
-            _ => {}
+    for path in [
+        "SCRIPT/start",
+        "SCREEN/width",
+        "SCREEN/height",
+        "SCREEN/v_width",
+        "SCREEN/v_height",
+        "ETC/heap",
+    ] {
+        if let Some(node) = document.unique_child_path(path)? {
+            fields.insert(format!("document/{path}"), node.text.trim().to_owned());
         }
     }
-    ensure!(stack.is_empty(), "CatSystem2 startup XML unclosed element");
     let script = fields
         .remove("document/SCRIPT/start")
         .context("CatSystem2 SCRIPT/start missing")?

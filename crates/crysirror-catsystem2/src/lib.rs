@@ -5,6 +5,12 @@
 mod adapter;
 pub mod kcs;
 mod native_menu;
+mod native_values;
+mod native_interpreter;
+mod sound_definition;
+mod native_save;
+mod image_list;
+mod fes_task;
 pub mod scene;
 pub mod startup;
 mod task_policy;
@@ -12,3 +18,7 @@ mod task_policy;
 pub use adapter::register;
 pub use adapter::{CatSystem2Vm, Config};
 pub use startup::{parse_startup, Startup};
+
+mod loop_policy;
+
+mod native_settings;

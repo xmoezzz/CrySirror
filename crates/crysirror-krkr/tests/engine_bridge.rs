@@ -14,6 +14,12 @@ fn png(path: &std::path::Path, w: u32, h: u32, rgba: [u8; 4]) {
     let img = image::RgbaImage::from_pixel(w, h, image::Rgba(rgba));
     img.save(path).unwrap();
 }
+fn canvas_image_asset(runtime:&Runtime,id:u32)->String {
+    let surface=runtime.host.engine.canvases.surface(ClientId(1),id).unwrap();
+    let [crysirror_scene::canvas::CanvasNode::Draw{layer}]=surface.nodes.as_slice() else{panic!("expected one immutable image draw")};
+    let Paint::Image{asset,..}=&layer.paint else{panic!("expected shared image")};
+    asset.clone()
+}
 
 fn fixture(startup: &str, extra: &[(&str, &str)]) -> (tempfile::TempDir, Runtime) {
     let t = tempfile::tempdir().unwrap();
@@ -709,6 +715,37 @@ fn native_hit_filter_uses_super_work_flag_and_disabled_hit_blocks_fallthrough() 
 }
 
 #[test]
+fn transparent_assets_stay_lazy_in_hidden_layers_and_prepare_before_real_alpha_hit(){
+    let (d,mut r)=fixture(r#"
+        global.presses=0;
+        class Button extends Layer {function Button(w,p){super.Layer(w,p);}function onMouseDown(x,y,b,s){presses++;Debug.message('masked-press',presses);}}
+        var w=new Window(),root=new Layer(w,null),held=[];
+        for(var i=0;i<32;i++){var cached=new Layer(w,root);cached.loadImages('image/mask.png');held.add(cached);}
+        var button=new Button(w,root);button.loadImages('image/mask.png');button.visible=true;button.hitType=0;button.hitThreshold=128;
+        w.visible=true;Debug.message('hidden-cache-ready');
+    "#,&[]);
+    image::RgbaImage::from_raw(2,1,vec![255,0,0,255,0,0,0,0]).unwrap()
+        .save(d.path().join("assets/game/image/mask.png")).unwrap();
+    r.tick(0,InputFrame{pointer_x:20,pointer_y:20,..Default::default()}).unwrap();
+    let inspect=r.inspect();
+    let native=&inspect["sessions"][0]["native"];
+    assert!(native["log_tail"].to_string().contains("hidden-cache-ready"),"hidden assets must not park their native loader to retain duplicate RGBA");
+    assert_eq!(native["suspended"],false);
+    r.tick(1,InputFrame{pointer_x:0,pointer_y:0,buttons_pressed:buttons::MOUSE_LEFT,..Default::default()}).unwrap();
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);
+    loop{
+        r.tick(1,InputFrame::default()).unwrap();
+        if r.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("masked-press 1"){break;}
+        assert!(std::time::Instant::now()<deadline,"positive-alpha input receipt did not resume");
+        std::thread::yield_now();
+    }
+    r.tick(1,InputFrame{pointer_x:1,pointer_y:0,buttons_pressed:buttons::MOUSE_LEFT,..Default::default()}).unwrap();
+    let log=r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert_eq!(log.matches("masked-press 1").count(),1,"input receipt was delivered more than once");
+    assert!(!log.contains("masked-press 2"),"transparent pixel must fall through");
+}
+
+#[test]
 fn invalidation_releases_shared_native_voice_even_without_super_finalize() {
     let (d, mut r) = fixture(
         r#"
@@ -805,16 +842,51 @@ fn native_image_filters_resume_original_tjs_and_publish_shared_resource_pixels()
         assert!(std::time::Instant::now() < end);
         std::thread::yield_now();
     }
+    let asset=canvas_image_asset(&r,2);
+    assert!(asset.starts_with("__image_resource/"));
     let surface = r
         .assets
-        .surface(ClientId(1), "__surface/1073741826")
+        .surface(ClientId(1), &asset)
         .unwrap();
     assert_eq!(&*surface.rgba, &[182, 182, 182, 255, 38, 38, 38, 255]);
     assert_eq!(
         r.inspect()["sessions"][0]["native"]["owns_framebuffer"],
         false
     );
+    let frozen=r.assets.freeze_surfaces();
+    r.host.submit_engine(ClientId(1),1,&serde_json::to_vec(&json!({"canvases":[
+        {"op":"hide","layer":5},{"op":"destroy","id":2}
+    ]})).unwrap()).unwrap();
+    r.tick(1,InputFrame::default()).unwrap();
+    assert!(r.assets.surface(ClientId(1),&asset).is_none(),"destroyed logical image must release retired live catalog entry");
+    assert_eq!(frozen.surface(ClientId(1),&asset).unwrap().rgba,surface.rgba,
+        "already-admitted immutable view owns its old generation");
     drop(jobs);
+}
+
+#[test]
+fn native_alpha_clip_resumes_once_and_uses_shared_pair_pixels(){
+    let (_t,mut r)=fixture(r#"
+        Plugins.link('layerExBTOA.dll');
+        if(Plugins.getStatus('layerExBTOA.dll').kind!='engine_facade')throw new Exception('alpha clip facade absent');
+        var w=new Window(),root=new Layer(w,null),d=new Layer(w,root),s=new Layer(w,root);
+        d.setImageSize(3,1);d.fillRect(0,0,3,1,0x80123456);
+        s.setImageSize(3,1);s.fillRect(0,0,3,1,0x40aabbcc);
+        d.setClip(1,0,1,1);
+        var result=d.clipAlphaRect(0,0,s,-1,0,4,1,0);
+        if(result!==void)throw new Exception('clipAlphaRect result');
+        Debug.message('native-alpha-pair-complete');
+    "#,&[]);
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);
+    loop{
+        r.tick(1,InputFrame::default()).unwrap();
+        if r.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("native-alpha-pair-complete"){break;}
+        assert!(std::time::Instant::now()<deadline,"native pair did not complete");std::thread::yield_now();
+    }
+    let log=r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert_eq!(log.matches("native-alpha-pair-complete").count(),1);
+    let asset=canvas_image_asset(&r,2);let image=r.assets.surface(ClientId(1),&asset).unwrap();
+    assert_eq!(&*image.rgba,&[0x12,0x34,0x56,128,0x12,0x34,0x56,32,0x12,0x34,0x56,128]);
 }
 
 #[test]
@@ -848,9 +920,10 @@ fn layer_ex_raster_plugin_routes_real_copy_to_shared_image_worker() {
         assert!(std::time::Instant::now() < end);
         std::thread::yield_now();
     }
+    let asset=canvas_image_asset(&r,3);
     let image = r
         .assets
-        .surface(ClientId(1), "__surface/1073741827")
+        .surface(ClientId(1), &asset)
         .unwrap();
     assert_eq!(
         image.rgba.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>(),
@@ -1038,4 +1111,70 @@ fn native_crossfade_uses_engine_clock_and_exchanges_once() {
     assert!(r.host.engine.layers.crossfade(ClientId(1),4).is_none());
     let log=r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
     assert_eq!(log.matches("crossfade complete").count(),1,"{log}");
+}
+
+#[test]
+fn image_only_native_transition_reuses_source_canvas_without_extra_surface(){
+    let (_t,mut r)=fixture(r#"
+        var w=new Window(),root=new Layer(w,null),a=new Layer(w,root),b=new Layer(w,root);
+        a.setImageSize(2,2);b.setImageSize(2,2);
+        a.fillRect(0,0,2,2,0xffff0000);b.fillRect(0,0,2,2,0xff0000ff);
+        a.visible=true;b.visible=false;w.visible=true;
+        a.beginTransition('crossfade',false,b,%[time:100]);
+    "#,&[]);
+    r.tick(0,InputFrame::default()).unwrap();
+    let state=serde_json::to_value(&r.host.engine.canvases).unwrap();
+    assert_eq!(state["clients"]["1"].as_object().unwrap().len(),3,
+        "temporary transition presentation must not consume another shared surface");
+    let temporary=state["presentations"]["1"].as_object().unwrap().iter()
+        .find(|(id,p)|id.as_str()!="7" && p["source"]==3).unwrap().0.parse::<u32>().unwrap();
+    assert!(r.host.engine.layers.get(ClientId(1),temporary).is_some());
+    r.tick(100,InputFrame::default()).unwrap();
+    r.tick(101,InputFrame::default()).unwrap();
+    assert!(r.host.engine.layers.get(ClientId(1),temporary).is_none());
+    let state=serde_json::to_value(&r.host.engine.canvases).unwrap();
+    assert_eq!(state["clients"]["1"].as_object().unwrap().len(),3);
+}
+
+#[test]
+fn load_images_without_metainfo_returns_the_null_object() {
+    let (_dir, mut runtime) = fixture(r#"
+        Storages.addAutoPath("image/");
+        var w = new Window(); var l = new Layer(w, null);
+        var result = l.loadImages("chara");
+        if(result !== null || result === void) throw new Exception("wrong image metainfo return");
+        Debug.message("null-image-metainfo");
+    "#, &[]);
+    for _ in 0..1000 {
+        runtime.tick(16, InputFrame::default()).unwrap();
+        if runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("null-image-metainfo") { return; }
+        std::thread::yield_now();
+    }
+    panic!("image worker did not complete");
+}
+
+#[test]
+fn prerendered_font_binding_uses_async_engine_face_and_retained_text_nodes() {
+    let (tmp,mut r)=fixture(r#"
+        var mapped=new Font();mapped.face="Authored bitmap";mapped.height=24;
+        mapped.mapPrerenderedFont("authored.tft");
+        var win=new Window();win.visible=true;var layer=new Layer(win,null);
+        layer.font.face="Authored bitmap";layer.font.height=24;
+        Debug.message("precomputed width",layer.font.getTextWidth("AA"));
+        layer.drawText(1,1,"AA",0xffffff);
+        mapped.unmapPrerenderedFont();
+        Debug.message("precomputed done");
+    "#,&[]);
+    let mut data=b"TVP pre-rendered font\x1a".to_vec();data.extend([1,2]);data.extend(1u32.to_le_bytes());data.extend(36u32.to_le_bytes());data.extend(38u32.to_le_bytes());data.extend((b'A' as u16).to_le_bytes());data.extend(58u32.to_le_bytes());for v in [2i16,2,-1,2,3,0,4,0]{data.extend(v.to_le_bytes());}data.extend([32,0x43]);
+    std::fs::write(tmp.path().join("assets/game/authored.tft"),data).unwrap();
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+    let mut tick=0u64;
+    loop {
+        r.tick(tick,InputFrame::default()).unwrap();tick+=16;
+        if r.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("precomputed done"){break;}
+        assert!(std::time::Instant::now()<deadline,"font worker failed to resume");std::thread::yield_now();
+    }
+    let native=r.inspect()["sessions"][0]["native"].clone();let log=native["log_tail"].to_string();assert!(log.contains("precomputed width 8"),"{log}");
+    let canvas=r.host.engine.canvases.surface(ClientId(1),1).unwrap();let nodes=serde_json::to_string(&canvas.nodes).unwrap();assert!(nodes.contains("__font/1/"),"{nodes}");assert!(nodes.contains("AA"),"{nodes}");
+    assert!(native["error"].is_null());
 }

@@ -1632,6 +1632,21 @@ fn font_text_height(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Re
     Ok(Variant::Integer(font_size(rt, font)? as i64))
 }
 
+/// Native Layer default focus handlers forward event dictionaries to the
+/// constructor's Window action owner. Missing action is the native default.
+fn layer_focus_action(rt:&mut Rt,this:Option<ObjectHandle>,args:Vec<Variant>,focus:bool)->Result<Variant> {
+    let layer=this_of(rt,this,"Layer focus event")?;
+    let owner=ObjectHandle(rt.host().layer(layer)?.window);
+    let fields:&[&str]=if focus {&["blurred","direction"]}else{&["focused"]};
+    if args.len()<fields.len() {return Err(TjsError::bad_param_count());}
+    if !has_member(rt,owner,"action") {return Ok(Variant::Void);}
+    let event=rt.alloc_dictionary_object();
+    rt.set_object_member(event,"type",Variant::String(if focus {"onFocus"}else{"onBlur"}.into()));
+    rt.set_object_member(event,"target",Variant::self_bound(layer));
+    for (name,value) in fields.iter().zip(args) {rt.set_object_member(event,*name,value);}
+    rt.call_object_method(owner,"action",vec![Variant::self_bound(event)])
+}
+
 fn install_layer(rt: &mut Rt) {
     let class = native_class(rt, "Layer", |rt, this, a| {
         let h = this_of(rt, this, "Layer")?;
@@ -1759,6 +1774,7 @@ fn install_layer(rt: &mut Rt) {
                 let before = node_enabled_states(rt);
                 rt.set_object_member(h, slot, v);
                 if !enable {
+                    crate::native_mouse::leave_tree(rt, h.0, false)?;
                     remove_tree_modal_state(rt, h);
                 }
                 notify_node_enabled(rt, before)
@@ -1784,6 +1800,15 @@ fn install_layer(rt: &mut Rt) {
             ("onClick", |_, _, _| Ok(Variant::Void)),
             ("onPaint", |_, _, _| Ok(Variant::Void)),
             // krkrz default handlers of the modal-mode notifications.
+            ("onMouseEnter", |_, _, _| Ok(Variant::Void)),
+            ("onMouseLeave", |_, _, _| Ok(Variant::Void)),
+            ("onBlur", |rt,t,a| layer_focus_action(rt,t,a,false)),
+            ("onFocus", |rt,t,a| layer_focus_action(rt,t,a,true)),
+            ("releaseCapture", |rt, t, _| {
+                this_of(rt, t, "Layer.releaseCapture")?;
+                crate::native_mouse::release(rt);
+                Ok(Variant::Void)
+            }),
             ("onNodeEnabled", |_, _, _| Ok(Variant::Void)),
             ("onNodeDisabled", |_, _, _| Ok(Variant::Void)),
             // Pixel representation conversion (from a draw face to this layer's
@@ -1950,6 +1975,7 @@ fn install_layer(rt: &mut Rt) {
             }),
             ("loadImages", layer_load_images),
             ("adjustGamma", crate::image_api::gamma),
+            ("clipAlphaRect",crate::image_api::clip_alpha),
             // krkrz tTJSNI_BaseLayer::DoBoxBlur (LayerIntf.cpp): a box blur
             // of the clip rect over (-xblur,-yblur)..(xblur,yblur); the alpha
             // face (dfAlpha, or dfAuto on an alpha layer) weights colour by
@@ -2223,13 +2249,21 @@ fn install_layer(rt: &mut Rt) {
             ),
             (
                 "hint",
-                |_, _| Ok(Variant::String(String::new())),
-                |_, _, v| {
-                    if !v.to_tjs_string()?.is_empty() {
-                        return Err(unsupported("Layer.hint", "shared tooltip mapping"));
-                    }
-                    Ok(())
+                |rt, t| {
+                    let h = this_of(rt,t,"Layer.hint")?;
+                    Ok(Variant::String(rt.host().layer(h)?.hint.clone()))
                 },
+                |rt,t,v| { let h=this_of(rt,t,"Layer.hint")?; crate::tooltip::set(rt,h,v) },
+            ),
+            (
+                "showParentHint",
+                |rt,t| { let h=this_of(rt,t,"Layer.showParentHint")?; Ok(Variant::Integer(i64::from(rt.host().layer(h)?.show_parent_hint))) },
+                |rt,t,v| { let h=this_of(rt,t,"Layer.showParentHint")?; rt.host_mut().layer_mut(h)?.show_parent_hint=v.is_truthy(); Ok(()) },
+            ),
+            (
+                "ignoreHintSensing",
+                |rt,t| { let h=this_of(rt,t,"Layer.ignoreHintSensing")?; Ok(Variant::Integer(i64::from(rt.host().layer(h)?.ignore_hint_sensing))) },
+                |rt,t,v| { let h=this_of(rt,t,"Layer.ignoreHintSensing")?; rt.host_mut().layer_mut(h)?.ignore_hint_sensing=v.is_truthy(); Ok(()) },
             ),
             (
                 "imageModified",
@@ -2286,12 +2320,14 @@ fn install_layer(rt: &mut Rt) {
                 |rt, t| layer_get(rt, t, |l| l.visible as i64),
                 |rt, t, v| {
                     let show = boolean(&v);
+                    let h = this_of(rt, t, "Layer.visible")?;
+                    let was = rt.host().layer(h)?.visible;
                     layer_set(rt, t, Variant::Integer(show as i64), |l, x| {
                         l.visible = x != 0
                     })?;
                     // krkrz SetVisible(false) runs BlurTree (modal state in
                     // the hidden tree is removed, with node-enabled notices).
-                    let h = this_of(rt, t, "Layer.visible")?;
+                    if was && !show { crate::native_mouse::leave_tree(rt, h.0, false)?; }
                     if !show && rt.host().modal_layers.iter().any(|m| rt.host().is_ancestor_or_self(*m, h.0)) {
                         let before = node_enabled_states(rt);
                         remove_tree_modal_state(rt, h);
@@ -2412,7 +2448,9 @@ fn install_layer(rt: &mut Rt) {
                         }
                         cursor = rt.host().layers.get(&id).and_then(|l| l.parent);
                     }
-                    if let Some(old) = l.parent.and_then(|id| rt.host_mut().layers.get_mut(&id)) {
+                    crate::native_mouse::leave_tree(rt, h.0, true)?;
+                    let old_parent = rt.host().layer(h)?.parent;
+                    if let Some(old) = old_parent.and_then(|id| rt.host_mut().layers.get_mut(&id)) {
                         old.children.retain(|id| *id != h.0);
                     }
                     rt.host_mut()
@@ -2520,7 +2558,7 @@ fn set_image_size(rt: &mut Rt, h: ObjectHandle, w: i64, ht: i64) -> Result<()> {
     if l.has_image && l.image_width == w && l.image_height == ht {
         return Ok(());
     }
-    if !l.blank && l.has_image {
+    if l.has_image && (!l.blank || l.province_allocated) {
         return rt.host_mut().resize_surface(h, w, ht);
     }
     rt.host_mut().reset_surface(h, w, ht, [255, 255, 255, 0])
@@ -2616,6 +2654,28 @@ fn layer_load_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> R
                     .map_err(|e| TjsError::runtime(e.to_string()))?,
             ),
         });
+    // Retain the immutable Asset description. Shared effects decode on demand;
+    // prepare_hit_images resolves visible positive-alpha hit candidates before
+    // consuming their input receipt. Hidden native caches need no second RGBA
+    // copy merely because their image contains transparent pixels.
+    // Native LayerIntf returns metainfo as an Object variant. With no tags
+    // this is the null object, which is distinct from TJS void.
+    Ok(Variant::Null)
+}
+
+fn fill_province(rt:&mut Rt,h:ObjectHandle,owner:u32,rect:[i64;4],region:u32)->Result<Variant> {
+    let layer=rt.host().layer(h)?;
+    let size=[layer.image_width as u32,layer.image_height as u32];
+    let Some((rect,_))=crysirror_core::region_map::clip_region_copy(None,size,rect,[rect[0],rect[1]],layer.draw_clip)
+        .map_err(|e|TjsError::runtime(e.to_string()))? else {return Ok(Variant::Void);};
+    let layer=rt.host_mut().layer_mut(h)?;
+    if region!=0 || layer.province_allocated {
+        layer.regions.fill(owner,rect,region).map_err(|e|TjsError::runtime(e.to_string()))?;
+        layer.image_modified=true;
+        if region!=0 {layer.province_allocated=true;}
+        else if rect==[0,0,i64::from(size[0]),i64::from(size[1])] {layer.province_allocated=false;}
+    }
+    rt.host_mut().api_calls+=1;
     Ok(Variant::Void)
 }
 
@@ -2630,12 +2690,7 @@ fn layer_fill_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
             need_int(&a, 3, "province height")?,
         ];
         let region = need_int(&a, 4, "province region")? as u32 & 255;
-        rt.host_mut()
-            .layer_mut(h)?
-            .regions
-            .fill(owner, rect, region)
-            .map_err(|e| TjsError::runtime(e.to_string()))?;
-        return Ok(Variant::Void);
+        return fill_province(rt,h,owner,rect,region);
     }
     // krkrz LayerIntf FillRect: holdAlpha with a colour face fills colour
     // only; dfOpaque (1) without holdAlpha fills with alpha 255.
@@ -2724,12 +2779,7 @@ fn layer_color_rect(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Re
         ];
         let region = need_int(&a, 4, "province region")? as u32 & 255;
         let owner = rt.host().client;
-        rt.host_mut()
-            .layer_mut(h)?
-            .regions
-            .fill(owner, rect, region)
-            .map_err(|e| TjsError::runtime(e.to_string()))?;
-        return Ok(Variant::Void);
+        return fill_province(rt,h,owner,rect,region);
     }
     let face = rt.object_member(h, "__lp_face").to_integer().unwrap_or(0);
     let hold = rt.object_member(h, "__lp_holdAlpha").to_integer().unwrap_or(0) != 0;
@@ -2839,7 +2889,7 @@ fn layer_copy(
     let copy_main = hold && replace && copy_face == 1;
     let atop = copy_main || hold && !replace && matches!(face, 0 | 1 | 128);
     if replace {
-        if !matches!(copy_face, 0 | 1 | 4) {
+        if !matches!(copy_face, 0 | 1 | 3 | 4) {
             return Err(unsupported(&format!("{member} with draw face={copy_face}"),
                 "per-channel canvas draw faces"));
         }
@@ -2907,6 +2957,26 @@ fn layer_copy(
     }
     let source = rt.host().layer(src)?.clone();
     let dest = rt.host().layer(h)?.clone();
+    if replace && copy_face==3 {
+        let owner=rt.host().client;
+        let Some((rect,at))=crysirror_core::region_map::clip_region_copy(None,
+            [dest.image_width as u32,dest.image_height as u32],
+            [sx,sy,sw,sh],[dx,dy],dest.draw_clip).map_err(|e|TjsError::runtime(e.to_string()))? else {return Ok(Variant::Void);};
+        let layer=rt.host_mut().layer_mut(h)?;
+        if source.province_allocated {
+            let changed=layer.regions.copy_from(owner,&source.regions,rect,at,None)
+                .map_err(|e|TjsError::runtime(e.to_string()))?;
+            layer.province_allocated=true;layer.image_modified|=changed;
+        } else {
+            // krkrz CopyRect's absent-province branch fills the clipped SOURCE
+            // rectangle, not the destination coordinates. Preserve that policy.
+            if layer.province_allocated {layer.regions.fill(owner,rect,0)
+                .map_err(|e|TjsError::runtime(e.to_string()))?;}
+            layer.image_modified=true;
+        }
+        rt.host_mut().api_calls+=1;
+        return Ok(Variant::Void);
+    }
     // A complete destination replacement can select one cell from a larger
     // source atlas. The shared Canvas copy clips/snapshots that cell itself.
     let whole = [dx, dy] == [0, 0]
@@ -3099,6 +3169,8 @@ fn layer_assign_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) ->
         "rect":[0,0,source.image_width,source.image_height],"position":[0,0],"opacity":255,"replace":true}));
     host.layer_mut(h)?.blank = source.blank;
     host.layer_mut(h)?.full_alpha = source.full_alpha;
+    host.layer_mut(h)?.regions = source.regions.clone();
+    host.layer_mut(h)?.province_allocated = source.province_allocated;
     // The images are shared, so the CPU source is too.
     host.layer_mut(h)?.image_source = source.image_source.clone();
     if source.image_source.is_none() {
@@ -3145,7 +3217,9 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     let size = font_size(rt, font)?;
     let l = rt.host().layer(h)?.clone();
     let alias=crate::font_resources::alias(rt,font)?;
-    let bold = rt.resolve_object_member(font, "bold")?.is_truthy();
+    // A mapped precomputed face already contains the native Font style.
+    let bold = rt.resolve_object_member(font, "bold")?.is_truthy()
+        && !crate::font_resources::is_mapped(rt,font)?;
     if !bold && shadow_level == 0 {
         let host = rt.host_mut();
         if host.layer(h)?.full_alpha != Some(255) {
@@ -3405,7 +3479,7 @@ fn layer_operate_affine(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -
     transform_blit(rt, h, src, rect, matrix, Some(opacity), M)
 }
 
-fn clip_of(l: &LayerState) -> [i64; 4] {
+pub(crate) fn clip_of(l: &LayerState) -> [i64; 4] {
     l.draw_clip.unwrap_or([0, 0, l.image_width, l.image_height])
 }
 fn clip_get(rt: &mut Rt, t: Option<ObjectHandle>, i: usize) -> Result<Variant> {

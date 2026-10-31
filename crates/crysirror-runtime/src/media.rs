@@ -3,6 +3,8 @@
 //! decoder queue and its clock; a VM only issues resource commands and queries.
 //! Decoded video frames are individual texture resources, never engine screens.
 use anyhow::{Context, Result, anyhow, ensure};
+#[path="media_probe.rs"]
+pub mod probe;
 use crysirror_core::{
     path::{Mount, VfsPath},
     service::{AssetReader, AudioParameters, AudioRequest, ClientStorage, PcmAudio, PcmBus},

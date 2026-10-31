@@ -118,13 +118,18 @@ struct Services {
     layer_ids: BTreeMap<u8, Vec<u32>>,
     palette: BTreeMap<u8, [u8; 3]>,
     positions: BTreeMap<u8, [i16; 2]>,
+    sprite_scales: BTreeMap<u8,(i16,[i16;2])>,
     names: Option<crate::names::Names>,
     voice_archive: Option<Arc<dyn Archive>>,
     audio: Option<(u32, String, u64)>,
     music_loops: Option<BTreeMap<String, [u64; 2]>>,
+    music_release_pending: Option<crysirror_core::service::AudioReleaseHandle>,
+    music_releases: Vec<(crysirror_core::service::AudioReleaseHandle, u64)>,
+    audio_update_due: bool,
     mixer_controls: Option<crate::machine::MixerControls>,
     scene_root: bool,
     displayed: BTreeSet<u8>,
+    fit_background:bool,
     fade: Option<(bool, u32, u32)>,
     fade_canvas: bool,
     fade_frames: u64,
@@ -146,6 +151,7 @@ const COLOUR_ROOT: u32 = 0x3400_0001;
 // Canvas presentation roots reserve the upper 0x2000_0000 namespace.
 const FADE_SOURCE: u32 = 0x1400_0002;
 const FADE_CANVAS: u32 = 0x3300_0000;
+const CHECKPOINT_CANVAS:u32=0x3300_0002;
 pub struct CircusVm {
     client: ClientId,
     config: Config,
@@ -220,10 +226,10 @@ impl Services {
                                 return Ok(Prepared::SaveReadable(false));
                             }
                             let reader = storage.open_read(&path)?;
-                            if reader.len()? < 356324 {
+                            if reader.len()? < crate::native_save::BODY_BYTES as u64 {
                                 return Ok(Prepared::SaveReadable(false));
                             }
-                            let mut block = vec![0; 356324];
+                            let mut block = vec![0; crate::native_save::BODY_BYTES];
                             crysirror_resource::read_exact_at(reader.as_ref(), 0, &mut block)?;
                             Ok(Prepared::SaveReadable(true))
                         }
@@ -383,6 +389,7 @@ impl Bridge<'_> {
             return Ok(());
         }
         self.services.frame_at = Some(now);
+        self.services.audio_update_due = true;
         self.advance_effects(now)?;
         self.advance_menu()?;
         if let Some((_, target, _)) = self.services.fade {
@@ -396,6 +403,23 @@ impl Bridge<'_> {
             )?;
         }
         Ok(())
+    }
+    /// Retained shared Layer owns native stage position/scale even when its
+    /// image slot is currently empty; later images attach to the same parent.
+    fn sprite_root(&mut self, slot:u8) -> Result<u32> {
+        ensure!((4..=8).contains(&slot),"Circus native sprite slot");
+        self.root()?;
+        let id=0x3501_0000+u32::from(slot);
+        let position=self.services.positions.get(&slot).copied().unwrap_or([0,0]);
+        let (percent,pivot)=self.services.sprite_scales.get(&slot).copied().unwrap_or((100,[0,0]));
+        //4432E0 uses percentages below1000 and hundredths of a percent
+        //for both axes at/above1000. A zero pivot selects the source centre;
+        //that case is resolved when a real image is attached below.
+        let scale=f32::from(percent)/if percent>=1000{10000.}else{100.};
+        let logical=self.services.image_extents.get(&slot).copied().unwrap_or([1280,720]);
+        let pivot=[if pivot[0]==0{logical[0] as f32/2.}else{f32::from(pivot[0])},if pivot[1]==0{logical[1] as f32/2.}else{f32::from(pivot[1])}];
+        self.submit(vec![json!({"op":"put","layer":{"id":id,"parent":SCENE_ROOT,"rect":[position[0],position[1],1280,720],"paint":{"kind":"solid","color":[0,0,0,0]},"order":[0,slot],"transform":{"scale_x":scale,"scale_y":scale,"pivot_x":pivot[0],"pivot_y":pivot[1]}}})],vec![])?;
+        Ok(id)
     }
     fn root(&mut self) -> Result<()> {
         if !self.services.scene_root {
@@ -480,6 +504,29 @@ impl Bridge<'_> {
     }
 }
 impl NativeHost for Bridge<'_> {
+    fn image_dimensions(&mut self,slot:u8)->Result<Option<([u32;2],[u32;2])>> {
+        Ok(self.services.images.get(&slot).zip(self.services.image_extents.get(&slot)).map(|(image,logical)|(image.size,*logical)))
+    }
+    fn capture_checkpoint(&mut self)->Result<Option<Vec<u8>>> {
+        if !self.effects_ready()? {return Ok(None)}
+        ensure!(self.services.loading.is_none()&&self.services.audio.is_none(),"Circus checkpoint requires completed resource publication");
+        self.root()?;
+        self.host.submit_engine(self.client,1,&serde_json::to_vec(&json!({"canvases":[
+            {"op":"create","id":CHECKPOINT_CANVAS,"width":1280,"height":720},
+            {"op":"copy_subtree","source":SCENE_ROOT,"destination":CHECKPOINT_CANVAS,"rect":[0,0,1280,720],"position":[0,0]}
+        ]}))?)?;
+        let visual:Value=serde_json::from_slice(&self.host.query_engine(self.client,EngineQuery::Canvas(CHECKPOINT_CANVAS))?)?;
+        ensure!(!visual.is_null(),"Circus checkpoint needs actual shared canvas receipt");
+        let ui:Value=serde_json::from_slice(&self.host.query_engine(self.client,EngineQuery::UiSnapshot{canvas:[1280,720],root:None})?)?;
+        let mut ids=BTreeSet::from([SCENE_ROOT,COLOUR_ROOT]);
+        ids.extend(self.services.images.keys().map(|slot|0x3700_0000+u32::from(*slot)));
+        ids.extend((4..=8).map(|slot|0x3501_0000+slot));
+        ids.extend(self.services.layer_ids.values().flatten().copied());
+        let mut retained=Vec::new();for id in ids {let layer:Value=serde_json::from_slice(&self.host.query_engine(self.client,EngineQuery::Layer(id))?)?;if !layer.is_null(){retained.push(layer)}}
+        let resources=json!({"schema":1,"owner":self.client.0,"scene":visual,"ui":ui,"retained_layers":retained,"image_names":self.services.image_names,"positions":self.services.positions,"scales":self.services.sprite_scales,"palette":self.services.palette,"fit_background":self.services.fit_background,"sequence_rng":self.services.sequence_rng});
+        Ok(Some(serde_json::to_vec(&resources)?))
+    }
+
     fn menu_action(&mut self)->Result<Option<String>>{self.tick_menu()}
 
     fn reload_system(&mut self) -> Result<Option<crate::machine::SystemReload>> {
@@ -757,6 +804,15 @@ impl NativeHost for Bridge<'_> {
                 self.services.fade_frames = 0;
                 self.services.fade_duration_ms = *duration_ms;
             }
+            Event::CenterAudioPan{kind}=>{
+                let channels=match kind{0=>0..=1,1=>2..=7,2=>8..=11,_=>bail!("Circus native pan category")};
+                for channel in channels {self.host.submit_audio(self.client,AudioRequest::SetPan{channel,pan:0.5,fade_ms:0.})?;}
+            }
+            Event::FitBackground=>{
+                self.services.fit_background=true;
+                if self.services.displayed.contains(&1){return self.emit(&Event::DisplayImage{slot:1});}
+            }
+            Event::ReleaseMusic { forced, steps } => return self.release_music(*forced, *steps),
             Event::StopAudio { channel } => self.host.submit_audio(
                 self.client,
                 AudioRequest::Stop {
@@ -782,12 +838,16 @@ impl NativeHost for Bridge<'_> {
             // Native positioning applies to the reusable engine Layer state.
             Event::SpritePosition { slot, position } => {
                 self.services.positions.insert(*slot, *position);
+                if (4..=8).contains(slot) {self.sprite_root(*slot)?;}
+            }
+            Event::SpriteScale{slot,percent,pivot}=>{
+                self.services.sprite_scales.insert(*slot,(*percent,*pivot));self.sprite_root(*slot)?;
             }
             Event::GroupVisibility(_) => {
                 bail!("Circus native group visibility mapping not yet verified")
             }
             Event::ResetScene=>{
-                self.root()?;
+                self.root()?;self.services.fit_background=false;
                 let mut layers=vec![json!({"op":"set_visible","id":SCENE_ROOT,"visible":true})];
                 if let Some((_,target,_))=self.services.fade.take(){layers.push(json!({"op":"end_crossfade","id":target}));}
                 if self.services.fade_canvas{
@@ -799,18 +859,20 @@ impl NativeHost for Bridge<'_> {
             }
             Event::DisplayImage { slot } => {
                 self.root()?;
+                let parent=if (4..=8).contains(slot){self.sprite_root(*slot)?}else{SCENE_ROOT};
                 let image = self
                     .services
                     .images
                     .get(slot)
                     .context("Circus display image undefined")?;
-                let position = self.services.positions.get(slot).copied().unwrap_or([0, 0]);
+                let position = if parent==SCENE_ROOT{self.services.positions.get(slot).copied().unwrap_or([0, 0])}else{[0,0]};
                 let logical = self
                     .services
                     .image_extents
                     .get(slot)
                     .context("Circus logical image extent")?;
-                self.submit(vec![json!({"op":"put","layer":{"id":0x3700_0000+u32::from(*slot),"parent":SCENE_ROOT,"rect":[position[0],position[1],logical[0],logical[1]],"paint":{"kind":"image","asset":image.path.relative()},"sampling":{"address_u":"repeat","address_v":"repeat"},"uv":[0.,0.,logical[0] as f32/image.size[0] as f32,logical[1] as f32/image.size[1] as f32],"order":[0,slot]}})],vec![])?;
+                let extent=if *slot==1&&self.services.fit_background{[1280,720]}else{*logical};
+                self.submit(vec![json!({"op":"put","layer":{"id":0x3700_0000+u32::from(*slot),"parent":parent,"rect":[position[0],position[1],extent[0],extent[1]],"paint":{"kind":"image","asset":image.path.relative()},"sampling":{"address_u":"repeat","address_v":"repeat"},"uv":[0.,0.,logical[0] as f32/image.size[0] as f32,logical[1] as f32/image.size[1] as f32],"order":[0,slot]}})],vec![])?;
                 self.services.displayed.insert(*slot);
             }
         }
@@ -860,6 +922,7 @@ impl VmAdapter for CircusVm {
                 font: &self.config.font,
                 input,
             };
+            bridge.native_audio_update()?;
             if !bridge.effects_ready()? {
                 return Ok(VmYield::BudgetExhausted);
             }
@@ -873,6 +936,7 @@ impl VmAdapter for CircusVm {
                     && bridge.services.audio.is_none();
                 if native_frame {
                     bridge.native_frame()?;
+                    self.machine.finish_native_frame();
                 }
                 match outcome {
                     Outcome::Advanced => {}
@@ -882,6 +946,7 @@ impl VmAdapter for CircusVm {
                             if native_frame
                                 && bridge.services.fade.is_none()
                                 && bridge.services.effects.is_none()
+                                && bridge.services.music_releases.is_empty()
                             {
                                 VmYield::WaitUntil(t)
                             } else {
@@ -894,6 +959,7 @@ impl VmAdapter for CircusVm {
                             if native_frame
                                 && bridge.services.fade.is_none()
                                 && bridge.services.effects.is_none()
+                                && bridge.services.music_releases.is_empty()
                             {
                                 VmYield::WaitForInput
                             } else {
@@ -917,6 +983,6 @@ impl VmAdapter for CircusVm {
         Err(crysirror_core::Error::Unsupported("Circus snapshots"))
     }
     fn diagnostics(&self) -> Vec<u8> {
-        serde_json::to_vec(&json!({"scene":self.machine.state.scene,"pc":self.machine.state.pc,"instructions":self.machine.state.instructions,"native_groups":self.machine.state.groups.len(),"engine_images":self.services.images.len(),"worker_pending":self.services.loading.is_some()})).unwrap_or_default()
+        serde_json::to_vec(&json!({"scene":self.machine.state.scene,"pc":self.machine.state.pc,"instructions":self.machine.state.instructions,"native_groups":self.machine.state.groups.len(),"engine_images":self.services.images.len(),"worker_pending":self.services.loading.is_some(),"native_save_projection":{"gaps":self.machine.state.native_live.gaps(),"completed_opcodes":self.machine.state.native_live.completed_opcodes()},"checkpoint":self.machine.state.checkpoint.as_ref().map(|c|json!({"resume_pc":c.resume_pc,"continuation":c.continuation,"vm_bytes":c.vm_state.len(),"shared_resource_bytes":c.shared_resources.len()}))})).unwrap_or_default()
     }
 }

@@ -20,6 +20,13 @@ use std::sync::{Arc, OnceLock};
 /// Every typed engine command and the API method that issues it.
 /// `tests/api_coverage.rs` fails when a command variant has no entry.
 pub const COMMAND_API: &[(&str, &str, &str)] = &[
+    ("input_route","put","InputRoutes.put"),
+    ("input_route","remove","InputRoutes.remove"),
+    ("input_route","clear","InputRoutes.clear"),
+    ("input_route","set_enabled","InputRoutes.setEnabled"),
+    ("input_route","set_priority","InputRoutes.setPriority"),
+    ("input_route","acknowledge","InputRoutes.acknowledge"),
+    ("input_route","cancel","InputRoutes.cancel"),
     ("world", "spawn", "World.spawn"),
     ("world", "despawn", "Entity.destroy"),
     ("world", "set_transform", "Entity.position"),
@@ -60,6 +67,7 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("layer", "complete_reveal", "Layers.completeReveal"),
     ("layer", "set_opacity", "Layers.setOpacity"),
     ("layer", "set_order", "Layers.setOrder"),
+    ("layer", "set_depth", "Layers.setDepth"),
     ("layer", "set_clip", "Layers.setClip"),
     ("layer", "set_filter", "Layers.setFilter"),
     ("layer", "transition", "Layers.transition"),
@@ -86,6 +94,7 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("canvas", "restore", "Canvases.apply"),
     ("canvas", "present", "Canvases.apply"),
     ("canvas", "hide", "Canvases.apply"),
+    ("canvas", "destroy", "Canvases.apply"),
     ("ui", "set_menu", "Ui.setMenu"),
     ("ui", "remove_menu", "Ui.removeMenu"),
     ("ui", "open_menu", "Ui.openMenu"),
@@ -95,6 +104,10 @@ pub const COMMAND_API: &[(&str, &str, &str)] = &[
     ("ui", "close_menu", "Ui.closeMenu"),
     ("ui", "set_menu_checked", "Ui.setMenuChecked"),
     ("ui", "set_menu_enabled", "Ui.setMenuEnabled"),
+    ("ui", "put_tooltip", "Ui.putTooltip"),
+    ("ui", "remove_tooltip", "Ui.removeTooltip"),
+    ("ui", "show_tooltip", "Ui.showTooltip"),
+    ("ui", "hide_tooltip", "Ui.hideTooltip"),
     ("ui", "put", "Ui.put"),
     ("ui", "remove", "Ui.remove"),
     ("ui", "set_visible", "Ui.setVisible"),
@@ -185,6 +198,7 @@ fn layers_info() -> &'static ClassInfo {
             m("revealStatus", vec![("id", T::Int)], T::Optional(Box::new(T::Map)), "Engine-owned glyph reveal {visible,total,complete}, or null for an absent/non-glyph layer."),
             m("completeReveal", vec![("id", T::Int)], T::Void, "Show the complete positioned text run without a VM-private reveal clock."),
             m("setOpacity", vec![("id", T::Int), ("opacity", T::Int)], T::Void, "Inherited opacity 0..255."),
+            m("setDepth",vec![("id",T::Int),("depth",T::Optional(Box::new(T::Number)))],T::Void,"Opt this subtree into stable floating-depth painter order within its major bucket. Equal depths preserve the last committed frame order; ordinary layers draw before depth scopes. Null restores ordinary order. This does not change geometric position."),
             m("setOrder", vec![("id", T::Int), ("order", T::List(Box::new(T::Int)))], T::Void, "Explicit [major, minor] draw order."),
             m("setClip", vec![("id", T::Int), ("clip", T::Optional(Box::new(T::List(Box::new(T::Number)))))], T::Void, "Clip rectangle [x,y,w,h] or null."),
             m("setFilter", vec![("id", T::Int), ("filter", T::Optional(Box::new(T::Map)))], T::Void,
@@ -289,6 +303,7 @@ impl Class for LayersClass {
                 id: id(args)?,
                 order: json(arg(args, 1, "order")?, "order")?,
             },
+            "setDepth"=>LayerCommand::SetDepth{id:id(args)?,depth:match args.get(1){None|Some(Value::Null)=>None,Some(value)=>Some(value.as_f32()?)}},
             "setClip" => LayerCommand::SetClip {
                 id: id(args)?,
                 clip: json(args.get(1).unwrap_or(&Value::Null), "clip")?,
@@ -339,6 +354,10 @@ fn ui_info() -> &'static ClassInfo {
         methods: vec![
             m("drainEvents",vec![],T::List(Box::new(T::Map)),"Consume this client's retained events once, preserving other clients' events. Use this for action dispatch; events only reads a snapshot of the queue."),
             m("snapshotLayers",vec![("root",T::Optional(Box::new(T::Int)))],T::List(Box::new(T::Map)),"Freeze owned UI into independent logical LayerSpec records on the project canvas. Pass null for all owned UI, or a widget id for its subtree; current values, style and clip are preserved."),
+            m("putTooltip",vec![("tooltip",T::Map)],T::Void,"Prepare font-measured bounds and register an owned plain single-line TooltipSpec; no native VM or pointer capture is required."),
+            m("removeTooltip",vec![("id",T::Int)],T::Void,"Remove an owned tooltip and its active presentation."),
+            m("showTooltip",vec![("id",T::Int),("position",T::List(Box::new(T::Number)))],T::Void,"Start or update a passive tooltip at logical pointer coordinates; shared UI owns its delay and lifetime."),
+            m("hideTooltip",vec![("id",T::Optional(Box::new(T::Int)))],T::Void,"Hide one owned tooltip, or all of this client's tooltips with null."),
             m("setMenu",vec![("menu",T::Map)],T::Void,"Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state."),
             m("removeMenu",vec![("id",T::Int)],T::Void,"Remove a client menu tree."),
             m("openMenu",vec![("id",T::Int),("item",T::Optional(Box::new(T::Int))),("position",T::Optional(Box::new(T::List(Box::new(T::Number)))))],T::Void,"Open a root submenu or a context popup at a logical canvas position."),
@@ -403,6 +422,13 @@ impl Class for UiClass {
             let layers=state.runtime.host.engine.ui.snapshot_layers(state.client.0,state.runtime.project.canvas,root)?;
             return Ok(Value::from_json(serde_json::to_value(layers)?));
         }
+        if method == "putTooltip" {
+            let tooltip=json(arg(args,0,"tooltip")?,"tooltip")?;
+            let batch=ServiceBatch{ui:vec![UiCommand::PutTooltip{tooltip}],..Default::default()};
+            let state=cx.state()?;
+            state.runtime.host.submit_engine(state.client,1,&serde_json::to_vec(&batch)?)?;
+            return Ok(Value::Null);
+        }
         if method == "motionStatus" {
             let target = id(args)?;
             let state = cx.state()?;
@@ -422,6 +448,9 @@ impl Class for UiClass {
             )?));
         }
         let cmd = match method {
+            "removeTooltip" => UiCommand::RemoveTooltip{id:id(args)?},
+            "showTooltip" => UiCommand::ShowTooltip{id:id(args)?,position:json(arg(args,1,"position")?,"tooltip position")?},
+            "hideTooltip" => UiCommand::HideTooltip{id:json(args.first().unwrap_or(&Value::Null),"tooltip id")?},
             "setMenu" => UiCommand::SetMenu {
                 menu: json(arg(args, 0, "menu")?, "menu spec")?,
             },

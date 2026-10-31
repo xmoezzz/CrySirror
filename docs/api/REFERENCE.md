@@ -6,16 +6,16 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `1af7e309b18b2933`
+API fingerprint: `66c74a7ee0a69bf1`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
 ## Contents
 
 - [Globals](#globals)
-- Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [Vfx](#class-vfx), [World](#class-world)
+- Classes: [Assets](#class-assets), [Audio](#class-audio), [Bitmap](#class-bitmap), [Canvases](#class-canvases), [Client](#class-client), [Engine](#class-engine), [Entity](#class-entity), [Fs](#class-fs), [Input](#class-input), [InputRoutes](#class-inputroutes), [Layers](#class-layers), [Localization](#class-localization), [Media](#class-media), [Physics](#class-physics), [PhysicsJoint](#class-physicsjoint), [Profiler](#class-profiler), [Puppets](#class-puppets), [Resources](#class-resources), [Save](#class-save), [Text](#class-text), [Ui](#class-ui), [Vfx](#class-vfx), [World](#class-world)
 - [Commands](#commands)
-- Data: [ImageEffect](#imageeffect), [SpriteAlpha](#spritealpha), [StripeReveal](#stripereveal), [SheetSequence](#sheetsequence), [SheetLoop](#sheetloop), [WidgetInteraction](#widgetinteraction), [VectorPath](#vectorpath), [PathCommand](#pathcommand), [PathStroke](#pathstroke), [ImageTransition](#imagetransition), [SineRowCopy](#sinerowcopy), [RegisterScore](#registerscore), [RegisterWrite](#registerwrite), [SimpleTextPlacement](#simpletextplacement), [WindowPolicy](#windowpolicy), [InputSample](#inputsample), [InputReceipt](#inputreceipt), [InputBufferSnapshot](#inputbuffersnapshot), [InputFrame](#inputframe), [CueSequenceCursor](#cuesequencecursor), [AudioSequenceCursor](#audiosequencecursor), [CueSequenceSpec](#cuesequencespec), [CueSequenceLine](#cuesequenceline), [CueSequenceMode](#cuesequencemode), [CueSequenceClock](#cuesequenceclock), [CueSequenceTiming](#cuesequencetiming), [CueSequenceRandom](#cuesequencerandom), [AudioSequenceHandle](#audiosequencehandle), [AudioSequenceEmission](#audiosequenceemission), [AudioSequenceInfo](#audiosequenceinfo), [DopplerSettings](#dopplersettings), [DopplerCalculation](#dopplercalculation), [DopplerInfo](#dopplerinfo), [MotionSettings](#motionsettings), [MotionEstimate](#motionestimate), [MotionStatus](#motionstatus), [Spatial](#spatial), [VoiceSpec](#voicespec), [AudioResourceHandle](#audioresourcehandle), [AudioSourcePrepareSpec](#audiosourcepreparespec), [AudioTransformSpec](#audiotransformspec), [AudioResourceTransform](#audioresourcetransform), [AudioResourceInfo](#audioresourceinfo), [AudioResourcePreparation](#audioresourcepreparation), [AudioMixGroupSettings](#audiomixgroupsettings), [AudioMixGroupInfo](#audiomixgroupinfo), [AudioParameters](#audioparameters), [PcmBus](#pcmbus), [AudioResumeSettings](#audioresumesettings), [AudioResumePolicy](#audioresumepolicy), [AudioPlaybackInfo](#audioplaybackinfo), [ReflectionTrackingSpec](#reflectiontrackingspec), [ReflectionOptions](#reflectionoptions), [ReflectionQuery](#reflectionquery), [ReflectionPath](#reflectionpath), [ReflectionPaths](#reflectionpaths), [ReverbSpec](#reverbspec), [ReverbSettings](#reverbsettings), [ReverbSend](#reverbsend), [SceneVoicePhase](#scenevoicephase), [SceneVoiceStatus](#scenevoicestatus), [AudioAsset](#audioasset), [AudioPreparePhase](#audiopreparephase), [AudioPreparation](#audiopreparation), [PcmAudioInfo](#pcmaudioinfo), [StreamBufferSpec](#streambufferspec), [SourceBufferStatus](#sourcebufferstatus), [SeekProgress](#seekprogress), [HrtfEarOrder](#hrtfearorder), [HrtfOptions](#hrtfoptions), [HrirAsset](#hrirasset), [HrirMeasurement](#hrirmeasurement), [AcousticBackend](#acousticbackend), [AcousticMeshUpdate](#acousticmeshupdate), [AcousticGeometryStats](#acousticgeometrystats), [AcousticMeshBindingSpec](#acousticmeshbindingspec), [AcousticSceneSpec](#acousticscenespec), [AcousticMesh](#acousticmesh), [AcousticMaterial](#acousticmaterial), [AcousticSource](#acousticsource), [AcousticQuery](#acousticquery), [DirectPath](#directpath), [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxScreenSpriteTarget](#vfxscreenspritetarget), [VfxScreenSpriteOptions](#vfxscreenspriteoptions), [VfxSimulationClock](#vfxsimulationclock), [VfxSequenceRng](#vfxsequencerng), [VfxSequenceExchange](#vfxsequenceexchange), [VfxFallingAtlasSpec](#vfxfallingatlasspec), [VfxSystemSequenceState](#vfxsystemsequencestate), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [SubtreeTransitionEffect](#subtreetransitioneffect), [RuleWipe](#rulewipe), [ImageSampling](#imagesampling), [TextureAddressMode](#textureaddressmode), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [GlyphBlur](#glyphblur), [GlyphCoverageKernel](#glyphcoveragekernel), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaClock](#mediaclock), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand), [MenuSpec](#menuspec), [MenuItemSpec](#menuitemspec), [OperationStatus](#operationstatus), [OperationState](#operationstate), [FontJob](#fontjob), [FontHandle](#fonthandle), [FontLoadSource](#fontloadsource), [FontLoadSpec](#fontloadspec), [FontInfo](#fontinfo), [FontLoadState](#fontloadstate), [MotionProperty](#motionproperty), [MotionTrackSpec](#motiontrackspec), [MotionTrackStatus](#motiontrackstatus), [MotionStatus](#motionstatus), [WidgetHitMask](#widgethitmask), [MenuTemplate](#menutemplate), [MenuTemplateItem](#menutemplateitem), [PeMenuResource](#pemenuresource), [PeResourceName](#peresourcename), [UiEvent](#uievent), [WidgetId](#widgetid)
+- Data: [ImageEffect](#imageeffect), [LogRecord](#logrecord), [LogReceipt](#logreceipt), [LogSnapshot](#logsnapshot), [KeyboardLockState](#keyboardlockstate), [KeyboardLockSnapshot](#keyboardlocksnapshot), [NativeLiveState](#nativelivestate), [CivilTime](#civiltime), [CivilTimeState](#civiltimestate), [MediaProbeInfo](#mediaprobeinfo), [MediaProbeState](#mediaprobestate), [InputReceiverSpec](#inputreceiverspec), [InputRouteSource](#inputroutesource), [InputRoutePhase](#inputroutephase), [InputRouteEvent](#inputrouteevent), [InputDeliveryReceipt](#inputdeliveryreceipt), [InputDelivery](#inputdelivery), [InputRouteStats](#inputroutestats), [InputRouteCommand](#inputroutecommand), [RgbLookup](#rgblookup), [RgbLookupProfile](#rgblookupprofile), [PatternRng](#patternrng), [TemporalPatternSpec](#temporalpatternspec), [TemporalPatternSnapshot](#temporalpatternsnapshot), [PatternResourceInfo](#patternresourceinfo), [PatternRequest](#patternrequest), [PatternOutput](#patternoutput), [PatternProcessState](#patternprocessstate), [FixedMixSpec](#fixedmixspec), [FixedMixRounding](#fixedmixrounding), [FixedMixAlpha](#fixedmixalpha), [FixedLumaSpec](#fixedlumaspec), [ProgressKnot](#progressknot), [ProgressShape](#progressshape), [ProgressCurve](#progresscurve), [FixedSampleRegion](#fixedsampleregion), [ResampleAlpha](#resamplealpha), [PiecewiseResampleSpec](#piecewiseresamplespec), [AlphaClipRect](#alphacliprect), [DepthOrderKey](#depthorderkey), [DepthOrderStep](#depthorderstep), [ImageInput](#imageinput), [ImageProcessState](#imageprocessstate), [MaterializeRequest](#materializerequest), [KeyboardLockPolicy](#keyboardlockpolicy), [SpriteAlpha](#spritealpha), [StripeReveal](#stripereveal), [SheetSequence](#sheetsequence), [SheetLoop](#sheetloop), [WidgetInteraction](#widgetinteraction), [VectorPath](#vectorpath), [PathCommand](#pathcommand), [PathStroke](#pathstroke), [ImageTransition](#imagetransition), [SineRowCopy](#sinerowcopy), [RegisterScore](#registerscore), [RegisterWrite](#registerwrite), [SimpleTextPlacement](#simpletextplacement), [WindowPolicy](#windowpolicy), [InputSample](#inputsample), [InputReceipt](#inputreceipt), [InputBufferSnapshot](#inputbuffersnapshot), [InputFrame](#inputframe), [CueSequenceCursor](#cuesequencecursor), [AudioSequenceCursor](#audiosequencecursor), [CueSequenceSpec](#cuesequencespec), [CueSequenceLine](#cuesequenceline), [CueSequenceMode](#cuesequencemode), [CueSequenceClock](#cuesequenceclock), [CueSequenceTiming](#cuesequencetiming), [CueSequenceRandom](#cuesequencerandom), [AudioSequenceHandle](#audiosequencehandle), [AudioSequenceEmission](#audiosequenceemission), [AudioSequenceInfo](#audiosequenceinfo), [DopplerSettings](#dopplersettings), [DopplerCalculation](#dopplercalculation), [DopplerInfo](#dopplerinfo), [MotionSettings](#motionsettings), [MotionEstimate](#motionestimate), [MotionStatus](#motionstatus), [Spatial](#spatial), [VoiceSpec](#voicespec), [AudioResourceHandle](#audioresourcehandle), [AudioSourcePrepareSpec](#audiosourcepreparespec), [AudioTransformSpec](#audiotransformspec), [AudioResourceTransform](#audioresourcetransform), [AudioResourceInfo](#audioresourceinfo), [AudioResourcePreparation](#audioresourcepreparation), [AudioMixGroupSettings](#audiomixgroupsettings), [AudioMixGroupInfo](#audiomixgroupinfo), [AudioParameters](#audioparameters), [PcmBus](#pcmbus), [AudioResumeSettings](#audioresumesettings), [AudioResumePolicy](#audioresumepolicy), [AudioPlaybackInfo](#audioplaybackinfo), [ReflectionTrackingSpec](#reflectiontrackingspec), [ReflectionOptions](#reflectionoptions), [ReflectionQuery](#reflectionquery), [ReflectionPath](#reflectionpath), [ReflectionPaths](#reflectionpaths), [ReverbSpec](#reverbspec), [ReverbSettings](#reverbsettings), [ReverbSend](#reverbsend), [SceneVoicePhase](#scenevoicephase), [SceneVoiceStatus](#scenevoicestatus), [AudioAsset](#audioasset), [ByteFormatValue](#byteformatvalue), [ByteFormatOutput](#byteformatoutput), [BitmapGlyph](#bitmapglyph), [PrecomputedFont](#precomputedfont), [ByteSplitBoundary](#bytesplitboundary), [ByteSplitLimits](#bytesplitlimits), [ByteSplitOutput](#bytesplitoutput), [LoopFrameRounding](#loopframerounding), [RegionMap](#regionmap), [AudioLoopTimebase](#audiolooptimebase), [AudioLoopRange](#audiolooprange), [AudioLoopMetadata](#audioloopmetadata), [AudioLoopCatalogReceipt](#audioloopcatalogreceipt), [AudioPreparePhase](#audiopreparephase), [AudioPreparation](#audiopreparation), [PcmAudioInfo](#pcmaudioinfo), [StreamBufferSpec](#streambufferspec), [SourceBufferStatus](#sourcebufferstatus), [AudioReleaseSpec](#audioreleasespec), [AudioReleaseHandle](#audioreleasehandle), [AudioReleasePhase](#audioreleasephase), [AudioReleaseInfo](#audioreleaseinfo), [VoiceReleaseSpec](#voicereleasespec), [TooltipSpec](#tooltipspec), [SpriteCursorLayout](#spritecursorlayout), [SpriteHotspot](#spritehotspot), [InstallerFile](#installerfile), [InstallerCatalog](#installercatalog), [XmlDocument](#xmldocument), [XmlNode](#xmlnode), [MajiroSettingsProfile](#majirosettingsprofile), [OpticalDiscPolicy](#opticaldiscpolicy), [SeekProgress](#seekprogress), [HrtfEarOrder](#hrtfearorder), [HrtfOptions](#hrtfoptions), [HrirAsset](#hrirasset), [HrirMeasurement](#hrirmeasurement), [AcousticBackend](#acousticbackend), [AcousticMeshUpdate](#acousticmeshupdate), [AcousticGeometryStats](#acousticgeometrystats), [AcousticMeshBindingSpec](#acousticmeshbindingspec), [AcousticSceneSpec](#acousticscenespec), [AcousticMesh](#acousticmesh), [AcousticMaterial](#acousticmaterial), [AcousticSource](#acousticsource), [AcousticQuery](#acousticquery), [DirectPath](#directpath), [DecodeLimits](#decodelimits), [TransformSpec](#transformspec), [LzssMode](#lzssmode), [LzssParams](#lzssparams), [FileKind](#filekind), [WaveLoop](#waveloop), [WaveSpec](#wavespec), [BitmapRect](#bitmaprect), [PixelMath](#pixelmath), [Sampling](#sampling), [BlitOptions](#blitoptions), [StretchOptions](#stretchoptions), [MessageWindow](#messagewindow), [AssociatedBlend](#associatedblend), [CoverageWrite](#coveragewrite), [AssociatedBlitOptions](#associatedblitoptions), [RgbFilter](#rgbfilter), [AssetKind](#assetkind), [AssetState](#assetstate), [AssetTicket](#assetticket), [AssetStatus](#assetstatus), [TaskStats](#taskstats), [Environment](#environment), [Sun](#sun), [Fog](#fog), [AutoExposure](#autoexposure), [ScreenSpaceReflections](#screenspacereflections), [RayTracedGi](#raytracedgi), [GeometryLod](#geometrylod), [VirtualShadows](#virtualshadows), [Tonemap](#tonemap), [EntitySpec](#entityspec), [Transform](#transform), [Material](#material), [AlphaMode](#alphamode), [NormalEncoding](#normalencoding), [LightSpec](#lightspec), [LightShape](#lightshape), [LightUnits](#lightunits), [Falloff](#falloff), [ReflectionProbeSpec](#reflectionprobespec), [IrradianceVolumeSpec](#irradiancevolumespec), [ColliderSpec](#colliderspec), [ColliderShape](#collidershape), [BodyKind](#bodykind), [CollisionGroups](#collisiongroups), [SystemsSpec](#systemsspec), [PhysicsScene](#physicsscene), [ClientPhysicsScene](#clientphysicsscene), [BodyForces](#bodyforces), [KinematicTarget](#kinematictarget), [JointFrame](#jointframe), [JointMotor](#jointmotor), [JointSpec](#jointspec), [JointHandle](#jointhandle), [JointState](#jointstate), [EmitterSpec](#emitterspec), [VfxSystemSpec](#vfxsystemspec), [VfxEmitterSpec](#vfxemitterspec), [VfxScreenSpriteTarget](#vfxscreenspritetarget), [VfxScreenSpriteOptions](#vfxscreenspriteoptions), [VfxSimulationClock](#vfxsimulationclock), [VfxSequenceRng](#vfxsequencerng), [VfxSequenceExchange](#vfxsequenceexchange), [VfxFallingAtlasSpec](#vfxfallingatlasspec), [VfxSystemSequenceState](#vfxsystemsequencestate), [VfxParameterValue](#vfxparametervalue), [VfxScalarValue](#vfxscalarvalue), [VfxScalarBinding](#vfxscalarbinding), [VfxVectorValue](#vfxvectorvalue), [VfxVectorBinding](#vfxvectorbinding), [VfxSimulationTarget](#vfxsimulationtarget), [VfxSimulationSpace](#vfxsimulationspace), [VfxOverflowPolicy](#vfxoverflowpolicy), [VfxSpawnSpec](#vfxspawnspec), [VfxBurst](#vfxburst), [VfxInitSpec](#vfxinitspec), [VfxSpawnShape](#vfxspawnshape), [VfxModule](#vfxmodule), [VfxInterpolation](#vfxinterpolation), [VfxScalarKey](#vfxscalarkey), [VfxVec2Key](#vfxvec2key), [VfxColorKey](#vfxcolorkey), [VfxScalarCurve](#vfxscalarcurve), [VfxVec2Curve](#vfxvec2curve), [VfxColorCurve](#vfxcolorcurve), [VfxRenderSpec](#vfxrenderspec), [VfxBlendMode](#vfxblendmode), [VfxFacingMode](#vfxfacingmode), [VfxMeshShape](#vfxmeshshape), [VfxEventKind](#vfxeventkind), [VfxEventHandler](#vfxeventhandler), [VfxParticle](#vfxparticle), [VfxParticleEvent](#vfxparticleevent), [VfxStats](#vfxstats), [VfxWorldBudget](#vfxworldbudget), [LayerSpec](#layerspec), [Paint](#paint), [SubtreeTransitionEffect](#subtreetransitioneffect), [RuleWipe](#rulewipe), [ImageSampling](#imagesampling), [TextureAddressMode](#textureaddressmode), [PositionedGlyph](#positionedglyph), [GlyphRevealUnit](#glyphrevealunit), [GlyphReveal](#glyphreveal), [GlyphRevealStatus](#glyphrevealstatus), [GlyphBlur](#glyphblur), [GlyphCoverageKernel](#glyphcoveragekernel), [CanvasSurface](#canvassurface), [CanvasNode](#canvasnode), [CanvasCommand](#canvascommand), [ServiceBatch](#servicebatch), [MediaRequest](#mediarequest), [MediaPhase](#mediaphase), [MediaInfo](#mediainfo), [MediaOptions](#mediaoptions), [MediaState](#mediastate), [MediaClock](#mediaclock), [MediaStatus](#mediastatus), [LayerFilter](#layerfilter), [Blend](#blend), [ToneCurve](#tonecurve), [LayerMask](#layermask), [Distortion](#distortion), [TransitionSpec](#transitionspec), [TransitionEffect](#transitioneffect), [Easing](#easing), [WidgetSpec](#widgetspec), [WidgetKind](#widgetkind), [Flow](#flow), [PuppetCommand](#puppetcommand), [PuppetRig](#puppetrig), [Parameter](#parameter), [Deformer](#deformer), [DeformerKey](#deformerkey), [Part](#part), [PartKey](#partkey), [PartBlend](#partblend), [Motion](#motion), [Curve](#curve), [Pendulum](#pendulum), [SequenceSpec](#sequencespec), [Track](#track), [TrackProperty](#trackproperty), [KeyInterpolation](#keyinterpolation), [TrackNoise](#tracknoise), [CameraTrack](#cameratrack), [CameraKey](#camerakey), [SequenceEvent](#sequenceevent), [WorldCommand](#worldcommand), [LayerCommand](#layercommand), [UiCommand](#uicommand), [MenuSpec](#menuspec), [MenuItemSpec](#menuitemspec), [OperationStatus](#operationstatus), [OperationState](#operationstate), [FontJob](#fontjob), [FontHandle](#fonthandle), [FontLoadSource](#fontloadsource), [FontLoadSpec](#fontloadspec), [FontInfo](#fontinfo), [FontLoadState](#fontloadstate), [MotionProperty](#motionproperty), [MotionTrackSpec](#motiontrackspec), [MotionTrackStatus](#motiontrackstatus), [MotionStatus](#motionstatus), [WidgetHitMask](#widgethitmask), [MenuTemplate](#menutemplate), [MenuTemplateItem](#menutemplateitem), [PeMenuResource](#pemenuresource), [PeResourceName](#peresourcename), [UiEvent](#uievent), [WidgetId](#widgetid)
 - [Adapter configs](#adapter-configs)
 
 ## Globals
@@ -30,6 +30,7 @@ The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/Type
 | `audio` | [Audio](#class-audio) |
 | `save` | [Save](#class-save) |
 | `input` | [Input](#class-input) |
+| `inputRoutes` | [InputRoutes](#class-inputroutes) |
 | `localization` | [Localization](#class-localization) |
 | `text` | [Text](#class-text) |
 | `bitmap` | [Bitmap](#class-bitmap) |
@@ -75,6 +76,10 @@ Script global: `audio`.
 | `setMotionSettings(settings: Record<string, any>)` | `void` | Set strict MotionSettings and reset this client's automatic source/listener histories. Pose capture happens once per App frame; DSP interpolation belongs to workers. |
 | `resetMotion(—)` | `void` | Reset this client's automatic source/listener pose histories for the next frame, such as a teleport. Explicit velocities are retained. Does not reset source position, user pitch/rate or DSP history. |
 | `nativeChannelInfo(channel: number)` | `any` | Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails. |
+| `beginVoiceRelease(spec: Record<string, any>)` | `Record<string, any>` | Retire a shared native channel decoder to a tail channel without reopening or seeking; admit an externally clocked stepped db100 release and return an owned operation handle. Pending is not transfer completion. |
+| `advanceVoiceRelease(handle: Record<string, any>, elapsedUpdates: any)` | `void` | Supply a monotonic exact update counter (integer or decimal string) for a channel release; repeated samples are idempotent. |
+| `voiceRelease(handle: Record<string, any>)` | `Record<string, any>` | Query actual owner-published release phase, completed counter, source position and stopped_at_update; requested counters alone are not completion. |
+| `releaseVoiceRelease(handle: Record<string, any>)` | `void` | Release a terminal receipt; active/pending actors cannot be silently discarded. |
 | `playbackInfo(handle: Record<string, any>)` | `Record<string, any>` | Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters. |
 | `scheduleVoiceResume(handle: Record<string, any>, delay_ms: number, fade_ms: number)` | `void` | Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness. |
 | `scheduleVoiceResumeWithOptions(handle: Record<string, any>, delay_ms: number, fade_ms: number, options: Record<string, any>)` | `void` | Resume after an output-clock delay. Options policy:freeze (default) or preserve continues the prior input/pause fade until the deadline. reset_gain:true restarts a gain fade from zero to the latest target instead of fading transport; default false preserves an independent gain ramp. Later pause/stop/resume replaces it; EOF cancels it. Readiness is independent. |
@@ -165,6 +170,7 @@ Script global: `bitmap`.
 | Method | Returns | Description |
 |---|---|---|
 | `beginRowCopy(slot: number, source: number, options: Record<string, any>)` | `number` | Prepare a SineRowCopy from a shared bitmap snapshot. Full-image clip; uncovered destination pixels are preserved. Uses effectStatus/cancelEffect. |
+| `beginAlphaClip(slot: number, source: number, options: Record<string, any>)` | `number` | Prepare clipped stored-coverage multiplication using AlphaClipRect. RGB is retained unless multiply_rgb is explicit; self_source reads the current destination in forward order and requires identical slots. Uses client/epoch/revision-checked effectStatus/cancelEffect. |
 | `beginTransition(slot: number, other: number, options: Record<string, any>, mask: number \| null)` | `number` | Prepare a snapshot crossfade/rule-mask/blur transition into slot at explicit ImageTransition progress. Inputs must be client-owned equal-size bitmaps. Uses effectStatus/cancelEffect and rejects a stale target revision. |
 | `beginEffect(slot: number, effects: Record<string, any>[])` | `number` | Prepare an ImageEffect chain on shared workers. Captures immutable pixels and the target revision; effectStatus publishes only if the client/epoch/revision still match. Max 4M pixels, 16 effects. |
 | `effectStatus(ticket: number)` | `Record<string, any>` | Poll a bitmap effect without waiting. Ready includes result.surface; stale or failed work is visible and does not overwrite newer pixels. |
@@ -188,10 +194,12 @@ Script global: `canvases`.
 
 | Method | Returns | Description |
 |---|---|---|
-| `apply(commands: Record<string, any>[])` | `void` | Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs. |
+| `getLimits(—)` | `Record<string, any>` | Return shared retained-canvas capacity: surfacesPerClient. Pixel-byte, dimension and node limits are admitted separately. |
+| `apply(commands: Record<string, any>[])` | `void` | Atomically apply typed canvas commands: create, destroy, clear, draw, set, copy, present and hide. Destroy releases an existing unpresented surface; hide its presentations first. Frozen copies survive source destruction. Draws contain ordinary Layer specs, including positioned glyph runs. |
 | `get(id: number)` | `Record<string, any> \| null` | Inspect this client's canvas dimensions and logical draw nodes, or null when absent. No flattened native frame is returned. |
+| `readPixel(id: number, x: number, y: number)` | `number[]` | Read exact RGBA bytes from supported retained solid canvas nodes. Missing/outside coordinates and unsupported image/text/group/filter/transform/blend profiles fail; no guessed matte or GPU readback. |
 
-Commands issued: `apply` → `canvas.create`, `apply` → `canvas.clear`, `apply` → `canvas.draw`, `apply` → `canvas.set`, `apply` → `canvas.copy`, `apply` → `canvas.resize`, `apply` → `canvas.fill`, `apply` → `canvas.transform_copy`, `apply` → `canvas.copy_subtree`, `apply` → `canvas.fade`, `apply` → `canvas.filter`, `apply` → `canvas.restore`, `apply` → `canvas.present`, `apply` → `canvas.hide`.
+Commands issued: `apply` → `canvas.create`, `apply` → `canvas.clear`, `apply` → `canvas.draw`, `apply` → `canvas.set`, `apply` → `canvas.copy`, `apply` → `canvas.resize`, `apply` → `canvas.fill`, `apply` → `canvas.transform_copy`, `apply` → `canvas.copy_subtree`, `apply` → `canvas.fade`, `apply` → `canvas.filter`, `apply` → `canvas.restore`, `apply` → `canvas.present`, `apply` → `canvas.hide`, `apply` → `canvas.destroy`.
 
 ## Class Client
 
@@ -221,6 +229,7 @@ Script global: `engine`.
 | Method | Returns | Description |
 |---|---|---|
 | `log(message: string)` | `void` | Append a line to the bounded engine log. |
+| `logs(—)` | `Record<string, any>` | Read this client's canonical bounded engine log and dropped count. Sequences and virtual timestamps are exact decimal strings; no filesystem/device output is implied. |
 | `quit(—)` | `void` | Ask the host to stop after this frame. |
 | `clients(—)` | `Client[]` | Project clients, including native VMs. |
 
@@ -340,6 +349,8 @@ Script global: `input`.
 
 | Method | Returns | Description |
 |---|---|---|
+| `keyboardLocks(—)` | `Record<string, any>` | This client's logical Caps/Num/Scroll lock state and revision. Physical state is null unless imported; logical control never toggles the OS keyboard. Session state resets only on successful Runtime restore. |
+| `setKeyboardLocks(state: Record<string, any>)` | `Record<string, any>` | Patch this client's logical caps_lock/num_lock/scroll_lock. mode must be logical; physical requests fail explicitly. Returns owner-committed state/revision, not device success. |
 | `enableEvents(capacity: number)` | `void` | Enable/replace this client's opt-in logical input journal (1..4096 samples). Accepted App frames feed it once. Disabled by default; action queries remain independent. Overflow is visible, with no silent edge drop. |
 | `disableEvents(—)` | `void` | Release this client's journal. Old receipts cannot affect a newly enabled journal. |
 | `events(maximum: number)` | `Record<string, any>` | Publish an ordered prefix {samples:[InputSample],receipt:InputReceipt\|null}. Reads are idempotent until acknowledgement; leased samples cannot be rewritten by pointer-motion coalescing. Journal JSON u64 values are exact decimal strings (including masks, sequences and timestamps); echo receipts directly. Records model framed digital buttons/pointer, not raw OS/text/gamepad-axis events. |
@@ -364,6 +375,27 @@ Script global: `input`.
 | `takeRebind(—)` | `Record<string, any> \| null` | Drain the completed capture result. |
 
 
+## Class InputRoutes
+
+Client-scoped device-event receivers with stable priority, explicit delivery receipts, capture and cancellation. Interactive Widget mixing and simultaneous active receiver clients are explicitly unsupported in the current routing profile.
+
+Script global: `inputRoutes`.
+
+| Method | Returns | Description |
+|---|---|---|
+| `put(receiver: Record<string, any>)` | `void` | Register/update a bounded receiver with signed priority, source mask, optional half-open pointer rect/coverage and enabled/hover flags. |
+| `remove(id: number)` | `void` | Remove an owned receiver; stale capture/delivery cannot activate a different receiver. |
+| `clear(—)` | `void` | Clear this client's receivers and pending input state. |
+| `setEnabled(id: number, enabled: boolean)` | `void` | Enable or disable a registered receiver. |
+| `setPriority(id: number, priority: number)` | `void` | Set signed priority, high first, preserving equal-priority stable history. |
+| `delivery(—)` | `Record<string, any> \| null` | Lease the next routed event. Repeated polls retain the same receipt until acknowledgement; u64 receipt fields are exact decimal strings. |
+| `acknowledge(receipt: Record<string, any>, handled: boolean)` | `void` | Acknowledge exactly the current scoped receipt. Unhandled events continue to the next eligible receiver; stale or foreign receipts fail. |
+| `cancel(—)` | `void` | Cancel transient delivery/capture state without synthesizing input. |
+| `receiver(id: number)` | `Record<string, any> \| null` | Inspect one owned receiver, or null when absent. |
+| `stats(—)` | `Record<string, any>` | Inspect bounded receiver/journal/delivery state; this does not inject a device event. |
+
+Commands issued: `put` → `input_route.put`, `remove` → `input_route.remove`, `clear` → `input_route.clear`, `setEnabled` → `input_route.set_enabled`, `setPriority` → `input_route.set_priority`, `acknowledge` → `input_route.acknowledge`, `cancel` → `input_route.cancel`.
+
 ## Class Layers
 
 Retained 2D layer hierarchy (sprites, text, solid fills) composited over 3D.
@@ -384,6 +416,7 @@ Script global: `layers`.
 | `revealStatus(id: number)` | `Record<string, any> \| null` | Engine-owned glyph reveal {visible,total,complete}, or null for an absent/non-glyph layer. |
 | `completeReveal(id: number)` | `void` | Show the complete positioned text run without a VM-private reveal clock. |
 | `setOpacity(id: number, opacity: number)` | `void` | Inherited opacity 0..255. |
+| `setDepth(id: number, depth: number \| null)` | `void` | Opt this subtree into stable floating-depth painter order within its major bucket. Equal depths preserve the last committed frame order; ordinary layers draw before depth scopes. Null restores ordinary order. This does not change geometric position. |
 | `setOrder(id: number, order: number[])` | `void` | Explicit [major, minor] draw order. |
 | `setClip(id: number, clip: number[] \| null)` | `void` | Clip rectangle [x,y,w,h] or null. |
 | `setFilter(id: number, filter: Record<string, any> \| null)` | `void` | Siglus-style 2D filter {mono, invert, bright, dark, color_rate, color, add, tone_curve?:{asset,row,saturation}, mask?:{asset,gray_alpha}, alpha_test, distortion?:{kind:'mosaic'\|'raster'\|'radial_blur'\|'threshold_fade',...}} or null. |
@@ -399,7 +432,7 @@ Script global: `layers`.
 | `endMotion(id: number, property: string \| null, finish: boolean)` | `void` | Cancel one track or all tracks; finish optionally applies the target before removal. |
 | `motionStatus(id: number)` | `Record<string, any>` | Current owned motion tracks and completion; a missing target fails. |
 
-Commands issued: `put` → `layer.put`, `remove` → `layer.remove`, `setTransform` → `layer.set_transform`, `setVisible` → `layer.set_visible`, `completeReveal` → `layer.complete_reveal`, `setOpacity` → `layer.set_opacity`, `setOrder` → `layer.set_order`, `setClip` → `layer.set_clip`, `setFilter` → `layer.set_filter`, `transition` → `layer.transition`, `endTransition` → `layer.end_transition`, `beginCrossfade` → `layer.begin_crossfade`, `beginCrossfadeEffect` → `layer.begin_crossfade_effect`, `endCrossfade` → `layer.end_crossfade`, `setCrossfadeElapsed` → `layer.set_crossfade_elapsed`, `beginMotion` → `layer.begin_motion`, `setMotionElapsed` → `layer.set_motion_elapsed`, `endMotion` → `layer.end_motion`.
+Commands issued: `put` → `layer.put`, `remove` → `layer.remove`, `setTransform` → `layer.set_transform`, `setVisible` → `layer.set_visible`, `completeReveal` → `layer.complete_reveal`, `setOpacity` → `layer.set_opacity`, `setOrder` → `layer.set_order`, `setDepth` → `layer.set_depth`, `setClip` → `layer.set_clip`, `setFilter` → `layer.set_filter`, `transition` → `layer.transition`, `endTransition` → `layer.end_transition`, `beginCrossfade` → `layer.begin_crossfade`, `beginCrossfadeEffect` → `layer.begin_crossfade_effect`, `endCrossfade` → `layer.end_crossfade`, `setCrossfadeElapsed` → `layer.set_crossfade_elapsed`, `beginMotion` → `layer.begin_motion`, `setMotionElapsed` → `layer.set_motion_elapsed`, `endMotion` → `layer.end_motion`.
 
 ## Class Localization
 
@@ -430,6 +463,9 @@ Script global: `media`.
 
 | Method | Returns | Description |
 |---|---|---|
+| `beginProbe(asset: string)` | `number` | Begin scoped video decoder/header preparation without playback, pictures or PCM. probeStatus retains Pending/Ready/Failed; audio facts remain unknown when not probed. |
+| `probeStatus(ticket: number)` | `Record<string, any>` | Poll header preparation without joining; Ready exposes size/container/video decoder, optional audio facts, frame_ms and exact duration_ms as a decimal string or null. |
+| `releaseProbe(ticket: number)` | `void` | Release this client's header probe; unfinished work is cancelled. Tickets become obsolete after restore. |
 | `play(id: number, asset: string, options: Record<string, any> \| null)` | `string` | Start a scoped media resource; options {loop?:false,audio?:true,gain?:1}. Returns its logical image resource path for Layer/Canvas/Material APIs; inspect status for loading, playback and errors. |
 | `stop(id: number)` | `void` | Stop only this client's media resource. |
 | `remove(id: number)` | `void` | Release this client's media resource and decoded surface after detaching its image references. |
@@ -536,7 +572,7 @@ Script global: `resources`.
 | `beginDecode(asset: string, kind: string, options: Record<string, any> \| null)` | `number` | Schedule file/audio conversion (kind=file) or archive indexing (kind=archive) on the bounded CPU pool. Options {format?,profile?}. Returns a scoped ticket; owner calls never join. At most 64 retained tickets per client and 256 per host. |
 | `decodeStatus(ticket: number)` | `Record<string, any>` | Poll pending/ready/failed resource work without blocking. A completed decoder failure remains visible until cancelled. |
 | `readDecode(ticket: number, offset: number \| null, limit: number \| null)` | `Record<string, any>` | Read a ready file's bounded byte page (maximum 65536) or archive metadata page (maximum 1024 entries). Pending work fails visibly rather than waiting or returning fabricated data. |
-| `mountDecode(ticket: number, target: string)` | `Record<string, any>` | Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. No CPU decoder runs during publication. |
+| `mountDecode(ticket: number, target: string, fallback: boolean \| null)` | `Record<string, any>` | Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. Optional fallback=true puts existing overlays and real loose files ahead of this provider; default false preserves ordinary overlay priority. No CPU decoder runs during publication. |
 | `cancelDecode(ticket: number)` | `void` | Cancel pending work or release a retained result. Late worker output is discarded. Already mounted readers retain their own decoded-resource reservation. |
 | `transforms(—)` | `string[]` | List installed byte transform IDs; profiles refer to keys supplied by the Rust host. |
 | `imageFormats(—)` | `Record<string, any>` | List installed native image format IDs and standard image extensions; the runtime, Bitmap, text icons and renderer use this same registry. |
@@ -577,6 +613,7 @@ Script global: `text`.
 | Method | Returns | Description |
 |---|---|---|
 | `beginFont(alias: string, asset: string, faceIndex: number \| null)` | `number` | Begin bounded asset read and font preparation. fontStatus publishes the immutable face to this client's measurement and renderer catalog. |
+| `beginPrecomputedFont(alias: string, asset: string, pixelSize: number)` | `number` | Begin bounded TFT v0/v1 fixed-size coverage font preparation. Uses the same scoped fontStatus, measurement, TextRun and GlyphRun resources; missing glyphs or a different size fail explicitly. |
 | `fontStatus(ticket: number)` | `Record<string, any>` | Poll font workers. Ready contains canonical alias, digest, revision, families and resource handle; failed contains an error. |
 | `resolveFont(aliasOrFamily: string)` | `any` | Resolve a client-owned logical alias or font family to immutable font metadata, or null. |
 | `releaseFontJob(ticket: number)` | `void` | Cancel/release registration ticket. Published faces remain until releaseFont. |
@@ -612,6 +649,10 @@ Script global: `ui`.
 |---|---|---|
 | `drainEvents(—)` | `Record<string, any>[]` | Consume this client's retained events once, preserving other clients' events. Use this for action dispatch; events only reads a snapshot of the queue. |
 | `snapshotLayers(root: number \| null)` | `Record<string, any>[]` | Freeze owned UI into independent logical LayerSpec records on the project canvas. Pass null for all owned UI, or a widget id for its subtree; current values, style and clip are preserved. |
+| `putTooltip(tooltip: Record<string, any>)` | `void` | Prepare font-measured bounds and register an owned plain single-line TooltipSpec; no native VM or pointer capture is required. |
+| `removeTooltip(id: number)` | `void` | Remove an owned tooltip and its active presentation. |
+| `showTooltip(id: number, position: number[])` | `void` | Start or update a passive tooltip at logical pointer coordinates; shared UI owns its delay and lifetime. |
+| `hideTooltip(id: number \| null)` | `void` | Hide one owned tooltip, or all of this client's tooltips with null. |
 | `setMenu(menu: Record<string, any>)` | `void` | Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state. |
 | `removeMenu(id: number)` | `void` | Remove a client menu tree. |
 | `openMenu(id: number, item: number \| null, position: number[] \| null)` | `void` | Open a root submenu or a context popup at a logical canvas position. |
@@ -642,7 +683,7 @@ Script global: `ui`.
 | `endMotion(id: number, property: string \| null, finish: boolean)` | `void` | Cancel one or all widget motion tracks, optionally applying their targets. |
 | `motionStatus(id: number)` | `Record<string, any>` | Current owned widget motion tracks and completion; a missing target fails. |
 
-Commands issued: `setMenu` → `ui.set_menu`, `removeMenu` → `ui.remove_menu`, `openMenu` → `ui.open_menu`, `openDialog` → `ui.open_dialog`, `closeDialog` → `ui.close_dialog`, `warpPointer` → `ui.warp_pointer`, `closeMenu` → `ui.close_menu`, `setMenuChecked` → `ui.set_menu_checked`, `setMenuEnabled` → `ui.set_menu_enabled`, `put` → `ui.put`, `remove` → `ui.remove`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setHitMask` → `ui.set_hit_mask`, `setText` → `ui.set_text`, `setTitle` → `ui.set_title`, `setWindowPolicy` → `ui.set_window_policy`, `setFullscreen` → `ui.set_fullscreen`, `setCursorVisible` → `ui.set_cursor_visible`, `defineCursor` → `ui.define_cursor`, `setCursor` → `ui.set_cursor`, `insertText` → `ui.insert_text`, `backspace` → `ui.backspace`, `focusTextField` → `ui.focus`, `beginMotion` → `ui.begin_motion`, `setMotionElapsed` → `ui.set_motion_elapsed`, `endMotion` → `ui.end_motion`.
+Commands issued: `setMenu` → `ui.set_menu`, `removeMenu` → `ui.remove_menu`, `openMenu` → `ui.open_menu`, `openDialog` → `ui.open_dialog`, `closeDialog` → `ui.close_dialog`, `warpPointer` → `ui.warp_pointer`, `closeMenu` → `ui.close_menu`, `setMenuChecked` → `ui.set_menu_checked`, `setMenuEnabled` → `ui.set_menu_enabled`, `putTooltip` → `ui.put_tooltip`, `removeTooltip` → `ui.remove_tooltip`, `showTooltip` → `ui.show_tooltip`, `hideTooltip` → `ui.hide_tooltip`, `put` → `ui.put`, `remove` → `ui.remove`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setHitMask` → `ui.set_hit_mask`, `setText` → `ui.set_text`, `setTitle` → `ui.set_title`, `setWindowPolicy` → `ui.set_window_policy`, `setFullscreen` → `ui.set_fullscreen`, `setCursorVisible` → `ui.set_cursor_visible`, `defineCursor` → `ui.define_cursor`, `setCursor` → `ui.set_cursor`, `insertText` → `ui.insert_text`, `backspace` → `ui.backspace`, `focusTextField` → `ui.focus`, `beginMotion` → `ui.begin_motion`, `setMotionElapsed` → `ui.set_motion_elapsed`, `endMotion` → `ui.end_motion`.
 
 ## Class Vfx
 
@@ -714,6 +755,13 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 
 | System | Command | API |
 |---|---|---|
+| input_route | `put` | `InputRoutes.put` |
+| input_route | `remove` | `InputRoutes.remove` |
+| input_route | `clear` | `InputRoutes.clear` |
+| input_route | `set_enabled` | `InputRoutes.setEnabled` |
+| input_route | `set_priority` | `InputRoutes.setPriority` |
+| input_route | `acknowledge` | `InputRoutes.acknowledge` |
+| input_route | `cancel` | `InputRoutes.cancel` |
 | world | `spawn` | `World.spawn` |
 | world | `despawn` | `Entity.destroy` |
 | world | `set_transform` | `Entity.position` |
@@ -750,6 +798,7 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | layer | `complete_reveal` | `Layers.completeReveal` |
 | layer | `set_opacity` | `Layers.setOpacity` |
 | layer | `set_order` | `Layers.setOrder` |
+| layer | `set_depth` | `Layers.setDepth` |
 | layer | `set_clip` | `Layers.setClip` |
 | layer | `set_filter` | `Layers.setFilter` |
 | layer | `transition` | `Layers.transition` |
@@ -776,6 +825,7 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | canvas | `restore` | `Canvases.apply` |
 | canvas | `present` | `Canvases.apply` |
 | canvas | `hide` | `Canvases.apply` |
+| canvas | `destroy` | `Canvases.apply` |
 | ui | `set_menu` | `Ui.setMenu` |
 | ui | `remove_menu` | `Ui.removeMenu` |
 | ui | `open_menu` | `Ui.openMenu` |
@@ -785,6 +835,10 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | ui | `close_menu` | `Ui.closeMenu` |
 | ui | `set_menu_checked` | `Ui.setMenuChecked` |
 | ui | `set_menu_enabled` | `Ui.setMenuEnabled` |
+| ui | `put_tooltip` | `Ui.putTooltip` |
+| ui | `remove_tooltip` | `Ui.removeTooltip` |
+| ui | `show_tooltip` | `Ui.showTooltip` |
+| ui | `hide_tooltip` | `Ui.hideTooltip` |
 | ui | `put` | `Ui.put` |
 | ui | `remove` | `Ui.remove` |
 | ui | `set_visible` | `Ui.setVisible` |
@@ -824,9 +878,14 @@ Reusable image operations. All channels are straight RGBA bytes; RGB-only transf
 
 | Variant | Fields | Description |
 |---|---|---|
+| `override_alpha` | `alpha: u8` | Replace coverage while retaining all stored RGB bytes. Useful for opaque XRGB resources and explicitly authored mask normalisation. |
+| `rgb_lookup` | `spec: crate::rgb_lut::RgbLookup` | Arbitrary straight RGB tables; premultiplied profiles fail before admission. |
+| `fixed_luma` | `spec: crate::fixed_luma::FixedLumaSpec` | Explicit grouped luminance rounding and integer /256 colour mixture. |
+| `piecewise_resample` | `spec: crate::piecewise_resample::PiecewiseResampleSpec` | Fixed16.16 piecewise nearest sampling and explicit /256 mixtures. |
 | `stripe_reveal` | `spec: crate::sprite_alpha::StripeReveal` | Bounded generic stripe/stagger mask for retained transitions. |
 | `sprite_alpha` | `spec: crate::sprite_alpha::SpriteAlpha` | Extract reusable sprite transparency from decoded resource pixels. |
 | `sine_row_copy` | `spec: crate::row_copy::SineRowCopy` | Two-input whole-pixel row copy; preserves uncovered destination pixels. |
+| `alpha_clip_rect` | `spec: crate::alpha_clip::AlphaClipRect` | Two-input clipped coverage multiplication with optional exterior clear. |
 | `transition` | `spec: crate::transition::ImageTransition` | — |
 | `vector` | `path: crate::vector::VectorPath` | Engine vector path on the existing image with source-over composition. |
 | `perspective` | `quad: [[f32; 2]; 4]` | Map the whole source into a convex quad, keeping canvas dimensions. |
@@ -842,6 +901,504 @@ Reusable image operations. All channels are straight RGBA bytes; RGB-only transf
 | `noise` | `seed: u32, amplitude: u8, monochrome: bool` | Deterministic signed uniform RGB noise. Alpha is unchanged. |
 | `flip` | `horizontal: bool, vertical: bool` | — |
 | `raster` | `amplitude: f32, frequency: f32, phase: f32` | Whole-pixel row displacement: round(sin(phase+y*frequency)*amplitude). Source edges clamp. Phase/frequency are radians, amplitude is pixels. |
+
+### LogRecord
+
+Used by: Engine.logs records; canonical client log.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `sequence` | `u64` | — | — |
+| `time_ms` | `u64` | — | — |
+| `message` | `String` | — | — |
+
+### LogReceipt
+
+Used by: HostServices.append_log committed owner receipt.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `ClientId` | — | — |
+| `sequence` | `u64` | — | — |
+
+### LogSnapshot
+
+Used by: HostServices.log_snapshot; Engine.logs converts u64 fields to decimal strings.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `ClientId` | — | — |
+| `dropped` | `u64` | — | — |
+| `records` | `Vec<LogRecord>` | — | — |
+
+### KeyboardLockState
+
+Used by: Logical engine keyboard locks; physical control separate.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `caps_lock` | `bool` | — | — |
+| `num_lock` | `bool` | — | — |
+| `scroll_lock` | `bool` | — | — |
+
+### KeyboardLockSnapshot
+
+Used by: Input.keyboardLocks / setKeyboardLocks.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `crate::state::ClientId` | — | — |
+| `revision` | `u64` | — | — |
+| `logical` | `KeyboardLockState` | — | — |
+| `physical` | `Option<KeyboardLockState>` | — | No physical state has been imported when None. Never infer physical Off. |
+| `physical_control_supported` | `bool` | — | — |
+
+### NativeLiveState
+
+Used by: Opaque Circus native save-image mutation audit; gaps block original save admission.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+
+### CivilTime
+
+Used by: HostServices.begin_civil_time worker result, independent of virtual clock.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `ClientId` | — | — |
+| `unix_ms` | `i64` | — | — |
+| `utc_offset_seconds` | `i32` | — | — |
+| `year` | `i32` | — | — |
+| `month` | `u8` | — | — |
+| `day` | `u8` | — | — |
+| `hour` | `u8` | — | — |
+| `minute` | `u8` | — | — |
+| `second` | `u8` | — | — |
+| `millisecond` | `u16` | — | — |
+
+### CivilTimeState
+
+Used by: CivilTimeQuery.poll completion.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Pending` | — | — |
+| `Ready` | — | — |
+| `Failed` | — | — |
+
+### MediaProbeInfo
+
+Used by: Media.probeStatus.info; header/decoder preparation without playback or PCM.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `ClientId` | — | — |
+| `size` | `[u32; 2]` | — | — |
+| `container` | `String` | — | — |
+| `video_decoder` | `String` | — | Selected engine video decoder family, not a claim about every packet. |
+| `header_validated` | `bool` | — | — |
+| `audio_decoder` | `Option<String>` | — | Unknown audio identity stays None; no PCM is decoded by this operation. |
+| `has_audio` | `Option<bool>` | — | — |
+| `duration_ms` | `Option<u64>` | — | — |
+| `frame_ms` | `Option<f64>` | — | — |
+
+### MediaProbeState
+
+Used by: HostServices.begin_media_probe nonblocking retained completion.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Pending` | — | — |
+| `Ready` | — | — |
+| `Failed` | — | — |
+
+### InputReceiverSpec
+
+Used by: InputRoutes.put; bounded scoped priority and pointer coverage.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `id` | `u32` | — | — |
+| `priority` | `i32` | — | — |
+| `sources` | `u8` | — | Keyboard=1, pointer=2, controller=4. Zero and unknown bits are invalid. |
+| `rect` | `Option<[i64; 4]>` | — | None is global for pointer press; it never participates in hover. |
+| `coverage` | `Option<WidgetHitMask>` | — | — |
+| `enabled` | `bool` | — | — |
+| `hover_enabled` | `bool` | — | — |
+| `drag_enabled` | `bool` | — | Accept explicit pointer drags. Automatic hardware drag detection is a separate backend operation; this receiver flag does not invent events. |
+
+### InputRouteSource
+
+Used by: InputDelivery.event source; explicit keyboard/pointer/controller identity.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `keyboard` | — | — |
+| `pointer` | — | — |
+| `controller` | — | — |
+
+### InputRoutePhase
+
+Used by: InputDelivery.event transition or hover phase.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `press` | — | — |
+| `release` | — | — |
+| `repeat` | — | — |
+| `drag` | — | Explicit backend drag; each eligible receiver gets its own ACK lease. |
+| `move` | — | — |
+| `hover_enter` | — | — |
+| `hover_leave` | — | — |
+
+### InputRouteEvent
+
+Used by: InputDelivery.event; logical source/code/point with no VM callback.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `source` | `InputRouteSource` | — | — |
+| `code` | `u32` | — | — |
+| `phase` | `InputRoutePhase` | — | — |
+| `point` | `[i32; 2]` | — | — |
+| `origin` | `Option<[i32; 2]>` | — | Required only for Drag: eligibility uses this origin, not current point. |
+
+### InputDeliveryReceipt
+
+Used by: InputRoutes.acknowledge scoped receipt; exact decimal-string u64 fields.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `u32` | — | — |
+| `epoch` | `u64` | — | — |
+| `event` | `u64` | — | — |
+| `delivery` | `u64` | — | — |
+
+### InputDelivery
+
+Used by: InputRoutes.delivery leased event, retained until acknowledgement.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `receiver` | `u32` | — | — |
+| `event` | `InputRouteEvent` | — | — |
+| `receipt` | `InputDeliveryReceipt` | — | — |
+
+### InputRouteStats
+
+Used by: InputRoutes.stats bounded live session state.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `receivers` | `usize` | — | — |
+| `queued_samples` | `usize` | — | — |
+| `queued_events` | `usize` | — | — |
+| `leased` | `bool` | — | — |
+| `captures` | `usize` | — | — |
+| `hover` | `Option<u32>` | — | — |
+| `epoch` | `u64` | — | — |
+
+### InputRouteCommand
+
+Used by: ServiceBatch.input_routes; canonical receiver operations.
+
+Variants are tagged by `"op"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `put` | `receiver: InputReceiverSpec` | Issued by `InputRoutes.put`. |
+| `remove` | `id: u32` | Issued by `InputRoutes.remove`. |
+| `clear` | — | Issued by `InputRoutes.clear`. |
+| `set_enabled` | `id: u32, enabled: bool` | Issued by `InputRoutes.setEnabled`. |
+| `set_priority` | `id: u32, priority: i32` | Issued by `InputRoutes.setPriority`. |
+| `acknowledge` | `receipt: InputDeliveryReceipt, handled: bool` | Issued by `InputRoutes.acknowledge`. |
+| `cancel` | — | Issued by `InputRoutes.cancel`. |
+
+### RgbLookup
+
+Used by: ImageEffect.rgb_lookup.spec; arbitrary straight RGBA byte lookup.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `red` | `Vec<u8>` | — | — |
+| `green` | `Vec<u8>` | — | — |
+| `blue` | `Vec<u8>` | — | — |
+| `profile` | `RgbLookupProfile` | — | — |
+
+### RgbLookupProfile
+
+Used by: RgbLookup profile; premultiplied admission explicitly unsupported.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `straight_rgba` | — | Lookup every straight RGB byte, including hidden RGB at zero alpha. |
+| `premultiplied_rgba` | — | Recognized for explicit rejection: this pipeline cannot publish premultiplied bytes as an ordinary straight ImageSurface. No implicit unpremultiplication. |
+
+### PatternRng
+
+Used by: Portable shared sequence state; worker receipt advances caller-owned RNG.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `state` | `u32` | — | — |
+| `multiplier` | `u32` | — | — |
+| `increment` | `u32` | — | — |
+| `output_shift` | `u8` | — | — |
+| `output_mask` | `u32` | — | — |
+| `draws` | `u64` | — | — |
+
+### TemporalPatternSpec
+
+Used by: HostServices.begin_pattern Create; persistent packed-cell raster specification.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `size` | `[u32; 2]` | — | — |
+| `cell` | `[u32; 2]` | — | One packed word describes four horizontally adjacent grey cells. |
+
+### TemporalPatternSnapshot
+
+Used by: PatternResource snapshot / PatternRequest.Restore portable state.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `schema` | `u32` | — | — |
+| `spec` | `TemporalPatternSpec` | — | — |
+| `words` | `Vec<u32>` | — | — |
+| `phase` | `u8` | — | — |
+| `completed_steps` | `u64` | — | — |
+
+### PatternResourceInfo
+
+Used by: Scoped immutable pattern generation and resident-byte metadata.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `ClientId` | — | — |
+| `size` | `[u32;2]` | — | — |
+| `completed_steps` | `u64` | — | — |
+| `resident_bytes` | `usize` | — | — |
+
+### PatternRequest
+
+Used by: HostServices.begin_pattern; create/advance/render/restore on common image workers.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Create` | `spec: Arc<[u8]>, rng: Arc<[u8]>` | — |
+| `Advance` | `source: Arc<dyn PatternResource>, rng: Arc<[u8]>` | — |
+| `AdvancePrefix` | `source: Arc<dyn PatternResource>, rng: Arc<[u8]>, words: usize` | Same immutable resource/RNG transaction, limited to a prefix bank. |
+| `Render` | `source: Arc<dyn PatternResource>, destination: ImageInput, rect: [u32;4], opacity256: u16` | — |
+| `Restore` | `snapshot: Arc<[u8]>, rng: Arc<[u8]>` | — |
+
+### PatternOutput
+
+Used by: PatternProcessState.Ready owner receipt.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Resource` | `resource: Arc<dyn PatternResource>, rng_after: Arc<[u8]>` | — |
+| `Image` | — | — |
+
+### PatternProcessState
+
+Used by: PatternProcess.poll nonblocking retained completion.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Pending` | — | — |
+| `Ready` | — | — |
+| `Failed` | — | — |
+
+### FixedMixSpec
+
+Used by: ImageTransition.fixed_weighted exact integer weights and rounding.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `left_weight` | `u32` | — | — |
+| `right_weight` | `u32` | — | — |
+| `fractional_bits` | `u8` | — | — |
+| `rounding` | `FixedMixRounding` | — | — |
+| `alpha` | `FixedMixAlpha` | — | — |
+
+### FixedMixRounding
+
+Used by: SeparateTerms or SumThenShift fixed-point color arithmetic.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `separate_terms` | — | — |
+| `sum_then_shift` | — | — |
+
+### FixedMixAlpha
+
+Used by: Explicit preserved/opaque/weighted output alpha.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `preserve_left` | — | — |
+| `opaque` | — | — |
+| `weighted` | — | — |
+
+### FixedLumaSpec
+
+Used by: ImageEffect.fixed_luma; grouped fixed-point luminance truncation and Q8 mix.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `coefficients` | `[u32; 3]` | — | Coefficients in engine RGB order, with sum no greater than 2^bits. |
+| `groups` | `[u8; 3]` | — | Equal group IDs are summed before a shift; groups are shifted separately. |
+| `fractional_bits` | `u8` | — | — |
+| `amount256` | `u16` | — | Luminance colour mix weight, in explicit /256 units. |
+
+### ProgressKnot
+
+Used by: ProgressCurve.knots; explicit clock-unit position and finite normalized value.
+
+One caller-clock position and normalized envelope value.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `at` | `u64` | — | Caller-selected time units, independent of wall-clock time. |
+| `value` | `f64` | — | Finite normalized value in0..=1. |
+
+### ProgressShape
+
+Used by: ProgressCurve.shape; shared double-precision scalar easing.
+
+Variants are tagged by `"kind"`.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `linear` | — | — |
+| `quadratic_in` | — | — |
+| `square_root` | — | — |
+| `half_cosine` | `pi: f64` | — |
+
+### ProgressCurve
+
+Used by: Device-free bounded progress envelope; repeated times are right-continuous steps.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `knots` | `Vec<ProgressKnot>` | — | At most64 ordered knots; duplicate times form right-continuous steps. |
+| `shape` | `ProgressShape` | — | — |
+
+### FixedSampleRegion
+
+Used by: PiecewiseResampleSpec.regions; immutable16.16 source and signed destination steps.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `destination_origin` | `[i32; 2]` | — | — |
+| `destination_step` | `[i8; 2]` | — | Each destination axis advances one pixel forward or backward. |
+| `size` | `[u32; 2]` | — | — |
+| `source_origin_q16` | `[i64; 2]` | — | Source texel is arithmetic floor(q16/65536). The original immutable input is sampled even when earlier regions have written this texel. |
+| `source_step_q16` | `[i64; 2]` | — | — |
+
+### ResampleAlpha
+
+Used by: PiecewiseResampleSpec.alpha; weighted, preserved or opaque channel policy.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `weighted` | — | — |
+| `preserve_destination` | — | — |
+| `opaque` | — | — |
+
+### PiecewiseResampleSpec
+
+Used by: ImageEffect.piecewise_resample; bounded ordered nearest sampling with independent Q8 weights.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `regions` | `Vec<FixedSampleRegion>` | — | Regions execute in order; overlap mixes against the staged destination. |
+| `source_weight256` | `u16` | — | These are independent floor-quantized weights, not inferred complements. |
+| `destination_weight256` | `u16` | — | — |
+| `alpha` | `ResampleAlpha` | — | — |
+
+### AlphaClipRect
+
+Used by: Bitmap.beginAlphaClip and ImageEffect.alpha_clip_rect; exact coverage products, clipping and explicit forward self-source profile.
+
+Integer image coordinates; the source's own draw clip does not constrain sampling. RGB remains unchanged unless `multiply_rgb` is explicitly set. Products use `(p + (p >> 7)) >> 8`, including all endpoint byte pairs.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `destination` | `[i32; 2]` | `[0,0]` | — |
+| `source` | `[i32; 4]` | `[0,0,16,16]` | x,y,width,height; width and height must be positive. |
+| `clip` | `[i32; 4]` | `[0,0,16,16]` | Destination x,y,width,height, intersected with its image bounds. |
+| `clear` | `Option<u8>` | `null` | Set exterior coverage (or multiply exterior RGBA with multiply_rgb). |
+| `multiply_rgb` | `bool` | `false` | — |
+| `self_source` | `bool` | `false` | Read source coverage from the current destination, walking forward. This deliberately preserves overlapping in-place feedback. |
+| `clear_empty_alpha_only` | `bool` | `false` | Explicit profile: an entirely disjoint source clears only coverage, even when intersecting operations would multiply all four channels. |
+
+### DepthOrderKey
+
+Used by: Derived immutable Primitive subtree depth path; no device handles.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `path` | `Vec<DepthOrderStep>` | — | Outermost explicit depth scope first; at most65 entries. |
+
+### DepthOrderStep
+
+Used by: DepthOrderKey.path; finite depth, scope and last committed stable rank.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `scope` | `u32` | — | — |
+| `major` | `i32` | — | — |
+| `depth` | `f32` | — | — |
+| `rank` | `u32` | — | — |
+
+### ImageInput
+
+Used by: ImageMetadata.begin_process; scoped resources, encoded memory and immutable composition graphs.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Encoded` | `name: alloc::string::String, bytes: Arc<[u8]>, size: [u32;2]` | Capability-resolved encoded bytes, for archive members and embedded resources. Shared workers decode using the same registry as file assets. Declared dimensions bound admission and must match the decoded result. |
+| `Composite` | `base: Box<ImageInput>, layers: Vec<ImageCompositeLayer>` | Immutable ordered bitmap operation graph, evaluated by shared CPU workers. Base and descendants retain original channel bytes; no screen is captured. |
+| `Solid` | `size: [u32; 2], color: [u8; 4]` | — |
+| `Raster` | `destination: Box<ImageInput>, source: Box<ImageInput>` | — |
+| `Transition` | `from: Arc<dyn ImageResource>, to: Arc<dyn ImageResource>, mask: Option<Arc<dyn ImageResource>>` | — |
+| `Asset` | `path: String, size: [u32; 2], fingerprint: Option<[u8; 32]>` | Expected dimensions bound admission; the worker verifies the decoded size. |
+| `Resource` | — | — |
+
+### ImageProcessState
+
+Used by: ImageJob.poll; includes HostServices.begin_canvas_image retained receipt.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Pending` | — | — |
+| `Ready` | — | — |
+| `Failed` | — | — |
+
+### MaterializeRequest
+
+Used by: CanvasSystem.capture_request frozen logical scene; presenter prepares a lazy readback capability.
+
+A full-surface snapshot that a presenting renderer should rasterize once and publish as an immutable image (`CanvasSystem::resolve_materialized`).
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `u32` | — | — |
+| `surface` | `u32` | — | — |
+| `size` | `[u32; 2]` | — | — |
+| `layers` | `Arc<Vec<LayerSpec>>` | — | — |
+
+### KeyboardLockPolicy
+
+Used by: Majiro explicit logical vs physical host policy.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `engine_logical` | — | Uses the engine client's own logical lock state. Does not import/toggle OS. |
+| `physical_windows` | — | Physical Windows lock-key import/control is not implemented. |
 
 ### SpriteAlpha
 
@@ -956,6 +1513,7 @@ A resource transition at explicit progress. A mask reveals bright pixels first; 
 | `progress` | `f32` | — | — |
 | `softness` | `f32` | — | — |
 | `blur` | `f32` | — | — |
+| `fixed_weighted` | `Option<crate::fixed_mix::FixedMixSpec>` | — | Exact integer-weighted profile. With this profile mask/blur/softness must be absent/zero; floating progress is retained only for old schemas. |
 
 ### SineRowCopy
 
@@ -1642,6 +2200,131 @@ Deferred, client-capability audio source. No bytes or device pointers in VM stat
 | `path` | `VfsPath` | — | Canonical read-only asset path under the submitting client. |
 | `frame_limit` | `Option<u64>` | — | Optional native declared decoded-frame boundary. |
 
+### ByteFormatValue
+
+Used by: Rust shared first-compatible encoded-byte formatting value.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Integer` | — | — |
+| `Bytes` | — | — |
+
+### ByteFormatOutput
+
+Used by: format_one_bytes bounded output and argument-consumption receipt.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `bytes` | `Vec<u8>` | — | — |
+| `matched` | `bool` | — | Exactly one compatible placeholder consumed this argument. |
+
+### BitmapGlyph
+
+Used by: PrecomputedFont checked TFT v0/v1 metrics and original coverage layout.
+
+Immutable bitmap glyph metrics; coverage is row-major, 0..=64.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `character` | `char` | — | — |
+| `size` | `[u16; 2]` | — | — |
+| `bearing` | `[i32; 2]` | — | Left and top relative to a downward-positive baseline. |
+| `advance` | `[i16; 2]` | — | Pen displacement in the source's original pixel units. |
+| `logical_advance` | `i16` | — | Native scalar measurement, distinct from the pen displacement. |
+
+### PrecomputedFont
+
+Used by: Text.beginPrecomputedFont / FontLoadSource.PrecomputedStorage and PrecomputedBytes fixed-size faces.
+
+A fixed-size face. Changing its size requires another explicit face binding.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+
+### ByteSplitBoundary
+
+Used by: Rust shared byte-delimiter tokenizer; explicit single-byte or reviewed Shift-JIS boundaries.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `SingleByte` | — | — |
+| `ShiftJis` | — | Protect a pair only for lead81..9F/E0..EF and trail40..7E/80..FC. F0..FC leads are deliberately not protected. This is a byte-boundary profile, not validation or normalization of an entire encoded string. |
+
+### ByteSplitLimits
+
+Used by: split_delimited_bytes input/output/token admission limits.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `max_input_bytes` | `usize` | — | — |
+| `max_output_bytes` | `usize` | — | — |
+| `max_tokens` | `usize` | — | — |
+
+### ByteSplitOutput
+
+Used by: split_delimited_bytes token spans and bounded NUL-delimited output.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `spans` | `Vec<Range<usize>>` | — | — |
+| `nul_bytes` | `Vec<u8>` | — | — |
+
+### LoopFrameRounding
+
+Used by: Rust resolve_loop_frames checked reference-rate conversion.
+
+Explicit endpoint conversion; no decoder, native profile or PlayAsset default invokes this automatically. Native adapters may support only selected rates.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Floor` | — | — |
+| `Ceil` | — | — |
+
+### RegionMap
+
+Used by: Rust scoped region-label map; atomic clipped snapshot copies and zero-filled resize.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+
+### AudioLoopTimebase
+
+Used by: Explicit catalog coordinates: decoded frames or fixed reference sample rate.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `DecodedFrames` | — | — |
+| `ReferenceFrames` | `sample_rate: u32` | Coordinates counted at this fixed reference rate. Callers explicitly resolve them for a source rate; no playback path automatically applies it. |
+
+### AudioLoopRange
+
+Used by: AudioLoopMetadata.range; exclusive end or decoded EOF.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `timebase` | `AudioLoopTimebase` | — | — |
+| `start_frame` | `u64` | — | — |
+| `end_frame` | `Option<u64>` | — | Exclusive end; None means the source's decoded end. |
+
+### AudioLoopMetadata
+
+Used by: HostServices explicit client asset loop catalog; playback does not consult implicitly.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `asset` | `String` | — | Canonical asset-relative path; names are exact, not implicitly case-folded. |
+| `range` | `AudioLoopRange` | — | — |
+
+### AudioLoopCatalogReceipt
+
+Used by: Atomic bounded host loop catalog owner commit.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `ClientId` | — | — |
+| `revision` | `u64` | — | — |
+| `entries` | `u32` | — | — |
+
 ### AudioPreparePhase
 
 Used by: AudioPreparation.phase.
@@ -1703,6 +2386,185 @@ Bounded source-buffer state. Decoder work never enters project/save JSON.
 | `generation` | `u64` | — | Source timeline generation; stale reads cannot enter a new timeline. |
 | `decoded_frames` | `u64` | — | Successfully decoded frames, including warmup and read-ahead. |
 | `error` | `Option<String>` | — | A visible decoder failure, retained until the source is replaced. |
+
+### AudioReleaseSpec
+
+Used by: Rust HostServices.begin_audio_release.
+
+Immutable release policy. Volume units are hundredths of one dB (db100). Source/cursor transfer and all interpolation are owned by the audio service.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `source_channel` | `u32` | — | Channel vacated by the live decoder without reopening or seeking. |
+| `tail_channel` | `u32` | — | Independent channel receiving the retired nonlooping voice. |
+| `threshold_db100` | `i32` | — | Captured levels at/above this select target_above_db100. |
+| `target_above_db100` | `i32` | — | Target for captured levels at or above the threshold. |
+| `target_below_db100` | `i32` | — | Target for captured levels below the threshold. |
+| `steps` | `u32` | — | Divisor of target-start; bounded1..100000. This is not milliseconds. |
+| `pan` | `Option<f32>` | — | Signed stereo pan -1..1; None preserves the current balance. |
+| `playback_rate` | `Option<f32>` | — | Playback multiplier0.125..4; None preserves the current rate. |
+| `freeze_group_gain` | `bool` | — | Bake current native gain-group attenuation into the retired voice. Engine bus/master controls remain live. False retains the group. |
+| `release_tail_when_source_missing` | `bool` | — | Without a source, release the existing tail, or complete if both absent. False rejects an absent source instead of touching the destination. |
+
+### AudioReleaseHandle
+
+Used by: Client-scoped audio release capability.
+
+Client capability whose generation is not reused across resets.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `client` | `crate::state::ClientId` | — | Owning client namespace. |
+| `generation` | `u64` | — | Unique owner-issued operation identity. |
+
+### AudioReleasePhase
+
+Used by: Audio release owner publication phase.
+
+Publication phase of the actual release actor, never a declaration alone.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Pending` | — | A render owner or preparation dependency still holds the source. |
+| `Active` | — | Transfer and current gain have been committed by the audio owner. |
+| `Complete` | — | Stop or source exhaustion has completed at an owner boundary. |
+| `Cancelled` | — | Another owner control replaced this voice/track. |
+
+### AudioReleaseInfo
+
+Used by: Rust HostServices.audio_release_info.
+
+Read-only owner-published completion; no device or decoder pointers.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `phase` | `AudioReleasePhase` | — | Actual actor phase. |
+| `submitted_updates` | `u64` | — | Latest monotonic external update requested by the caller. |
+| `completed_updates` | `u64` | — | External update through which work has actually been owner-committed. |
+| `volume_db100` | `Option<i32>` | — | Current integer hundredths of a dB, truncated toward zero. |
+| `source_position_frames` | `Option<u64>` | — | Last consumed source position, excluding decoder read-ahead. |
+| `stopped_at_update` | `Option<u64>` | — | First update that stopped the voice; zero means silent at admission. |
+
+### VoiceReleaseSpec
+
+Used by: Audio.beginVoiceRelease.
+
+A live decoder transfer followed by a stepped logarithmic release. Updates are explicit counters; this declaration does not interpret them as time.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `source_channel` | `u32` | `1` | — |
+| `tail_channel` | `u32` | `2` | — |
+| `threshold_db100` | `i32` | `-2000` | — |
+| `target_above_db100` | `i32` | `-6000` | — |
+| `target_below_db100` | `i32` | `-10000` | — |
+| `steps` | `u32` | `60` | — |
+| `pan` | `Option<f32>` | `null` | — |
+| `playback_rate` | `Option<f32>` | `null` | — |
+| `freeze_group_gain` | `bool` | `true` | — |
+| `release_tail_when_source_missing` | `bool` | `false` | — |
+
+### TooltipSpec
+
+Used by: Ui.putTooltip.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `id` | `u32` | `1` | — |
+| `text` | `String` | `"Hint"` | — |
+| `font` | `String` | `"default"` | — |
+| `text_size` | `u16` | `16` | — |
+| `delay_ms` | `u64` | `500` | — |
+| `lifetime_ms` | `u64` | `5000` | — |
+| `offset` | `[f32; 2]` | `[12.0,20.0]` | — |
+| `padding` | `[u16; 2]` | `[6,4]` | — |
+| `color` | `[u8; 4]` | `[0,0,0,255]` | — |
+| `background` | `[u8; 4]` | `[255,255,225,255]` | — |
+| `border` | `[u8; 4]` | `[70,70,60,255]` | — |
+
+### SpriteCursorLayout
+
+Used by: Rust cursor_from_sprite.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `frames` | `Vec<[u32; 4]>` | — | Source rectangles `[x, y, width, height]`, in display order. |
+| `hotspot` | `SpriteHotspot` | — | — |
+| `color_key_at` | `Option<[u32; 2]>` | — | A source pixel whose RGB identifies transparent pixels in every frame. |
+| `frame_ms` | `u32` | — | — |
+
+### SpriteHotspot
+
+Used by: SpriteCursorLayout.hotspot.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `Position` | — | — |
+| `Marker` | `rect: [u32; 4], rgb: [u8; 3], fallback: [u32; 2]` | Search the separate marker rectangle, in column-major order. Marker coordinates are relative to that rectangle; absence uses `fallback`. |
+
+### InstallerFile
+
+Used by: Shared windows/msi installed-file archive metadata.
+
+Immutable logical installed file, usable by any adapter or asset tool.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `path` | `String` | — | — |
+| `size` | `u64` | — | — |
+| `sequence` | `u32` | — | — |
+| `cabinet_stream` | `String` | — | — |
+| `cabinet_key` | `String` | — | — |
+
+### InstallerCatalog
+
+Used by: Rust shared read-only MSI/CAB catalog.
+
+A catalog owns only its scoped source and immutable data. The third-party MSI/CAB readers are created and destroyed inside each worker invocation; neither !Send MSI objects nor decoder pointers cross task boundaries.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+
+### XmlDocument
+
+Used by: Immutable shared XML resource.
+
+A validated CPU document. It contains no paths, device pointers or callbacks.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+
+### XmlNode
+
+Used by: XmlDocument element and attribute access.
+
+Immutable element in a shared XML resource.
+
+| Field | Rust type | Default | Description |
+|---|---|---|---|
+| `name` | `String` | — | Original qualified element name; namespaces are preserved as text. |
+| `text` | `String` | — | Concatenated character data, with XML 1.0 newline normalization. |
+| `attributes` | `BTreeMap<String, String>` | — | Original qualified attribute names and decoded values. |
+
+### MajiroSettingsProfile
+
+Used by: Majiro explicit portable client settings or unsupported Windows-registry import.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `portable_client` | — | Client Save JSON retains native named REG_SZ values. Missing values follow reviewed native ENV defaults; no original registry is imported. |
+| `strict_windows_registry` | — | Importing an original Windows registry is not implemented. |
+
+### OpticalDiscPolicy
+
+Used by: RealLive native host optical-disc policy; not authentication.
+
+Native portable-host policy, separate from any disc verification result.
+
+| Variant | Fields | Description |
+|---|---|---|
+| `disabled_for_native_host` | — | — |
+| `strict` | — | — |
 
 ### SeekProgress
 
@@ -2004,6 +2866,8 @@ Used by: Bitmap.blit and Bitmap.stretch mode.
 | `opaque_scalar256` | — | Encoded-byte scalar interpolation /256; full opacity copies RGBA, otherwise alpha is zero. No color-space conversion is performed. |
 | `mask_scalar256` | — | Scalar source-alpha /256 interpolation into an opaque bitmap. Writes alpha zero even at source alpha zero; opacity zero skips the whole draw. |
 | `mask_hold_alpha_scalar256` | — | MaskScalar256's RGB interpolation that keeps the destination alpha (krkr `TVPAlphaBlend_HDA`: sopa = s.a, or s.a*opacity>>8 below 255). |
+| `mask_piecewise256` | `weight: u16` | Explicit per-mask /256 profile: mask0 skips; mask255 uses weight and 256-weight; partial masks use a=mask*weight>>8 and 255-a. RGB products are summed then shifted. Destination alpha is retained. |
+| `mask_separate256` | — | Independent /256 floors for source-alpha RGB products. Mask0 skips; mask255 copies RGB. Destination alpha is retained; opacity must be255. |
 | `ps` | `blend: PsBlend, hold_alpha: bool` | Photoshop-like blend (krkr `tvpps.c`): per channel `f(s, d)`, then d + ((f - d)·a >> 8) with a = s.a (·opacity >> 8 below 255). With `hold_alpha` the destination alpha is kept (`_HDA`), otherwise the result alpha is zero, as the native kernels write it. |
 | `opaque_on_alpha_scalar256` | — | Encoded-byte scalar opaque-source blend onto straight alpha. Full opacity copies RGB and writes alpha 255; partial opacity uses the scalar opacity-on-opacity lookup table, ignoring source alpha. |
 | `alpha_on_alpha_scalar256` | — | Encoded-byte scalar straight-alpha blend using the scalar lookup table. This deliberately preserves the scalar transparent-pixel quirks; it is not the SIMD or conventional /255 source-over profile. |
@@ -3235,6 +4099,7 @@ Variants are tagged by `"kind"`.
 | `text` | `text: String, font: String, size: u16, color: [u8; 4], layout: String` | Text with an explicit project font alias, pixel size, color and layout. |
 | `glyph_run` | `font: String, size: f32, color: [u8; 4], bold: bool, glyphs: Vec<PositionedGlyph>, reveal: Option<GlyphReveal>, blur: Option<GlyphBlur>` | Retained explicit glyph positions, rendered as independent cached glyph quads. No VM renderer or flattened text/screen image is involved. |
 | `snapshot` | `size: [u32; 2], layers: Arc<Vec<LayerSpec>>` | Frozen, source-local static scene, rasterized once at `size` before the outer Layer's transform, opacity, UV crop and filter are applied. Inputs contain no nested snapshots, external parents or dynamic state. |
+| `mesh` | `frame: Arc<crysirror_puppet::PuppetFrame>, tint: [u8; 4]` | Immutable, validated engine mesh resource. Capturing an evaluated puppet freezes its completed geometry; textures remain client-scoped immutable image dependencies, with no rig/player or device handles. |
 | `puppet` | `asset: String, tint: [u8; 4]` | 2D deformable puppet (ADR 0029): an engine puppet rig JSON asset, fitted into the layer rect (aspect preserved). |
 
 ### SubtreeTransitionEffect
@@ -3316,6 +4181,7 @@ Engine-owned positioned-text clock. Layout, markup and wait policies are callers
 |---|---|---|---|
 | `unit` | `GlyphRevealUnit` | `"unicode_scalar"` | — |
 | `interval_ms` | `u64` | `40` | Milliseconds per positioned scalar. Zero reveals the run instantly. |
+| `rate_per_second` | `Option<u32>` | — | Exact rational scalar clock. When present this overrides interval_ms; the engine retains fractional milliseconds through elapsed_ms. |
 | `initial_visible` | `usize` | `0` | Prefix already visible when new text is appended to a page. |
 | `elapsed_ms` | `u64` | `0` | — |
 | `forced_complete` | `bool` | `false` | — |
@@ -3385,6 +4251,7 @@ Variants are tagged by `"op"`.
 | Variant | Fields | Description |
 |---|---|---|
 | `create` | `id: u32, width: u32, height: u32` | Issued by `Canvases.apply`. |
+| `destroy` | `id: u32` | Release one unpresented surface. Hide its presentations first. Frozen copies own their draw nodes and remain valid after the source is gone. |
 | `clear` | `id: u32, color: [u8; 4]` | Issued by `Canvases.apply`. |
 | `resize` | `id: u32, width: u32, height: u32` | Change the surface size, keeping its contents anchored at the top-left; area outside previous content stays transparent. |
 | `draw` | `id: u32, layer: LayerSpec, atop: Option<AtopMode>` | Append a draw; with `atop` it is drawn source-atop (see Copy). |
@@ -3411,6 +4278,7 @@ Typed engine operations carried through the dependency-free host contract. The r
 | `world` | `Vec<world::WorldCommand>` | `[]` | — |
 | `layers` | `Vec<layer::LayerCommand>` | `[]` | — |
 | `ui` | `Vec<ui::UiCommand>` | `[]` | — |
+| `input_routes` | `Vec<input_routes::InputRouteCommand>` | `[]` | — |
 
 ### MediaRequest
 
@@ -3963,6 +4831,7 @@ Variants are tagged by `"op"`.
 
 | Variant | Fields | Description |
 |---|---|---|
+| `set_depth` | `id: u32, depth: Option<f32>` | Stable finite floating depth within order major buckets; inherited by descendants. None returns this node to ordinary ordering in its scope. |
 | `begin_motion` | `id: u32, track: MotionTrackSpec` | Start or replace one local scalar track on an owned layer. |
 | `set_motion_elapsed` | `id: u32, property: MotionProperty, elapsed: u64` | Advance an external track in its caller-declared clock units. |
 | `end_motion` | `id: u32, property: Option<MotionProperty>, finish: bool` | Cancel selected/all tracks, optionally applying their final values. |
@@ -3991,6 +4860,10 @@ Variants are tagged by `"op"`.
 
 | Variant | Fields | Description |
 |---|---|---|
+| `put_tooltip` | `tooltip: tooltip::TooltipSpec` | Issued by `Ui.putTooltip`. |
+| `remove_tooltip` | `id: u32` | Issued by `Ui.removeTooltip`. |
+| `show_tooltip` | `id: u32, position: [f32;2]` | Issued by `Ui.showTooltip`. |
+| `hide_tooltip` | `id: Option<u32>` | Issued by `Ui.hideTooltip`. |
 | `begin_motion` | `id: u32, track: MotionTrackSpec` | Start or replace a local X/Y rectangle track on an owned widget. |
 | `set_motion_elapsed` | `id: u32, property: MotionProperty, elapsed: u64` | Advance one external widget track in caller-declared units. |
 | `end_motion` | `id: u32, property: Option<MotionProperty>, finish: bool` | Cancel selected/all tracks, optionally applying their final positions. |
@@ -4115,6 +4988,8 @@ Input to a font worker. Storage paths use the caller's capability root.
 |---|---|---|
 | `Storage` | — | Read through the client capability on an I/O worker. |
 | `Bytes` | — | Immutable caller bytes, charged before admission. |
+| `PrecomputedStorage` | `path: VfsPath, pixel_size: u16` | Fixed-size precomputed coverage face (currently TFT v0/v1), read on an I/O worker. |
+| `PrecomputedBytes` | `bytes: Arc<[u8]>, pixel_size: u16` | Caller-owned precomputed bytes; pixel size is explicit because TFT has no size header. |
 
 ### FontLoadSpec
 
@@ -4345,6 +5220,26 @@ Used by: UiEvent.widget client/local identity.
 | `bootstrap_profile` | `Option<String>` | Engine-published protected-bootstrap profile (`hxv4_bootstrap_profile` for `Plugins.linkZ`, or `cxdec_bootstrap_profile` for the startup `Storages.setupArchiveData` facade) the natives must match. |
 | `arguments` | `BTreeMap<String, String>` | Native command-line values exposed by System.getArgument. Explicit player values override executable-embedded defaults before startup. |
 
+### `majiro`
+
+| Field | Rust type | Description |
+|---|---|---|
+| `script` | `String` | — |
+| `environment` | `Option<String>` | Original ENV resource selected by the archive bootstrap, never a synthetic script. |
+| `settings_profile` | `MajiroSettingsProfile` | Explicit portable settings scope, distinct from the original Windows registry. |
+| `executable` | `Option<String>` | Optional caller-owned module inspected only to guard the reviewed native ABI. |
+| `run_mode` | `i32` | Original startup mode. Release play is 1; native is_testplay is mode!=1. |
+| `keyboard_lock_policy` | `crate::keyboard_policy::KeyboardLockPolicy` | Portable logical engine locks, separate from physical keyboard control. |
+
+### `system-nnn`
+
+| Field | Rust type | Description |
+|---|---|---|
+| `root` | `String` | — |
+| `module` | `String` | — |
+| `font` | `String` | — |
+| `entry` | `Entry` | — |
+
 ### `nscripter`
 
 | Field | Rust type | Description |
@@ -4373,6 +5268,7 @@ Used by: UiEvent.widget client/local identity.
 | `font_alias` | `String` | — |
 | `encoding` | `Option<String>` | — |
 | `start_scene` | `Option<i32>` | — |
+| `optical_disc_check` | `OpticalDiscPolicy` | — |
 
 ### `siglus`
 

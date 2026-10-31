@@ -169,3 +169,87 @@ fn native_division_and_modulo_zero_are_defined_zero_results() {
     assert_eq!(m.read_word(64).unwrap(), 0);
     assert_eq!(m.read_word(68).unwrap(), 0);
 }
+
+#[test]
+fn native_outparams_and_result_slot_are_preflighted_atomically() {
+    let mut code = Vec::new();
+    binary(&mut code, 0x2b, (3, 8), (3, 0));
+    let p = program(code);
+    let mut m = Machine::new(&p, 64).unwrap();
+    assert!(matches!(m.step(&p, 10).unwrap(), Event::Native(_)));
+    let before = m.memory.clone();
+    let pending = m.pending.clone();
+    assert!(m
+        .commit_native(None, &[(0, vec![1, 2]), (u32::MAX, vec![3])])
+        .is_err());
+    assert_eq!(m.memory, before);
+    assert_eq!(m.pending, pending);
+    m.memory.truncate(64);
+    let truncated = m.memory.clone();
+    assert!(m.commit_native(Some(3), &[(0, vec![1, 2])]).is_err());
+    assert_eq!(m.memory, truncated);
+    assert_eq!(m.pending, pending);
+    m.memory = before;
+    m.commit_native(Some(7), &[(0, vec![1, 2]), (1, vec![3, 4])])
+        .unwrap();
+    assert_eq!(&m.memory[..3], &[1, 3, 4]);
+    assert_eq!(m.read_word(64).unwrap(), 7);
+    assert!(m.pending.is_none());
+}
+
+#[test]
+fn increments_preserve_native_dword_return_around_narrow_stores() {
+    let p = program(vec![0x18, 1, 0, 0, 0, 0, 0x16, 1, 0, 0, 0, 0, 0x3b]);
+    let mut m = Machine::new(&p, 64).unwrap();
+    m.write_bytes(0, &0x123400ffu32.to_le_bytes()).unwrap();
+    assert_eq!(m.step(&p, 10).unwrap(), Event::Halted);
+    assert_eq!(m.read_word(64).unwrap(), 0x123400ff);
+    assert_eq!(m.read_word(68).unwrap(), 0x12340001);
+    assert_eq!(m.read_word(0).unwrap(), 0x12340001);
+}
+#[test]
+fn compound_arithmetic_preserves_native_unsigned_divide_remainder_policy() {
+    let mut code = Vec::new();
+    binary(&mut code, 0x20, (3, 0), (3, 6));
+    binary(&mut code, 0x20, (0x23, 4), (0x23, 6));
+    binary(&mut code, 0x1e, (1, 8), (3, 0x102));
+    code.push(0x3b);
+    let p = program(code);
+    let mut m = Machine::new(&p, 64).unwrap();
+    m.write_bytes(0, &20u32.to_le_bytes()).unwrap();
+    m.write_bytes(4, &20u32.to_le_bytes()).unwrap();
+    m.write_bytes(8, &0xffu32.to_le_bytes()).unwrap();
+    assert_eq!(m.step(&p, 10).unwrap(), Event::Halted);
+    assert_eq!(m.read_word(0).unwrap(), 2);
+    assert_eq!(m.read_word(4).unwrap(), 3);
+    assert_eq!(m.read_word(8).unwrap(), 1);
+    assert_eq!(m.read_word(72).unwrap(), 0x201);
+}
+
+#[test]
+fn push_already_stacked_value_leaves_it_in_place() {
+    let mut code = Vec::new();
+    code.push(0x25);
+    operand(&mut code, 3, 42);
+    code.push(0x25);
+    operand(&mut code, 0x43, 0);
+    code.push(0x3b);
+    let p = program(code);
+    let mut m = Machine::new(&p, 64).unwrap();
+    assert_eq!(m.step(&p, 10).unwrap(), Event::Halted);
+    assert_eq!(m.stack, 68);
+    assert_eq!(m.read_word(64).unwrap(), 42);
+}
+
+#[test]
+fn native_event_resume_preserves_original_delayed_boolean_and_atomic_message_buffer() {
+    let mut code=Vec::new();code.push(0x25);operand(&mut code,0,32);
+    binary(&mut code,0x2b,(0,71),(0,4));code.push(0x3b);
+    let p=program(code);let mut m=Machine::new(&p,256).unwrap();m.write_bytes(32,&[0xaa;16]).unwrap();
+    let Event::Native(call)=m.step(&p,100).unwrap()else{panic!("native wait missing")};assert_eq!(call.id,71);
+    let before=m.clone();assert!(m.resume_native_event(None).is_err());assert_eq!(m.pending,before.pending);assert_eq!(m.stack,before.stack);assert_eq!(m.memory,before.memory);
+    m.acknowledge(None).unwrap();let pc=m.pc;let stack=m.stack;
+    m.resume_native_event(None).unwrap();assert_eq!(m.pc,pc);assert_eq!(m.read_word(stack).unwrap(),0);assert_eq!(&m.memory[32..48],&[0xaa;16]);
+    let before=m.clone();assert!(m.resume_native_event(Some((0x800000f8,[1,2,3,4]))).is_err());assert_eq!(m.stack,before.stack);assert_eq!(m.memory,before.memory);assert_eq!(m.heap,before.heap);
+    let stack=m.stack;let message=[5,(-65533i32) as u32,5,0];m.resume_native_event(Some((32,message))).unwrap();assert_eq!(m.read_word(stack).unwrap(),1);for(i,word)in message.iter().enumerate(){assert_eq!(m.read_word(32+i as u32*4).unwrap(),*word);}assert_eq!(m.pc,pc);
+}

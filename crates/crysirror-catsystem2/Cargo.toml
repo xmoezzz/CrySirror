@@ -15,13 +15,16 @@ crysirror-core.workspace = true
 crysirror-tasks.workspace = true
 crysirror-resource.workspace = true
 crysirror-scene.workspace = true
+crysirror-text.workspace = true
 crysirror-runtime = { workspace = true, optional = true }
-quick-xml = "0.41"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [features]
 runtime = ["dep:crysirror-runtime"]
 
 [dev-dependencies]
+crysirror-runtime.workspace = true
+tempfile = "3.12"
+crysirror-audio.workspace = true
 crysirror-formats-arc.workspace = true
 

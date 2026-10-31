@@ -3804,12 +3804,13 @@ impl ObjectBuilder {
                 });
                 tasks.push(ExprTask::Expr(object));
             }
-            syntax::ExprKind::WithMember { property } => {
-                call_targets.push(CallTarget::Member {
-                    object: self.with_member_object(),
-                    key: MemberKey::Direct(lowerer.intern_string(property)),
-                    flags: FLAGS_DEFAULT_GET,
-                });
+            syntax::ExprKind::WithMember { .. } => {
+                // Native haspropnode only accepts T_DOT/T_LBRACKET, not
+                // T_WITHDOT (tjsInterCodeGen.cpp:1752). `.callback()` reads
+                // its value and VM_CALL retains the caller's this. A named
+                // dictionary member call instead supplies the dictionary.
+                tasks.push(ExprTask::CallTargetValueAfter);
+                tasks.push(ExprTask::Expr(callee));
             }
             syntax::ExprKind::Index { object, index } => {
                 tasks.push(ExprTask::CallTargetIndexAfterObject {

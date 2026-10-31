@@ -22,6 +22,8 @@ mod audio_motion;
 mod audio_groups_api;
 mod audio_resources_api;
 mod audio_sequences_api;
+mod audio_release_api;
+pub use audio_release_api::VoiceReleaseSpec;
 pub use audio_sequences_api::CueSequenceCursor;
 pub use audio_sequences_api::{CueSequenceSpec, CueSequenceLine, CueSequenceMode, CueSequenceClock, CueSequenceTiming, CueSequenceRandom};
 pub use audio_resources_api::{AudioSourcePrepareSpec, AudioTransformSpec};
@@ -31,9 +33,11 @@ mod bitmap_async;
 pub use bitmap_async::BitmapJobs;
 pub mod builtin;
 pub mod canvas_api;
+mod media_probe_api;
 pub mod context;
 pub mod input_api;
 pub mod input_events_api;
+mod input_routes_api;
 pub mod lifecycle;
 pub mod localization;
 pub mod object;
@@ -65,3 +69,5 @@ pub use value::Value;
 pub use acoustics_api::AcousticMeshBindingSpec;
 
 mod text_font_api;
+
+mod input_locks_api;

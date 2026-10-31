@@ -36,6 +36,13 @@ pub struct ImageDecodeContext<'a> {
     work: Option<&'a Work>,
 }
 impl<'a> ImageDecodeContext<'a> {
+    /// Observe the current resource worker's cancellation without copying input.
+    /// Standalone decoding without a resource job has no cancellation token.
+    pub fn check_cancelled(&self) -> Result<()> {
+        if let Some(resource)=self.resource {resource.check_cancelled()?;}
+        Ok(())
+    }
+
     pub fn new(path: &'a str, registry: &'a DecoderRegistry) -> Self {
         Self {
             path,

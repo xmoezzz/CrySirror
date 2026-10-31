@@ -55,6 +55,28 @@ fn pixels(a: &App, slot: u32) -> Vec<u8> {
         .to_vec()
 }
 #[test]
+fn alpha_clip_pair_is_public_scoped_snapshot_based_and_revision_checked(){
+    let (_d,mut a)=app();
+    call(&mut a,"Bitmap","create",json!([1,3,1,[18,52,86,128]])).unwrap();
+    call(&mut a,"Bitmap","create",json!([2,1,1,[200,50,20,64]])).unwrap();
+    let options=json!({"destination":[1,0],"source":[0,0,1,1],"clip":[0,0,3,1],"clear":0});
+    let ticket=call(&mut a,"Bitmap","beginAlphaClip",json!([1,2,options])).unwrap();
+    a.context().state().unwrap().client=ClientId(2);
+    assert!(call(&mut a,"Bitmap","effectStatus",json!([ticket])).is_err());
+    a.context().state().unwrap().client=ClientId(1);
+    call(&mut a,"Bitmap","fill",json!([2,{"x":0,"y":0,"width":1,"height":1},[0,0,0,255]])).unwrap();
+    assert_eq!(wait(&mut a,"Bitmap","effectStatus",ticket)["state"],"ready");
+    assert_eq!(pixels(&a,1),[18,52,86,0,18,52,86,32,18,52,86,0],"worker must use admitted source generation");
+    let mut invalid=options.clone();invalid["self_source"]=json!(true);
+    assert!(call(&mut a,"Bitmap","beginAlphaClip",json!([1,2,invalid])).is_err());
+    let ticket=call(&mut a,"Bitmap","beginAlphaClip",json!([1,2,options])).unwrap();
+    call(&mut a,"Bitmap","fill",json!([1,{"x":0,"y":0,"width":3,"height":1},[9,10,11,255]])).unwrap();
+    let result=wait(&mut a,"Bitmap","effectStatus",ticket);
+    assert_eq!(result["state"],"failed");assert!(result["error"].as_str().unwrap().contains("stale"));
+    assert_eq!(pixels(&a,1),[9,10,11,255,9,10,11,255,9,10,11,255]);
+    assert!(a.typescript_declarations().unwrap().contains("beginAlphaClip("));
+}
+#[test]
 fn shared_image_worker_publication_is_scoped_revision_checked_cancellable_and_restore_safe() {
     let (_d, mut a) = app();
     call(

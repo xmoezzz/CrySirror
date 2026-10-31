@@ -29,6 +29,14 @@ declare class Audio {
   resetMotion(): void;
   /** Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails. */
   nativeChannelInfo(channel: number): any;
+  /** Retire a shared native channel decoder to a tail channel without reopening or seeking; admit an externally clocked stepped db100 release and return an owned operation handle. Pending is not transfer completion. */
+  beginVoiceRelease(spec: Record<string, any>): Record<string, any>;
+  /** Supply a monotonic exact update counter (integer or decimal string) for a channel release; repeated samples are idempotent. */
+  advanceVoiceRelease(handle: Record<string, any>, elapsedUpdates: any): void;
+  /** Query actual owner-published release phase, completed counter, source position and stopped_at_update; requested counters alone are not completion. */
+  voiceRelease(handle: Record<string, any>): Record<string, any>;
+  /** Release a terminal receipt; active/pending actors cannot be silently discarded. */
+  releaseVoiceRelease(handle: Record<string, any>): void;
   /** Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters. */
   playbackInfo(handle: Record<string, any>): Record<string, any>;
   /** Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness. */
@@ -190,6 +198,8 @@ declare class Audio {
 declare class Bitmap {
   /** Prepare a SineRowCopy from a shared bitmap snapshot. Full-image clip; uncovered destination pixels are preserved. Uses effectStatus/cancelEffect. */
   beginRowCopy(slot: number, source: number, options: Record<string, any>): number;
+  /** Prepare clipped stored-coverage multiplication using AlphaClipRect. RGB is retained unless multiply_rgb is explicit; self_source reads the current destination in forward order and requires identical slots. Uses client/epoch/revision-checked effectStatus/cancelEffect. */
+  beginAlphaClip(slot: number, source: number, options: Record<string, any>): number;
   /** Prepare a snapshot crossfade/rule-mask/blur transition into slot at explicit ImageTransition progress. Inputs must be client-owned equal-size bitmaps. Uses effectStatus/cancelEffect and rejects a stale target revision. */
   beginTransition(slot: number, other: number, options: Record<string, any>, mask: number | null): number;
   /** Prepare an ImageEffect chain on shared workers. Captures immutable pixels and the target revision; effectStatus publishes only if the client/epoch/revision still match. Max 4M pixels, 16 effects. */
@@ -219,10 +229,14 @@ declare class Bitmap {
 }
 /** Client-scoped retained drawing canvases backed by inspectable engine Layer nodes. */
 declare class Canvases {
-  /** Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs. */
+  /** Return shared retained-canvas capacity: surfacesPerClient. Pixel-byte, dimension and node limits are admitted separately. */
+  getLimits(): Record<string, any>;
+  /** Atomically apply typed canvas commands: create, destroy, clear, draw, set, copy, present and hide. Destroy releases an existing unpresented surface; hide its presentations first. Frozen copies survive source destruction. Draws contain ordinary Layer specs, including positioned glyph runs. */
   apply(commands: Record<string, any>[]): void;
   /** Inspect this client's canvas dimensions and logical draw nodes, or null when absent. No flattened native frame is returned. */
   get(id: number): Record<string, any> | null;
+  /** Read exact RGBA bytes from supported retained solid canvas nodes. Missing/outside coordinates and unsupported image/text/group/filter/transform/blend profiles fail; no guessed matte or GPU readback. */
+  readPixel(id: number, x: number, y: number): number[];
 }
 /** A project client: a VM peer (data VM, Siglus SceneVm, ...) with its own scheduling, waits and saves. */
 declare class Client {
@@ -247,6 +261,8 @@ declare class Engine {
   readonly input: Record<string, any>;
   /** Append a line to the bounded engine log. */
   log(message: string): void;
+  /** Read this client's canonical bounded engine log and dropped count. Sequences and virtual timestamps are exact decimal strings; no filesystem/device output is implied. */
+  logs(): Record<string, any>;
   /** Ask the host to stop after this frame. */
   quit(): void;
   /** Project clients, including native VMs. */
@@ -424,6 +440,10 @@ declare class Input {
   readonly lastDevice: string;
   /** Action waiting for a new physical binding. */
   readonly pendingRebind: string | null;
+  /** This client's logical Caps/Num/Scroll lock state and revision. Physical state is null unless imported; logical control never toggles the OS keyboard. Session state resets only on successful Runtime restore. */
+  keyboardLocks(): Record<string, any>;
+  /** Patch this client's logical caps_lock/num_lock/scroll_lock. mode must be logical; physical requests fail explicitly. Returns owner-committed state/revision, not device success. */
+  setKeyboardLocks(state: Record<string, any>): Record<string, any>;
   /** Enable/replace this client's opt-in logical input journal (1..4096 samples). Accepted App frames feed it once. Disabled by default; action queries remain independent. Overflow is visible, with no silent edge drop. */
   enableEvents(capacity: number): void;
   /** Release this client's journal. Old receipts cannot affect a newly enabled journal. */
@@ -469,6 +489,29 @@ declare class Input {
   /** Drain the completed capture result. */
   takeRebind(): Record<string, any> | null;
 }
+/** Client-scoped device-event receivers with stable priority, explicit delivery receipts, capture and cancellation. Interactive Widget mixing and simultaneous active receiver clients are explicitly unsupported in the current routing profile. */
+declare class InputRoutes {
+  /** Register/update a bounded receiver with signed priority, source mask, optional half-open pointer rect/coverage and enabled/hover flags. */
+  put(receiver: Record<string, any>): void;
+  /** Remove an owned receiver; stale capture/delivery cannot activate a different receiver. */
+  remove(id: number): void;
+  /** Clear this client's receivers and pending input state. */
+  clear(): void;
+  /** Enable or disable a registered receiver. */
+  setEnabled(id: number, enabled: boolean): void;
+  /** Set signed priority, high first, preserving equal-priority stable history. */
+  setPriority(id: number, priority: number): void;
+  /** Lease the next routed event. Repeated polls retain the same receipt until acknowledgement; u64 receipt fields are exact decimal strings. */
+  delivery(): Record<string, any> | null;
+  /** Acknowledge exactly the current scoped receipt. Unhandled events continue to the next eligible receiver; stale or foreign receipts fail. */
+  acknowledge(receipt: Record<string, any>, handled: boolean): void;
+  /** Cancel transient delivery/capture state without synthesizing input. */
+  cancel(): void;
+  /** Inspect one owned receiver, or null when absent. */
+  receiver(id: number): Record<string, any> | null;
+  /** Inspect bounded receiver/journal/delivery state; this does not inject a device event. */
+  stats(): Record<string, any>;
+}
 /** Retained 2D layer hierarchy (sprites, text, solid fills) composited over 3D. */
 declare class Layers {
   /** Layers owned by this client. */
@@ -489,6 +532,8 @@ declare class Layers {
   completeReveal(id: number): void;
   /** Inherited opacity 0..255. */
   setOpacity(id: number, opacity: number): void;
+  /** Opt this subtree into stable floating-depth painter order within its major bucket. Equal depths preserve the last committed frame order; ordinary layers draw before depth scopes. Null restores ordinary order. This does not change geometric position. */
+  setDepth(id: number, depth: number | null): void;
   /** Explicit [major, minor] draw order. */
   setOrder(id: number, order: number[]): void;
   /** Clip rectangle [x,y,w,h] or null. */
@@ -539,6 +584,12 @@ declare class Localization {
 }
 /** Shared asynchronous media resources; decoding, clocks and errors belong to the engine. */
 declare class Media {
+  /** Begin scoped video decoder/header preparation without playback, pictures or PCM. probeStatus retains Pending/Ready/Failed; audio facts remain unknown when not probed. */
+  beginProbe(asset: string): number;
+  /** Poll header preparation without joining; Ready exposes size/container/video decoder, optional audio facts, frame_ms and exact duration_ms as a decimal string or null. */
+  probeStatus(ticket: number): Record<string, any>;
+  /** Release this client's header probe; unfinished work is cancelled. Tickets become obsolete after restore. */
+  releaseProbe(ticket: number): void;
   /** Start a scoped media resource; options {loop?:false,audio?:true,gain?:1}. Returns its logical image resource path for Layer/Canvas/Material APIs; inspect status for loading, playback and errors. */
   play(id: number, asset: string, options: Record<string, any> | null): string;
   /** Stop only this client's media resource. */
@@ -646,8 +697,8 @@ declare class Resources {
   decodeStatus(ticket: number): Record<string, any>;
   /** Read a ready file's bounded byte page (maximum 65536) or archive metadata page (maximum 1024 entries). Pending work fails visibly rather than waiting or returning fabricated data. */
   readDecode(ticket: number, offset: number | null, limit: number | null): Record<string, any>;
-  /** Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. No CPU decoder runs during publication. */
-  mountDecode(ticket: number, target: string): Record<string, any>;
+  /** Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. Optional fallback=true puts existing overlays and real loose files ahead of this provider; default false preserves ordinary overlay priority. No CPU decoder runs during publication. */
+  mountDecode(ticket: number, target: string, fallback: boolean | null): Record<string, any>;
   /** Cancel pending work or release a retained result. Late worker output is discarded. Already mounted readers retain their own decoded-resource reservation. */
   cancelDecode(ticket: number): void;
   /** List installed byte transform IDs; profiles refer to keys supplied by the Rust host. */
@@ -692,6 +743,8 @@ declare class Save {
 declare class Text {
   /** Begin bounded asset read and font preparation. fontStatus publishes the immutable face to this client's measurement and renderer catalog. */
   beginFont(alias: string, asset: string, faceIndex: number | null): number;
+  /** Begin bounded TFT v0/v1 fixed-size coverage font preparation. Uses the same scoped fontStatus, measurement, TextRun and GlyphRun resources; missing glyphs or a different size fail explicitly. */
+  beginPrecomputedFont(alias: string, asset: string, pixelSize: number): number;
   /** Poll font workers. Ready contains canonical alias, digest, revision, families and resource handle; failed contains an error. */
   fontStatus(ticket: number): Record<string, any>;
   /** Resolve a client-owned logical alias or font family to immutable font metadata, or null. */
@@ -739,6 +792,14 @@ declare class Ui {
   drainEvents(): Record<string, any>[];
   /** Freeze owned UI into independent logical LayerSpec records on the project canvas. Pass null for all owned UI, or a widget id for its subtree; current values, style and clip are preserved. */
   snapshotLayers(root: number | null): Record<string, any>[];
+  /** Prepare font-measured bounds and register an owned plain single-line TooltipSpec; no native VM or pointer capture is required. */
+  putTooltip(tooltip: Record<string, any>): void;
+  /** Remove an owned tooltip and its active presentation. */
+  removeTooltip(id: number): void;
+  /** Start or update a passive tooltip at logical pointer coordinates; shared UI owns its delay and lifetime. */
+  showTooltip(id: number, position: number[]): void;
+  /** Hide one owned tooltip, or all of this client's tooltips with null. */
+  hideTooltip(id: number | null): void;
   /** Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state. */
   setMenu(menu: Record<string, any>): void;
   /** Remove a client menu tree. */
@@ -892,6 +953,7 @@ declare const ui: Ui;
 declare const audio: Audio;
 declare const save: Save;
 declare const input: Input;
+declare const inputRoutes: InputRoutes;
 declare const localization: Localization;
 declare const text: Text;
 declare const bitmap: Bitmap;

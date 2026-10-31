@@ -1,0 +1,17 @@
+[package]
+name = "crysirror-formats-blackcyc"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+rust-version.workspace = true
+publish = false
+description = "Shared bounded Black Cyc GPK/VPK, DWQ and VAW resource formats"
+[dependencies]
+anyhow.workspace = true
+crysirror-core.workspace = true
+crysirror-resource.workspace = true
+crysirror-image.workspace = true
+encoding_rs = "0.8"
+serde_json.workspace = true
+[dev-dependencies]
+crysirror-audio.workspace = true

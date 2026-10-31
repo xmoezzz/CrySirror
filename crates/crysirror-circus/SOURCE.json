@@ -38,7 +38,7 @@
       "0x41AE60 / 0x425EE0 playerinput frozen scene source",
       "0x4502C0 / 0x4500E0 native GDI placement and destination clip",
       "0x43C390 24-byte music loop metadata in decoded frames",
-      "0x43B4C0 DirectSound centibel gain",
+      "0x43B4C0 DirectSound gain in hundredths of one dB (db100)",
       "0x41032E MSVC srand(timeGetTime)",
       "0x41F300 / 0x41DAC0 / 0x41C490 / 0x41D1F0 native falling declarations mapped to shared VFX pools/node/mesh/completion; ordinary type1 density0..5 only",
       "0x42E55D / 0x402320 single CRT random result and bounded save/replay history; worker sequence exchange before VM assignment",
@@ -49,7 +49,26 @@
       "0x414BC0 native button state99/1/2 and15-tick scale transitions; shared UI motion and retained event delivery",
       "0x412FB0 normal-state source-cut coverage alpha!=0; ImageResource::alpha_region and shared WidgetHitMask own extraction/sampling",
       "0x442D60 / 0x4428E0 native state4 release activation, matching shared Button capture/release",
-      "0x42AFC8 native49 ->0x425C20 clears current groups via41F2B0 and transition via407BC0/444020(0), mapped to ResetScene before background presentation"
+      "0x42AFC8 native49 ->0x425C20 clears current groups via41F2B0 and transition via407BC0/444020(0), mapped to ResetScene before background presentation",
+      "0x4222E0 / 0x43CC90 / 0x43BFF0 / 0x43BE10 native music0-to-tail1 ownership and retained consumed cursor, mapped to shared AudioReleaseSpec/Handle actor",
+      "0x43C0C0 / 0x43D010 native f32 db100 release arithmetic and explicit update clock, implemented in shared crysirror-audio and validated with standalone PCM/worker oracles",
+      "0x433EED ordinary audio update before native process, separate from 0x43BD90 200ms stream refill timer",
+      "0x4441A0 / 0x444230 / 0x4441C0 / 0x4432E0 ordinary native sprite scale percentage and pivot mapped to engine Layer transforms, 0x41E6A0 slots4..8",
+      "0x40E560 / 0x40E6A0 original named placement table declaration/update; ordered resource-prefix lookup inspected for future stage mapping, no private rendering/layout engine",
+      "0x41DD10 / dispatcher0x1c original transient native checkpoint resume-PC and following string-metadata consumption; shared Canvas/Mesh/UI retained capture and complete logical State, original1d restore remains unsupported",
+      "0x40C360 / 0x40C2F0 / 0x421750 original autosave0 layout statically inspected:356324-byte mirror plus128x72 thumbnail; writing/reconstructing this original format remains unsupported",
+      "0x43AC20 / dispatcher0xaf initial centered pan reset uses shared SetPan; nonzero/stepped db100 pan remains unsupported",
+      "0x444270 and embedded Tech.p0 straight-alpha shader: accepted pass0 invariant; other native shader passes remain unsupported",
+      "0x40C360 / 0x40C620 raw356324-byte native slot prefix retained losslessly by native_save codec; no zero-body constructor or claim of live-state serialization",
+      "0x41DD10 / 0x444770 precise150x960-byte captured sprite fixups; entire transient11/21/31/41/51 records and all texture identities cleared, opaque fields retained",
+      "0x4036D0 / 0x402350 native400x14-byte read-run record ABI and index; all seven WORDs retained, including sentinel/flags and original metadata; logical read-range mapping is not a complete restore",
+      "0x40C290 / 0x40C2F0 original six-byte local civil timestamp order at body100154, encoded from caller-obtained civil fields only",
+      "0x40EC50 / 0x40E730 native live body initialization; separate150x960byte live sprite records reconstructed from complete444BC0/444180/4488E0/445010 defaults, including integer clipping, original float scales/viewport and visible fields",
+      "0x40D210 native two1100byte bank resets,40D240 live selectors233/241, original opcode11 configured-name copy200-to265268 and184-to265288, counters/sentinel reset with old history tail retained",
+      "0x4036D0 / 0x402350 precise live14byte read-history append/contiguous extension/dedup and all source metadata;402320 random200-result recording synchronized after real shared sequence receipt",
+      "0x443EA0 / 0x444040 / 0x4441A0 / 0x444230 engine-owned completed logical/POT image extents and original native sprite metadata preserved separately from host texture identities",
+      "0x40E560 / 0x40E3B0 / 0x40E3E0 / native112 and19 original placement rows, voice-prefix timing records and music filename/id mirrored; live image admission remains blocked on explicit unaudited opcode set",
+      "0x4250B0 / 0x4226B0 / 0x421750 original save screenshot selection:6276/6277 enabled, draw(1), loop stops at native index80 with special native UI suppression; generic all-UI capture is not accepted as original thumbnail semantics"
     ],
     "exact_build_profiles": [
       {
@@ -62,5 +81,5 @@
       }
     ]
   },
-  "limits": "Registered ABI0xabb6 native VM remains partial: unsupported opcodes, keyboard/controller/page menu navigation, nonempty native UI text/markup, complex image animation and original slot saves fail explicitly. Shared menu process/coverage/motion mapping is implemented, but installed title/story progression still requires its actual validation. ABI0xaab6 is parse-only. No complete game compatibility is claimed."
+  "limits": "Registered ABI0xabb6 native VM remains partial. Actual original DC4PHDL title press/release advances into DC4_SEN20181213B, including native BGM tail release, fade capture, sprite transforms, named placement declarations and transient1c checkpoint. Execution stops visibly at pc0x83e opcode0x18 selector4 forced original autosave0. Native body encoding/thumbnail,1d/slot restoration, later dialogue, PCK playback, unsupported navigation/text/effects are incomplete. Shared checkpoint visual paints are not restored interaction or original binary-save compatibility. ABI0xaab6 is parse-only. No complete game compatibility is claimed. NativeLiveState now retains audited original body/sprite/read-history state during execution and records explicit per-opcode coverage gaps; a successful transient checkpoint is still not an admitted writable original slot."
 }

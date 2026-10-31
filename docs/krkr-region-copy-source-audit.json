@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/krkrz/krkrz",
+  "commit": "fd5c4baa6a2ef5978db1bd043634351f48667daf",
+  "files": {
+    "visual/LayerIntf.cpp": "9cf4cb58f0d63c53ba2c7ec7b0f09ca44a51bb43a92f09fb4aad6b1f90441556",
+    "visual/LayerIntf.h": "f27f0a252475b7f94e00ab3f6175f01c4f04ccce67ac4673e3ced0d8ba25d52e",
+    "visual/LayerManager.cpp": "5a46fd6a3344b25312b2a17a1d9ecc46ac6ef543a22f0f064ce7a479c6b4dd71",
+    "base/EventIntf.cpp": "73643539a2df61f78061e0a7d2d5600d48b16d2d5bf25c5f0afc484ac0d10a9d",
+    "base/EventIntf.h": "7faf979f5840446b91d15b2d5c8e77250a22cc58a8c5b9439102ad12b629b0ed"
+  },
+  "native_policy": {
+    "positive_mask_hit": "Layer MainImage stored alpha compared to HitThreshold; callbacks retain original ordering",
+    "province_copy": "dfProvince=3 copies 8-bit interaction labels, not RGBA. Missing source province fills the clipped source rectangle in the destination plane, per original CopyRect branch. Full zero FillRect deallocates the province plane; partial zero preserves allocation. AssignImages snapshots the province; SetImageSize retains content and fills newly exposed labels with zero.",
+    "focus_defaults": "Layer onBlur(focused) and onFocus(blurred,direction) forward native type/target dictionaries to the constructor Window.action owner. Missing action returns void; subtype super handlers remain callable. These are actual default event semantics, not ignored unknown calls."
+  },
+  "engine_ownership": "Generic scoped clip/copy/zero holes/resize and atomic fill budget belong to crysirror_core::region_map. Shared ImageJobs own bitmap graph preparation; native input is not acknowledged before ready. No private bitmap compositor is added."
+}

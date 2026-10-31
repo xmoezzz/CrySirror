@@ -29,6 +29,8 @@ fn kind(rt: &Rt, name: &str) -> Option<&'static str> {
             // AlphaMovie class over the shared media service (AJPM decoder).
             | "alphamovie.dll"
             | "layereximage.dll"
+            | "layerexbtoa.dll"
+            | "layerexmovie.dll"
             | "kagparserex.dll"
             | "extkagparser.dll"
             | "kropus.dll"
@@ -140,6 +142,7 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                 if name == "kagparserex.dll" && !rt.host().loaded_plugins.contains(&name) {
                     crate::kag::install_ex(rt);
                 }
+                if name == "layerexmovie.dll" && !rt.host().loaded_plugins.contains(&name) { crate::layer_movie::install(rt); }
                 if name == "layereximage.dll" && !rt.host().loaded_plugins.contains(&name) {
                     crate::image_api::install_ex_image(rt);
                 }
@@ -170,6 +173,8 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                         | "krmovie.dll"
                         | "alphamovie.dll"
             | "layereximage.dll"
+            | "layerexbtoa.dll"
+            | "layerexmovie.dll"
             | "kagparserex.dll"
             | "extkagparser.dll"
             | "kropus.dll"
@@ -265,8 +270,12 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                             "native ExtKAGParser VM while/local dictionary/multiline/parameter macro profile; unsupported save/fuzzy modes fail explicitly"
                         } else if name == "kagparserex.dll" {
                             "native KAG scenario VM, KAGParserEx taglist profile"
+                        } else if name == "layerexmovie.dll" {
+                            "plain RGB layer movies through shared Media metadata/frame/loop services; side-by-side alpha unsupported"
                         } else if name == "layereximage.dll" {
                             "shared ImageEffect CxImage colour/noise/blur profile"
+                        } else if name == "layerexbtoa.dll" {
+                            "clipAlphaRect via shared AlphaClipRect and Canvas preparation; other exports remain unsupported"
                         } else if name == "alphamovie.dll" {
                             "AlphaMovie (AJPM) through the shared media service"
                         } else if name == "krmovie.dll" {

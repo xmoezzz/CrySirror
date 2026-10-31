@@ -186,6 +186,17 @@ impl MixGroups {
             g.output = g.gain.step() * parent_gain;
         }
     }
+    /// Owner-boundary product; unlike output(), includes immediate control writes
+    /// that have not yet been sampled by a PCM render.
+    pub(crate) fn current_gain(&self, mut id: Option<usize>) -> f32 {
+        let mut gain = 1.;
+        while let Some(i) = id {
+            let group = self.slots[i].as_ref().unwrap();
+            gain *= group.gain.value;
+            id = group.parent;
+        }
+        gain
+    }
     pub(crate) fn output(&self, id: Option<usize>) -> f32 {
         id.map_or(1., |i| self.slots[i].as_ref().unwrap().output)
     }

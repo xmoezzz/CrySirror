@@ -1,0 +1,61 @@
+{
+  "research": [
+    {
+      "repository": "https://github.com/AtomCrafty/MajiroTools",
+      "commit": "e0261df508b6c8065865bb51b4059263cef84394",
+      "license": "MIT",
+      "copyright": "2021 Mario Welzig, Robert Jordan",
+      "files": [
+        "src/MajiroLib/Script/Disassembler.cs",
+        "src/MajiroLib/Script/Opcode.cs",
+        "src/MajiroLib/Script/Flags.cs",
+        "src/MajiroLib/Script/Crc.cs"
+      ]
+    },
+    {
+      "repository": "https://github.com/AtomCrafty/MajiroTools.wiki.git",
+      "commit": "209cece20d0c2393018a68e6332d06f0f9e89592",
+      "files": [
+        "Format:-Mjo-script.md",
+        "Types-and-variables.md",
+        "Table-of-opcodes.md",
+        "List-of-known-syscalls.md"
+      ]
+    }
+  ],
+  "scope": "Independent bounded MJO parser/native stack execution. External operations remain pending until shared engine service completion. Unsupported semantics fail at original PC. No original executable execution, hosted engine, renderer or mixer.",
+  "native_module": {
+    "path": "owner game-akatsuki/bin/暁の護衛.exe (not distributed)",
+    "sha256": "75f289d8d5b730c6f332488df8fe4827d7e95d1af4a100bfd2a880a0b9e80602",
+    "inspection": "Static IDA 9 only; no original program execution",
+    "functions": {
+      "0x410060": "syscall hash dispatch; auto_mode_config writes top integer at branch0x411c84",
+      "0x403310": "is_testplay returns startup mode != 1 through native integer push",
+      "0x419500": "page_create reads width/top, height/top-1, optional color/top-2",
+      "0x4404e0": "true-color allocation is24bpp BGR despite wiki claim32; zero storage maps opaque black",
+      "0x4404a0": "zero fill newly allocated true-color page",
+      "0x401c40": "rand(bound): original CRT rand()%signed bound; zero bound requires native error-dialog policy, not silently returned here",
+      "0x450379": "MSVCRT integer stream exactly matches shared SequenceRng::msvc",
+      "0x424d06": "original srand(time(0)); native startup IO worker captures Unix seconds once; no elapsed-ms replacement",
+      "0x401c80": "rand! special float profile remains unsupported",
+      "0x434cf0": "current settings initialize by registry read with ENV defaults",
+      "0x4431b0": "HKCU Software/REG_GLOBAL/REG_LOCAL REG_SZ integer read; not DWORD",
+      "0x4430e0": "native decimal-string REG_SZ persistence",
+      "0x4355d0": "get_effectspeed current global",
+      "0x4356e0": "set_effectspeed current global and persistence, integer0 return",
+      "0x435710": "set_mojispeed current global and persistence",
+      "0x41c5f0": "conditional CapsLock query/physical key toggle; explicit engine_logical policy clears only shared logical CapsLock, preserving NumLock/ScrollLock; no physical import/control",
+      "0x410060-0x81ce0485": "fast_mode_disable increments native depth and invokes caps clear",
+      "0x409f80": "native VM initialization resets fast-disable depth 0 before startup",
+      "0x41db40": "pushes a type3 native integer value onto VM stack; fast_mode_disable pushes zero"
+    }
+  },
+  "portable_settings": {
+    "profile": "portable_client",
+    "path": "client Save/majiro-portable-settings-v1.json",
+    "original_registry_import_performed": false,
+    "native_original_save_compatibility": false,
+    "writes": "shared StorageWrite owner receipt; no original syscall ACK on admission alone",
+    "limits": "1MiB,4096 entries, bounded unique string values; numeric profile rejects unsupported native atoi suffix/overflow strings"
+  }
+}

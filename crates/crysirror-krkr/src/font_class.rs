@@ -25,6 +25,25 @@ pub(super) fn initialize(rt: &mut Rt, font: ObjectHandle) {
     font_properties(rt, font);
     rt.register_object_native_with_arg_count(
         font,
+        "mapPrerenderedFont",
+        NativeArgCount::AtLeast(1),
+        |rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>| {
+            let font = this_of(rt, t, "Font.mapPrerenderedFont")?;
+            let storage = string(&a, 0, "Font.mapPrerenderedFont")?;
+            crate::font_resources::map(rt, font, storage)
+        },
+    );
+    rt.register_object_native_with_arg_count(
+        font,
+        "unmapPrerenderedFont",
+        NativeArgCount::Any,
+        |rt: &mut Rt, t: Option<ObjectHandle>, _: Vec<Variant>| {
+            let font = this_of(rt, t, "Font.unmapPrerenderedFont")?;
+            crate::font_resources::unmap(rt, font)
+        },
+    );
+    rt.register_object_native_with_arg_count(
+        font,
         "getTextWidth",
         NativeArgCount::AtLeast(1),
         font_text_width,

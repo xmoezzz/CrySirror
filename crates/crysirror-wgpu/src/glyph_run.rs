@@ -403,6 +403,7 @@ mod tests {
             *reveal = Some(GlyphReveal {
                 unit: GlyphRevealUnit::UnicodeScalar,
                 interval_ms: 20,
+                rate_per_second:None,
                 initial_visible: 0,
                 elapsed_ms: 0,
                 forced_complete: false,

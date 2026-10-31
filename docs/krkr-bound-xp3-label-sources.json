@@ -1,0 +1,131 @@
+{
+  "scope": "Bound XP3 header/index/segment addressing and KAG bare-label alias semantics; TJS with-dot callback call form and Layer empty metadata return; native hint policy over shared passive UI; layerExMovie plain RGB semantic facade; original LayerManager pointer hover/capture and Click/Up ordering",
+  "sources": [
+    {
+      "repository": "https://github.com/krkrz/KAGParser.git",
+      "commit": "c2269b26b390bd09aa1f2b39d7d779cb79c26f2e",
+      "review": "Complete archive/parser source reviewed before independently expressing native format/control semantics in Rust.",
+      "files": [
+        {
+          "path": "KAGParser.cpp",
+          "sha256": "1ff7195dbeed1e8f776ca417d1e84137c74534e6ae7b644e2837b21026e1935d"
+        },
+        {
+          "path": "KAGParser.h",
+          "sha256": "24efd1a415c92575290516973ae0ec43d92addcec817c9c06e7412fa73da6c30"
+        },
+        {
+          "path": "Main.cpp",
+          "sha256": "80fccf8ceaec30ac765107dcd9026b0df30722bd88b94189d6e96b31fdb533d1"
+        }
+      ]
+    },
+    {
+      "repository": "https://github.com/krkrz/krkrz.git",
+      "commit": "fd5c4baa6a2ef5978db1bd043634351f48667daf",
+      "review": "Complete archive/parser source reviewed before independently expressing native format/control semantics in Rust.",
+      "files": [
+        {
+          "path": "base/XP3Archive.cpp",
+          "sha256": "a5a7a85d208f2f4ce49061a4e2c5e72011f067c6ed427d6d2d85835db2238bc3"
+        },
+        {
+          "path": "base/XP3Archive.h",
+          "sha256": "1c9a57fbe6ade5cb54e603ff955199ef649034706e321f63da63a17f73fda197"
+        },
+        {
+          "path": "tjs2/tjsInterCodeGen.cpp",
+          "sha256": "53f70d067b7a44b6e2ebc07d0e1654563dc94ce52e0918cd501e4afdb81bd409"
+        },
+        {
+          "path": "visual/LayerIntf.cpp",
+          "sha256": "9cf4cb58f0d63c53ba2c7ec7b0f09ca44a51bb43a92f09fb4aad6b1f90441556"
+        },
+        {
+          "path": "visual/LayerManager.cpp",
+          "sha256": "5a46fd6a3344b25312b2a17a1d9ecc46ac6ef543a22f0f064ce7a479c6b4dd71"
+        },
+        {
+          "path": "visual/LayerManager.h",
+          "sha256": "13cf63385464252b3346dc687eedc5b78fd4f4c5d0112bab8236b2ebd9f01a97"
+        },
+        {
+          "path": "visual/LayerIntf.h",
+          "sha256": "f27f0a252475b7f94e00ab3f6175f01c4f04ccce67ac4673e3ced0d8ba25d52e"
+        },
+        {
+          "path": "visual/WindowIntf.cpp",
+          "sha256": "14ae7ad6f7548646170fd2b165badff775b6ed64af56e2bb7e696ed1f33c87d4"
+        },
+        {
+          "path": "visual/WindowIntf.h",
+          "sha256": "0898943633720d6be60f11d9caf6eb22d0d92c0d0f662e44ed815fe21733d5ac"
+        },
+        {
+          "path": "visual/win32/DrawDevice.cpp",
+          "sha256": "bccdf36b1376a00f91bdba57c335d41b31f695c6f21b6fe7ed86f67d047ca93b"
+        },
+        {
+          "path": "environ/win32/WindowFormUnit.cpp",
+          "sha256": "ef96ce7117281a8ce524bd6b9a2a9a7e0eba9ebb0a209c61dd5d0f112b6ec550"
+        },
+        {
+          "path": "environ/win32/TVPWindow.cpp",
+          "sha256": "eee3fdd460c437fd7d706a98e5709b690d099509423e13a31e666322b7a1ef18"
+        }
+      ],
+      "input_review": "Reviewed complete LayerManager implementation and native Layer event/visibility/enabled/part/shutdown routines, Window event posting, DrawDevice forwarding and Win32 input caller ordering. Original Click-before-Up, Down coordinates, capture and the one-recheck Enter policy are independently expressed; no OS/window/renderer implementation is adopted."
+    },
+    {
+      "repository": "https://github.com/krkrz/krkrz.git",
+      "commit": "49c4d53506edecb824cd7b2cff8d32959b1f1b70",
+      "review": "Complete plugin implementation, native registration, headers/base, manual and licence read. Only native method/callback/resource/wait policy is independently expressed; DirectShow/COM, temporary extraction, private framebuffer copy and timer are excluded.",
+      "files": [
+        {
+          "path": "src/plugins/win32/layerExMovie/main.cpp",
+          "sha256": "88146da92736e609aae87dc00f25ac3969c2f434d1f5c80db1bcb614167a3938"
+        },
+        {
+          "path": "src/plugins/win32/layerExMovie/layerExMovie.cpp",
+          "sha256": "495da90f09d8c37dbb76b3d8ec46bc5b53ac0dd829cd66ffb150548bbd10c2b1"
+        },
+        {
+          "path": "src/plugins/win32/layerExMovie/layerExMovie.hpp",
+          "sha256": "fb0b116e4efc04a5f24dfc6d976f0586d2614f434d64c497bc9547926d4e6f62"
+        },
+        {
+          "path": "src/plugins/win32/layerExMovie/layerExBase.hpp",
+          "sha256": "356df2c3283c968474903c02c86579766f0be430c71ff8d15a22e4990c9b78f2"
+        },
+        {
+          "path": "src/plugins/win32/layerExMovie/manual.tjs",
+          "sha256": "4a166a2696076d0e37c7d56f38646f3f002efd1475a339116a32bda5e0a2ec27"
+        },
+        {
+          "path": "src/plugins/win32/layerExMovie/readme.txt",
+          "sha256": "e6c2abca98fd75f579b23262b735ac5053192bcca84c970e81a253da53572ca1"
+        }
+      ]
+    }
+  ],
+  "notice": "docs/third-party/krkrz.txt (W.Dee and contributors)",
+  "implemented": [
+    "MZ paragraph-aligned signature scanning in bounded blocks",
+    "base-relative unsigned index and segment addressing, including negative relative index",
+    "bounded chained raw/zlib indices with cycle detection",
+    "bare one-character label has empty callback alias; first named-page alias cannot omit its name",
+    "T_WITHDOT calls use a value call preserving the caller this, while explicit member calls retain receiver policy",
+    "native Layer.loadImages absent metadata returns the null Object variant",
+    "native hint string, showParentHint and ignoreHintSensing policy only; generic text measurement, tooltip clocks/state/presentation are engine-owned",
+    "plain layerExMovie through existing engine Media metadata/frame/loop/stop operations, native original callbacks; pending real-game validation",
+    "native Layer hover/capture policy: Leave/re-hit/Enter/one re-hit, capture Move/Up, releaseCapture, BlurTree/Part lifetime, Click before Up at original Down coordinates",
+    "native slow input recheck after >1000ms of shared host time, with no synthetic Move or tooltip restart when target is unchanged; focus deactivation releases capture"
+  ],
+  "excluded": [
+    "native executable/DLL execution",
+    "game resources or executable bytes",
+    "native window/renderer/audio implementations",
+    "layerExMovie side-by-side alpha videos",
+    "layerExMovie reopening/restarting a playing stream or image size changes during playback"
+  ]
+}

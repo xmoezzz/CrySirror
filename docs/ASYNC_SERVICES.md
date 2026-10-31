@@ -244,3 +244,77 @@ only completion acknowledges following native instructions. Original SFX
 integer-ms end policy observes shared output age, with current frame-phase
 limits described in ADR 0078. Final DSP/mixing/output ownership is still a
 synchronous ADR 0050 boundary.
+
+## Persistent raster resources and immutable Canvas image jobs
+
+Offline native startup also has an explicit readiness boundary. A dormant
+adapter can opt into `VmAdapter.preparation_pending`; Runtime's nonblocking
+`poll_vm_preparations` steps only those preparing VMs with empty input, without
+advancing the clock/world or replaying already-started peers. Headless hosts
+settle this bounded startup phase before counting simulated game frames. This
+prevents an empty capture from succeeding merely because a fast owner loop
+finished thousands of simulated frames before cold resource I/O completed.
+Ordinary game execution/input begins after readiness; this does not make every
+later VM resource wait part of that startup fence.
+
+`HostServices.begin_pattern` admits Create/Advance/Render/Restore work on the
+shared image pool. Portable specification, RNG and snapshot bytes are data;
+the engine owns the immutable pattern generation and its memory reservation.
+Advance returns a candidate generation plus the caller's next RNG state. Only
+the native semantic receipt commits that RNG; failure cannot advance it. Source
+resources check both client identity and the creating runtime capability.
+
+`HostServices.begin_canvas_image(client, canvas)` freezes a retained engine
+Canvas, published image leases and font catalog membership at admission. It
+reserves output/scratch memory and a worker slot before enqueueing presentation.
+Desktop/offscreen hosts explicitly enable this presenter capability. A CPU host
+without one fails visibly. `Runtime.prepare_canvas_images` scopes renderer lookup
+to those immutable generations; pending asset dependencies retry next frame.
+The existing wgpu snapshot compositor prepares the texture. Its lazy reader
+retains that texture; GPU completion waiting, row depadding, channel conversion
+and immutable ImageResource publication run on an image worker. Polling the
+ImageJob never joins a GPU or a worker, and completion remains observable.
+
+This is a bounded immutable capture profile: live Puppet sources, replaceable
+`__surface/` dependencies and frame-history paths are rejected until they have an
+admission-time freeze contract. Ordinary immutable images, nested snapshots,
+completed meshes, text, clipping and isolated group composition reuse the normal
+engine compositor. No native VM renderer or composed legacy screen participates.
+Existing automatic Canvas compaction still uses its synchronous PNG helper;
+these explicit ImageJobs do not claim to have made that separate path async.
+
+Releasing a published image ends caller ownership exactly once. Retained
+Canvas/Layer/transition/filter/mesh, World material/terrain/environment and queued
+VFX dependencies keep its path valid. Owner collection removes retired paths
+after their final logical reference disappears; already-frozen render/capture
+leases remain usable afterward. Open Layer transactions defer collection to
+preserve rollback. Dependency visiting does not serialize geometry/particle data.
+
+## Media header preparation without playback
+
+`HostServices.begin_media_probe` and `Media.beginProbe/probeStatus/releaseProbe`
+prepare scoped video metadata on the shared workers. Admission reserves worker
+and header/decoder scratch budgets. Polling never joins, completion is retained,
+and dropping a pending job cancels it. This creates no Media playback slot,
+clock, decoded picture, Layer or PCM output. The public ticket belongs to its
+client and Runtime restore generation; restoring invalidates old tickets.
+
+MPEG uses the sequence parser shared with playback; MP4 prepares the selected
+stream decoder; ASF and Theora stop after decoder metadata is available. A
+validated header does not establish that every packet is decodable. Unknown
+audio identity and duration remain unknown, and AlphaMovie header-only
+preparation fails explicitly until it has an appropriate constructor boundary.
+
+## Canonical input receiver delivery
+
+`InputRoutes` calls the same Scene-owned receiver registry and delivery queue
+as native adapters. Signed priority, pointer coverage, capture and hover live
+in that shared service. A poll leases one event; its client/epoch/event/delivery
+receipt must be acknowledged before advancing. Unhandled delivery can continue
+to the next eligible receiver. Restoring preserves the receiver definitions
+and discards transient physical input, captures and old receipts.
+
+This bounded profile accepts one active receiver client. Interactive Widget or
+dialog mixing fails explicitly. Controller events require a backend to submit
+real controller identities; their presence in the data model does not simulate
+hardware support. VM callback dispatch remains native adapter policy.

@@ -2,8 +2,12 @@
 //! Retained layers, parent transforms, clips and painter ordering. Derived from
 //! siglus_rs layer.rs storage/ordering and render_math.rs projection semantics.
 mod crossfade;
+mod depth_order;
+pub use depth_order::{compare_primitives,DepthOrderKey,DepthOrderStep};
+use depth_order::DepthOrders;
 mod crossfade_effect;
 mod snapshot_opacity;
+mod image_dependencies;
 pub mod motion;
 pub use motion::{MotionProperty,MotionTrackSpec,MotionTrackStatus,MotionStatus};
 use motion::MotionTracks;
@@ -357,6 +361,10 @@ pub struct GlyphReveal {
     pub unit: GlyphRevealUnit,
     /// Milliseconds per positioned scalar. Zero reveals the run instantly.
     pub interval_ms: u64,
+    /// Exact rational scalar clock. When present this overrides interval_ms;
+    /// the engine retains fractional milliseconds through elapsed_ms.
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub rate_per_second:Option<u32>,
     /// Prefix already visible when new text is appended to a page.
     #[serde(default)]
     pub initial_visible: usize,
@@ -380,17 +388,26 @@ impl GlyphReveal {
             self.initial_visible <= total && self.interval_ms <= 86_400_000,
             "invalid glyph reveal prefix/interval"
         );
+        ensure!(self.rate_per_second.is_none_or(|rate|(1..=1_000_000).contains(&rate)),"invalid glyph reveal rate");
         Ok(())
     }
     pub fn visible_count(&self, total: usize) -> usize {
-        if self.forced_complete || self.interval_ms == 0 {
+        if self.forced_complete || (self.rate_per_second.is_none() && self.interval_ms == 0) {
             return total;
         }
         self.initial_visible
             .saturating_add(
-                usize::try_from(self.elapsed_ms / self.interval_ms).unwrap_or(usize::MAX),
+                match self.rate_per_second{
+                    Some(rate)=>usize::try_from(u128::from(self.elapsed_ms)*u128::from(rate)/1000).unwrap_or(usize::MAX),
+                    None=>usize::try_from(self.elapsed_ms / self.interval_ms).unwrap_or(usize::MAX),
+                },
             )
             .min(total)
+    }
+    /// Fractional scalar numerator retained by an exact rate clock, in 1/1000
+    /// units. No rounded integer interval or per-frame truncation is used.
+    pub fn rate_remainder(&self)->u16{
+        self.rate_per_second.map_or(0,|rate|((u128::from(self.elapsed_ms)*u128::from(rate))%1000) as u16)
     }
     pub fn status(&self, total: usize) -> GlyphRevealStatus {
         let visible = self.visible_count(total);
@@ -402,8 +419,12 @@ impl GlyphReveal {
     }
     fn advance(&mut self, total: usize, delta_ms: u64) {
         if !self.paused && !self.status(total).complete {
-            let duration = (total.saturating_sub(self.initial_visible) as u64)
-                .saturating_mul(self.interval_ms);
+            let remaining=total.saturating_sub(self.initial_visible) as u128;
+            let duration=match self.rate_per_second{
+                Some(0)=>0,
+                Some(rate)=>u64::try_from((remaining*1000).div_ceil(u128::from(rate))).unwrap_or(u64::MAX),
+                None=>(remaining as u64).saturating_mul(self.interval_ms),
+            };
             self.elapsed_ms = self.elapsed_ms.saturating_add(delta_ms).min(duration);
         }
     }
@@ -458,6 +479,14 @@ pub enum Paint {
         /// Shared, immutable frozen tree (cheap to clone with the system).
         layers: Arc<Vec<LayerSpec>>,
     },
+    /// Immutable, validated engine mesh resource. Capturing an evaluated
+    /// puppet freezes its completed geometry; textures remain client-scoped
+    /// immutable image dependencies, with no rig/player or device handles.
+    Mesh {
+        frame: Arc<crysirror_puppet::PuppetFrame>,
+        #[serde(default = "white")]
+        tint: [u8; 4],
+    },
     /// 2D deformable puppet (ADR 0029): an engine puppet rig JSON asset,
     /// fitted into the layer rect (aspect preserved).
     Puppet {
@@ -474,6 +503,13 @@ impl Paint {
         match self {
             Self::Image { asset, .. } => {
                 VfsPath::new(Mount::Asset, asset).map_err(|e| anyhow::anyhow!("{e}"))?;
+            }
+            Self::Mesh { frame, .. } => {
+                frame.validate()?;
+                for texture in &frame.textures {
+                    ensure!(crysirror_core::service::frame_history_layer(texture).is_none() && !texture.starts_with("__surface/"), "immutable mesh cannot retain live surface/media/frame history");
+                    VfsPath::new(Mount::Asset, texture).map_err(|e| anyhow::anyhow!("{e}"))?;
+                }
             }
             Self::Puppet { asset, .. } => {
                 VfsPath::new(Mount::Asset, asset).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -719,6 +755,8 @@ fn alpha() -> u8 {
 }
 #[derive(Clone, Debug)]
 pub struct Primitive {
+    /// Derived client-scoped floating-depth scopes, inherited by child payloads.
+    pub depth_order:Option<DepthOrderKey>,
     /// Engine-isolated subtree inputs; renderer composites once, after child draws.
     pub composite: Option<Arc<CompositeFrame>>,
     pub owner: u32,
@@ -807,6 +845,10 @@ pub struct LayerSystem {
     #[serde(default)]
     crossfades: BTreeMap<u32, BTreeMap<u32, SubtreeCrossfade>>,
     clients: BTreeMap<u32, BTreeMap<u32, LayerSpec>>,
+    /// Derived adjacency retained across small Canvas rebuild batches. It is
+    /// invalidated on rollback/install and reconstructed after deserialization.
+    #[serde(skip)]
+    child_index: BTreeMap<u32,BTreeMap<u32,BTreeSet<u32>>>,
     /// Puppet layers' states by client and layer id (ADR 0029).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     puppets: BTreeMap<u32, BTreeMap<u32, PuppetSlot>>,
@@ -821,6 +863,8 @@ pub struct LayerSystem {
     transition_serial: u64,
     #[serde(default)]
     motions: MotionTracks,
+    #[serde(default)]
+    depth_orders:DepthOrders,
     /// An open multi-batch transaction (see [`LayerSystem::transaction`]).
     #[serde(skip)]
     txn: TxnSlot,
@@ -843,6 +887,7 @@ type SideState = (
     Option<ActiveTransition>,
     u64,
     MotionTracks,
+    DepthOrders,
 );
 
 /// Originals of every layer the transaction's batches touched (first touch
@@ -1063,6 +1108,9 @@ pub fn intersect(a: [f32; 4], b: [f32; 4]) -> Option<[f32; 4]> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LayerCommand {
+    /// Stable finite floating depth within order major buckets; inherited by
+    /// descendants. None returns this node to ordinary ordering in its scope.
+    SetDepth {id:u32,depth:Option<f32>},
     /// Start or replace one local scalar track on an owned layer.
     BeginMotion {id:u32,track:MotionTrackSpec},
     /// Advance an external track in its caller-declared clock units.
@@ -1146,6 +1194,15 @@ pub enum LayerCommand {
     EndTransition,
 }
 impl LayerSystem {
+    /// Commit accepted frame ordering history at the exclusive owner boundary.
+    /// Intermediate SetDepth calls and frame extraction never advance history.
+    pub fn commit_frame_order(&mut self)->Result<()> {self.depth_orders.commit(&self.clients)}
+    /// Explicit local depth (an inherited scope is visible in frame keys).
+    pub fn depth(&self,client:ClientId,id:u32)->Result<Option<f32>> {
+        ensure!(self.get(client,id).is_some(),"layer depth target missing");
+        Ok(self.depth_orders.get(client.0,id))
+    }
+    pub(super) fn depth_key(&self,client:u32,id:u32)->Result<Option<DepthOrderKey>> {Ok(self.depth_orders.keys(&self.clients)?.remove(&(client,id)))}
     /// Inspect the same client-scoped logical node used by render extraction.
     /// Owner-scoped retained motion state; an unknown layer is an error.
     pub fn motion_status(&self,client:ClientId,id:u32)->Result<MotionStatus>{
@@ -1208,21 +1265,16 @@ impl LayerSystem {
                 layer.blend == Blend::Normal,
                 "snapshot requires normal layer blend"
             );
-            ensure!(
-                !matches!(layer.paint, Paint::Puppet { .. }),
-                "snapshot of dynamic puppet needs an evaluated immutable resource"
-            );
-            if let Paint::Snapshot { layers, .. } = &layer.paint {
-                ensure!(
-                    1 + snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING,
-                    "snapshot nesting budget"
-                );
+            if let Some(frame) = self.puppet_frames.get(&(client.0,id)) {
+                let tint=match &layer.paint {Paint::Puppet{tint,..}|Paint::Mesh{tint,..}=>*tint,_=>[255;4]};
+                layer.paint=Paint::Mesh {frame:frame.clone(),tint};
+                layer.paint.validate()?;
+            } else {
+                ensure!(!matches!(layer.paint, Paint::Puppet { .. }) && !self.dynamic_puppets.contains(&(client.0,id)), "snapshot puppet frame has not completed owner publication");
             }
-            ensure!(
-                !self.dynamic_puppets.contains(&(client.0, id))
-                    && !self.puppet_frames.contains_key(&(client.0, id)),
-                "snapshot of evaluated/dynamic puppet needs an immutable mesh resource"
-            );
+            if let Paint::Snapshot { layers, .. } = &layer.paint {
+                ensure!(1 + snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING,"snapshot nesting budget");
+            }
             ensure!(
                 layer.paint.glyph_reveal_status().is_none_or(|r| r.complete),
                 "snapshot of dynamic glyph reveal is unsupported"
@@ -1270,6 +1322,7 @@ impl LayerSystem {
                 }
             }
         }
+        self.depth_orders.freeze(client.0,&self.clients,&mut out)?;
         snapshot_opacity::isolate(&mut out)?;
         out.sort_by_key(|layer| (layer.order, layer.id));
         Ok(out)
@@ -1286,6 +1339,7 @@ impl LayerSystem {
             self.transition.clone(),
             self.transition_serial,
             self.motions.clone(),
+            self.depth_orders.clone(),
         )
     }
     /// Run `f` as one atomic unit over several `apply_batch` calls without
@@ -1309,6 +1363,7 @@ impl LayerSystem {
                 }
             }
         } else {
+            self.child_index.clear();
             for ((client, id), original) in txn.journal {
                 let owner = self.clients.entry(client).or_default();
                 match original {
@@ -1326,6 +1381,7 @@ impl LayerSystem {
                 self.transition,
                 self.transition_serial,
                 self.motions,
+                self.depth_orders,
             ) = txn.side;
         }
         result
@@ -1342,6 +1398,7 @@ impl LayerSystem {
                 self.validate_touched(client, journal.keys().copied())
             });
         if let Err(e) = result {
+            self.child_index.remove(&client.0);
             let owner = self.clients.entry(client.0).or_default();
             for (id, original) in journal {
                 match original {
@@ -1360,6 +1417,7 @@ impl LayerSystem {
                 self.transition,
                 self.transition_serial,
                 self.motions,
+                self.depth_orders,
             ) = side;
             return Err(e);
         }
@@ -1377,10 +1435,14 @@ impl LayerSystem {
         journal: &mut BTreeMap<u32, Option<LayerSpec>>,
     ) -> Result<()> {
         let staged = self;
-        // parent → children, built on the first Remove and kept current.
-        let mut children: Option<BTreeMap<u32, BTreeSet<u32>>> = None;
+        // Each owner index is built on its first Remove and kept current across
+        // batches; one Canvas edit must not rescan thousands of unrelated nodes.
         for command in commands {
             match command {
+                LayerCommand::SetDepth{id,depth}=>{
+                    ensure!(staged.clients.get(&client.0).is_some_and(|o|o.contains_key(id)),"layer depth target missing");
+                    staged.depth_orders.set(client.0,*id,*depth)?;continue;
+                }
                 LayerCommand::BeginMotion{id,track}=>{
                     let layer=staged.clients.get_mut(&client.0).and_then(|o|o.get_mut(id)).context("motion layer missing")?;
                     journal.entry(*id).or_insert_with(||Some(layer.clone()));
@@ -1498,7 +1560,7 @@ impl LayerSystem {
                     }
                     staged.motions.cancel(client.0,layer.id);
                     let previous = owner.insert(layer.id, layer.clone());
-                    if let Some(index) = &mut children {
+                    if let Some(index) = staged.child_index.get_mut(&client.0) {
                         if let Some(p) = previous.as_ref().and_then(|s| s.parent) {
                             if let Some(set) = index.get_mut(&p) {
                                 set.remove(&layer.id);
@@ -1512,7 +1574,7 @@ impl LayerSystem {
                 }
                 LayerCommand::Remove { id } => {
                     ensure!(owner.contains_key(id), "layer {id} missing for removal");
-                    let index = children.get_or_insert_with(|| {
+                    let index = staged.child_index.entry(client.0).or_insert_with(|| {
                         let mut index: BTreeMap<u32, BTreeSet<u32>> = BTreeMap::new();
                         for (id, s) in owner.iter() {
                             if let Some(p) = s.parent {
@@ -1531,6 +1593,7 @@ impl LayerSystem {
                         }
                     }
                     for r in &remove {
+                        staged.depth_orders.remove(client.0,*r);
                         staged.motions.cancel(client.0,*r);
                         if let Some(spec) = owner.remove(r) {
                             if let Some(set) = spec.parent.and_then(|p| index.get_mut(&p)) {
@@ -1745,6 +1808,7 @@ impl LayerSystem {
     }
     pub fn install(&mut self, client: ClientId, specs: &[LayerSpec]) -> Result<()> {
         let mut staged = self.clone();
+        staged.child_index.remove(&client.0);
         let owner = staged.clients.entry(client.0).or_default();
         for s in specs {
             ensure!(
@@ -1788,6 +1852,7 @@ impl LayerSystem {
                 }
             }
         }
+        self.depth_orders.validate(&self.clients)?;
         self.validate_crossfades()
     }
     /// Full validation, including frozen snapshot payloads (restore paths).
@@ -1822,6 +1887,7 @@ impl LayerSystem {
                 validate_layer(owner, *id, s, snapshots)?;
             }
         }
+        self.depth_orders.validate(&self.clients)?;
         self.validate_crossfades()
     }
     pub fn set_visible(&mut self, client: ClientId, id: u32, visible: bool) -> Result<()> {
@@ -1843,6 +1909,7 @@ impl LayerSystem {
             "layer canvas bounds"
         );
         let mut out = Vec::new();
+        let depth_keys=self.depth_orders.keys(&self.clients)?;
         for (client, owner) in &self.clients {
             for spec in owner.values() {
                 let mut chain = vec![spec];
@@ -1918,6 +1985,7 @@ impl LayerSystem {
                     "non-finite layer geometry"
                 );
                 out.push(Primitive {
+                    depth_order:depth_keys.get(&(*client,spec.id)).cloned(),
                     composite: None,
                     owner: *client,
                     id: spec.id,
@@ -1933,11 +2001,11 @@ impl LayerSystem {
                     uv: spec.uv.unwrap_or([0., 0., 1., 1.]),
                     sampling:spec.sampling,
                     filter: spec.filter.clone(),
-                    puppet: self.puppet_frames.get(&(*client, spec.id)).cloned(),
+                    puppet: match &spec.paint {Paint::Mesh{frame,..}=>Some(frame.clone()),_=>self.puppet_frames.get(&(*client, spec.id)).cloned()},
                 });
             }
         }
-        out.sort_by_key(|p| (p.order, p.owner, p.id, p.sub));
+        out.sort_by(compare_primitives);
         Ok(out)
     }
 }
@@ -1952,6 +2020,7 @@ pub fn rectangle(
 ) -> Primitive {
     let [x, y, w, h] = rect;
     Primitive {
+        depth_order:None,
         composite: None,
         owner,
         id,

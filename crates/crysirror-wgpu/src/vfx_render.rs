@@ -599,8 +599,7 @@ impl VfxRenderer {
         path: Option<&str>,
     ) -> Result<Option<String>> {
         let surface = path
-            .and_then(|path| assets.surface(ClientId(client), path))
-            .cloned();
+            .and_then(|path| assets.surface(ClientId(client), path));
         let (key, image) = if let Some(surface) = &surface {
             (
                 format!("surface:{client}:{}:{}", path.unwrap(), surface.revision),

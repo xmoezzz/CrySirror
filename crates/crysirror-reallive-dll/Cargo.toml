@@ -1,0 +1,27 @@
+# Native DLL semantics adopted from siglus_rs 5f358ef (MPL-2.0).
+# First-class workspace maintenance; provenance/patches: SOURCE.json.
+[package]
+name = "crysirror-reallive-dll"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+autotests = false
+autobenches = false
+autoexamples = false
+
+[lib]
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+encoding_rs = "0.8"
+crysirror-vfx.workspace = true
+crysirror-resource.workspace = true
+
+[lints.rust]
+unused = "allow"
+dead_code = "allow"
+nonstandard_style = "allow"
+unexpected_cfgs = "allow"

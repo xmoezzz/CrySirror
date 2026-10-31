@@ -11,6 +11,8 @@ use crysirror_core::{
 use std::{collections::BTreeMap, sync::Arc};
 
 pub mod dynamic;
+pub mod precomputed_font;
+pub mod format;
 pub mod glyph;
 pub mod glyph_blur;
 pub mod glyph_coverage;
@@ -47,6 +49,7 @@ impl TextSystem {
             text.len() <= 1024 * 1024 && !text.contains(['\n', '\r']),
             "single-line text metric limit"
         );
+        if let Some(font)=self.precomputed_face(alias)? { return font.measure_simple(size,text); }
         let font = self.font(alias)?;
         let scaled = font.as_scaled(PxScale::from(size));
         let mut advance = 0.;
@@ -81,6 +84,7 @@ impl TextSystem {
         text: &str,
     ) -> Result<Vec<crysirror_core::service::SimpleTextPlacement>> {
         self.measure_simple(font, size as f32, text)?;
+        if let Some(face)=self.precomputed_face(font)? { return face.position_simple(text); }
         let run = TextRun {
             text: text.into(),
             font: font.into(),
@@ -118,6 +122,10 @@ impl TextSystem {
             size.is_finite() && (1.0..=512.0).contains(&size),
             "font metric size"
         );
+        if let Some(face)=self.precomputed_face(alias)? {
+            face.check_size(size)?;let id=face.glyph_id(character).context("precomputed font missing character")?;
+            return Ok(crysirror_core::service::FontMetrics{ascent:face.ascent(),descent:face.descent(),advance:f32::from(face.glyph(id)?.logical_advance)});
+        }
         let face = self.font(alias)?;
         let scaled = face.as_scaled(PxScale::from(size));
         Ok(crysirror_core::service::FontMetrics {
@@ -167,7 +175,11 @@ impl TextSystem {
     }
     fn font(&self, alias: &str) -> Result<FontArc> {
         if let Some((font, _)) = self.fonts.get(alias) { return Ok(font.clone()); }
-        Ok(self.dynamic_face(alias)?.font.clone())
+        self.dynamic_face(alias)?.font.clone().context("precomputed face has no outline/shaping backend")
+    }
+    fn precomputed_face(&self, alias:&str) -> Result<Option<Arc<precomputed_font::PrecomputedFont>>> {
+        if self.fonts.contains_key(alias){ return Ok(None); }
+        Ok(self.dynamic_face(alias)?.precomputed.clone())
     }
     fn font_source(&self, alias: &str) -> Result<(Arc<[u8]>,u32)> {
         if let Some(source) = self.font_sources.get(alias) { return Ok(source.clone()); }
@@ -260,6 +272,10 @@ impl TextSystem {
         Ok(glyphs)
     }
     pub fn layout_glyphs(&self, text: &TextRun) -> Result<Vec<PositionedGlyph>> {
+        if let Some(face)=self.precomputed_face(&text.font)? {
+            self.key(text)?;Self::validate_surface(text.size_px,[text.bounds.width,text.bounds.height])?;
+            return face.layout(text);
+        }
         let glyphs = self.positioned(text)?;
         let font = self.font(&text.font)?;
         let scaled = font.as_scaled(f32::from(text.size_px));
@@ -275,6 +291,10 @@ impl TextSystem {
     }
     /// Preserve the original simple-layout float placements for pixel stability.
     pub fn rasterize(&self, text: &TextRun) -> Result<Vec<u8>> {
+        if let Some(face)=self.precomputed_face(&text.font)? {
+            self.key(text)?;Self::validate_surface(text.size_px,[text.bounds.width,text.bounds.height])?;
+            return face.paint([text.bounds.width,text.bounds.height],&face.layout(text)?);
+        }
         let glyphs = self.positioned(text)?;
         Self::paint(
             &self.font(&text.font)?,
@@ -294,6 +314,7 @@ impl TextSystem {
     ) -> Result<Vec<u8>> {
         Self::validate_surface(size, canvas)?;
         ensure!(glyphs.len() <= 1024 * 1024, "too many positioned glyphs");
+        if let Some(face)=self.precomputed_face(font)? {face.check_size(f32::from(size))?;return face.paint(canvas,glyphs);}
         let font = self.font(font)?;
         let mut positioned = Vec::with_capacity(glyphs.len());
         for g in glyphs {
@@ -547,3 +568,4 @@ pub mod bitmap_font;
 pub mod slot_color;
 
 pub mod vn_slot;
+pub mod byte_split;

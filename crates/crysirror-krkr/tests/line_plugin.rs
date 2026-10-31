@@ -156,6 +156,16 @@ fn installed_rotating_adler_game_uses_real_shared_host() {
     let mut registry = AdapterRegistry::default();
     crysirror_krkr::register(&mut registry).unwrap();
     let mut runtime = Runtime::with_asset_root(project, &root, state.path(), registry).unwrap();
+    // Match the desktop's explicit host font setup; actual bytes stay caller
+    // owned and are installed through the same shared Text API.
+    if let Some(path)=std::env::var_os("CRYSIRROR_KRKR_FONT") {
+        use std::io::Read;
+        let mut bytes=Vec::new();
+        std::fs::File::open(path).unwrap().take(32*1024*1024+1).read_to_end(&mut bytes).unwrap();
+        assert!(bytes.len()<=32*1024*1024,"font byte limit");
+        runtime.host.text.add_font("default",bytes.clone()).unwrap();
+        runtime.assets.text.add_font("default",bytes).unwrap();
+    }
     crysirror_formats_arc::register_images(&mut runtime.assets.decoders).unwrap();
     let client = ClientId(1);
     let storage = runtime.host.storage(client).unwrap();
@@ -177,9 +187,15 @@ fn installed_rotating_adler_game_uses_real_shared_host() {
                 Ok(companion_storage.open_asset(&VfsPath::new(Mount::Asset, name)?)?)
             },
         ));
-        context
-            .parameters
-            .insert("kirikiri/xp3".into(), json!({"adler_xor_modules":modules}));
+        // The same installed Runtime probe also accepts classic CXDEC
+        // companions, explicitly selected by the caller. Both profiles pass
+        // through shared ArchiveFormat/DecodeContext; no game hook is injected.
+        let parameters = if std::env::var_os("CRYSIRROR_KRKR_CXDEC").is_some() {
+            json!({"cxdec_modules":modules})
+        } else {
+            json!({"adler_xor_modules":modules})
+        };
+        context.parameters.insert("kirikiri/xp3".into(), parameters);
         let source = storage
             .open_asset(&VfsPath::new(Mount::Asset, &name).unwrap())
             .unwrap();
@@ -201,10 +217,20 @@ fn installed_rotating_adler_game_uses_real_shared_host() {
     let mut completed = 0;
     let input_path = std::env::var_os("CRYSIRROR_KRKR_INPUT_TRACK").map(std::path::PathBuf::from);
     let inputs = input_track::InputTrack::load(input_path.as_deref()).unwrap();
+    let await_title=std::env::var_os("CRYSIRROR_KRKR_AWAIT_TITLE").is_some();
+    let mut title_ready=None;
+    let mut input_clock=0;
     for frame in 0..frames {
-        match runtime.tick(16, inputs.at(frame)) {
+        let input=if !await_title||title_ready.is_some(){let input=inputs.at(input_clock);input_clock+=1;input}else{InputFrame::default()};
+        match runtime.tick(16, input) {
             Ok(()) => {
                 completed += 1;
+                if await_title&&title_ready.is_none(){
+                    let view=runtime.inspect();let native=&view["sessions"][0]["native"];
+                    if native["kag"]["last_tag"]=="s"&&native["kag"]["sleeping"]==true&&native["suspended"]==false {
+                        title_ready=Some(frame);
+                    }
+                }
                 std::thread::yield_now();
             }
             Err(e) => {
@@ -213,7 +239,8 @@ fn installed_rotating_adler_game_uses_real_shared_host() {
             }
         }
     }
-    let report = json!({"frames_completed":completed,"requested_frames":frames,"gpu_rendered":false,"error":error,"runtime":runtime.inspect()});
+    if await_title&&title_ready.is_none()&&error.is_none(){error=Some("original title wait was not observed within the bounded probe".into());}
+    let report = json!({"title_ready_frame":title_ready,"input_updates":input_clock,"frames_completed":completed,"requested_frames":frames,"gpu_rendered":false,"error":error,"runtime":runtime.inspect()});
     if let Some(path) = std::env::var_os("CRYSIRROR_KRKR_REPORT") {
         std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
     }
@@ -874,4 +901,426 @@ fn native_addfont_registers_engine_resource_before_continuation_and_uses_shared_
         assert!(start.elapsed()<std::time::Duration::from_secs(10),"{}",runtime.inspect());
         std::thread::yield_now();
     }
+}
+
+#[test]
+fn live_transition_endpoint_sizes_publish_in_one_engine_layer_batch() {
+    use crysirror_core::state::ClientId;
+    let (_dir, mut runtime) = fixture(r#"
+        var w = new Window(); w.visible = true;
+        var root = new Layer(w,null); root.visible = true;
+        var a = new Layer(w,root); a.visible = true;
+        var b = new Layer(w,root); b.visible = false;
+        a.beginTransition("crossfade",true,b,%[time:500]);
+        a.setSize(96,64); b.setSize(96,64);
+    "#);
+    runtime.tick(0,InputFrame::default()).unwrap();
+    let layers = &runtime.host.engine.layers;
+    assert_eq!(layers.get(ClientId(1),4).unwrap().rect[2..], [96.,64.]);
+    assert_eq!(layers.get(ClientId(1),6).unwrap().rect[2..], [96.,64.]);
+    assert!(layers.crossfade(ClientId(1),4).is_some());
+    runtime.tick(16,InputFrame::default()).unwrap();
+}
+
+#[test]
+fn positive_native_alpha_hits_use_prepared_shared_image_coverage() {
+    use crysirror_core::service::buttons;
+    let (dir,mut runtime)=fixture(r#"
+        var w=new Window();w.visible=true;var root=new Layer(w,null);
+        class Hit extends Layer {
+            function Hit(w,p){super.Layer(w,p);}
+            function onClick(){Debug.message("alpha-click");}
+        }
+        var sprite=new Hit(w,root);sprite.visible=true;
+        sprite.hitType=htMask;sprite.hitThreshold=16;sprite.loadImages("alpha.png");
+        Debug.message("alpha-ready");
+    "#);
+    let mut image=image::RgbaImage::new(2,1);image.put_pixel(0,0,image::Rgba([240,0,0,0]));image.put_pixel(1,0,image::Rgba([240,0,0,255]));
+    image.save(dir.path().join("assets/alpha.png")).unwrap();
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(10);
+    loop {
+        runtime.tick(1,InputFrame::default()).unwrap();
+        if runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("alpha-ready"){break;}
+        assert!(std::time::Instant::now()<deadline,"image preparation timeout");std::thread::yield_now();
+    }
+    for x in [0,1] {
+        runtime.tick(1,InputFrame{buttons_down:buttons::MOUSE_LEFT,buttons_pressed:0,pointer_x:x,pointer_y:0}).unwrap();
+        runtime.tick(1,InputFrame{buttons_down:0,buttons_pressed:0,pointer_x:x,pointer_y:0}).unwrap();
+    }
+    let log=runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert_eq!(log.matches("alpha-click").count(),1,"{log}");
+}
+
+#[test]
+fn temporary_image_alpha_preparation_preserves_copied_immutable_asset() {
+    use crysirror_core::{
+        image_processing::{ImageInput, ImageProcessState},
+        service::{HostServices, buttons},
+        state::ClientId,
+    };
+    use crysirror_scene::{canvas::CanvasNode, layer::Paint};
+    let (dir, mut runtime) = fixture(r#"
+        var w=new Window();w.visible=true;var root=new Layer(w,null);
+        class Hit extends Layer {
+            function Hit(w,p){super.Layer(w,p);}
+            function onClick(x,y){Debug.message("replacement-alpha-click",x);}
+        }
+        var temp=new Hit(w,root);temp.visible=true;
+        temp.hitType=htMask;temp.hitThreshold=16;temp.loadImages("a.png");
+        var dest=new Layer(w,root);dest.setImageSize(2,1);dest.setSize(2,1);
+        dest.setPos(4,4);dest.visible=true;dest.copyRect(0,0,temp,0,0,2,1);
+        temp.loadImages("b.png");
+        Debug.message("immutable-copy-ready");
+    "#);
+    let a = [210, 20, 30, 0, 20, 220, 30, 255];
+    let b = [30, 40, 220, 255, 220, 40, 20, 0];
+    for (name, bytes) in [("a.png", a), ("b.png", b)] {
+        image::RgbaImage::from_raw(2, 1, bytes.to_vec()).unwrap()
+            .save(dir.path().join("assets").join(name)).unwrap();
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        runtime.tick(1, InputFrame::default()).unwrap();
+        if runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string()
+            .contains("immutable-copy-ready") { break; }
+        assert!(std::time::Instant::now() < deadline, "image preparation timeout");
+        std::thread::yield_now();
+    }
+    fn image_assets(nodes: &[CanvasNode]) -> Vec<String> {
+        let mut assets=Vec::new();
+        for node in nodes {
+            match node {
+                CanvasNode::Draw { layer } => if let Paint::Image { asset, .. } = &layer.paint {
+                    assets.push(asset.clone());
+                },
+                CanvasNode::Group { nodes, .. } => assets.extend(image_assets(nodes)),
+            }
+        }
+        assets
+    }
+    let copied = runtime.host.engine.canvases.surface(ClientId(1), 3).unwrap();
+    let assets = image_assets(&copied.nodes);
+    assert_eq!(assets.len(), 1, "one copied immutable image paint");
+    let asset = &assets[0];
+    assert_eq!(asset, "a.png", "copy must retain A's immutable asset, not temp's live slot");
+    let temporary = runtime.host.engine.canvases.surface(ClientId(1), 2).unwrap();
+    assert_eq!(image_assets(&temporary.nodes), ["b.png"], "temporary Layer must now display distinct B");
+    let metadata = runtime.host.image_metadata(ClientId(1)).unwrap();
+    let mut pixels = metadata.begin_process(ImageInput::Asset {
+        path: asset.clone(), size: [2, 1], fingerprint: Some(metadata.fingerprint(asset).unwrap()),
+    }, std::sync::Arc::from(&b"[]"[..])).unwrap();
+    loop {
+        match pixels.poll().unwrap() {
+            ImageProcessState::Ready(image) => {
+                assert_eq!(&*image.rgba(), &a);
+                assert_eq!(image.alpha_at([0,0]), Some(0));
+                assert_eq!(image.alpha_at([1,0]), Some(255));
+                break;
+            }
+            ImageProcessState::Failed(e) => panic!("copied immutable A failed: {e}"),
+            ImageProcessState::Pending => {
+                assert!(std::time::Instant::now() < deadline, "copied A pixel preparation timeout");
+                std::thread::yield_now();
+            }
+        }
+    }
+    // The native hit path must use the separately prepared B coverage after
+    // reload: its first pixel is opaque, its second transparent (opposite A).
+    for x in [0, 1] {
+        runtime.tick(1, InputFrame { buttons_down: buttons::MOUSE_LEFT,
+            buttons_pressed:0, pointer_x:x, pointer_y:0 }).unwrap();
+        runtime.tick(1, InputFrame { buttons_down:0, buttons_pressed:0,
+            pointer_x:x, pointer_y:0 }).unwrap();
+    }
+    let log=runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert_eq!(log.matches("replacement-alpha-click").count(), 1, "{log}");
+    assert!(log.contains("replacement-alpha-click 0"), "B's opaque first pixel: {log}");
+}
+
+fn mouse_fixture(extra: &str) -> (tempfile::TempDir, Runtime) {
+    fixture(&format!(r#"
+        class W extends Window {{
+            function W(){{super.Window();}}
+            function onKeyDown(key,shift){{if(key==32){{{extra}}}}}
+            function onMouseMove(x,y,shift){{if(global.window_trace)note("window:move:"+x);}}
+            function onMouseDown(x,y,button,shift){{if(global.window_trace)note("window:down:"+x);}}
+            function onMouseUp(x,y,button,shift){{if(global.window_trace)note("window:up:"+x);}}
+            function onClick(x,y){{if(global.window_trace)note("window:click:"+x);}}
+        }}
+        var w=new W();w.visible=true;var root=new Layer(w,null);
+        var branch=new Layer(w,root);branch.visible=true;
+        function note(s){{Debug.message("mouse:"+s);}}
+        global.mutate=false;global.cancel=false;global.window_trace=false;
+        class H extends Layer {{
+            var tag;
+            function H(w,p,n,x){{super.Layer(w,p);tag=n;setSize(8,8);setImageSize(8,8);left=x;visible=true;hitThreshold=0;}}
+            function onMouseEnter(){{
+                note(tag+":enter");super.onMouseEnter();
+                if(global.mutate&&tag=="C"){{visible=false;b.visible=true;}}
+                else if(global.mutate&&tag=="B"){{visible=false;c.visible=true;}}
+            }}
+            function onMouseLeave(){{
+                note(tag+":leave");super.onMouseLeave();
+                if(global.mutate&&tag=="A"){{b.visible=false;c.visible=true;}}
+            }}
+            function onMouseMove(x,y,shift){{note(tag+":move:"+x);}}
+            function onMouseDown(x,y,button,shift){{note(tag+":down");if(global.cancel)releaseCapture();}}
+            function onMouseUp(x,y,button,shift){{note(tag+":up:"+x);}}
+            function onClick(x,y){{note(tag+":click:"+x);}}
+        }}
+        var a=new H(w,root,"A",0);var b=new H(w,root,"B",12);
+        var c=new H(w,root,"C",12);c.visible=false;
+    "#))
+}
+fn mouse_tick(runtime:&mut Runtime,x:i32,down:bool,key:bool) {
+    use crysirror_core::service::buttons;
+    runtime.tick(1,InputFrame { pointer_x:x,pointer_y:1,
+        buttons_down:if down {buttons::MOUSE_LEFT}else{0},
+        buttons_pressed:if key {buttons::SPACE}else{0} }).unwrap();
+}
+fn mouse_events(runtime:&Runtime)->Vec<String> {
+    runtime.inspect()["sessions"][0]["native"]["log_tail"].as_array().unwrap()
+        .iter().rev().filter_map(|v|v.as_str()?.strip_prefix("mouse:").map(str::to_owned)).collect()
+}
+#[test]
+fn native_hover_orders_cross_layer_events_without_repeating_same_layer_enter() {
+    let (_dir,mut r)=mouse_fixture("");
+    mouse_tick(&mut r,1,false,false);mouse_tick(&mut r,2,false,false);
+    mouse_tick(&mut r,14,false,false);mouse_tick(&mut r,-1,false,false);
+    assert_eq!(mouse_events(&r),["A:enter","A:move:1","A:move:2","A:leave","B:enter","B:move:2","B:leave"]);
+}
+#[test]
+fn native_capture_routes_drag_and_click_before_up_using_press_coordinates() {
+    let (_dir,mut r)=mouse_fixture("global.window_trace=true;");
+    mouse_tick(&mut r,-1,false,true);
+    mouse_tick(&mut r,1,true,false);mouse_tick(&mut r,15,true,false);mouse_tick(&mut r,15,false,false);
+    assert_eq!(mouse_events(&r),["window:move:1","A:enter","A:move:1","window:down:1","A:down","window:move:15","A:move:15","window:click:1","A:click:1","window:up:15","A:up:15","A:leave","B:enter"]);
+    let (_dir,mut cancel)=mouse_fixture("global.cancel=true;");
+    mouse_tick(&mut cancel,-1,false,true);mouse_tick(&mut cancel,1,true,false);
+    mouse_tick(&mut cancel,15,true,false);mouse_tick(&mut cancel,15,false,false);
+    let events=mouse_events(&cancel);
+    assert!(!events.iter().any(|e|e.contains(":click:")),"releaseCapture must suppress native click: {events:?}");
+    assert!(events.contains(&"B:up:3".into()),"releaseCapture must route subsequent Up by hit: {events:?}");
+    let (_dir,mut deactivated)=mouse_fixture("");
+    deactivated.host.window_focused=Some(true);
+    mouse_tick(&mut deactivated,1,true,false);
+    deactivated.host.window_focused=Some(false);
+    mouse_tick(&mut deactivated,15,true,false);mouse_tick(&mut deactivated,15,false,false);
+    let events=mouse_events(&deactivated);
+    assert!(events.contains(&"B:up:3".into()),"deactivation releases native capture: {events:?}");
+    assert!(!events.iter().any(|e|e.starts_with("A:up:")||e.contains(":click:")),"deactivated capture cannot receive Up/Click: {events:?}");
+    // WindowForm has one LastMouseDown point shared by all mouse buttons.
+    // Right Down during left capture changes the following left Click point.
+    use crysirror_core::service::buttons;
+    let (_dir,mut chord)=mouse_fixture("");
+    for (x,down) in [(1,buttons::MOUSE_LEFT),(15,buttons::MOUSE_LEFT|buttons::MOUSE_RIGHT),
+        (15,buttons::MOUSE_RIGHT),(15,0)] {
+        chord.tick(1,InputFrame {pointer_x:x,pointer_y:1,buttons_down:down,buttons_pressed:0}).unwrap();
+    }
+    let events=mouse_events(&chord);
+    assert!(!events.iter().any(|e|e.contains(":click:")),"shared last Down point is over B while A captures: {events:?}");
+    assert_eq!(events.iter().filter(|e|*e=="A:up:15").count(),2,"capture survives until all buttons release: {events:?}");
+}
+#[test]
+fn native_idle_recheck_updates_hover_after_layer_motion_without_synthetic_move() {
+    let (_dir,mut r)=mouse_fixture("a.left=12;b.left=0;");
+    mouse_tick(&mut r,1,false,false);mouse_tick(&mut r,1,false,true);
+    assert_eq!(mouse_events(&r),["A:enter","A:move:1"]);
+    r.tick(1001,InputFrame {pointer_x:1,pointer_y:1,..Default::default()}).unwrap();
+    assert_eq!(mouse_events(&r),["A:enter","A:move:1","A:leave","B:enter"]);
+}
+#[test]
+fn native_hover_rechecks_after_handlers_once_and_capture_survives_hide_but_not_part() {
+    let (_dir,mut r)=mouse_fixture("global.mutate=true;");
+    mouse_tick(&mut r,1,false,true);mouse_tick(&mut r,14,false,false);
+    assert_eq!(mouse_events(&r),["A:enter","A:move:1","A:leave","C:enter","C:leave","B:enter","B:move:2"]);
+    let (_dir,mut hidden)=mouse_fixture("a.visible=false;");
+    mouse_tick(&mut hidden,1,true,false);mouse_tick(&mut hidden,1,true,true);
+    assert_eq!(mouse_events(&hidden).last().unwrap(),"A:leave");
+    mouse_tick(&mut hidden,15,true,false);mouse_tick(&mut hidden,15,false,false);
+    let events=mouse_events(&hidden);
+    assert!(events.contains(&"A:up:15".into()),"hidden capture still owns Up: {events:?}");
+    assert!(!events.iter().any(|e|e=="B:up:3"),"hidden capture may not fall through: {events:?}");
+    let (_dir,mut parted)=mouse_fixture("a.parent=branch;");
+    mouse_tick(&mut parted,1,true,false);mouse_tick(&mut parted,1,true,true);
+    assert_eq!(mouse_events(&parted).last().unwrap(),"A:leave");
+    mouse_tick(&mut parted,15,true,false);mouse_tick(&mut parted,15,false,false);
+    let events=mouse_events(&parted);
+    assert!(events.contains(&"B:up:3".into()),"Part releases capture: {events:?}");
+    assert!(!events.iter().any(|e|e.starts_with("A:up:")||e.contains(":click:")),"parted capture may not receive Up/Click: {events:?}");
+    let (_dir,mut removed)=mouse_fixture("invalidate a;");
+    mouse_tick(&mut removed,1,true,false);mouse_tick(&mut removed,1,true,true);
+    mouse_tick(&mut removed,15,true,false);mouse_tick(&mut removed,15,false,false);
+    let events=mouse_events(&removed);
+    assert!(!events.iter().any(|e|e=="A:leave"||e.starts_with("A:up:")||e.starts_with("A:click:")),"Shutdown suppresses callbacks: {events:?}");
+    assert!(events.contains(&"B:up:3".into()));
+}
+
+#[test]
+fn layer_movie_metadata_frames_loop_stop_and_retirement_use_shared_media() {
+    use crysirror_core::service::buttons;
+    let (dir,mut runtime)=fixture(r#"
+        Plugins.link("layerExMovie.dll");
+        var w=new Window();w.visible=true;var root=new Layer(w,null);
+        class Movie extends Layer {
+            var starts=0,stops=0,updates=0;
+            function Movie(w,p){super.Layer(w,p);}
+            function onStartMovie(){starts++;Debug.message("movie-start");}
+            function onUpdateMovie(){updates++;}
+            function onStopMovie(){stops++;Debug.message("movie-stop");}
+        }
+        var m=new Movie(w,root);
+        var rejected=false;try{m.openMovie("movie.mpg",true);}catch(e){rejected=true;}
+        if(!rejected)throw new Exception("side-by-side alpha was silently admitted");
+        m.openMovie("movie.mpg",false);
+        if(m.imageWidth!=64||m.imageHeight!=48||m.type!=ltOpaque)throw new Exception("movie metadata geometry");
+        m.startMovie(true);if(!m.isPlayingMovie()||m.starts!=1)throw new Exception("movie start state");
+        System.addContinuousHandler(function(tick){
+            if(System.getKeyState(32)&&m.isPlayingMovie()){
+                m.stopMovie();if(m.stops!=1||m.isPlayingMovie()||m.updates<1)throw new Exception("movie stop state");
+                invalidate m;Debug.message("movie-retired");
+            }
+        });
+    "#);
+    std::fs::write(dir.path().join("assets/movie.mpg"),include_bytes!("../../crysirror-video/tests/fixtures/red_blue.mpg")).unwrap();
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(15);
+    loop {
+        runtime.tick(16,InputFrame::default()).unwrap();
+        let state=runtime.inspect();
+        if state["media"]["resources"].as_array().is_some_and(|resources|resources.iter().any(|r|r["id"]==640&&r["status"]["loops_completed"].as_u64().unwrap_or(0)>0)){break;}
+        assert!(std::time::Instant::now()<deadline,"shared movie did not publish and loop: {}",state["media"]);std::thread::yield_now();
+    }
+    runtime.tick(16,InputFrame{buttons_down:buttons::SPACE,buttons_pressed:0,pointer_x:0,pointer_y:0}).unwrap();
+    runtime.tick(16,InputFrame::default()).unwrap();
+    let state=runtime.inspect();let log=state["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log.contains("movie-retired"),"{log}");
+    assert!(!state["media"]["resources"].as_array().unwrap().iter().any(|r|r["id"]==640),"{}",state["media"]);
+}
+
+#[test]
+fn layer_movie_real_eof_sends_one_stop_after_the_last_picture() {
+    let (dir,mut runtime)=fixture(r#"
+        Plugins.link("layerExMovie.dll");var w=new Window();w.visible=true;var root=new Layer(w,null);
+        class Movie extends Layer {
+            var updates=0,stops=0;
+            function Movie(w,p){super.Layer(w,p);}
+            function onUpdateMovie(){if(!isPlayingMovie())throw new Exception("last frame saw early stop");updates++;}
+            function onStopMovie(){stops++;if(stops!=1||updates<1||isPlayingMovie())throw new Exception("EOF policy");Debug.message("movie-eof");}
+        }
+        var m=new Movie(w,root);m.openMovie("movie.mpg",false);m.startMovie(false);
+    "#);
+    std::fs::write(dir.path().join("assets/movie.mpg"),include_bytes!("../../crysirror-video/tests/fixtures/red_blue.mpg")).unwrap();
+    let deadline=std::time::Instant::now()+std::time::Duration::from_secs(15);
+    loop {
+        runtime.tick(16,InputFrame::default()).unwrap();
+        if runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("movie-eof"){break;}
+        assert!(std::time::Instant::now()<deadline,"media EOF callback did not arrive");std::thread::yield_now();
+    }
+    for _ in 0..4{runtime.tick(16,InputFrame::default()).unwrap();}
+    let state=runtime.inspect();let log=state["sessions"][0]["native"]["log_tail"].to_string();assert_eq!(log.matches("movie-eof").count(),1);
+    assert_eq!(state["media"]["resources"][0]["status"]["state"],"stopped");
+}
+
+#[test]
+fn composite_alpha_hits_wait_for_shared_workers_and_refresh_after_copy() {
+    use crysirror_core::{service::buttons, state::ClientId};
+    let (dir, mut runtime)=fixture(r#"
+        var w=new Window();w.visible=true;var root=new Layer(w,null);
+        class Hit extends Layer {
+            function Hit(w,p){super.Layer(w,p);}
+            function onClick(x,y){Debug.message('composite-hit:'+x);}
+        }
+        global.a=new Layer(w,root);a.loadImages('a.png');
+        global.b=new Layer(w,root);b.loadImages('b.png');
+        global.dest=new Hit(w,root);dest.setSize(4,1);dest.setImageSize(4,1);
+        dest.hitType=htMask;dest.hitThreshold=128;dest.visible=true;
+        dest.copyRect(1,0,a,0,0,2,1);
+        w.onKeyDown=function(key,shift){
+            if(key==32){dest.copyRect(1,0,b,0,0,2,1);Debug.message('composite-changed');}
+        };
+        Debug.message('composite-ready');
+    "#);
+    for (name, alpha) in [("a.png",[0,255]),("b.png",[255,0])] {
+        let bytes=vec![200,10,20,alpha[0],20,200,30,alpha[1]];
+        image::RgbaImage::from_raw(2,1,bytes).unwrap().save(dir.path().join("assets").join(name)).unwrap();
+    }
+    fn log(runtime:&Runtime)->String {
+        runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string()
+    }
+    let until=std::time::Instant::now()+std::time::Duration::from_secs(10);
+    while !log(&runtime).contains("composite-ready") {
+        runtime.tick(1,InputFrame::default()).unwrap();
+        assert!(std::time::Instant::now()<until);std::thread::yield_now();
+    }
+    let before=serde_json::to_value(runtime.host.engine.canvases.surface(ClientId(1),4).unwrap()).unwrap();
+    fn deliver(runtime:&mut Runtime, down:u64,x:i32) {
+        runtime.tick(1,InputFrame{buttons_down:down,buttons_pressed:0,pointer_x:x,pointer_y:0}).unwrap();
+        // Input remains queued while coverage is pending; stable samples may
+        // coalesce but their press/release edges must be consumed exactly once.
+        for _ in 0..200 {
+            runtime.tick(1,InputFrame{buttons_down:down,buttons_pressed:0,pointer_x:x,pointer_y:0}).unwrap();
+            std::thread::yield_now();
+        }
+    }
+    for x in [0,1,2,3] {deliver(&mut runtime,buttons::MOUSE_LEFT,x);deliver(&mut runtime,0,x);}
+    let first=log(&runtime);
+    assert_eq!(first.matches("composite-hit:").count(),1,"{first}");
+    assert!(first.contains("composite-hit:2"),"{first}");
+    let after=serde_json::to_value(runtime.host.engine.canvases.surface(ClientId(1),4).unwrap()).unwrap();
+    assert_eq!(before,after,"coverage must not replace the retained composite canvas");
+    deliver(&mut runtime,buttons::SPACE,3);deliver(&mut runtime,0,3);
+    assert!(log(&runtime).contains("composite-changed"));
+    for x in [1,2] {deliver(&mut runtime,buttons::MOUSE_LEFT,x);deliver(&mut runtime,0,x);}
+    let second=log(&runtime);
+    assert_eq!(second.matches("composite-hit:").count(),2,"{second}");
+    assert!(second.contains("composite-hit:1"),"updated graph must invalidate old coverage: {second}");
+}
+
+#[test]
+fn province_copy_uses_shared_region_map_and_preserves_native_absent_source_policy() {
+    let (_dir,mut runtime)=fixture(r#"
+        var w=new Window();w.visible=true;var root=new Layer(w,null);
+        var source=new Layer(w,root);source.setImageSize(4,2);source.face=dfProvince;
+        source.fillRect(0,0,4,2,7);source.fillRect(1,0,1,2,0);
+        var dest=new Layer(w,root);dest.setImageSize(6,2);dest.face=dfProvince;
+        dest.fillRect(0,0,6,2,9);dest.setClip(2,0,3,2);
+        dest.copyRect(1,0,source,0,0,4,2);
+        if(dest.getProvincePixel(0,0)!=9||dest.getProvincePixel(1,0)!=9||dest.getProvincePixel(2,0)!=0||dest.getProvincePixel(3,0)!=7||dest.getProvincePixel(4,0)!=7||dest.getProvincePixel(5,0)!=9)throw new Exception('clipped identifiers');
+        var empty=new Layer(w,root);empty.setImageSize(6,2);
+        dest.setClip();dest.copyRect(4,0,empty,1,0,1,1);
+        if(dest.getProvincePixel(1,0)!=0||dest.getProvincePixel(4,0)!=7)throw new Exception('native absent source coordinates');
+        dest.copyRect(1,1,dest,0,0,5,1);
+        if(dest.getProvincePixel(1,1)!=9||dest.getProvincePixel(2,1)!=0||dest.getProvincePixel(4,1)!=7)throw new Exception('overlapping snapshot copy');
+        var assigned=new Layer(w,root);assigned.assignImages(dest);assigned.setImageSize(8,3);
+        if(assigned.getProvincePixel(4,0)!=7||assigned.getProvincePixel(7,2)!=0)throw new Exception('assign and resize identifiers');
+        dest.fillRect(0,0,6,2,0);
+        assigned.face=dfProvince;assigned.copyRect(4,0,dest,0,0,1,1);
+        if(assigned.getProvincePixel(0,0)!=0||assigned.getProvincePixel(4,0)!=7)throw new Exception('full zero fill deallocates native plane');
+        Debug.message('province-copy-complete');
+    "#);
+    runtime.tick(1,InputFrame::default()).unwrap();
+    assert!(runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("province-copy-complete"));
+}
+
+#[test]
+fn native_focus_defaults_forward_action_and_subclass_super_handlers() {
+    let (_dir,mut runtime)=fixture(r#"
+        var w=new Window();w.visible=true;var root=new Layer(w,null);
+        var events=[];
+        w.action=function(ev){
+            var other=ev.type=='onBlur'?ev.focused:ev.blurred;
+            events.add(ev.type+':'+ev.target.name+':'+(other===null?'null':other.name)+(ev.type=='onFocus'?':'+ev.direction:''));
+        };
+        class Focusable extends Layer {
+            function Focusable(w,p){super.Layer(w,p);visible=true;focusable=true;}
+            function onFocus(){super.onFocus(...);}
+            function onBlur(){super.onBlur(...);}
+        }
+        var a=new Focusable(w,root);a.name='A';var b=new Focusable(w,root);b.name='B';
+        a.focus();b.focus();w.focusedLayer=null;
+        if(events.join('|')!='onFocus:A:null:1|onBlur:A:B|onFocus:B:A:1|onBlur:B:null')throw new Exception(events.join('|'));
+        Debug.message('focus-default-action-complete');
+    "#);
+    runtime.tick(1,InputFrame::default()).unwrap();
+    assert!(runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("focus-default-action-complete"));
 }

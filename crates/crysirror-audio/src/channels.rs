@@ -379,6 +379,7 @@ impl ChannelAudio {
     }
     pub fn submit(&mut self, client: u32, request: AudioRequest) -> Result<()> {
         self.mixer.idle()?;
+        self.poll_releases()?;
         if self.clients.insert(client) {
             // Native VMs retain their own ducking policy. Users can explicitly
             // configure the shared mixer; playback does not invent a new fade.
@@ -393,6 +394,15 @@ impl ChannelAudio {
         self.voices
             .retain(|_, h| self.mixer.is_playing(h.client, *h));
         self.cancel_pending_control(client, &request)?;
+        let controlled_channel = match &request {
+            AudioRequest::SetMixGroup { .. } | AudioRequest::SetMixGroupGain { .. } => None,
+            AudioRequest::Play {channel,..} | AudioRequest::PlayAsset {channel,..}
+            | AudioRequest::PlayPcm {channel,..} | AudioRequest::PlayResource {channel,..}
+            | AudioRequest::Stop {channel,..} | AudioRequest::Pause {channel,..}
+            | AudioRequest::Resume {channel,..} | AudioRequest::ResumeWithOptions {channel,..}
+            | AudioRequest::SetGain {channel,..} | AudioRequest::SetLooped {channel,..}
+            | AudioRequest::SetPan {channel,..} => Some(*channel),
+        };
         match request {
             AudioRequest::SetMixGroupGain {
                 name,
@@ -528,6 +538,7 @@ impl ChannelAudio {
                 }
             }
         }
+        if let Some(channel) = controlled_channel { self.cancel_release_channel(client, channel); }
         Ok(())
     }
     fn play(
@@ -582,6 +593,7 @@ impl ChannelAudio {
         };
         self.mixer.prepared_position(client, h, start)?;
         self.mixer.set_pan(client, h, pan, 0.)?;
+        self.cancel_release_channel(client, channel);
         self.voices.insert((client, channel), h);
         Ok(())
     }

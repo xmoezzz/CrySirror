@@ -33,6 +33,25 @@ complex image animation, snapshots and original saves fail explicitly.
 Parsing 536 installed scripts or registering a factory does not establish
 title/story completion.
 
+`native_save` preserves the complete original 356324-byte slot prefix, opaque
+bytes and native read-run metadata. Its bounded patches implement the audited
+PC, byte-bank, image-name, civil timestamp and checkpoint sprite fixups. It
+deliberately cannot construct an empty slot body from logical VM JSON. The
+live native body projection, original slot restoration and actual 128x72 PNG
+thumbnail are still required before mandatory autosave can succeed; current
+DC4PHDL execution stops explicitly at that operation.
+
+`NativeLiveState` additionally tracks the audited original initialization and
+live mutations: nonzero native sprite constructor fields, both byte-bank reset
+arrays, original read-history metadata/counters, random history, texture
+extents, sprite transforms, placement rows, voice timing and music fields.
+This VM metadata is distinct from shared engine rendering resources. Successful
+instructions synchronize it; unaudited instructions leave explicit admission
+gaps visible in runtime inspection. The real sequence still reaches forced
+autosave with these gaps and stops. Original thumbnail drawing selects native
+layers and UI explicitly; a generic capture of all UI does not establish the
+same result.
+
 Run the actual engine without a window or audio device:
 
 ```sh

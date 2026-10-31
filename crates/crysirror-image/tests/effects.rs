@@ -139,6 +139,7 @@ fn transitions_have_exact_endpoints_mask_order_and_alpha_correct_midpoint() {
         progress: 0.,
         softness: 0.,
         blur: 4.,
+        fixed_weighted: None,
     };
     assert_eq!(a.transition_to(&b, None, &spec, &|| Ok(())).unwrap(), a);
     spec.progress = 1.;
@@ -155,6 +156,37 @@ fn transitions_have_exact_endpoints_mask_order_and_alpha_correct_midpoint() {
     let out = a.transition_to(&b, Some(&mask), &spec, &|| Ok(())).unwrap();
     assert_eq!(&out.rgba[..4], &b.rgba[..4]);
     assert_eq!(out.rgba[7], 0);
+}
+
+#[test]
+fn fixed_weighted_transition_uses_explicit_integer_profile() {
+    use crysirror_image::fixed_mix::{FixedMixAlpha, FixedMixRounding, FixedMixSpec};
+    let a = ImageSurface::filled(1, 1, [255, 1, 100, 0]).unwrap();
+    let b = ImageSurface::filled(1, 1, [1, 255, 100, 0]).unwrap();
+    let spec = ImageTransition {
+        progress: 0.5,
+        softness: 0.,
+        blur: 0.,
+        fixed_weighted: Some(FixedMixSpec {
+            left_weight: 128,
+            right_weight: 128,
+            fractional_bits: 8,
+            rounding: FixedMixRounding::SumThenShift,
+            alpha: FixedMixAlpha::Opaque,
+        }),
+    };
+    assert_eq!(
+        a.transition_to(&b, None, &spec, &|| Ok(())).unwrap().rgba,
+        [128, 128, 100, 255]
+    );
+    assert!(a.transition_to(&b, Some(&a), &spec, &|| Ok(())).is_err());
+}
+
+#[test]
+fn coverage_override_preserves_hidden_rgb_and_input(){
+    let input=ImageSurface{width:1,height:1,rgba:vec![3,7,101,0]};
+    let output=input.apply_effect(&E::OverrideAlpha{alpha:255}).unwrap();
+    assert_eq!(output.rgba,[3,7,101,255]);assert_eq!(input.rgba,[3,7,101,0]);
 }
 
 #[test]

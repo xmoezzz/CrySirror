@@ -1,16 +1,16 @@
 //! Bounded I/O -> CPU -> publication font jobs, with client-owned immutable faces.
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use crysirror_core::{service::*, state::ClientId};
 use crysirror_tasks::{Task, TaskPermit, TaskPool};
 use crysirror_text::{
+    dynamic::{PreparedFontFace, MAX_FONT_BYTES},
     TextSystem,
-    dynamic::{MAX_FONT_BYTES, PreparedFontFace},
 };
 use std::{
     collections::BTreeMap,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
     },
 };
 const MAX_RESIDENT: usize = 256 * 1024 * 1024;
@@ -35,9 +35,25 @@ fn charge(used: &Arc<AtomicUsize>, len: usize) -> Result<Arc<Charge>> {
         bytes,
     }))
 }
+fn charge_precomputed(used: &Arc<AtomicUsize>, bytes: usize) -> Result<Arc<Charge>> {
+    ensure!(bytes <= MAX_RESIDENT, "precomputed font reservation limit");
+    used.fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
+        old.checked_add(bytes).filter(|n| *n <= MAX_RESIDENT)
+    })
+    .map_err(|_| anyhow::anyhow!("precomputed font resident byte budget"))?;
+    Ok(Arc::new(Charge {
+        used: used.clone(),
+        bytes,
+    }))
+}
+enum EncodedSource {
+    Storage(crysirror_core::path::VfsPath),
+    Bytes(Arc<[u8]>),
+}
 struct Loaded {
     bytes: Arc<[u8]>,
     charge: Arc<Charge>,
+    pixel_size: Option<u16>,
 }
 enum Stage {
     Read(Task<Loaded>, Option<TaskPermit>),
@@ -87,10 +103,21 @@ impl FontResources {
         owner: ClientId,
         storage: Arc<dyn ClientStorage>,
     ) -> Arc<dyn FontLibrary> {
+        self.for_client_with_text(owner, storage, &self.0.text)
+    }
+    /// Bind the host's current static aliases while retaining the live shared
+    /// dynamic catalog. Desktop font installation can precede VM startup.
+    pub fn for_client_with_text(
+        &self,
+        owner: ClientId,
+        storage: Arc<dyn ClientStorage>,
+        text: &TextSystem,
+    ) -> Arc<dyn FontLibrary> {
         Arc::new(ClientFonts {
             resources: self.clone(),
             owner,
             storage,
+            text: text.for_client(owner),
         })
     }
     /// Whether a snapshot would need explicit dynamic-font reconstruction.
@@ -118,11 +145,21 @@ impl FontResources {
                 Stage::Read(task, permit) => {
                     if let Some(input) = task.try_take()? {
                         let index = job.index;
+                        let used = self.0.used.clone();
                         let task = permit.take().context("font CPU permit consumed")?.spawn(
                             move |cancel| {
                                 cancel.check()?;
-                                let mut face = PreparedFontFace::prepare(input.bytes, index)?;
-                                face.retain_storage(input.charge);
+                                let face = if let Some(pixel_size)=input.pixel_size {
+                                    let needed=crysirror_text::precomputed_font::PrecomputedFont::required_resident_bytes(&input.bytes,&||cancel.check())?;
+                                    let extra=charge_precomputed(&used,needed)?;
+                                    let mut face=PreparedFontFace::prepare_precomputed(input.bytes,pixel_size,&||cancel.check())?;
+                                    face.retain_storage(Arc::new((input.charge,extra)));
+                                    face
+                                } else {
+                                    let mut face=PreparedFontFace::prepare(input.bytes,index)?;
+                                    face.retain_storage(input.charge);
+                                    face
+                                };
                                 cancel.check()?;
                                 Ok(Arc::new(face))
                             },
@@ -196,6 +233,7 @@ struct ClientFonts {
     resources: FontResources,
     owner: ClientId,
     storage: Arc<dyn ClientStorage>,
+    text: TextSystem,
 }
 impl FontLibrary for ClientFonts {
     fn begin(&self, spec: FontLoadSpec) -> crysirror_core::Result<FontJob> {
@@ -213,12 +251,28 @@ impl FontLibrary for ClientFonts {
         let permit = self.resources.0.cpu.reserve().map_err(err)?;
         let used = self.resources.0.used.clone();
         let storage = self.storage.clone();
-        // Charge supplied bytes before queueing: queued jobs also retain memory.
-        let supplied_charge = match &spec.source {
-            FontLoadSource::Bytes(bytes) => Some(charge(&used, bytes.len()).map_err(err)?),
-            FontLoadSource::Storage(_) => None,
+        let (source, pixel_size) = match spec.source {
+            FontLoadSource::Storage(path) => (EncodedSource::Storage(path), None),
+            FontLoadSource::Bytes(bytes) => (EncodedSource::Bytes(bytes), None),
+            FontLoadSource::PrecomputedStorage { path, pixel_size } => {
+                (EncodedSource::Storage(path), Some(pixel_size))
+            }
+            FontLoadSource::PrecomputedBytes { bytes, pixel_size } => {
+                (EncodedSource::Bytes(bytes), Some(pixel_size))
+            }
         };
-        let source = spec.source;
+        if let Some(size) = pixel_size {
+            if !(1..=512).contains(&size) || spec.face_index != 0 {
+                return Err(crysirror_core::Error::Invalid(
+                    "precomputed font size/face index",
+                ));
+            }
+        }
+        // Charge supplied bytes before queueing: queued jobs also retain memory.
+        let supplied_charge = match &source {
+            EncodedSource::Bytes(bytes) => Some(charge(&used, bytes.len()).map_err(err)?),
+            EncodedSource::Storage(_) => None,
+        };
         let read = self
             .resources
             .0
@@ -226,11 +280,15 @@ impl FontLibrary for ClientFonts {
             .spawn(move |cancel| {
                 cancel.check()?;
                 match source {
-                    FontLoadSource::Bytes(bytes) => {
+                    EncodedSource::Bytes(bytes) => {
                         let charge = supplied_charge.context("font bytes reservation")?;
-                        Ok(Loaded { bytes, charge })
+                        Ok(Loaded {
+                            bytes,
+                            charge,
+                            pixel_size,
+                        })
                     }
-                    FontLoadSource::Storage(path) => {
+                    EncodedSource::Storage(path) => {
                         let reader = storage.open_read(&path)?;
                         let len = usize::try_from(reader.len()?)?;
                         let charge = charge(&used, len)?;
@@ -245,6 +303,7 @@ impl FontLibrary for ClientFonts {
                         Ok(Loaded {
                             bytes: bytes.into(),
                             charge,
+                            pixel_size,
                         })
                     }
                 }
@@ -301,13 +360,7 @@ impl FontLibrary for ClientFonts {
             .cloned())
     }
     fn is_loaded(&self, alias: &str) -> crysirror_core::Result<bool> {
-        Ok(self
-            .resources
-            .0
-            .text
-            .for_client(self.owner)
-            .font_digest(alias)
-            .is_ok())
+        Ok(self.text.font_digest(alias).is_ok())
     }
     fn release_job(&self, job: FontJob) -> crysirror_core::Result<()> {
         let mut s = self.resources.0.state.lock().map_err(err)?;

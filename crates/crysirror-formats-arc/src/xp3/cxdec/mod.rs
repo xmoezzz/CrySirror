@@ -22,6 +22,8 @@ use recover::ModuleFacts;
 use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
 
+pub(super) fn filename_token(name:&str)->String {special::token("",name)}
+
 const MAX_MODULES: usize = 16;
 const SAMPLE_COUNT: usize = 32;
 const SAMPLE_BYTES: u64 = 64 * 1024 * 1024;

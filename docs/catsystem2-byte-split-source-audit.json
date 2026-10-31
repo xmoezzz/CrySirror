@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-31",
+  "module_sha256": "f8a1fb4fed8a0c64c3fbc0bcf009f63e8f3181cfbc1a0dbd60f9ddefc8e25b3d",
+  "method": "Owner-authorized local static IDA9 review only; original module never executed and generated C remains ignored",
+  "native41": "655990 resolves original destination/source/delimiter VM addresses and calls6A5AB0 with void return",
+  "shared_owner": "crysirror-text::byte_split; generic source/delimiter bytes, SingleByte or explicit ShiftJis boundary, bounded spans and NUL-list output; no I/O/font/VM dependency",
+  "6a5ab0": "Skip leading separators, collapse repeated byte separators, emit one NUL when a nonempty token meets a delimiter; preserve nonseparator bytes and finish with a WORD zero. A trailing separator consequently leaves three zero bytes. Separator membership is checked before character-pair protection.",
+  "6a7590": "Lead81..9F or E0..EF; trail40..7E or80..FC. Signed-char comparison <=-4 covers80..FC. 7F and F0..FC leads are not protected. No guessed UTF8 or lossy normalization.",
+  "limits": "1MiB input,1MiB+2 output,65536 tokens,256 delimiter bytes; caller may lower all limits. Input NUL is explicit invalid data. Output capacity is checked before output allocation; scoped cancellation checks before work, by byte chunks, before output and before return.",
+  "adapter_owner": "Only original numeric address, native memory NUL-list layout and void return policy; copied immutable arguments run on existing TaskPool worker; actual completed bytes are atomically committed by owner before native41 ACK",
+  "native42": "6554A0 selects Nth NUL-list item through checked numeric VM addresses; negative signed indices select first, first empty item terminates search; copies native WORD terminator and returns presence flag. No delimiter algorithm lives in the VM.",
+  "excluded": "Native43/6A57D0 has independent recursive bracket-group rules and is not treated as native41",
+  "validation": "Independent shared byte_split tests3/3 passed in shared-byte-split-tests.log. Original Neko KCS executed native41 one hundred times, then visibly stopped at native66 PC0x19AE after19888 instructions. No image/title/gameplay claim."
+}

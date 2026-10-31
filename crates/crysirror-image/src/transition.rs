@@ -15,9 +15,20 @@ pub struct ImageTransition {
     pub progress: f32,
     pub softness: f32,
     pub blur: f32,
+    /// Exact integer-weighted profile. With this profile mask/blur/softness
+    /// must be absent/zero; floating progress is retained only for old schemas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_weighted: Option<crate::fixed_mix::FixedMixSpec>,
 }
 impl ImageTransition {
     pub fn validate(&self) -> Result<()> {
+        if let Some(spec) = self.fixed_weighted {
+            spec.validate()?;
+            ensure!(
+                self.blur == 0. && self.softness == 0.,
+                "fixed weighted transition cannot blur or soften"
+            );
+        }
         ensure!(
             self.progress.is_finite() && (0.0..=1.).contains(&self.progress),
             "transition progress"
@@ -60,6 +71,10 @@ impl ImageSurface {
             );
         }
         check()?;
+        if let Some(fixed) = spec.fixed_weighted {
+            ensure!(mask.is_none(), "fixed weighted transition cannot use mask");
+            return fixed.apply(self, other, check);
+        }
         if spec.progress == 0. {
             return Ok(self.clone());
         }

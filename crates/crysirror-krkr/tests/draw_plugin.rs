@@ -49,9 +49,12 @@ fn ordered_brushes_affine_append_and_path_bounds_use_shared_vector_workers() {
         assert!(std::time::Instant::now() < end);
         std::thread::yield_now()
     }
+    let surface=r.host.engine.canvases.surface(ClientId(1),2).unwrap();
+    let [crysirror_scene::canvas::CanvasNode::Draw{layer}]=surface.nodes.as_slice() else{panic!("expected shared immutable drawing")};
+    let crysirror_scene::layer::Paint::Image{asset,..}=&layer.paint else{panic!("expected resource publication")};
     let p = r
         .assets
-        .surface(ClientId(1), "__surface/1073741826")
+        .surface(ClientId(1), asset)
         .unwrap();
     let at = |x: usize, y: usize| &p.rgba[(y * 12 + x) * 4..(y * 12 + x) * 4 + 4];
     assert_eq!(at(3, 4), &[255, 0, 0, 255]);

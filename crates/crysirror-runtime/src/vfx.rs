@@ -170,6 +170,21 @@ impl Default for VfxRuntime {
     }
 }
 impl VfxRuntime {
+    /// Retain textures used by accepted/queued simulation inputs and completed
+    /// frame generations, including work which has not published a Layer yet.
+    pub(crate) fn visit_image_dependencies(&self,visitor:&mut dyn FnMut(crysirror_core::state::ClientId,&str)) {
+        fn render(client:u32,spec:&crysirror_vfx::RenderSpec,visitor:&mut dyn FnMut(crysirror_core::state::ClientId,&str)) {
+            match spec {crysirror_vfx::RenderSpec::Sprite{texture,..}|crysirror_vfx::RenderSpec::Mesh{texture,..}|crysirror_vfx::RenderSpec::Ribbon{texture,..}=>if let Some(asset)=texture {visitor(crysirror_core::state::ClientId(client),asset);}}
+        }
+        let mut inputs=|inputs:&[SystemInstance]| {for instance in inputs {for emitter in &instance.spec.emitters {render(instance.client,&emitter.render,visitor);}}};
+        inputs(&self.inputs);inputs(&self.accepted_inputs);inputs(&self.recorded_inputs);
+        for sample in &self.input_history {inputs(&sample.inputs);}
+        for frame in std::iter::once(&self.frame).chain(self.screen_frame.iter()) {
+            for emitter in &frame.emitters {render(emitter.client,&emitter.render,visitor);}
+            for emitter in &frame.gpu_emitters {render(emitter.client,&emitter.emitter.spec.render,visitor);}
+        }
+        for emitter in self.gpu_history.values(){render(emitter.client,&emitter.emitter.spec.render,visitor);}
+    }
     /// Completed single-stream receipts mapped to the current client/entity
     /// lifetime. No entry is produced from declarations or worker admission.
     /// The fingerprint lets a host reject a cached receipt if a same-revision

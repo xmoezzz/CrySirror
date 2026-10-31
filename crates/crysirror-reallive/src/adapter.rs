@@ -28,6 +28,8 @@ const SCENE_ROOT: u32 = 9;
 const SHOWN: u32 = 1000;
 mod commands;
 mod objects;
+mod cursor;
+mod tone;
 use std::{collections::BTreeMap, rc::Rc, sync::Arc};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,6 +42,16 @@ pub struct Config {
     pub encoding: Option<String>,
     #[serde(default)]
     pub start_scene: Option<i32>,
+    #[serde(default)]
+    pub optical_disc_check: OpticalDiscPolicy,
+}
+/// Native portable-host policy, separate from any disc verification result.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OpticalDiscPolicy {
+    #[default]
+    DisabledForNativeHost,
+    Strict,
 }
 fn font() -> String {
     "default".into()
@@ -119,6 +131,11 @@ pub struct RealLiveVm {
     config: Config,
     machine: Option<Machine>,
     resources: Option<Rc<std::cell::RefCell<Resources>>>,
+    object_assets:Option<Rc<objects::ObjectAssets>>,
+    tone_pool:crysirror_tasks::TaskPool,
+    pending_tone:Option<tone::PendingTone>,
+    tone_images:tone::ToneImages,
+    image_pending:bool,
     /// Engine layers of the VM's objects, as last submitted.
     object_layers: BTreeMap<u32, Value>,
     /// Engine layers of open text-window frames.
@@ -147,6 +164,10 @@ pub struct RealLiveVm {
     color: u32,
     fast_text: bool,
     hide_cursor: bool,
+    cursor_definitions: std::collections::BTreeSet<i32>,
+    published_cursor: Option<i32>,
+    pending_cursor: Option<cursor::PendingCursor>,
+    optical_disc_checks: u64,
     grp_closes: bool,
     wipe_closes: bool,
     draw_stack: Vec<String>,
@@ -167,6 +188,11 @@ impl RealLiveVm {
             config,
             machine: None,
             resources: None,
+            object_assets:None,
+            tone_pool:crysirror_tasks::TaskPool::new("reallive-tone",1,2)?,
+            pending_tone:None,
+            tone_images:Default::default(),
+            image_pending:false,
             wait: None,
             pending_audio: None,
             width: 640,
@@ -183,6 +209,10 @@ impl RealLiveVm {
             color: 0,
             fast_text: false,
             hide_cursor: false,
+            cursor_definitions: Default::default(),
+            published_cursor: None,
+            pending_cursor: None,
+            optical_disc_checks: 0,
             grp_closes: false,
             wipe_closes: false,
             draw_stack: vec![],
@@ -259,6 +289,7 @@ impl RealLiveVm {
         self.grp_closes = exe.int("GRPCOM_WINDOWCLOSE").unwrap_or(0) != 0;
         self.wipe_closes = exe.int("WAIP_WINDOWCLOSE").unwrap_or(0) != 0;
         self.resources = Some(Rc::new(std::cell::RefCell::new(r)));
+        vm.sys.mouse_cursor = exe.int("MOUSE_CURSOR").unwrap_or(0);
         let mut ops = Vec::new();
         for id in 0..16 {
             ops.push(json!({"op":"create","id":id,"width":self.width,"height":self.height}));
@@ -632,6 +663,9 @@ impl RealLiveVm {
             m.sys.input.clicks.truncate(8);
         }
         let result = (|| {
+            if !self.sync_cursor(&m, h)? {
+                return Ok(VmYield::BudgetExhausted);
+            }
             if self.pending_audio.is_some() {
                 if !self.poll_audio(h)? {
                     return Ok(VmYield::BudgetExhausted);
@@ -650,7 +684,7 @@ impl RealLiveVm {
                     RunResult::Event(event) => {
                         let next = match event {
                             VmEvent::Command(c) => {
-                                *self.opcode_counts.entry(c.op.to_string()).or_default() += 1;
+                                if !self.image_pending { *self.opcode_counts.entry(c.op.to_string()).or_default() += 1; }
                                 self.command(&mut m, h, input, &c).with_context(|| {
                                     format!(
                                         "{} scene {} line {} parameters {:?}",
@@ -666,7 +700,7 @@ impl RealLiveVm {
                                 Next::Advance
                             }
                         };
-                        if self.pending_audio.is_some() {
+                        if self.pending_audio.is_some() || self.image_pending {
                             return Ok(VmYield::BudgetExhausted);
                         }
                         m.ack(next)?;
@@ -683,6 +717,7 @@ impl RealLiveVm {
         })();
         let result = result.and_then(|y| {
             self.sync_objects(&mut m, h)?;
+            self.sync_cursor(&m, h)?;
             Ok(y)
         });
         self.last_down = input.buttons_down;
@@ -726,7 +761,7 @@ impl VmAdapter for RealLiveVm {
         Err(Error::Unsupported("RealLive VM checkpoint not implemented"))
     }
     fn diagnostics(&self) -> Vec<u8> {
-        serde_json::to_vec(&json!({"vm":"original-reallive-bytecode","frames":self.frames,"engine_api_calls":self.api_calls,"wait":format!("{:?}",self.wait),"scene":self.machine.as_ref().map(Machine::scene_number),"line":self.machine.as_ref().map(|m|m.line),"instructions":self.machine.as_ref().map(|m|m.instructions),"opcodes":self.opcode_counts,"error":self.last_error,"rendering":"engine retained Canvas/Layer/GlyphRun/Ui/Media","owns_framebuffer":false,"approximated_transitions":self.approximated})).unwrap_or_default()
+        serde_json::to_vec(&json!({"vm":"original-reallive-bytecode","frames":self.frames,"engine_api_calls":self.api_calls,"wait":format!("{:?}",self.wait),"scene":self.machine.as_ref().map(Machine::scene_number),"line":self.machine.as_ref().map(|m|m.line),"instructions":self.machine.as_ref().map(|m|m.instructions),"opcodes":self.opcode_counts,"error":self.last_error,"tone_images":{"ready":self.tone_images.ready.len(),"pending":self.image_pending},"rendering":"engine retained Canvas/Layer/GlyphRun/Ui/Media","owns_framebuffer":false,"approximated_transitions":self.approximated,"optical_disc_check":{"policy":self.config.optical_disc_check,"status":if self.optical_disc_checks > 0 {"policy-disabled"} else {"not-requested"},"calls":self.optical_disc_checks,"authentication_performed":false,"verification_result":null,"policy_continuation_store":if self.optical_disc_checks>0 {Some(1)}else{None}}})).unwrap_or_default()
     }
 }
 pub struct RealLiveFactory;

@@ -1,0 +1,81 @@
+{
+  "research": [
+    {
+      "project": "RLVM",
+      "commit": "e38cda7783dc67539ce27901596ed93a2bb5c826",
+      "files": [
+        {
+          "path": "src/systems/base/tone_curve.cc",
+          "sha256": "bdddfeba8d95c6fc51f896f485b8630064d0a9641df28a9786137712dd49c8ec"
+        },
+        {
+          "path": "src/systems/base/system.cc",
+          "sha256": "79cb3202b4728e46d6993c54c7ddeb0cbd9a8f87977ef88ef988a52ddf0d46ae"
+        },
+        {
+          "path": "src/systems/sdl/sdl_graphics_system.cc",
+          "sha256": "f9ba87d2ac20183944dc3f24576f2bde5fd058122888bacfbdaca2e0f68ddccc"
+        },
+        {
+          "path": "src/systems/sdl/sdl_surface.cc",
+          "sha256": "d2f7d231b2bda2771b13a79e231bf20130fb5dc47789793ce4101eb4edadf914"
+        }
+      ]
+    },
+    {
+      "project": "siglus_rs",
+      "commit": "5f358ef1360b0439e92aed2b749e8f25d8721954",
+      "files": [
+        {
+          "path": "crates/reallive/src/tone_curve.rs",
+          "sha256": "f7cf7d325e97b751c42269c842418b736cc42871d9e027c4bcc972f6f58cf92f"
+        },
+        {
+          "path": "crates/reallive/src/resource.rs",
+          "sha256": "a07cba7868b92758ee57826041466a0dd2936674a7cb0d47e4bd61cc01d55563"
+        }
+      ]
+    }
+  ],
+  "implementation": "Independent native filename/TCC metadata policy, no copied legacy pixel implementation. Shared original crysirror-image RgbLookup owns all pixel transforms.",
+  "native_semantics": {
+    "suffix": "decimal effect >=10; table = effect/10-1; ?030 means index2, not a G00 pattern",
+    "source": "configured #TONECURVE_FILENAME resolved case-insensitively under original dat directory",
+    "TCC": "version1000 i32LE, count i32LE, RGB tables at0xFE8+i*0x340,768bytes per curve",
+    "scope": "strict decimal suffix only; malformed or unsupported encodings fail, no effect stripping"
+  },
+  "shared_semantics": {
+    "ImageEffect": "rgb_lookup",
+    "RgbLookup": "red/green/blue each exactly256 u8; explicit profile straight_rgba",
+    "alpha": "preserved exactly, including hidden RGB transformed at alpha0",
+    "premultiplied_rgba": "recognized but rejected before job admission; ImageSurface/resources have no association metadata",
+    "pixel_budget": 4194304,
+    "tables_bytes": 768,
+    "atomicity": "immutable source; validation/cancellation failure yields no published result; ImageJob reserves worker and memory; owner publishes only Ready with matching client"
+  },
+  "native_boundaries": {
+    "metadata": "one bounded native TaskPool worker reads<=1MiB TCC and<=64MiB encoded source and validates<=4096 G00 regions; blake3 source identity passed to shared Asset ImageJob; first valid TCC byte snapshot is retained per client (<=1MiB) for subsequent variants",
+    "pixels": "shared ImageJob decodes and applies RGB LUT on CPU workers; alpha/atlas regions preserved",
+    "publication": "Core HostServices.publish_image_resource validates owner/layout/budgets and publishes unique immutable __image_resource path retaining RGBA Arc+worker resource lease; no owner PNG/scan/hash/copy. Native does not release a variant while live layers may reference it; cache is bounded.",
+    "cache_limits": "32 variants and128MiB RGBA per native client",
+    "PC": "original object opcode remains pending; original obj::creation runs only after Ready; no object install or opcode ACK during dependency wait"
+  },
+  "native_vm_manifest_sha256": "7702cb2bff5e9cab78c7851a7c64e8c96cdc9aadffa945640a83dd8d386ee9a4",
+  "validation": {
+    "shared_rgb_lookup_release_tests": 4,
+    "native_tcc_release_tests": 1,
+    "native_bridge_release_tests": 2,
+    "runtime_file_publication_release_tests": 1,
+    "failed_final": 0,
+    "game_behavior": {
+      "player_sha256": "913f4b795b1b38f5cc9920ea5d9fc8cc84fb353cc290eabba90970f9b3a7d45c",
+      "bootstrap": "normal installed-game detection/voice archive mounts; ordinary Ctrl and mouse down/up track",
+      "GPU": "Apple M5 Metal, headless, no OS window/audio device",
+      "at10000": "scene513:91, normal corridor narration, errornull, tone variants ready2/pendingfalse",
+      "at16000": "scene513:203, normal cafeteria/Riki dialogue, Pause17, errornull, ready2/pendingfalse",
+      "new_native_unsupported_wall": "none observed in bounded16000-frame run",
+      "evidence": "target/verification/reallive-air-after-lb/lb/player10-story-{10000,16000}-{report.json,.png}"
+    }
+  },
+  "remaining": "No persisted publication identity or original/native/framework save support is claimed. Native checkpoint API remains Unsupported; runtime snapshot/restore explicitly rejects live image publications. Correct future save restore must reconstruct engine-owned resources from native names/table policy, not persist raw Arcs/ephemeral paths."
+}

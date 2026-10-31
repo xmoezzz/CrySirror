@@ -1,0 +1,17 @@
+KAGParserEx semantic reference (wamsoft)
+Repository: https://github.com/wamsoft/KAGParserEx
+Pinned commit: 61d5f1e65f500b5aef5a621333f86f3457939b31
+Reference: KAGParser.cpp ArgValue::add/getReturn and native GetNextTag;
+readme.txt ordered tag list and licence paragraphs.
+
+Source notice:
+Copyright (C) 2000 W.Dee <dee@kikyou.info> and contributors
+See details of license at "license.txt"
+
+The distribution readme states:
+このプラグインのライセンスは吉里吉里本体に準拠してください。
+
+The retained KiriKiri licence/copyright notices accompany this reference in
+krkrz.txt in this same directory. CrySirror implements the native ordered tag
+metadata in Rust; the Windows plugin binary and original renderer are not
+included or executed. The existing first-class parser source notices remain.

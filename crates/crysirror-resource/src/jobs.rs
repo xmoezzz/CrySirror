@@ -4,7 +4,7 @@
 //! client capabilities; only successful completions become owner-visible state.
 //! Tickets/results are derived runtime state and are intentionally not saved.
 use crate::{Archive, DecodeContext, DecodedFile, FileRegistry, FormatRegistry};
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use crysirror_core::{service::AssetReader, state::ClientId};
 use crysirror_tasks::{Task, TaskPool};
 use std::{collections::BTreeMap, sync::Arc};
@@ -111,6 +111,7 @@ impl ResourceTasks {
     ) -> Result<u64> {
         self.admit(client, &context)?;
         self.submit(client, "file", pool, move |cancel| {
+            let context = context.with_cancellation(cancel.clone());
             cancel.check()?;
             let source = source()?;
             cancel.check()?;
@@ -119,7 +120,7 @@ impl ResourceTasks {
             Ok(ResourceResult::File {
                 format,
                 decoded,
-                context,
+                context: context.published(),
             })
         })
     }
@@ -146,6 +147,7 @@ impl ResourceTasks {
     ) -> Result<u64> {
         self.admit(client, &context)?;
         self.submit(client, "archive", pool, move |cancel| {
+            let context = context.with_cancellation(cancel.clone());
             cancel.check()?;
             let source = source()?;
             cancel.check()?;
@@ -154,7 +156,7 @@ impl ResourceTasks {
             Ok(ResourceResult::Archive {
                 format,
                 archive: Arc::from(archive),
-                context,
+                context: context.published(),
             })
         })
     }

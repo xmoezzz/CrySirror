@@ -131,6 +131,66 @@
       ]
     },
     {
+      "adapter": "majiro",
+      "config": [
+        {
+          "doc": "",
+          "name": "script",
+          "rust_type": "String"
+        },
+        {
+          "doc": "Original ENV resource selected by the archive bootstrap, never a synthetic script.",
+          "name": "environment",
+          "rust_type": "Option<String>"
+        },
+        {
+          "doc": "Explicit portable settings scope, distinct from the original Windows registry.",
+          "name": "settings_profile",
+          "rust_type": "MajiroSettingsProfile"
+        },
+        {
+          "doc": "Optional caller-owned module inspected only to guard the reviewed native ABI.",
+          "name": "executable",
+          "rust_type": "Option<String>"
+        },
+        {
+          "doc": "Original startup mode. Release play is 1; native is_testplay is mode!=1.",
+          "name": "run_mode",
+          "rust_type": "i32"
+        },
+        {
+          "doc": "Portable logical engine locks, separate from physical keyboard control.",
+          "name": "keyboard_lock_policy",
+          "rust_type": "crate::keyboard_policy::KeyboardLockPolicy"
+        }
+      ]
+    },
+    {
+      "adapter": "system-nnn",
+      "config": [
+        {
+          "doc": "",
+          "name": "root",
+          "rust_type": "String"
+        },
+        {
+          "doc": "",
+          "name": "module",
+          "rust_type": "String"
+        },
+        {
+          "doc": "",
+          "name": "font",
+          "rust_type": "String"
+        },
+        {
+          "doc": "",
+          "name": "entry",
+          "rust_type": "Entry"
+        }
+      ]
+    },
+    {
       "adapter": "nscripter",
       "config": [
         {
@@ -212,6 +272,11 @@
           "doc": "",
           "name": "start_scene",
           "rust_type": "Option<i32>"
+        },
+        {
+          "doc": "",
+          "name": "optical_disc_check",
+          "rust_type": "OpticalDiscPolicy"
         }
       ]
     },
@@ -936,6 +1001,54 @@
             }
           ],
           "returns": "any"
+        },
+        {
+          "doc": "Retire a shared native channel decoder to a tail channel without reopening or seeking; admit an externally clocked stepped db100 release and return an owned operation handle. Pending is not transfer completion.",
+          "name": "beginVoiceRelease",
+          "params": [
+            {
+              "name": "spec",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Supply a monotonic exact update counter (integer or decimal string) for a channel release; repeated samples are idempotent.",
+          "name": "advanceVoiceRelease",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "elapsedUpdates",
+              "type": "any"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Query actual owner-published release phase, completed counter, source position and stopped_at_update; requested counters alone are not completion.",
+          "name": "voiceRelease",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Release a terminal receipt; active/pending actors cannot be silently discarded.",
+          "name": "releaseVoiceRelease",
+          "params": [
+            {
+              "name": "handle",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
         },
         {
           "doc": "Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters.",
@@ -1940,6 +2053,25 @@
           "returns": "number"
         },
         {
+          "doc": "Prepare clipped stored-coverage multiplication using AlphaClipRect. RGB is retained unless multiply_rgb is explicit; self_source reads the current destination in forward order and requires identical slots. Uses client/epoch/revision-checked effectStatus/cancelEffect.",
+          "name": "beginAlphaClip",
+          "params": [
+            {
+              "name": "slot",
+              "type": "number"
+            },
+            {
+              "name": "source",
+              "type": "number"
+            },
+            {
+              "name": "options",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "number"
+        },
+        {
           "doc": "Prepare a snapshot crossfade/rule-mask/blur transition into slot at explicit ImageTransition progress. Inputs must be client-owned equal-size bitmaps. Uses effectStatus/cancelEffect and rejects a stale target revision.",
           "name": "beginTransition",
           "params": [
@@ -2167,7 +2299,13 @@
       "global": "canvases",
       "methods": [
         {
-          "doc": "Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs.",
+          "doc": "Return shared retained-canvas capacity: surfacesPerClient. Pixel-byte, dimension and node limits are admitted separately.",
+          "name": "getLimits",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Atomically apply typed canvas commands: create, destroy, clear, draw, set, copy, present and hide. Destroy releases an existing unpresented surface; hide its presentations first. Frozen copies survive source destruction. Draws contain ordinary Layer specs, including positioned glyph runs.",
           "name": "apply",
           "params": [
             {
@@ -2187,6 +2325,25 @@
             }
           ],
           "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Read exact RGBA bytes from supported retained solid canvas nodes. Missing/outside coordinates and unsupported image/text/group/filter/transform/blend profiles fail; no guessed matte or GPU readback.",
+          "name": "readPixel",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "x",
+              "type": "number"
+            },
+            {
+              "name": "y",
+              "type": "number"
+            }
+          ],
+          "returns": "number[]"
         }
       ],
       "name": "Canvases",
@@ -2238,6 +2395,12 @@
             }
           ],
           "returns": "void"
+        },
+        {
+          "doc": "Read this client's canonical bounded engine log and dropped count. Sequences and virtual timestamps are exact decimal strings; no filesystem/device output is implied.",
+          "name": "logs",
+          "params": [],
+          "returns": "Record<string, any>"
         },
         {
           "doc": "Ask the host to stop after this frame.",
@@ -3030,6 +3193,23 @@
       "global": "input",
       "methods": [
         {
+          "doc": "This client's logical Caps/Num/Scroll lock state and revision. Physical state is null unless imported; logical control never toggles the OS keyboard. Session state resets only on successful Runtime restore.",
+          "name": "keyboardLocks",
+          "params": [],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Patch this client's logical caps_lock/num_lock/scroll_lock. mode must be logical; physical requests fail explicitly. Returns owner-committed state/revision, not device success.",
+          "name": "setKeyboardLocks",
+          "params": [
+            {
+              "name": "state",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
           "doc": "Enable/replace this client's opt-in logical input journal (1..4096 samples). Accepted App frames feed it once. Disabled by default; action queries remain independent. Overflow is visible, with no silent edge drop.",
           "name": "enableEvents",
           "params": [
@@ -3289,6 +3469,116 @@
       ]
     },
     {
+      "doc": "Client-scoped device-event receivers with stable priority, explicit delivery receipts, capture and cancellation. Interactive Widget mixing and simultaneous active receiver clients are explicitly unsupported in the current routing profile.",
+      "global": "inputRoutes",
+      "methods": [
+        {
+          "doc": "Register/update a bounded receiver with signed priority, source mask, optional half-open pointer rect/coverage and enabled/hover flags.",
+          "name": "put",
+          "params": [
+            {
+              "name": "receiver",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove an owned receiver; stale capture/delivery cannot activate a different receiver.",
+          "name": "remove",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Clear this client's receivers and pending input state.",
+          "name": "clear",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Enable or disable a registered receiver.",
+          "name": "setEnabled",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "enabled",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Set signed priority, high first, preserving equal-priority stable history.",
+          "name": "setPriority",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "priority",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Lease the next routed event. Repeated polls retain the same receipt until acknowledgement; u64 receipt fields are exact decimal strings.",
+          "name": "delivery",
+          "params": [],
+          "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Acknowledge exactly the current scoped receipt. Unhandled events continue to the next eligible receiver; stale or foreign receipts fail.",
+          "name": "acknowledge",
+          "params": [
+            {
+              "name": "receipt",
+              "type": "Record<string, any>"
+            },
+            {
+              "name": "handled",
+              "type": "boolean"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Cancel transient delivery/capture state without synthesizing input.",
+          "name": "cancel",
+          "params": [],
+          "returns": "void"
+        },
+        {
+          "doc": "Inspect one owned receiver, or null when absent.",
+          "name": "receiver",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any> | null"
+        },
+        {
+          "doc": "Inspect bounded receiver/journal/delivery state; this does not inject a device event.",
+          "name": "stats",
+          "params": [],
+          "returns": "Record<string, any>"
+        }
+      ],
+      "name": "InputRoutes",
+      "properties": []
+    },
+    {
       "doc": "Retained 2D layer hierarchy (sprites, text, solid fills) composited over 3D.",
       "global": "layers",
       "methods": [
@@ -3377,6 +3667,21 @@
             {
               "name": "opacity",
               "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Opt this subtree into stable floating-depth painter order within its major bucket. Equal depths preserve the last committed frame order; ordinary layers draw before depth scopes. Null restores ordinary order. This does not change geometric position.",
+          "name": "setDepth",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "depth",
+              "type": "number | null"
             }
           ],
           "returns": "void"
@@ -3697,6 +4002,39 @@
       "doc": "Shared asynchronous media resources; decoding, clocks and errors belong to the engine.",
       "global": "media",
       "methods": [
+        {
+          "doc": "Begin scoped video decoder/header preparation without playback, pictures or PCM. probeStatus retains Pending/Ready/Failed; audio facts remain unknown when not probed.",
+          "name": "beginProbe",
+          "params": [
+            {
+              "name": "asset",
+              "type": "string"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Poll header preparation without joining; Ready exposes size/container/video decoder, optional audio facts, frame_ms and exact duration_ms as a decimal string or null.",
+          "name": "probeStatus",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "Record<string, any>"
+        },
+        {
+          "doc": "Release this client's header probe; unfinished work is cancelled. Tickets become obsolete after restore.",
+          "name": "releaseProbe",
+          "params": [
+            {
+              "name": "ticket",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
         {
           "doc": "Start a scoped media resource; options {loop?:false,audio?:true,gain?:1}. Returns its logical image resource path for Layer/Canvas/Material APIs; inspect status for loading, playback and errors.",
           "name": "play",
@@ -4323,7 +4661,7 @@
           "returns": "Record<string, any>"
         },
         {
-          "doc": "Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. No CPU decoder runs during publication.",
+          "doc": "Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. Optional fallback=true puts existing overlays and real loose files ahead of this provider; default false preserves ordinary overlay priority. No CPU decoder runs during publication.",
           "name": "mountDecode",
           "params": [
             {
@@ -4333,6 +4671,10 @@
             {
               "name": "target",
               "type": "string"
+            },
+            {
+              "name": "fallback",
+              "type": "boolean | null"
             }
           ],
           "returns": "Record<string, any>"
@@ -4580,6 +4922,25 @@
             {
               "name": "faceIndex",
               "type": "number | null"
+            }
+          ],
+          "returns": "number"
+        },
+        {
+          "doc": "Begin bounded TFT v0/v1 fixed-size coverage font preparation. Uses the same scoped fontStatus, measurement, TextRun and GlyphRun resources; missing glyphs or a different size fail explicitly.",
+          "name": "beginPrecomputedFont",
+          "params": [
+            {
+              "name": "alias",
+              "type": "string"
+            },
+            {
+              "name": "asset",
+              "type": "string"
+            },
+            {
+              "name": "pixelSize",
+              "type": "number"
             }
           ],
           "returns": "number"
@@ -4858,6 +5219,54 @@
             }
           ],
           "returns": "Record<string, any>[]"
+        },
+        {
+          "doc": "Prepare font-measured bounds and register an owned plain single-line TooltipSpec; no native VM or pointer capture is required.",
+          "name": "putTooltip",
+          "params": [
+            {
+              "name": "tooltip",
+              "type": "Record<string, any>"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Remove an owned tooltip and its active presentation.",
+          "name": "removeTooltip",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Start or update a passive tooltip at logical pointer coordinates; shared UI owns its delay and lifetime.",
+          "name": "showTooltip",
+          "params": [
+            {
+              "name": "id",
+              "type": "number"
+            },
+            {
+              "name": "position",
+              "type": "number[]"
+            }
+          ],
+          "returns": "void"
+        },
+        {
+          "doc": "Hide one owned tooltip, or all of this client's tooltips with null.",
+          "name": "hideTooltip",
+          "params": [
+            {
+              "name": "id",
+              "type": "number | null"
+            }
+          ],
+          "returns": "void"
         },
         {
           "doc": "Install a client-owned MenuSpec tree, independently of a native VM. Popups, radio groups and activation events are engine state.",
@@ -5804,6 +6213,41 @@
   ],
   "commands": [
     {
+      "api": "InputRoutes.put",
+      "op": "put",
+      "system": "input_route"
+    },
+    {
+      "api": "InputRoutes.remove",
+      "op": "remove",
+      "system": "input_route"
+    },
+    {
+      "api": "InputRoutes.clear",
+      "op": "clear",
+      "system": "input_route"
+    },
+    {
+      "api": "InputRoutes.setEnabled",
+      "op": "set_enabled",
+      "system": "input_route"
+    },
+    {
+      "api": "InputRoutes.setPriority",
+      "op": "set_priority",
+      "system": "input_route"
+    },
+    {
+      "api": "InputRoutes.acknowledge",
+      "op": "acknowledge",
+      "system": "input_route"
+    },
+    {
+      "api": "InputRoutes.cancel",
+      "op": "cancel",
+      "system": "input_route"
+    },
+    {
       "api": "World.spawn",
       "op": "spawn",
       "system": "world"
@@ -5984,6 +6428,11 @@
       "system": "layer"
     },
     {
+      "api": "Layers.setDepth",
+      "op": "set_depth",
+      "system": "layer"
+    },
+    {
       "api": "Layers.setClip",
       "op": "set_clip",
       "system": "layer"
@@ -6114,6 +6563,11 @@
       "system": "canvas"
     },
     {
+      "api": "Canvases.apply",
+      "op": "destroy",
+      "system": "canvas"
+    },
+    {
       "api": "Ui.setMenu",
       "op": "set_menu",
       "system": "ui"
@@ -6156,6 +6610,26 @@
     {
       "api": "Ui.setMenuEnabled",
       "op": "set_menu_enabled",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.putTooltip",
+      "op": "put_tooltip",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.removeTooltip",
+      "op": "remove_tooltip",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.showTooltip",
+      "op": "show_tooltip",
+      "system": "ui"
+    },
+    {
+      "api": "Ui.hideTooltip",
+      "op": "hide_tooltip",
       "system": "ui"
     },
     {
@@ -6295,6 +6769,30 @@
       "fields": [
         {
           "default": null,
+          "doc": "Replace coverage while retaining all stored RGB bytes. Useful for opaque XRGB resources and explicitly authored mask normalisation.",
+          "name": "override_alpha",
+          "rust_type": "alpha: u8"
+        },
+        {
+          "default": null,
+          "doc": "Arbitrary straight RGB tables; premultiplied profiles fail before admission.",
+          "name": "rgb_lookup",
+          "rust_type": "spec: crate::rgb_lut::RgbLookup"
+        },
+        {
+          "default": null,
+          "doc": "Explicit grouped luminance rounding and integer /256 colour mixture.",
+          "name": "fixed_luma",
+          "rust_type": "spec: crate::fixed_luma::FixedLumaSpec"
+        },
+        {
+          "default": null,
+          "doc": "Fixed16.16 piecewise nearest sampling and explicit /256 mixtures.",
+          "name": "piecewise_resample",
+          "rust_type": "spec: crate::piecewise_resample::PiecewiseResampleSpec"
+        },
+        {
+          "default": null,
           "doc": "Bounded generic stripe/stagger mask for retained transitions.",
           "name": "stripe_reveal",
           "rust_type": "spec: crate::sprite_alpha::StripeReveal"
@@ -6310,6 +6808,12 @@
           "doc": "Two-input whole-pixel row copy; preserves uncovered destination pixels.",
           "name": "sine_row_copy",
           "rust_type": "spec: crate::row_copy::SineRowCopy"
+        },
+        {
+          "default": null,
+          "doc": "Two-input clipped coverage multiplication with optional exterior clear.",
+          "name": "alpha_clip_rect",
+          "rust_type": "spec: crate::alpha_clip::AlphaClipRect"
         },
         {
           "default": null,
@@ -6404,6 +6908,1406 @@
       ],
       "name": "ImageEffect",
       "used_by": "Bitmap.applyEffectAsync; shared worker effects"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "sequence",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "time_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "message",
+          "rust_type": "String"
+        }
+      ],
+      "name": "LogRecord",
+      "used_by": "Engine.logs records; canonical client log"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "ClientId"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "sequence",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "LogReceipt",
+      "used_by": "HostServices.append_log committed owner receipt"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "ClientId"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "dropped",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "records",
+          "rust_type": "Vec<LogRecord>"
+        }
+      ],
+      "name": "LogSnapshot",
+      "used_by": "HostServices.log_snapshot; Engine.logs converts u64 fields to decimal strings"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "caps_lock",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "num_lock",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "scroll_lock",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "KeyboardLockState",
+      "used_by": "Logical engine keyboard locks; physical control separate"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "crate::state::ClientId"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "revision",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "logical",
+          "rust_type": "KeyboardLockState"
+        },
+        {
+          "default": null,
+          "doc": "No physical state has been imported when None. Never infer physical Off.",
+          "name": "physical",
+          "rust_type": "Option<KeyboardLockState>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "physical_control_supported",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "KeyboardLockSnapshot",
+      "used_by": "Input.keyboardLocks / setKeyboardLocks"
+    },
+    {
+      "doc": "",
+      "fields": [],
+      "name": "NativeLiveState",
+      "used_by": "Opaque Circus native save-image mutation audit; gaps block original save admission"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "ClientId"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "unix_ms",
+          "rust_type": "i64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "utc_offset_seconds",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "year",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "month",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "day",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "hour",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "minute",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "second",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "millisecond",
+          "rust_type": "u16"
+        }
+      ],
+      "name": "CivilTime",
+      "used_by": "HostServices.begin_civil_time worker result, independent of virtual clock"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Pending",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ready",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "CivilTimeState",
+      "used_by": "CivilTimeQuery.poll completion"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "ClientId"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "[u32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "container",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Selected engine video decoder family, not a claim about every packet.",
+          "name": "video_decoder",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "header_validated",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Unknown audio identity stays None; no PCM is decoded by this operation.",
+          "name": "audio_decoder",
+          "rust_type": "Option<String>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "has_audio",
+          "rust_type": "Option<bool>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "duration_ms",
+          "rust_type": "Option<u64>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "frame_ms",
+          "rust_type": "Option<f64>"
+        }
+      ],
+      "name": "MediaProbeInfo",
+      "used_by": "Media.probeStatus.info; header/decoder preparation without playback or PCM"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Pending",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ready",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "MediaProbeState",
+      "used_by": "HostServices.begin_media_probe nonblocking retained completion"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "priority",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "Keyboard=1, pointer=2, controller=4. Zero and unknown bits are invalid.",
+          "name": "sources",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "None is global for pointer press; it never participates in hover.",
+          "name": "rect",
+          "rust_type": "Option<[i64; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "coverage",
+          "rust_type": "Option<WidgetHitMask>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "hover_enabled",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Accept explicit pointer drags. Automatic hardware drag detection is a separate backend operation; this receiver flag does not invent events.",
+          "name": "drag_enabled",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "InputReceiverSpec",
+      "used_by": "InputRoutes.put; bounded scoped priority and pointer coverage"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "keyboard",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "pointer",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "controller",
+          "rust_type": ""
+        }
+      ],
+      "name": "InputRouteSource",
+      "used_by": "InputDelivery.event source; explicit keyboard/pointer/controller identity"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "press",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "release",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "repeat",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Explicit backend drag; each eligible receiver gets its own ACK lease.",
+          "name": "drag",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "move",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "hover_enter",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "hover_leave",
+          "rust_type": ""
+        }
+      ],
+      "name": "InputRoutePhase",
+      "used_by": "InputDelivery.event transition or hover phase"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "source",
+          "rust_type": "InputRouteSource"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "code",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "phase",
+          "rust_type": "InputRoutePhase"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "point",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Required only for Drag: eligibility uses this origin, not current point.",
+          "name": "origin",
+          "rust_type": "Option<[i32; 2]>"
+        }
+      ],
+      "name": "InputRouteEvent",
+      "used_by": "InputDelivery.event; logical source/code/point with no VM callback"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "epoch",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "event",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "delivery",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "InputDeliveryReceipt",
+      "used_by": "InputRoutes.acknowledge scoped receipt; exact decimal-string u64 fields"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "receiver",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "event",
+          "rust_type": "InputRouteEvent"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "receipt",
+          "rust_type": "InputDeliveryReceipt"
+        }
+      ],
+      "name": "InputDelivery",
+      "used_by": "InputRoutes.delivery leased event, retained until acknowledgement"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "receivers",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "queued_samples",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "queued_events",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "leased",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "captures",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "hover",
+          "rust_type": "Option<u32>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "epoch",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "InputRouteStats",
+      "used_by": "InputRoutes.stats bounded live session state"
+    },
+    {
+      "doc": "Variants are tagged by `\"op\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "put",
+          "rust_type": "receiver: InputReceiverSpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "remove",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "clear",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_enabled",
+          "rust_type": "id: u32, enabled: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "set_priority",
+          "rust_type": "id: u32, priority: i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "acknowledge",
+          "rust_type": "receipt: InputDeliveryReceipt, handled: bool"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "cancel",
+          "rust_type": ""
+        }
+      ],
+      "name": "InputRouteCommand",
+      "used_by": "ServiceBatch.input_routes; canonical receiver operations"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "red",
+          "rust_type": "Vec<u8>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "green",
+          "rust_type": "Vec<u8>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "blue",
+          "rust_type": "Vec<u8>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "profile",
+          "rust_type": "RgbLookupProfile"
+        }
+      ],
+      "name": "RgbLookup",
+      "used_by": "ImageEffect.rgb_lookup.spec; arbitrary straight RGBA byte lookup"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Lookup every straight RGB byte, including hidden RGB at zero alpha.",
+          "name": "straight_rgba",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Recognized for explicit rejection: this pipeline cannot publish premultiplied bytes as an ordinary straight ImageSurface. No implicit unpremultiplication.",
+          "name": "premultiplied_rgba",
+          "rust_type": ""
+        }
+      ],
+      "name": "RgbLookupProfile",
+      "used_by": "RgbLookup profile; premultiplied admission explicitly unsupported"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "state",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "multiplier",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "increment",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "output_shift",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "output_mask",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "draws",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "PatternRng",
+      "used_by": "Portable shared sequence state; worker receipt advances caller-owned RNG"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "[u32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "One packed word describes four horizontally adjacent grey cells.",
+          "name": "cell",
+          "rust_type": "[u32; 2]"
+        }
+      ],
+      "name": "TemporalPatternSpec",
+      "used_by": "HostServices.begin_pattern Create; persistent packed-cell raster specification"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "schema",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "spec",
+          "rust_type": "TemporalPatternSpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "words",
+          "rust_type": "Vec<u32>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "phase",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "completed_steps",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "TemporalPatternSnapshot",
+      "used_by": "PatternResource snapshot / PatternRequest.Restore portable state"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "ClientId"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "[u32;2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "completed_steps",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "resident_bytes",
+          "rust_type": "usize"
+        }
+      ],
+      "name": "PatternResourceInfo",
+      "used_by": "Scoped immutable pattern generation and resident-byte metadata"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Create",
+          "rust_type": "spec: Arc<[u8]>, rng: Arc<[u8]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Advance",
+          "rust_type": "source: Arc<dyn PatternResource>, rng: Arc<[u8]>"
+        },
+        {
+          "default": null,
+          "doc": "Same immutable resource/RNG transaction, limited to a prefix bank.",
+          "name": "AdvancePrefix",
+          "rust_type": "source: Arc<dyn PatternResource>, rng: Arc<[u8]>, words: usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Render",
+          "rust_type": "source: Arc<dyn PatternResource>, destination: ImageInput, rect: [u32;4], opacity256: u16"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Restore",
+          "rust_type": "snapshot: Arc<[u8]>, rng: Arc<[u8]>"
+        }
+      ],
+      "name": "PatternRequest",
+      "used_by": "HostServices.begin_pattern; create/advance/render/restore on common image workers"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Resource",
+          "rust_type": "resource: Arc<dyn PatternResource>, rng_after: Arc<[u8]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Image",
+          "rust_type": ""
+        }
+      ],
+      "name": "PatternOutput",
+      "used_by": "PatternProcessState.Ready owner receipt"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Pending",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ready",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "PatternProcessState",
+      "used_by": "PatternProcess.poll nonblocking retained completion"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "left_weight",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "right_weight",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "fractional_bits",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "rounding",
+          "rust_type": "FixedMixRounding"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "alpha",
+          "rust_type": "FixedMixAlpha"
+        }
+      ],
+      "name": "FixedMixSpec",
+      "used_by": "ImageTransition.fixed_weighted exact integer weights and rounding"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "separate_terms",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "sum_then_shift",
+          "rust_type": ""
+        }
+      ],
+      "name": "FixedMixRounding",
+      "used_by": "SeparateTerms or SumThenShift fixed-point color arithmetic"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "preserve_left",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "opaque",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "weighted",
+          "rust_type": ""
+        }
+      ],
+      "name": "FixedMixAlpha",
+      "used_by": "Explicit preserved/opaque/weighted output alpha"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Coefficients in engine RGB order, with sum no greater than 2^bits.",
+          "name": "coefficients",
+          "rust_type": "[u32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "Equal group IDs are summed before a shift; groups are shifted separately.",
+          "name": "groups",
+          "rust_type": "[u8; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "fractional_bits",
+          "rust_type": "u8"
+        },
+        {
+          "default": null,
+          "doc": "Luminance colour mix weight, in explicit /256 units.",
+          "name": "amount256",
+          "rust_type": "u16"
+        }
+      ],
+      "name": "FixedLumaSpec",
+      "used_by": "ImageEffect.fixed_luma; grouped fixed-point luminance truncation and Q8 mix"
+    },
+    {
+      "doc": "One caller-clock position and normalized envelope value.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Caller-selected time units, independent of wall-clock time.",
+          "name": "at",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Finite normalized value in0..=1.",
+          "name": "value",
+          "rust_type": "f64"
+        }
+      ],
+      "name": "ProgressKnot",
+      "used_by": "ProgressCurve.knots; explicit clock-unit position and finite normalized value"
+    },
+    {
+      "doc": "Variants are tagged by `\"kind\"`.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "linear",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "quadratic_in",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "square_root",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "half_cosine",
+          "rust_type": "pi: f64"
+        }
+      ],
+      "name": "ProgressShape",
+      "used_by": "ProgressCurve.shape; shared double-precision scalar easing"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "At most64 ordered knots; duplicate times form right-continuous steps.",
+          "name": "knots",
+          "rust_type": "Vec<ProgressKnot>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "shape",
+          "rust_type": "ProgressShape"
+        }
+      ],
+      "name": "ProgressCurve",
+      "used_by": "Device-free bounded progress envelope; repeated times are right-continuous steps"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "destination_origin",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Each destination axis advances one pixel forward or backward.",
+          "name": "destination_step",
+          "rust_type": "[i8; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "[u32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Source texel is arithmetic floor(q16/65536). The original immutable input is sampled even when earlier regions have written this texel.",
+          "name": "source_origin_q16",
+          "rust_type": "[i64; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "source_step_q16",
+          "rust_type": "[i64; 2]"
+        }
+      ],
+      "name": "FixedSampleRegion",
+      "used_by": "PiecewiseResampleSpec.regions; immutable16.16 source and signed destination steps"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "weighted",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "preserve_destination",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "opaque",
+          "rust_type": ""
+        }
+      ],
+      "name": "ResampleAlpha",
+      "used_by": "PiecewiseResampleSpec.alpha; weighted, preserved or opaque channel policy"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Regions execute in order; overlap mixes against the staged destination.",
+          "name": "regions",
+          "rust_type": "Vec<FixedSampleRegion>"
+        },
+        {
+          "default": null,
+          "doc": "These are independent floor-quantized weights, not inferred complements.",
+          "name": "source_weight256",
+          "rust_type": "u16"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "destination_weight256",
+          "rust_type": "u16"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "alpha",
+          "rust_type": "ResampleAlpha"
+        }
+      ],
+      "name": "PiecewiseResampleSpec",
+      "used_by": "ImageEffect.piecewise_resample; bounded ordered nearest sampling with independent Q8 weights"
+    },
+    {
+      "doc": "Integer image coordinates; the source's own draw clip does not constrain sampling. RGB remains unchanged unless `multiply_rgb` is explicitly set. Products use `(p + (p >> 7)) >> 8`, including all endpoint byte pairs.",
+      "fields": [
+        {
+          "default": [
+            0,
+            0
+          ],
+          "doc": "",
+          "name": "destination",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "default": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "doc": "x,y,width,height; width and height must be positive.",
+          "name": "source",
+          "rust_type": "[i32; 4]"
+        },
+        {
+          "default": [
+            0,
+            0,
+            16,
+            16
+          ],
+          "doc": "Destination x,y,width,height, intersected with its image bounds.",
+          "name": "clip",
+          "rust_type": "[i32; 4]"
+        },
+        {
+          "default": null,
+          "doc": "Set exterior coverage (or multiply exterior RGBA with multiply_rgb).",
+          "name": "clear",
+          "rust_type": "Option<u8>"
+        },
+        {
+          "default": false,
+          "doc": "",
+          "name": "multiply_rgb",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "Read source coverage from the current destination, walking forward. This deliberately preserves overlapping in-place feedback.",
+          "name": "self_source",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "Explicit profile: an entirely disjoint source clears only coverage, even when intersecting operations would multiply all four channels.",
+          "name": "clear_empty_alpha_only",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "AlphaClipRect",
+      "used_by": "Bitmap.beginAlphaClip and ImageEffect.alpha_clip_rect; exact coverage products, clipping and explicit forward self-source profile"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Outermost explicit depth scope first; at most65 entries.",
+          "name": "path",
+          "rust_type": "Vec<DepthOrderStep>"
+        }
+      ],
+      "name": "DepthOrderKey",
+      "used_by": "Derived immutable Primitive subtree depth path; no device handles"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "scope",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "major",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "depth",
+          "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "rank",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "DepthOrderStep",
+      "used_by": "DepthOrderKey.path; finite depth, scope and last committed stable rank"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Capability-resolved encoded bytes, for archive members and embedded resources. Shared workers decode using the same registry as file assets. Declared dimensions bound admission and must match the decoded result.",
+          "name": "Encoded",
+          "rust_type": "name: alloc::string::String, bytes: Arc<[u8]>, size: [u32;2]"
+        },
+        {
+          "default": null,
+          "doc": "Immutable ordered bitmap operation graph, evaluated by shared CPU workers. Base and descendants retain original channel bytes; no screen is captured.",
+          "name": "Composite",
+          "rust_type": "base: Box<ImageInput>, layers: Vec<ImageCompositeLayer>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Solid",
+          "rust_type": "size: [u32; 2], color: [u8; 4]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Raster",
+          "rust_type": "destination: Box<ImageInput>, source: Box<ImageInput>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Transition",
+          "rust_type": "from: Arc<dyn ImageResource>, to: Arc<dyn ImageResource>, mask: Option<Arc<dyn ImageResource>>"
+        },
+        {
+          "default": null,
+          "doc": "Expected dimensions bound admission; the worker verifies the decoded size.",
+          "name": "Asset",
+          "rust_type": "path: String, size: [u32; 2], fingerprint: Option<[u8; 32]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Resource",
+          "rust_type": ""
+        }
+      ],
+      "name": "ImageInput",
+      "used_by": "ImageMetadata.begin_process; scoped resources, encoded memory and immutable composition graphs"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Pending",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ready",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Failed",
+          "rust_type": ""
+        }
+      ],
+      "name": "ImageProcessState",
+      "used_by": "ImageJob.poll; includes HostServices.begin_canvas_image retained receipt"
+    },
+    {
+      "doc": "A full-surface snapshot that a presenting renderer should rasterize once and publish as an immutable image (`CanvasSystem::resolve_materialized`).",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "surface",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "[u32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "layers",
+          "rust_type": "Arc<Vec<LayerSpec>>"
+        }
+      ],
+      "name": "MaterializeRequest",
+      "used_by": "CanvasSystem.capture_request frozen logical scene; presenter prepares a lazy readback capability"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Uses the engine client's own logical lock state. Does not import/toggle OS.",
+          "name": "engine_logical",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Physical Windows lock-key import/control is not implemented.",
+          "name": "physical_windows",
+          "rust_type": ""
+        }
+      ],
+      "name": "KeyboardLockPolicy",
+      "used_by": "Majiro explicit logical vs physical host policy"
     },
     {
       "doc": "Variants are tagged by `\"mode\"`.",
@@ -6685,6 +8589,12 @@
           "doc": "",
           "name": "blur",
           "rust_type": "f32"
+        },
+        {
+          "default": null,
+          "doc": "Exact integer-weighted profile. With this profile mask/blur/softness must be absent/zero; floating progress is retained only for old schemas.",
+          "name": "fixed_weighted",
+          "rust_type": "Option<crate::fixed_mix::FixedMixSpec>"
         }
       ],
       "name": "ImageTransition",
@@ -8603,6 +10513,263 @@
       "used_by": "HostServices::begin_audio / AudioRequest::PlayAsset"
     },
     {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Integer",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Bytes",
+          "rust_type": ""
+        }
+      ],
+      "name": "ByteFormatValue",
+      "used_by": "Rust shared first-compatible encoded-byte formatting value"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "bytes",
+          "rust_type": "Vec<u8>"
+        },
+        {
+          "default": null,
+          "doc": "Exactly one compatible placeholder consumed this argument.",
+          "name": "matched",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "ByteFormatOutput",
+      "used_by": "format_one_bytes bounded output and argument-consumption receipt"
+    },
+    {
+      "doc": "Immutable bitmap glyph metrics; coverage is row-major, 0..=64.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "character",
+          "rust_type": "char"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "[u16; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Left and top relative to a downward-positive baseline.",
+          "name": "bearing",
+          "rust_type": "[i32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Pen displacement in the source's original pixel units.",
+          "name": "advance",
+          "rust_type": "[i16; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Native scalar measurement, distinct from the pen displacement.",
+          "name": "logical_advance",
+          "rust_type": "i16"
+        }
+      ],
+      "name": "BitmapGlyph",
+      "used_by": "PrecomputedFont checked TFT v0/v1 metrics and original coverage layout"
+    },
+    {
+      "doc": "A fixed-size face. Changing its size requires another explicit face binding.",
+      "fields": [],
+      "name": "PrecomputedFont",
+      "used_by": "Text.beginPrecomputedFont / FontLoadSource.PrecomputedStorage and PrecomputedBytes fixed-size faces"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "SingleByte",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Protect a pair only for lead81..9F/E0..EF and trail40..7E/80..FC. F0..FC leads are deliberately not protected. This is a byte-boundary profile, not validation or normalization of an entire encoded string.",
+          "name": "ShiftJis",
+          "rust_type": ""
+        }
+      ],
+      "name": "ByteSplitBoundary",
+      "used_by": "Rust shared byte-delimiter tokenizer; explicit single-byte or reviewed Shift-JIS boundaries"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "max_input_bytes",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "max_output_bytes",
+          "rust_type": "usize"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "max_tokens",
+          "rust_type": "usize"
+        }
+      ],
+      "name": "ByteSplitLimits",
+      "used_by": "split_delimited_bytes input/output/token admission limits"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "spans",
+          "rust_type": "Vec<Range<usize>>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "nul_bytes",
+          "rust_type": "Vec<u8>"
+        }
+      ],
+      "name": "ByteSplitOutput",
+      "used_by": "split_delimited_bytes token spans and bounded NUL-delimited output"
+    },
+    {
+      "doc": "Explicit endpoint conversion; no decoder, native profile or PlayAsset default invokes this automatically. Native adapters may support only selected rates.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Floor",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "Ceil",
+          "rust_type": ""
+        }
+      ],
+      "name": "LoopFrameRounding",
+      "used_by": "Rust resolve_loop_frames checked reference-rate conversion"
+    },
+    {
+      "doc": "",
+      "fields": [],
+      "name": "RegionMap",
+      "used_by": "Rust scoped region-label map; atomic clipped snapshot copies and zero-filled resize"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "DecodedFrames",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Coordinates counted at this fixed reference rate. Callers explicitly resolve them for a source rate; no playback path automatically applies it.",
+          "name": "ReferenceFrames",
+          "rust_type": "sample_rate: u32"
+        }
+      ],
+      "name": "AudioLoopTimebase",
+      "used_by": "Explicit catalog coordinates: decoded frames or fixed reference sample rate"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "timebase",
+          "rust_type": "AudioLoopTimebase"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "start_frame",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Exclusive end; None means the source's decoded end.",
+          "name": "end_frame",
+          "rust_type": "Option<u64>"
+        }
+      ],
+      "name": "AudioLoopRange",
+      "used_by": "AudioLoopMetadata.range; exclusive end or decoded EOF"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Canonical asset-relative path; names are exact, not implicitly case-folded.",
+          "name": "asset",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "range",
+          "rust_type": "AudioLoopRange"
+        }
+      ],
+      "name": "AudioLoopMetadata",
+      "used_by": "HostServices explicit client asset loop catalog; playback does not consult implicitly"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "client",
+          "rust_type": "ClientId"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "revision",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "entries",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "AudioLoopCatalogReceipt",
+      "used_by": "Atomic bounded host loop catalog owner commit"
+    },
+    {
       "doc": "Acknowledgement of preparation and owner publication, separate from EOF.",
       "fields": [
         {
@@ -8738,6 +10905,489 @@
       ],
       "name": "SourceBufferStatus",
       "used_by": "Audio.sourceStatus"
+    },
+    {
+      "doc": "Immutable release policy. Volume units are hundredths of one dB (db100). Source/cursor transfer and all interpolation are owned by the audio service.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Channel vacated by the live decoder without reopening or seeking.",
+          "name": "source_channel",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Independent channel receiving the retired nonlooping voice.",
+          "name": "tail_channel",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Captured levels at/above this select target_above_db100.",
+          "name": "threshold_db100",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "Target for captured levels at or above the threshold.",
+          "name": "target_above_db100",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "Target for captured levels below the threshold.",
+          "name": "target_below_db100",
+          "rust_type": "i32"
+        },
+        {
+          "default": null,
+          "doc": "Divisor of target-start; bounded1..100000. This is not milliseconds.",
+          "name": "steps",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "Signed stereo pan -1..1; None preserves the current balance.",
+          "name": "pan",
+          "rust_type": "Option<f32>"
+        },
+        {
+          "default": null,
+          "doc": "Playback multiplier0.125..4; None preserves the current rate.",
+          "name": "playback_rate",
+          "rust_type": "Option<f32>"
+        },
+        {
+          "default": null,
+          "doc": "Bake current native gain-group attenuation into the retired voice. Engine bus/master controls remain live. False retains the group.",
+          "name": "freeze_group_gain",
+          "rust_type": "bool"
+        },
+        {
+          "default": null,
+          "doc": "Without a source, release the existing tail, or complete if both absent. False rejects an absent source instead of touching the destination.",
+          "name": "release_tail_when_source_missing",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "AudioReleaseSpec",
+      "used_by": "Rust HostServices.begin_audio_release"
+    },
+    {
+      "doc": "Client capability whose generation is not reused across resets.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Owning client namespace.",
+          "name": "client",
+          "rust_type": "crate::state::ClientId"
+        },
+        {
+          "default": null,
+          "doc": "Unique owner-issued operation identity.",
+          "name": "generation",
+          "rust_type": "u64"
+        }
+      ],
+      "name": "AudioReleaseHandle",
+      "used_by": "Client-scoped audio release capability"
+    },
+    {
+      "doc": "Publication phase of the actual release actor, never a declaration alone.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "A render owner or preparation dependency still holds the source.",
+          "name": "Pending",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Transfer and current gain have been committed by the audio owner.",
+          "name": "Active",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Stop or source exhaustion has completed at an owner boundary.",
+          "name": "Complete",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Another owner control replaced this voice/track.",
+          "name": "Cancelled",
+          "rust_type": ""
+        }
+      ],
+      "name": "AudioReleasePhase",
+      "used_by": "Audio release owner publication phase"
+    },
+    {
+      "doc": "Read-only owner-published completion; no device or decoder pointers.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Actual actor phase.",
+          "name": "phase",
+          "rust_type": "AudioReleasePhase"
+        },
+        {
+          "default": null,
+          "doc": "Latest monotonic external update requested by the caller.",
+          "name": "submitted_updates",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "External update through which work has actually been owner-committed.",
+          "name": "completed_updates",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "Current integer hundredths of a dB, truncated toward zero.",
+          "name": "volume_db100",
+          "rust_type": "Option<i32>"
+        },
+        {
+          "default": null,
+          "doc": "Last consumed source position, excluding decoder read-ahead.",
+          "name": "source_position_frames",
+          "rust_type": "Option<u64>"
+        },
+        {
+          "default": null,
+          "doc": "First update that stopped the voice; zero means silent at admission.",
+          "name": "stopped_at_update",
+          "rust_type": "Option<u64>"
+        }
+      ],
+      "name": "AudioReleaseInfo",
+      "used_by": "Rust HostServices.audio_release_info"
+    },
+    {
+      "doc": "A live decoder transfer followed by a stepped logarithmic release. Updates are explicit counters; this declaration does not interpret them as time.",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "",
+          "name": "source_channel",
+          "rust_type": "u32"
+        },
+        {
+          "default": 2,
+          "doc": "",
+          "name": "tail_channel",
+          "rust_type": "u32"
+        },
+        {
+          "default": -2000,
+          "doc": "",
+          "name": "threshold_db100",
+          "rust_type": "i32"
+        },
+        {
+          "default": -6000,
+          "doc": "",
+          "name": "target_above_db100",
+          "rust_type": "i32"
+        },
+        {
+          "default": -10000,
+          "doc": "",
+          "name": "target_below_db100",
+          "rust_type": "i32"
+        },
+        {
+          "default": 60,
+          "doc": "",
+          "name": "steps",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "pan",
+          "rust_type": "Option<f32>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "playback_rate",
+          "rust_type": "Option<f32>"
+        },
+        {
+          "default": true,
+          "doc": "",
+          "name": "freeze_group_gain",
+          "rust_type": "bool"
+        },
+        {
+          "default": false,
+          "doc": "",
+          "name": "release_tail_when_source_missing",
+          "rust_type": "bool"
+        }
+      ],
+      "name": "VoiceReleaseSpec",
+      "used_by": "Audio.beginVoiceRelease"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": 1,
+          "doc": "",
+          "name": "id",
+          "rust_type": "u32"
+        },
+        {
+          "default": "Hint",
+          "doc": "",
+          "name": "text",
+          "rust_type": "String"
+        },
+        {
+          "default": "default",
+          "doc": "",
+          "name": "font",
+          "rust_type": "String"
+        },
+        {
+          "default": 16,
+          "doc": "",
+          "name": "text_size",
+          "rust_type": "u16"
+        },
+        {
+          "default": 500,
+          "doc": "",
+          "name": "delay_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": 5000,
+          "doc": "",
+          "name": "lifetime_ms",
+          "rust_type": "u64"
+        },
+        {
+          "default": [
+            12.0,
+            20.0
+          ],
+          "doc": "",
+          "name": "offset",
+          "rust_type": "[f32; 2]"
+        },
+        {
+          "default": [
+            6,
+            4
+          ],
+          "doc": "",
+          "name": "padding",
+          "rust_type": "[u16; 2]"
+        },
+        {
+          "default": [
+            0,
+            0,
+            0,
+            255
+          ],
+          "doc": "",
+          "name": "color",
+          "rust_type": "[u8; 4]"
+        },
+        {
+          "default": [
+            255,
+            255,
+            225,
+            255
+          ],
+          "doc": "",
+          "name": "background",
+          "rust_type": "[u8; 4]"
+        },
+        {
+          "default": [
+            70,
+            70,
+            60,
+            255
+          ],
+          "doc": "",
+          "name": "border",
+          "rust_type": "[u8; 4]"
+        }
+      ],
+      "name": "TooltipSpec",
+      "used_by": "Ui.putTooltip"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Source rectangles `[x, y, width, height]`, in display order.",
+          "name": "frames",
+          "rust_type": "Vec<[u32; 4]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "hotspot",
+          "rust_type": "SpriteHotspot"
+        },
+        {
+          "default": null,
+          "doc": "A source pixel whose RGB identifies transparent pixels in every frame.",
+          "name": "color_key_at",
+          "rust_type": "Option<[u32; 2]>"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "frame_ms",
+          "rust_type": "u32"
+        }
+      ],
+      "name": "SpriteCursorLayout",
+      "used_by": "Rust cursor_from_sprite"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "Position",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Search the separate marker rectangle, in column-major order. Marker coordinates are relative to that rectangle; absence uses `fallback`.",
+          "name": "Marker",
+          "rust_type": "rect: [u32; 4], rgb: [u8; 3], fallback: [u32; 2]"
+        }
+      ],
+      "name": "SpriteHotspot",
+      "used_by": "SpriteCursorLayout.hotspot"
+    },
+    {
+      "doc": "Immutable logical installed file, usable by any adapter or asset tool.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "path",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "size",
+          "rust_type": "u64"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "sequence",
+          "rust_type": "u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "cabinet_stream",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "cabinet_key",
+          "rust_type": "String"
+        }
+      ],
+      "name": "InstallerFile",
+      "used_by": "Shared windows/msi installed-file archive metadata"
+    },
+    {
+      "doc": "A catalog owns only its scoped source and immutable data. The third-party MSI/CAB readers are created and destroyed inside each worker invocation; neither !Send MSI objects nor decoder pointers cross task boundaries.",
+      "fields": [],
+      "name": "InstallerCatalog",
+      "used_by": "Rust shared read-only MSI/CAB catalog"
+    },
+    {
+      "doc": "A validated CPU document. It contains no paths, device pointers or callbacks.",
+      "fields": [],
+      "name": "XmlDocument",
+      "used_by": "Immutable shared XML resource"
+    },
+    {
+      "doc": "Immutable element in a shared XML resource.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Original qualified element name; namespaces are preserved as text.",
+          "name": "name",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Concatenated character data, with XML 1.0 newline normalization.",
+          "name": "text",
+          "rust_type": "String"
+        },
+        {
+          "default": null,
+          "doc": "Original qualified attribute names and decoded values.",
+          "name": "attributes",
+          "rust_type": "BTreeMap<String, String>"
+        }
+      ],
+      "name": "XmlNode",
+      "used_by": "XmlDocument element and attribute access"
+    },
+    {
+      "doc": "",
+      "fields": [
+        {
+          "default": null,
+          "doc": "Client Save JSON retains native named REG_SZ values. Missing values follow reviewed native ENV defaults; no original registry is imported.",
+          "name": "portable_client",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Importing an original Windows registry is not implemented.",
+          "name": "strict_windows_registry",
+          "rust_type": ""
+        }
+      ],
+      "name": "MajiroSettingsProfile",
+      "used_by": "Majiro explicit portable client settings or unsupported Windows-registry import"
+    },
+    {
+      "doc": "Native portable-host policy, separate from any disc verification result.",
+      "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "disabled_for_native_host",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "strict",
+          "rust_type": ""
+        }
+      ],
+      "name": "OpticalDiscPolicy",
+      "used_by": "RealLive native host optical-disc policy; not authentication"
     },
     {
       "doc": "A seek publishes only once the exact decoded frame is available.",
@@ -9641,6 +12291,18 @@
           "default": null,
           "doc": "MaskScalar256's RGB interpolation that keeps the destination alpha (krkr `TVPAlphaBlend_HDA`: sopa = s.a, or s.a*opacity>>8 below 255).",
           "name": "mask_hold_alpha_scalar256",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Explicit per-mask /256 profile: mask0 skips; mask255 uses weight and 256-weight; partial masks use a=mask*weight>>8 and 255-a. RGB products are summed then shifted. Destination alpha is retained.",
+          "name": "mask_piecewise256",
+          "rust_type": "weight: u16"
+        },
+        {
+          "default": null,
+          "doc": "Independent /256 floors for source-alpha RGB products. Mask0 skips; mask255 copies RGB. Destination alpha is retained; opacity must be255.",
+          "name": "mask_separate256",
           "rust_type": ""
         },
         {
@@ -13635,6 +16297,12 @@
         },
         {
           "default": null,
+          "doc": "Immutable, validated engine mesh resource. Capturing an evaluated puppet freezes its completed geometry; textures remain client-scoped immutable image dependencies, with no rig/player or device handles.",
+          "name": "mesh",
+          "rust_type": "frame: Arc<crysirror_puppet::PuppetFrame>, tint: [u8; 4]"
+        },
+        {
+          "default": null,
           "doc": "2D deformable puppet (ADR 0029): an engine puppet rig JSON asset, fitted into the layer rect (aspect preserved).",
           "name": "puppet",
           "rust_type": "asset: String, tint: [u8; 4]"
@@ -13794,6 +16462,12 @@
           "rust_type": "u64"
         },
         {
+          "default": null,
+          "doc": "Exact rational scalar clock. When present this overrides interval_ms; the engine retains fractional milliseconds through elapsed_ms.",
+          "name": "rate_per_second",
+          "rust_type": "Option<u32>"
+        },
+        {
           "default": 0,
           "doc": "Prefix already visible when new text is appended to a page.",
           "name": "initial_visible",
@@ -13951,6 +16625,12 @@
         },
         {
           "default": null,
+          "doc": "Release one unpresented surface. Hide its presentations first. Frozen copies own their draw nodes and remain valid after the source is gone.",
+          "name": "destroy",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
           "doc": "",
           "name": "clear",
           "rust_type": "id: u32, color: [u8; 4]"
@@ -14057,6 +16737,12 @@
           "doc": "",
           "name": "ui",
           "rust_type": "Vec<ui::UiCommand>"
+        },
+        {
+          "default": [],
+          "doc": "",
+          "name": "input_routes",
+          "rust_type": "Vec<input_routes::InputRouteCommand>"
         }
       ],
       "name": "ServiceBatch",
@@ -15843,6 +18529,12 @@
       "fields": [
         {
           "default": null,
+          "doc": "Stable finite floating depth within order major buckets; inherited by descendants. None returns this node to ordinary ordering in its scope.",
+          "name": "set_depth",
+          "rust_type": "id: u32, depth: Option<f32>"
+        },
+        {
+          "default": null,
           "doc": "Start or replace one local scalar track on an owned layer.",
           "name": "begin_motion",
           "rust_type": "id: u32, track: MotionTrackSpec"
@@ -15962,6 +18654,30 @@
     {
       "doc": "Variants are tagged by `\"op\"`.",
       "fields": [
+        {
+          "default": null,
+          "doc": "",
+          "name": "put_tooltip",
+          "rust_type": "tooltip: tooltip::TooltipSpec"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "remove_tooltip",
+          "rust_type": "id: u32"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "show_tooltip",
+          "rust_type": "id: u32, position: [f32;2]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "hide_tooltip",
+          "rust_type": "id: Option<u32>"
+        },
         {
           "default": null,
           "doc": "Start or replace a local X/Y rectangle track on an owned widget.",
@@ -16381,6 +19097,18 @@
           "doc": "Immutable caller bytes, charged before admission.",
           "name": "Bytes",
           "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Fixed-size precomputed coverage face (currently TFT v0/v1), read on an I/O worker.",
+          "name": "PrecomputedStorage",
+          "rust_type": "path: VfsPath, pixel_size: u16"
+        },
+        {
+          "default": null,
+          "doc": "Caller-owned precomputed bytes; pixel size is explicit because TFT has no size header.",
+          "name": "PrecomputedBytes",
+          "rust_type": "bytes: Arc<[u8]>, pixel_size: u16"
         }
       ],
       "name": "FontLoadSource",
@@ -16832,7 +19560,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "1af7e309b18b2933",
+  "fingerprint": "66c74a7ee0a69bf1",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {
@@ -16866,6 +19594,10 @@
     {
       "class": "Input",
       "global": "input"
+    },
+    {
+      "class": "InputRoutes",
+      "global": "inputRoutes"
     },
     {
       "class": "Localization",

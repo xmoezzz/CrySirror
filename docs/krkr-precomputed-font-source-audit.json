@@ -1,0 +1,40 @@
+{
+  "scope": "Precomputed bitmap coverage faces owned by shared font workers/catalog/TextSystem, plus thin native Font map/unmap semantic bindings.",
+  "source": {
+    "repository": "https://github.com/krkrz/krkrz",
+    "commit": "fd5c4baa6a2ef5978db1bd043634351f48667daf",
+    "license_notice": "docs/third-party/krkrz.txt",
+    "files": [
+      {
+        "path": "visual/PrerenderedFont.cpp",
+        "sha256": "5efe60fefa3fee142351b1a19fde3563c5726ce9612ee046bdc5577207d4e2d0"
+      },
+      {
+        "path": "visual/PrerenderedFont.h",
+        "sha256": "9bf75c3eb12edd48ad023724737a24e2c3c5ce602edbf43ac9f936d45373b678"
+      },
+      {
+        "path": "visual/LayerBitmapImpl.cpp",
+        "sha256": "df7e8a6fa92912fa1b74273fe369dc057754b322cc880f3575982b0cf4338751"
+      },
+      {
+        "path": "visual/LayerIntf.cpp",
+        "sha256": "9cf4cb58f0d63c53ba2c7ec7b0f09ca44a51bb43a92f09fb4aad6b1f90441556"
+      }
+    ],
+    "reviewed": "Complete PrerenderedFont.cpp/.h; LayerBitmapImpl global font map/unmap and character data/getTextSize; native Font registration in LayerIntf."
+  },
+  "implementation": {
+    "shared_decoder": "crates/crysirror-text/src/precomputed_font.rs",
+    "shared_catalog": "crates/crysirror-text/src/dynamic.rs",
+    "shared_glyphs": "crates/crysirror-text/src/glyph.rs",
+    "worker_owner": "crates/crysirror-runtime/src/font_resources.rs",
+    "core_input": "FontLoadSource::PrecomputedStorage { path, pixel_size } / PrecomputedBytes { bytes, pixel_size }",
+    "public_script": "Text.beginPrecomputedFont(alias, asset, pixelSize): int; uses existing fontStatus, measurement and release methods.",
+    "native_policy": "Native Font signature face/height/bold/italic/angle maps to a shared canonical alias. An async worker pause preserves ordering. Unmap removes the signature binding; retained engine text nodes keep their immutable face. Baked native bold is not synthesized again.",
+    "limits": "32MiB encoded source, 65536 strictly ordered BMP characters, 4MP coverage per glyph, 64MiB total face coverage, 256MiB shared host font resident budget including decoded coverage reserved before allocation; cancellation checked while indexing and decoding.",
+    "metrics": "Original bearings, IncX/IncY and scalar Inc are retained separately. TFT has no nominal pixel size/ascent header: callers declare pixel size, shared portable line pitch uses that size and baseline ascent is the maximum stored origin. Explicit positioned glyphs can use caller baseline. Native GDI/FreeType pixel parity is not claimed.",
+    "boundaries": "Fixed declared size only. Missing glyphs fail explicitly; native OS font fallback outside the mapped bitmap face is not yet implemented. Complex shaping of bitmap faces is unsupported, not replaced with an outline font."
+  },
+  "verification": "Self-authored in-memory 2x2 half-coverage glyph fixture; no font files or user data committed. Separate decoder tests, worker publication/client isolation/frozen lifetime tests, adapter test and actual game execution logs."
+}

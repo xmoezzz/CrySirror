@@ -1,0 +1,69 @@
+{
+  "date": "2026-11-01",
+  "status": "Shared engine InputRouting and reviewed native104/105/848/849 plus71 event wait implemented; original keyslot/callback result mapping remains unsupported",
+  "module_sha256": "f8a1fb4fed8a0c64c3fbc0bcf009f63e8f3181cfbc1a0dbd60f9ddefc8e25b3d",
+  "method": "Owner-authorized local IDA9 static review;EXE never run",
+  "functions": {
+    "648a50": "104 accepts[button,x,y,w,h,priority,eventmode],wrappingnativeRECT right=x+w,bottom=y+h,sendsmessage89 fromcurrentKCS task(main3).",
+    "5de590/8cdaa8": "type6constructor unbound:binding target-1,no input record,no renderer;eventmode/result0,ownenabled1,relative0. Fullvtable8entries reviewed.",
+    "5de8e0:89": "Bind only when unbound;payload[taskid,priority,7(allinputsourcebits),rect,0,1,1,defaultaux]. Fullcanvas RECT uses exact constant8CDAD0=[-100000,-100000,100000,100000], NOT an empty rectangle. SendsINPUT msg126;binding_target=caller,a2;event_mode=lastparam;result=1.",
+    "5de860": "Full-canvas testtop<=0,left<=0,bottom>=virtualheight,right>=virtualwidth;this160 markerrecords result.",
+    "5de8c0/5dd3c0": "Input registry resolved bymessage34:main framework owns actualINPUT logical1;buttonbinding targetmain3 is distinctfromINPUT1.",
+    "5e6f50:126/128/127": "Register appendsrealrecord thenstablelist-sort;reorder128 removes/reinsertsrecord thenresorts;drop127 freescoverage/removesrecord;otherfieldmutations retainrecordidentity.",
+    "5e6020/5e5fb0": "Stable linked-list merge priorityhighfirst. Exact5E5FDB CMP ESI,[EDI+0Ch],5E5FDE JLE provesSIGNED i32 comparison. Equal leavesoldercurrentorder.",
+    "5e7a30": "Press:enabled+source-mask match;pointerclassbit2 requiresglobalemptyrect OR half-open PtInRect plusoptionalcoverage,keyboard/other bypassrect. Dispatchcurrentreceiver taskmessage4 etc,continue on unhandled,storekey->receivercapture only whenhandled. Release:enabledfilter,ifcaptureonlythatreceiverelseeligibleall;source/rectnotretested;clearcaptureafterdelivery.",
+    "5e7bf0": "Repeat:capturedreceiverorfirstlistrecord ifnocapture;enabled/source/rect/mask checks;dispatch once,doesnotbroadenunhandledrepeat toallreceivers.",
+    "5e7d10": "Hover:enabled+hover_enabled,coverage or NONEMPTY rect PtInRect;emptyglobalrect isnothover. Firsthitwins;emitexit8beforeenter7,recordhover state.",
+    "5de8e0:4/5/6/7/8": "Clickcontroller emits originalparentmsg9(down)/10(up),65(wheel),6(drag),64(hoveron/off);targetcanrespondhandled throughthis[30],whichreturnstoinputdispatcherthenresets.",
+    "5e8600:9/10 and877310": "Main script receivesreservednativeevent-65533/-65532(sender,key,state);877310 resumesonlyits originalblockedKCS scriptaftercopying16-byteevent,executesthenreadsmodifiedresult. Mustpreserveoriginalcallback/PC/wait/result ratherthan turnitinto genericButtonactivation.",
+    "70f740/70ff00": "Underlyinginputreturns sourcebitsfor80logicalkeyslots\u00d74players;16touch normalizes2beforetaskdispatch.70FF00 readsWinMMjoypad axes/buttons. Exactlogicalkeybindings/defaultconfigprojection stillrequiresfullreview.",
+    "648980/5de8e0:92/5e6f50:134": "Native105 sets real registered receiverenabled. Unbound controllerhasnoeffect. Disablealso sends132 toclearrecordhover;nativeown-enabledflag35isnotchanged. Booleanprofile0/1currentlymapped.",
+    "65a180/877390": "Native71 unique static caller65A197 arms ScriptDecode2 event-wait flag16 and caller buffer17. Adapter validates16-byte caller buffer and boolean result stack, ACKs void and yields. NativeMain tick5E84E0 calls877450\u21928762A0 on next owner tick: no event pushes0, preserves caller buffer, clears wait flag and resumes same script. Original877310 copies16-byte event then pushes1/runs only when flag16 is armed. Adapter message callback remains unsupported until logical keyslot and controller result semantics are fully mapped.",
+    "6489b0/5de8e0:98/5e6f50:135": "848 updatesactualsharedreceiver hover_enabled viaexistingPut,source marker semantics nowpreserved insharedInputRouting. Actualonce.",
+    "6489e0/5de8e0:99/5e6f50:153": "849 sets registered receiver drag_enabled via shared Put.5E7950 broadcasts pointer-source enabled/drag-enabled receivers whose origin rect matches, ignores coverage and handled short circuit. Shared explicit Drag carries origin; hardware automatic drag detection is still unsupported.",
+    "8cdbe4/5e84e0/877450/8762a0": "Complete nativeMain vtable reviewed.5E84E0 is its actual owner tick;5E8270 is destructor, not tick. Two actual native71 waits now return0 on later owner ticks. Machine.resume_native_event atomically preflights optional16-byte buffer and4-byte result before writes; synthetic event message branch is tested but not wired to actual native callbacks.",
+    "5dc510/5de8a0/629850": "Original child phase precedes Main KCS resume. Existing controller result resets0 before FES firsttick; newly created lowbutton retains bindresult1 until following native tick. Adapter triggers this phase only at actual71 resume, not host quota exhaustion/resource polls. FES lowerbutton uses shared receiver priority2/fullrectangle/source7. Independent source/Scene test included in23/23 release; actual Fes8 remains first_tick=true at447 because original Main has not yielded again."
+  },
+  "shared_requirements": [
+    "Client-scoped engine receiver registry with independent signedpriority andstableequalorder,enabled/source filters,global press regions distinctfromhover,half-open rectangles andoptionalimmutablecoverage.",
+    "Candidate delivery order andpresscapture/release/repeat/hover state belongsharedengine;originaltaskcallback/event/result routing andlogicalkeyslotbinding belongadapter.",
+    "Monotonic epoch/delivery receipts mustsurvive asynchronous polling;handledACK consumesexactdelivery,unhandled triesnext. Owner/frame/cancellation/clear/restore semantics explicit.",
+    "Useexisting CoreInputBuffer for observedpress/release journaling whereappropriate;no VM-privatehit tester ornativeeventloss throughdrainedUiEvents.",
+    "Native104 mustnotbemappedto ordinary focused keyboard Button activation orwrongsource-mask5. Actualevent_mode5isdistinctfromfixedreceiver sourcemask7."
+  ],
+  "actual_frontier": {
+    "instructions": 20227,
+    "native": 447,
+    "pc": "0x1926",
+    "args": [
+      8,
+      406
+    ],
+    "text": "flow",
+    "log": "target/verification/catsystem2/native66-fes-owner.log",
+    "native66_count": 4,
+    "native449_count": 1,
+    "native71_count": 2,
+    "Cat_GPU_title_gameplay_input_validated": false
+  },
+  "engine_implementation": {
+    "owner": "EngineSystems.input_routes:InputRouting;ServiceBatch.input_routes;CoreEngineQuery InputRouteDelivery/InputRouteReceiver/InputRouteStats;Runtime sharedquery/submit/restore/tick",
+    "API": "InputReceiverSpec(id,priority:i32,sources1/2/4,rect[x,y,w,h]orNone,sharedWidgetHitMask,enabled,hover_enabled,drag_enabled); InputRouteEvent(source,code,phase,point,origin optional explicit Drag origin); commands Put/Remove/Clear/SetEnabled/SetPriority/Acknowledge/Cancel; InputDeliveryReceipt(client,epoch,event,delivery) with u64 decimal-string wire. Root owns reflected InputRoutes singleton/API docs.",
+    "ownership": "One active routedclient in EngineSystems;mix with interactivewidgets/dialogs isexplicitlyrejected. Active menu conflict withphysicalbuttonactivityfails before enginejournal/clock/UIcommit. EngineSystems preflight_input ispure forpre-behaviourchecks.",
+    "delivery": "Core InputBufferjournal observations and press/releaseedges;priority stablei32highfirst;coverage delegatedsharedWidgetHitMask;presscapture/release/repeat/hoverengine-owned;oneleaseddelivery repeatedpollsame receipt;strictforeign/staleACK;bounded512eventwork/poll;backendexplicitdispatchcannotjumpqueuedphysicaljournal.",
+    "restore": "Onlyreceivercanonicalregistry/priority/order andengineinputclockpersist. Devicejournal/captures/hover/leasesneverreplay;restorefirstadmissionfreshCoreepochandheldbaseline;originalCatframeworksnapshotsremainunsupported.",
+    "hardware": "CurrentInputFramepath classifiesexisting keyboard/pointerbits. ControllerexplicitRusteventadmissionisreusable/tested;no controllerhardwareobservationclaimed.",
+    "lifecycle": "EngineInput/Actions/optionaljournals getframe-startownershipselectedinput;Runtimegetsphysicalforrouter. Mid-on_update registration suppressesalreadyobservedpressed andprimesheldbaseline;clearownershipneverrawfallback. Asyncframe completion/end_frame retainexactsamechosenAppinput;no resample.",
+    "validation": "Shared release routing7/7 (shared-input-routing-drag-tests.log); Engine lifecycle3/3 (shared-input-routing-lifecycle-tests.log); KCS VM12/12 (native71-vm-tests.log); Cat lib22/22 and owner1/1 (native262-tests.log/native262-owner.log). Root/NNN reflection/docs8/8 fingerprint bd71afbaa37a19da separately verified."
+  },
+  "resolved_hover_suspension": "SharedLive per-receiverhover-markedsetpreservesdisabledhovermarkers,avoidsfalseexit/re-enter,anddirtypropertychangesrecomputewithoutpointermotion. Inputdisable/cancel/remove/restoreclearappropriateliveflags. PublicDTO/command/queryunchanged;shared-input-routing-hover-tests.log6/6.",
+  "input_failure_boundary_validation": "Actualowner-original-script/session probes sharedCorejournalclickdown/upandCtrldown/up;allreachunsupportednativecallback withretainedsamePC/instructions/pendingcall/receipt acrossrepeatedpoll/step. ExplicittestCancelbetweenprobes. Thisisnotgameplayinputsuccess.",
+  "drag_boundary": "Shared explicit backend Drag is implemented and tested. No automatic hardware Drag detector or real controller observation claimed. Actual click-down/up and Ctrl-down/up remain explicit unsupported native callback boundaries, preserving the same original PC/instruction count/pending call and leased receipt across repeated delivery.",
+  "logical_keyslot_frontier": {
+    "71ec50": "Original startup KEYCUSTOMIZE parses80 logical rows, keyboard/mouse/joypad/touch each4binding IDs and correspondingrepeat flags, plus native name/enabled policy. Stored native VK/mouse IDs are not Core button bit ordinals.",
+    "5e66c0": "Native input owner tick loopsplayer0..3,slot0..79, source16 touch normalizes2. First handled press/release/repeat stops further slot processing in that frame; duplicate physical bindings can target multiple logical slots. Actual startup key00/key02 both bind Enter and mouse1. A direct mouse_left\u21920 or Ctrl\u2192fixedslot mapping is not correct generally.",
+    "shared_boundary": "Current shared InputRoutes owns physical journal and candidate receivers; logical alias binding generation/ordered handled-batch semantics remain missing. Existing Engine ActionMap only accepts Core button names and is not yet connected to client-scoped receiver logical-slot delivery. Do not hide general binding/gesture/hit algorithms in Cat.",
+    "status": "No logical binding/callback success claimed. Hardware automatic Drag, full VK keyboard inventory,4-player hardware and native key-repeat timing remain unfinished."
+  },
+  "actual_canonical_runtime": "native449-canonical-runtime-owner.log release1/1,one actualRuntime/all31INTs,20,227instructions to447/1926/flow. Bootstrap0instructions/time;Runtime.tick fourmouse/Ctrl down/up events retainnativecallbackfailure,pending/instructionsandexactleasedreceipt onrepeatquery. Fes8first_tick remains true until a genuine later source tick; sourceNative71 resetscontroller5result0."
+}

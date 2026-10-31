@@ -20,18 +20,25 @@ use std::{
 };
 
 pub const DEFAULT_LAYER_SIZE: u32 = 32;
-/// Canvas surface ids 1..=MAX_LAYERS; engine layer ids are derived from them.
-pub const MAX_LAYERS: u32 = 1000;
+/// One shared Canvas per native Layer. Image-only transitions add a temporary
+/// presentation of an existing source Canvas, not another retained surface.
+/// Engine Layer nodes and pixels keep their independent admission limits.
+pub const MAX_LAYERS: u32 = crysirror_core::service::MAX_CANVAS_SURFACES_PER_CLIENT as u32;
 const MAX_LOG: usize = 4096;
 
 #[derive(Clone, Debug)]
 pub struct LayerState {
+    /// Original tooltip string; engine UI owns its display and lifecycle.
+    pub hint: String,
+    pub show_parent_hint: bool,
+    pub ignore_hint_sensing: bool,
     pub kind: i64,
     /// Drawing clip (krkr setClip) in image pixels; `None` is the whole image.
     pub draw_clip: Option<[i64; 4]>,
     pub image_source: Option<crysirror_core::image_processing::ImageInput>,
     pub source_lost: String,
     pub regions: crysirror_core::region_map::RegionMap,
+    pub province_allocated: bool,
     pub slot: u32,
     pub window: usize,
     pub parent: Option<usize>,
@@ -110,19 +117,28 @@ pub struct KrkrHost {
     pub(crate) line_parser: crate::line_plugin::State,
     pub(crate) psbfile: crate::psbfile_plugin::State,
     pub(crate) draws: crate::draw_plugin::State,
-    pub image_job: Option<(usize, crysirror_core::image_processing::ImageJob, [bool; 2])>,
+    /// Target, owner-polled job, native flips, whether to replace Canvas paint.
+    /// Unmodified Asset preparation retains its original immutable paint.
+    pub image_job: Option<(usize, crysirror_core::image_processing::ImageJob, [bool; 2], bool)>,
+    pub(crate) image_pair:Option<crate::image_api::PairPreparation>,
+    /// End publication caller ownership after ordered Canvas edits commit.
+    /// Engine retained draws and frozen copies then own the resource lease.
+    pub(crate) retired_images: Vec<String>,
     pub io_barrier: bool,
     pub writes: std::collections::VecDeque<Box<dyn crysirror_core::service::StorageWrite>>,
     pub can_suspend: bool,
     pub sounds: crate::sound::Sounds,
     pub videos: crate::video::Videos,
     pub alpha_movies: crate::alpha_movie::AlphaMovies,
+    pub layer_movies: crate::layer_movie::LayerMovies,
     pub(crate) cursors: crate::pointer::Cursors,
     pub client: u32,
     pub storage: Option<Storage>,
     pub images: Option<Arc<dyn ImageMetadata>>,
     pub text_measurement: Option<Arc<dyn TextMeasurement>>,
     pub(crate) fonts:crate::font_resources::Fonts,
+    pub(crate) hint_hover: Option<usize>,
+    pub(crate) mouse: crate::native_mouse::MouseState,
     pub input: crysirror_core::service::InputFrame,
     pub now: u64,
     /// The presenting host's display (`System.screenWidth`, windowEx monitors);
@@ -182,6 +198,8 @@ impl KrkrHost {
             line_parser: Default::default(),
             psbfile: Default::default(),
             image_job: None,
+            image_pair:None,
+            retired_images: Vec::new(),
             draws:Default::default(),
             io_barrier: false,
             writes: Default::default(),
@@ -189,12 +207,15 @@ impl KrkrHost {
             sounds: Default::default(),
             videos: Default::default(),
             alpha_movies: Default::default(),
+            layer_movies: Default::default(),
             cursors: Default::default(),
             client: 1,
             storage: None,
             images: None,
             text_measurement: None,
             fonts:Default::default(),
+            hint_hover: None,
+            mouse: Default::default(),
             input: Default::default(),
             now: 0,
             display: None,
@@ -379,6 +400,9 @@ impl KrkrHost {
         let primary = parent.is_none();
         let size = DEFAULT_LAYER_SIZE as i64;
         let state = LayerState {
+            hint: String::new(),
+            show_parent_hint: true,
+            ignore_hint_sensing: false,
             kind: if primary { 1 } else { 2 },
             image_source: None,
             source_lost: String::new(),
@@ -387,6 +411,7 @@ impl KrkrHost {
                 [size as u32, size as u32],
             )
             .map_err(|e| TjsError::runtime(e.to_string()))?,
+            province_allocated: false,
             slot,
             window,
             parent,
@@ -448,9 +473,9 @@ impl KrkrHost {
                 "invalid layer image size {w}x{height}"
             )));
         }
-        let regions =
-            crysirror_core::region_map::RegionMap::new(self.client, [w as u32, height as u32])
-                .map_err(|e| TjsError::runtime(e.to_string()))?;
+        let mut regions=self.layer(h)?.regions.clone();
+        regions.resize(self.client,[w as u32,height as u32])
+            .map_err(|e|TjsError::runtime(e.to_string()))?;
         let slot = {
             let l = self.layer_mut(h)?;
             // Canvas Resize retains the old pixels. Keep its immutable CPU
@@ -502,6 +527,7 @@ impl KrkrHost {
         let slot = {
             let l = self.layer_mut(h)?;
             l.regions = regions;
+            l.province_allocated = false;
             l.full_alpha = Some(fill[3]);
             l.has_image = true;
             l.image_modified = true;
@@ -521,6 +547,11 @@ impl KrkrHost {
 
     /// Remove the engine nodes of a layer subtree (children first).
     pub fn detach_subtree(&mut self, h: usize) {
+        // Invalidate marks the native object shutdown before detaching it:
+        // no callback may be delivered to that retired object.
+        if self.mouse.hover == Some(h) { self.mouse.hover = None; }
+        if self.mouse.capture == Some(h) { self.mouse.capture = None; self.mouse.release_called = true; }
+        if self.layer_movies.retire(h) { self.deferred.cancel(self.client,crate::async_trigger::target(h,3)); }
         let cancelled: Vec<_> = self.transitions.0.iter()
             .filter(|(dest, source)| **dest == h || **source == h)
             .map(|(&dest, _)| dest).collect();
@@ -555,7 +586,10 @@ impl KrkrHost {
             return;
         }
         l.attached = false;
+        let hint = !std::mem::take(&mut l.hint).is_empty();
+        let tooltip_id = l.slot;
         let (presentation, container) = (l.presentation(), l.container());
+        if hint { self.ui_op(json!({"op":"remove_tooltip","id":tooltip_id})); }
         self.canvas_op(json!({"op":"hide","layer":presentation}));
         self.layer_op(json!({"op":"remove","id":container}));
     }
@@ -563,6 +597,7 @@ impl KrkrHost {
     pub fn invalidate_layer(&mut self, h: usize) {
         self.detach_subtree(h);
         if let Some(l) = self.layers.remove(&h) {
+            self.canvas_op(json!({"op":"destroy","id":l.slot}));
             if let Some(p) = l.parent.and_then(|p| self.layers.get_mut(&p)) {
                 p.children.retain(|c| *c != h);
             }
@@ -615,6 +650,7 @@ impl KrkrHost {
     /// from a depth-first walk, container geometry and image placement.
     pub fn sync(&mut self) -> TjsResult<()> {
         crate::menus::sync(self)?;
+        crate::tooltip::sync_liveness(self)?;
         let roots: Vec<usize> = self.windows.values().filter_map(|w| w.primary).collect();
         let mut order = Vec::new();
         for root in roots {
@@ -626,6 +662,8 @@ impl KrkrHost {
                 stack.extend(children);
             }
         }
+        let mut containers = Vec::new();
+        let mut presentations = Vec::new();
         for (index, h) in order.into_iter().enumerate() {
             let major = index as i32 * 2;
             let Some(l) = self.layers.get_mut(&h) else {
@@ -665,11 +703,17 @@ impl KrkrHost {
                         "parent":l.container(),"position":placement.1})
                 })
             };
-            self.layer_op(json!({"op":"put","layer":spec}));
+            containers.push(json!({"op":"put","layer":spec}));
             if let Some(p) = present {
-                self.canvas_op(p);
+                presentations.push(p);
             }
         }
+        // One owner publication must update every dirty logical container
+        // before its canvas presentations. In particular the two endpoints
+        // of a live subtree transition resize together: alternating layer/
+        // canvas batches exposes an invalid half-updated pair to validation.
+        for op in containers { self.layer_op(op); }
+        for op in presentations { self.canvas_op(op); }
         Ok(())
     }
 
@@ -728,10 +772,11 @@ pub fn container_spec(l: &LayerState, major: i32, parent: Option<u32>, shown: bo
 }
 
 impl TjsHost for KrkrHost {
-    /// Everything with native state or queued work keyed by an object.
+    /// Actual owners and queued work. The Layer tree is a non-owning native
+    /// index (krkrz AddChild/ObjectList::Add), not a reference to every script
+    /// Layer ever constructed. Script fields and suspended frames trace theirs.
     fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
-        let ids = self.layers.keys()
-            .chain(self.windows.keys())
+        let ids = self.windows.keys()
             .chain(self.timers.keys())
             .chain(self.parsers.keys())
             .chain(self.menus.keys())
@@ -740,7 +785,10 @@ impl TjsHost for KrkrHost {
             .chain(self.menu_popups.iter().map(|(h, _)| h))
             .chain(self.image_job.iter().map(|(h, ..)| h));
         out.extend(ids.map(|h| ObjectHandle(*h)));
+        if let Some(pair)=&self.image_pair{out.extend([ObjectHandle(pair.target),ObjectHandle(pair.source)]);}
+        out.extend(self.mouse.hover.into_iter().chain(self.mouse.capture).map(ObjectHandle));
         out.extend(self.deferred.targets(self.client).map(|t| ObjectHandle((t >> 2) as usize)));
+        self.layer_movies.gc_roots(out);
         self.sounds.gc_roots(out);
         self.motion.gc_roots(out);
         for (callback, _) in self.transitions.2.values() {
@@ -760,6 +808,9 @@ impl TjsHost for KrkrHost {
 
     fn object_collected(&mut self, handle: ObjectHandle) {
         // Registries that do not root their instances (see gc_roots).
+        if self.layers.contains_key(&handle.0) {
+            self.invalidate_layer(handle.0);
+        }
         self.psbfile.invalidate(handle.0);
         self.csv.invalidate(handle.0);
         self.line_parser.invalidate(handle.0);

@@ -1,5 +1,5 @@
 //! Client-scoped asynchronous font resources, independent of text backends.
-use crate::{Result, path::VfsPath, state::ClientId};
+use crate::{path::VfsPath, state::ClientId, Result};
 use alloc::{string::String, sync::Arc, vec::Vec};
 /// Client-owned asynchronous registration ticket.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -24,6 +24,10 @@ pub enum FontLoadSource {
     Storage(VfsPath),
     /// Immutable caller bytes, charged before admission.
     Bytes(Arc<[u8]>),
+    /// Fixed-size precomputed coverage face (currently TFT v0/v1), read on an I/O worker.
+    PrecomputedStorage { path: VfsPath, pixel_size: u16 },
+    /// Caller-owned precomputed bytes; pixel size is explicit because TFT has no size header.
+    PrecomputedBytes { bytes: Arc<[u8]>, pixel_size: u16 },
 }
 /// A logical font binding and selected collection face.
 #[derive(Clone)]

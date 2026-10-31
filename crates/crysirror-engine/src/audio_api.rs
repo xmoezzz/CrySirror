@@ -398,6 +398,10 @@ fn info() -> &'static ClassInfo {
         method("setMotionSettings",vec![("settings",T::Map)],T::Void,"Set strict MotionSettings and reset this client's automatic source/listener histories. Pose capture happens once per App frame; DSP interpolation belongs to workers."),
         method("resetMotion",vec![],T::Void,"Reset this client's automatic source/listener pose histories for the next frame, such as a teleport. Explicit velocities are retained. Does not reset source position, user pitch/rate or DSP history."),
         method("nativeChannelInfo",vec![("channel",T::Int)],T::Any,"Shared native/media channel AudioPlaybackInfo or null when ended. Scoped to the caller; source frame units, output-clock fades/delays and source completion remain distinct from processing tails."),
+        method("beginVoiceRelease",vec![("spec",T::Map)],T::Map,"Retire a shared native channel decoder to a tail channel without reopening or seeking; admit an externally clocked stepped db100 release and return an owned operation handle. Pending is not transfer completion."),
+        method("advanceVoiceRelease",vec![("handle",T::Map),("elapsedUpdates",T::Any)],T::Void,"Supply a monotonic exact update counter (integer or decimal string) for a channel release; repeated samples are idempotent."),
+        method("voiceRelease",vec![("handle",T::Map)],T::Map,"Query actual owner-published release phase, completed counter, source position and stopped_at_update; requested counters alone are not completion."),
+        method("releaseVoiceRelease",vec![("handle",T::Map)],T::Void,"Release a terminal receipt; active/pending actors cannot be silently discarded."),
         method("playbackInfo",vec![("handle",T::Map)],T::Map,"Exact shared AudioPlaybackInfo for a live pooled voice: decoded-source position/rate/length, publication age, running transport frames, paused/loop state and distinct stop/pause fade/resume-delay counters."),
         method("scheduleVoiceResume",vec![("handle",T::Map),("delay_ms",T::Number),("fade_ms",T::Number)],T::Void,"Freeze a source, then resume after a sample-clock delay with a fresh fade-in. Later pause/stop/resume replaces this schedule. This schedules transport, not asset readiness."),
         method("scheduleVoiceResumeWithOptions",vec![("handle",T::Map),("delay_ms",T::Number),("fade_ms",T::Number),("options",T::Map)],T::Void,"Resume after an output-clock delay. Options policy:freeze (default) or preserve continues the prior input/pause fade until the deadline. reset_gain:true restarts a gain fade from zero to the latest target instead of fading transport; default false preserves an independent gain ramp. Later pause/stop/resume replaces it; EOF cancels it. Readiness is independent."),
@@ -688,11 +692,18 @@ impl Class for AudioClass {
                         | "cancelSourcePreparation"
                         | "beginPrepareSource"
                         | "clearSfxCache"
+                        | "beginVoiceRelease"
+                        | "advanceVoiceRelease"
+                        | "voiceRelease"
+                        | "releaseVoiceRelease"
                 ),
                 "audio frame pending; poll frame completion before this control"
             );
         }
         if let Some(result) = crate::audio_motion::call(cx, name, args)? {
+            return Ok(result);
+        }
+        if let Some(result) = crate::audio_release_api::call(cx,name,args)? {
             return Ok(result);
         }
         if let Some(result) = crate::audio_sequences_api::call(cx, name, args)? {

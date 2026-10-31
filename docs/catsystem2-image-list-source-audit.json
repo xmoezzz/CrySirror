@@ -1,0 +1,63 @@
+{
+  "date": "2026-11-01",
+  "status": "Source initialization and native policy mapped over shared ImageJobs; image content/composition/FES execution and title remain incomplete",
+  "module_sha256": "f8a1fb4fed8a0c64c3fbc0bcf009f63e8f3181cfbc1a0dbd60f9ddefc8e25b3d",
+  "method": "Local IDA9 static inspection of owner module as data only; never execute original EXE/DLL; no proprietary source/data distributed",
+  "functions": {
+    "5dd580:0xF/5f3790/8ce2f4": "Type15 image-list task. Complete8-slot vtable [5F3980,5DD350,5F3A00,5F39A0,5DD130,5DD210,5DCC80,5F3AE0] reviewed. Constructor has no manager/base plane, publication flags120=1,124=0,132=0,140=1; auxiliary tree empty. Original112/116 are uninitialized until setter, represented None.",
+    "68e6f0/68e970/68bb00/68b0e0": "Constructor creates empty bitmap wrapper, not a filesystem scanner. Pointer0 and raw fields4/8 are0, UTF16 string starts empty at9E2F84, word532=1.68BB00 allocates native4-byte pixels with4-byte aligned stride and zeroes them through6A79A0. Wrapper raw4/8 are not dimensions. Generic image allocation belongs shared engine.",
+    "643d10/5f3ae0:279/742660": "Native256 initializes zero32bpp work bitmap of actual requested dimensions and dirty-page rectangles, then creates hidden base Plane with configured virtual extent and Z1000. No image placement/bin packing algorithm appears here. First initialization only mapped; reinitialization remains unsupported.",
+    "71d430/B91BFC+47236/47240": "Source texture page dimensions come from startup TEXTURE/size/x,y. Parser-data offsets include1048-byte header; reviewed screen source extent confirms offset relationship. Actual256x256 page192count. Unsupported absent definition fails; no guessed GPU texture cap.",
+    "686e50/686ea0/686ec0": "Each page is actual page RECT plus empty dirty RECT, not a packing node. Read/clear dirty rectangles are backend optimization policy; generic pixels/rendering remain shared.",
+    "644370/5f3ae0:283/743e10": "Native260 stores source task112/116 and manager DWORD4/5 as upload XY only. It does not translate/show/compose/mark damage. Signed raw native values preserved; manager initialized later does not automatically inherit an earlier task-only setter.",
+    "643e10/5f3ae0:286": "Native262 sets fields124 and120 to argument; nonzero sets140=1 while zero leaves140 unchanged. Reviewed boolean0/1 profile mapped. This is publication policy, not actual compositing or display.",
+    "743600": "Large native CPU compositor/dirty upload implementation is not adopted. Native image insertion, composition, clear, capture and entry lifecycle stay unsupported until source semantics are projected onto reusable shared Image/Canvas/Layer APIs.",
+    "5dd580:0x22/627e50/8d2a90": "FES task distinct from Plane. Complete vtable [628360,62DAA0,629850,5DC9B0,5DD130,5DD210,62AD10,62BED0] reviewed. Constructor125 cannot reach INPUT before attach. Native66 preserves actual state/26; first tick registers real shared lowbutton before parentKCS resumes from71. Parent profiles beyond currentmain remain explicitly unsupported; player loading447 remains unsupported.",
+    "654a70/5f3ae0:285/743e00/68f5a0/68cac0": "449/message334 binds FES task to actual image-list manager bitmap.743E00 returns manager field2 wrapper;68F5A0\u219268CAC0 returns native bitmap width/height. Adapter obtains real engine ImageResource.size, stores originalrect[0,0,w,h], binds nativeimage-listID and copies task uploadXY via284. No draw or image copy occurs."
+  },
+  "engine_boundary": {
+    "allocation": "PendingImages reserves shared task before startup XML I/O/parse, then ImageMetadata.begin_process(ImageInput::Solid, no effects) generates transparent atlas and base image on engine workers. Owner publishes two actual ImageResources and shared Image Layer, then commits native task/ACK. Partial publication errors release admitted resources. No private pixel allocation/compositor/texture upload implementation.",
+    "ownership": "Atlas and base are scoped client ImageResources with engine publication paths. Native logical task7 is separate from GPU handles; task parent6 is not render graph parent. Transparent1x1 group represents logical transform origin; true1280x720 payload is its child, hidden, depth1000. Native empty rectangle remains empty.",
+    "limits": "Native bounded first-init dimensions1..8192/product<=16Mi pixels/pagecount<=4096. Scratch bitmap, later entries, resource replacement, auxiliary timers, draw/composition and full task scheduler remain incomplete."
+  },
+  "validation": {
+    "Cat_library": "23/23 release native66-fes-tests.log; added real shared lowbutton/source-tick/reset test",
+    "KCS_VM": "12/12 release native71-vm-tests.log",
+    "actual_owner": "1/1 release native66-fes-owner.log;20,227instructions,constructor66fourtimes,449once,71twice;447/PC1926/args[8,406]/flow pending. Four retained click/Ctrl callback failure probes unchanged.",
+    "actual_engine_resources": "Client1 atlas3072x4096=50,331,648bytes, page256x256/count192; real base1280x720 at Z1000 hidden; upload position[0,0]; policy120/124/140=1/1/1. Owner test delegates resource generation/publication to an actual shared Runtime, not a fake ImageResource.",
+    "input": "Four negative physical-edge journal probes click down/up and Ctrl down/up preserve original native boundary and same leased receipt. No successful native callback/game input claimed.",
+    "not_validated": "No Cat GPU/window/title/gameplay/text/audio/FES/CST execution, image content/composition, original-save restore or completed integration.",
+    "actual_canonical_runtime": "New latest opt-in owner_actual_runtime release1/1, native449-canonical-runtime-owner.log(0.40s):all31INTs in one Runtime, bootstrap0instructions/frame/time,20,227instructions to447/1926/flow. Genuine Fes8 bankowner3/imageList6/rect3072x4096/upload0/firstticktrue/cursorUnknown;native controller5result0. Shared atlas public path independently resolves,foreignclientexcluded,canonicalLayerstatecorrect,fourRuntime.tick click/Ctrl edges retainnativefailurecontinuation/samelease.",
+    "actual_unified_player": "Immutable player24 SHA256 f6cc7fc86de4ed35650c510ecdda07cc2007900f0876500727295da611ef8d98; detect-only selectsactualdata/1280x720; headless20000frames requested exits1 at66class34PC18eb before finalcapture, noPNG. Not a successful GPU pixel/title/gameplay pass."
+  },
+  "next_class34_evidence": {
+    "constructor_query": "627E50 ASM628072 reads indeterminate[this+0x1A0] as msg125 target. Crucially this is before62DAA0 attach:5DC340 sets parent0 and empty child registry.5DD130\u21925DD210(parent0) returns without INPUT. If target equals self,62AD10\u219262BED0/default\u21925DC9D0/default is unhandled125 and broadcastflag0 visits no children. Thus no INPUT side effect is reachable, independent of target bits; cursor remains Unknown. Subsequent native66/26 overwrites message_parameter1192 with0. No INPUT1/zero cursor substitution.",
+    "input_query_observable": "The truly routed INPUT125 path5E6F50\u219270F6D0\u21927106F0\u2192676990 can clear held keys/update cursor. This remains relevant to later live calls. Complete parent/child routing proves it is unreachable in627E50 construction, resolving the earlier conservative boundary without dropping an observable operation.",
+    "first_tick": "629850 first owner tick checks275 once, obtains inherited string bank via parent177; creates native type6 low button with virtual RECT/parent-depth priority and binds/enables shared input record; only then ifsource97=0 it returns without FES advance. Correct child-before-current KCS scheduling is required. Original firsttick cannot be replaced by an empty constructor.",
+    "static_next_calls": "Read-only bytecode decode fromPC0x18eb identifies next449/PC0x190e then447/PC0x1926 before return. These are static observations, not executed/ACKed original calls.",
+    "449": "654A70\u2192334 binds image-list. Handler reads manager bitmap dimensions(msg285/68F5A0) plus upload XY(msg284), sets native image-list binding/full rect. Shared image resource.size supplies actual dimensions when implemented.",
+    "447": "6548C0 resolves original FES path then messages331(create755600 original player with interpreter),332(load/start).755600 initializes original command/object tables and expressions (_EXITCODE_,click/scroll/push names). Not mapped. No hosted FES engine/compositor accepted.",
+    "current_decision": "Class34 constructor/attach/26 and449 binding actually mapped/ACKed. release lib23/23 andowner1/1.20,227instructions to447PC0x1926 args[8,406] textflow; Fes8 bankowner3,imageList6,rect3072x4096,upload0,cursorUnknown,playerfalse,firstticktrue/lowbuttonNone. Real loaded/player semantics remain unsupported; no empty-player ACK."
+  },
+  "actual_frontier": {
+    "instructions": 20227,
+    "native": 447,
+    "pc": "0x1926",
+    "args": [
+      8,
+      406
+    ],
+    "text": "flow",
+    "log": "target/verification/catsystem2/native66-fes-owner.log",
+    "native66_count": 4,
+    "native449_count": 1,
+    "native71_count": 2,
+    "Cat_GPU_title_gameplay_input_validated": false
+  },
+  "next_native447": {
+    "source": "6548C0 calls331(player755600 with original interpreter) then332(load755D10), genuine FES flow resource",
+    "local_bank": "7286D0 creates/selects512DWORD local variables keyed by FES player identity, names map via728B70. It is not a global-backup flag copy.755600 initializes9namedvalues (_EXITCODE_,click/scroll/push) in that bank. Existing native_interpreter has matching LocalBank representation but no admission/mutation API wired yet.",
+    "container": "765BA0 scoped callback767240 reads;765A50 FES\\0 header has packed/unpacked/reserved then shared-zlib payload, text line program. Compressed source bypasses plain-text766970/766AE0 preprocessing; section766CE0/7676C0 still applies. Shared Resource transform must own compression; native section/command grammar belongs first-class VM.",
+    "load_side_effects": "755D10 additionally calls758C60/7597B0/7589E0/758F70/75AAC0; handler332 then62BBC0 preloads realimage resources and6287B0 creates typed FE objects/tasks. Loading text/decompressing alone must not ACK447. No private bitmap/renderer/effect/audio implementation accepted."
+  }
+}

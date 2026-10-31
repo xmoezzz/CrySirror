@@ -7,6 +7,7 @@ pub mod dialog;
 pub mod menu;
 pub mod snapshot;
 pub mod hit_mask;
+pub mod tooltip;
 pub use hit_mask::WidgetHitMask;
 use crate::layer::motion::{MotionProperty,MotionTrackSpec,MotionStatus,MotionTracks};
 use crate::{
@@ -196,6 +197,9 @@ pub struct WindowPolicy {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiSystem {
+    /// Passive delayed text; independent of widgets and never consumes input.
+    #[serde(default, skip_serializing_if = "tooltip::TooltipSystem::is_empty")]
+    pub tooltips: tooltip::TooltipSystem,
     #[serde(default, skip_serializing_if = "menu::MenuSystem::is_empty")]
     pub menus: menu::MenuSystem,
     /// Open modal message dialogs (engine-drawn on every platform).
@@ -246,6 +250,10 @@ struct Layout {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiCommand {
+    PutTooltip { tooltip: tooltip::TooltipSpec },
+    RemoveTooltip { id:u32 },
+    ShowTooltip { id:u32, position:[f32;2] },
+    HideTooltip { #[serde(default)] id:Option<u32> },
     /// Start or replace a local X/Y rectangle track on an owned widget.
     BeginMotion {id:u32,track:MotionTrackSpec},
     /// Advance one external widget track in caller-declared units.
@@ -351,6 +359,10 @@ pub enum UiCommand {
     },
 }
 impl UiSystem {
+    pub(crate) fn input_routing_compatible(&self)->bool {
+        self.dialogs.is_empty() && !self.clients.values().flat_map(|owner|owner.values()).any(|w|w.spec.visible&&w.spec.enabled&&matches!(w.spec.kind,WidgetKind::Button|WidgetKind::Toggle|WidgetKind::Slider|WidgetKind::TextField))
+    }
+
     /// Owner-scoped widget motion state; an unknown widget is an error.
     pub fn motion_status(&self,client:ClientId,id:u32)->Result<MotionStatus>{
         ensure!(self.get(client.0,id).is_some(),"motion widget missing");
@@ -358,6 +370,7 @@ impl UiSystem {
     }
     /// Advance only automatic widget tracks before input layout is evaluated.
     pub fn advance_motions(&mut self,delta_ms:u64){
+        self.tooltips.advance(delta_ms);
         for(owner,id,property,value)in self.motions.tick(delta_ms){
             if let Some(widget)=self.clients.get_mut(&owner).and_then(|o|o.get_mut(&id)){property.set_rect(&mut widget.spec.rect,value);}
         }
@@ -369,6 +382,10 @@ impl UiSystem {
         let owner = staged.clients.entry(client.0).or_default();
         for command in commands {
             match command {
+                UiCommand::PutTooltip{tooltip} => staged.tooltips.put(client.0,tooltip.clone())?,
+                UiCommand::RemoveTooltip{id} => staged.tooltips.remove(client.0,*id)?,
+                UiCommand::ShowTooltip{id,position} => staged.tooltips.show(client.0,*id,*position)?,
+                UiCommand::HideTooltip{id} => staged.tooltips.hide(client.0,*id),
                 UiCommand::SetHitMask{id,mask}=>{
                     let widget=owner.get_mut(id).context("hit mask widget missing")?;
                     if let Some(mask)=mask{mask.validate(widget.spec.rect)?;}
@@ -539,6 +556,7 @@ impl UiSystem {
         staged.hover = staged.hover.filter(|id| exists(*id));
         staged.activated = staged.activated.filter(|id| exists(*id));
         staged.validate()?;
+        staged.tooltips.clear_prepared();
         *self = staged;
         Ok(())
     }
@@ -572,6 +590,7 @@ impl UiSystem {
     pub fn reset_input_after_restore(&mut self) {
         self.menus.reset_input();
         self.dialogs.reset_input();
+        self.tooltips.reset_input();
         self.input = InputState::default();
         self.pressed = None;
         self.hover = None;
@@ -588,6 +607,7 @@ impl UiSystem {
             .chain(self.fullscreen.as_ref().map(|v| v.0))
             .chain(self.menus.client_ids())
             .chain(self.dialogs.client_ids())
+            .chain(self.tooltips.client_ids())
             .chain(self.focus.map(|v| v.owner))
             .chain(self.events.iter().map(|v| v.widget.owner))
     }
@@ -628,6 +648,7 @@ impl UiSystem {
         self.motions.validate(false,|owner,id|self.clients.get(&owner).is_some_and(|o|o.contains_key(&id)))?;
         self.menus.validate()?;
         self.dialogs.validate()?;
+        self.tooltips.validate()?;
         ensure!(
             self.clients.len() <= 64
                 && self.clients.values().map(BTreeMap::len).sum::<usize>() <= 4096
@@ -1186,6 +1207,7 @@ impl UiSystem {
     pub fn frame(&self, canvas: [u32; 2]) -> Result<Vec<Primitive>> {
         let mut out = self.frame_widgets(canvas, None)?;
         out.extend(self.menus.frame(canvas)?);
+        out.extend(self.tooltips.frame(canvas)?);
         out.extend(self.dialogs.frame(canvas)?);
         Ok(out)
     }

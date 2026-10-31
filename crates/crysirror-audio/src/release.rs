@@ -3,7 +3,7 @@
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Atomic live-source retirement and external-update logarithmic release.
 use crate::{channels::ChannelAudio, mixer::VoiceHandle};
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 pub use crysirror_core::service::{
     AudioReleaseHandle as Handle, AudioReleaseInfo as Info, AudioReleasePhase as Phase,
     AudioReleaseSpec as Spec,
@@ -22,6 +22,7 @@ struct Entry {
     current: f32,
     target: f32,
     step: f32,
+    source_extent: Option<u64>,
 }
 impl Entry {
     fn advance(&mut self, mixer: &mut crate::mixer::Mixer) -> Result<()> {
@@ -58,16 +59,8 @@ impl Entry {
 impl ChannelAudio {
     /// Retire source into a separate nonlooping, running tail. Prepared source
     /// intents on both channels are invalidated; live PCM/decoder cursor is moved.
-    pub fn begin_audio_release(&mut self, _client: u32, spec: Spec) -> Result<Handle> {
+    pub fn begin_audio_release(&mut self, client: u32, spec: Spec) -> Result<Handle> {
         spec.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
-        anyhow::bail!("audio stepped release producer is not yet verified; native control remains unsupported")
-    }
-    // Incomplete producer retained for the next owner task. Do not expose this
-    // admission path until offline PCM and worker-ownership oracles pass.
-    #[allow(dead_code)]
-    fn admit_release_unverified(&mut self, client: u32, spec: Spec) -> Result<Handle> {
-        spec.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
-        ensure!(self.clients.contains(&client), "release client missing");
         ensure!(
             self.releases.entries.len() < 1024
                 && self
@@ -87,15 +80,6 @@ impl ChannelAudio {
                 "release source missing"
             );
         }
-        for channel in [spec.source_channel, spec.tail_channel] {
-            self.cancel_pending_control(
-                client,
-                &AudioRequest::Stop {
-                    channel,
-                    fade_ms: 0.,
-                },
-            )?;
-        }
         let generation = crysirror_tasks::table::next_operation_id()?;
         self.releases.entries.insert(
             generation,
@@ -114,10 +98,14 @@ impl ChannelAudio {
                 current: 0.,
                 target: 0.,
                 step: 0.,
+                source_extent: None,
             },
         );
         // Admission is distinct from publication. A worker lease remains Pending.
-        self.poll_releases()?;
+        if let Err(error) = self.poll_releases() {
+            self.releases.entries.remove(&generation);
+            return Err(error);
+        }
         Ok(Handle {
             client: ClientId(client),
             generation,
@@ -165,6 +153,9 @@ impl ChannelAudio {
             .values()
             .any(|e| matches!(e.info.phase, Phase::Pending | Phase::Active))
     }
+    pub(crate) fn clear_releases(&mut self) {
+        self.releases.entries.clear();
+    }
     pub fn poll_releases(&mut self) -> Result<()> {
         if self.mixer.is_rendering() {
             return Ok(());
@@ -202,6 +193,17 @@ impl ChannelAudio {
                             target <= start,
                             "release target would amplify captured gain"
                         );
+                        // Preflight above is read-only. Invalidate intents only
+                        // after every fallible gain/voice validation succeeds.
+                        for channel in [e.spec.source_channel, e.spec.tail_channel] {
+                            self.cancel_pending_control(
+                                e.owner,
+                                &AudioRequest::Stop {
+                                    channel,
+                                    fade_ms: 0.,
+                                },
+                            )?;
+                        }
                         if let Some(old) = dst.filter(|old| Some(*old) != src && src.is_some()) {
                             self.mixer.stop(e.owner, old, 0.)?;
                         }
@@ -213,6 +215,7 @@ impl ChannelAudio {
                             old.info.phase = Phase::Cancelled;
                             old.voice = None;
                         }
+                        e.source_extent = self.mixer.playback_info(e.owner, h)?.source_frames;
                         self.mixer.capture_release(e.owner, h, &e.spec)?;
                         if src.is_some() {
                             self.voices.remove(&(e.owner, e.spec.source_channel));
@@ -237,19 +240,32 @@ impl ChannelAudio {
                             e.spec.release_tail_when_source_missing,
                             "release source disappeared before publication"
                         );
+                        for channel in [e.spec.source_channel, e.spec.tail_channel] {
+                            self.cancel_pending_control(
+                                e.owner,
+                                &AudioRequest::Stop {
+                                    channel,
+                                    fade_ms: 0.,
+                                },
+                            )?;
+                        }
                         e.info.phase = Phase::Complete;
                         e.info.stopped_at_update = Some(0);
                     }
                 }
                 if e.info.phase == Phase::Active {
                     let h = e.voice.unwrap();
-                    if self.voices.get(&(e.owner, e.spec.tail_channel)) != Some(&h)
-                        || !self.mixer.is_playing(e.owner, h)
-                    {
+                    if self.voices.get(&(e.owner, e.spec.tail_channel)) != Some(&h) {
                         e.voice = None;
                         e.info.phase = Phase::Cancelled;
                     } else if !self.mixer.source_is_playing(e.owner, h) {
-                        self.mixer.stop(e.owner, h, 0.)?;
+                        if self.mixer.is_playing(e.owner, h) {
+                            e.info.source_position_frames =
+                                Some(self.mixer.playback_info(e.owner, h)?.position_frames);
+                            self.mixer.stop(e.owner, h, 0.)?;
+                        } else if let Some(extent) = e.source_extent {
+                            e.info.source_position_frames = Some(extent);
+                        }
                         e.voice = None;
                         e.info.phase = Phase::Complete;
                         e.info.stopped_at_update = Some(e.info.completed_updates);
@@ -271,7 +287,8 @@ impl ChannelAudio {
     pub(super) fn cancel_release_channel(&mut self, client: u32, channel: u32) {
         for e in self.releases.entries.values_mut().filter(|e| {
             e.owner == client
-                && e.spec.tail_channel == channel
+                && (e.spec.tail_channel == channel
+                    || e.info.phase == Phase::Pending && e.spec.source_channel == channel)
                 && matches!(e.info.phase, Phase::Pending | Phase::Active)
         }) {
             e.info.phase = Phase::Cancelled;
@@ -279,3 +296,7 @@ impl ChannelAudio {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "release_tests.rs"]
+mod tests;

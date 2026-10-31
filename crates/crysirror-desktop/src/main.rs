@@ -255,12 +255,20 @@ fn adapter_registry() -> Result<AdapterRegistry> {
     crysirror_circus::register(&mut registry)?;
     #[cfg(feature = "catsystem2")]
     crysirror_catsystem2::register(&mut registry)?;
+    #[cfg(feature = "majiro")]
+    crysirror_majiro::adapter::register(&mut registry)?;
+    #[cfg(feature = "system-nnn")]
+    crysirror_system_nnn::installed::register(&mut registry)?;
     #[cfg(feature = "avg32")]
     crysirror_avg32::register(&mut registry)?;
     Ok(registry)
 }
 fn load_project(path: &Path) -> Result<Project> {
     let project = Project::load(path)?;
+    #[cfg(feature = "system-nnn")]
+    for client in project.clients.iter().filter(|client|client.adapter=="system-nnn") {
+        serde_json::from_value::<crysirror_system_nnn::installed::Config>(client.config.clone())?.validate()?;
+    }
     #[cfg(feature = "krkr")]
     for c in project.clients.iter().filter(|c| c.adapter == "krkr") {
         serde_json::from_value::<crysirror_krkr::Config>(c.config.clone())?.validate()?;
@@ -288,6 +296,10 @@ fn load_project(path: &Path) -> Result<Project> {
     #[cfg(feature = "catsystem2")]
     for c in project.clients.iter().filter(|c| c.adapter == "catsystem2") {
         serde_json::from_value::<crysirror_catsystem2::Config>(c.config.clone())?.validate()?;
+    }
+    #[cfg(feature = "majiro")]
+    for c in project.clients.iter().filter(|c| c.adapter == "majiro") {
+        serde_json::from_value::<crysirror_majiro::adapter::Config>(c.config.clone())?.validate()?;
     }
     #[cfg(feature = "avg32")]
     for c in project.clients.iter().filter(|c| c.adapter == "avg32") {
@@ -657,10 +669,13 @@ fn run() -> Result<()> {
             }
             // Compacted canvases are materialized as frames advance, as the
             // window host does after each presented frame.
+            app::load_fonts(&mut rt,font.as_deref())?;
             let mut materializer = crysirror_wgpu::Renderer::new(gpu.clone(),
                 if std::env::var_os("CRYSIRROR_CAPTURE_BGRA").is_some() { wgpu::TextureFormat::Bgra8UnormSrgb }
                 else { wgpu::TextureFormat::Rgba8UnormSrgb });
             materializer.set_rendering_path(path)?;
+            rt.set_canvas_image_presenter(true);
+            app::settle_vm_preparations(&mut rt)?;
             if movie_dir.is_none() && std::env::var_os("CRYSIRROR_CPU_FRAME_HISTORY").is_none() {
                 rt.host.mesh_frame_history = Some(materializer.mesh_frame_history_provider());
             }

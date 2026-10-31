@@ -1,7 +1,7 @@
 //! Immutable dynamic faces shared by measurement and renderer views.
 use crate::TextSystem;
 use ab_glyph::FontArc;
-use anyhow::{Context, Result, ensure};
+use anyhow::{ensure, Context, Result};
 use crysirror_core::state::ClientId;
 use std::{
     collections::BTreeMap,
@@ -11,7 +11,8 @@ use std::{
 pub const MAX_FONT_BYTES: usize = 32 * 1024 * 1024;
 /// Worker-prepared outline/shaping font; publication performs no parsing.
 pub struct PreparedFontFace {
-    pub(crate) font: FontArc,
+    pub(crate) font: Option<FontArc>,
+    pub(crate) precomputed: Option<Arc<crate::precomputed_font::PrecomputedFont>>,
     pub(crate) bytes: Arc<[u8]>,
     /// Selected collection face index.
     pub face_index: u32,
@@ -64,7 +65,8 @@ impl PreparedFontFace {
             h.finalize().to_hex().to_string()
         };
         Ok(Self {
-            font,
+            font: Some(font),
+            precomputed: None,
             bytes: bytes.clone(),
             face_index,
             collection_faces: rustybuzz::ttf_parser::fonts_in_collection(&bytes).unwrap_or(1),
@@ -73,8 +75,38 @@ impl PreparedFontFace {
             retention: None,
         })
     }
+    /// Prepare a fixed-size coverage face without an outline/shaping backend.
+    /// The caller reserves `PrecomputedFont::required_resident_bytes` first.
+    pub fn prepare_precomputed(
+        bytes: Arc<[u8]>,
+        pixel_size: u16,
+        check: &dyn Fn() -> Result<()>,
+    ) -> Result<Self> {
+        let face = crate::precomputed_font::PrecomputedFont::from_tft(&bytes, pixel_size, check)?;
+        let mut hash = blake3::Hasher::new();
+        hash.update(b"precomputed-v1");
+        hash.update(&pixel_size.to_le_bytes());
+        hash.update(&bytes);
+        Ok(Self {
+            font: None,
+            precomputed: Some(Arc::new(face)),
+            bytes,
+            face_index: 0,
+            collection_faces: 1,
+            digest: hash.finalize().to_hex().to_string(),
+            families: Vec::new(),
+            retention: None,
+        })
+    }
     /// Keep a host memory reservation alive with every font clone.
     pub fn retain_storage(&mut self, lease: Arc<dyn Send + Sync>) {
+        if let Some(face) = &mut self.precomputed {
+            // Worker preparation owns this Arc exclusively until publication.
+            // Bitmap-only read clones must retain their accounting lease too.
+            Arc::get_mut(face)
+                .expect("prepared bitmap face shared before publication")
+                .retain_storage(lease.clone());
+        }
         self.retention = Some(lease);
     }
     /// Resident source size, excluding parsed outline backend overhead.
@@ -85,6 +117,19 @@ impl PreparedFontFace {
 #[derive(Clone, Default)]
 pub(crate) struct Catalog(Arc<RwLock<BTreeMap<String, (ClientId, Arc<PreparedFontFace>)>>>);
 impl TextSystem {
+    /// Freeze catalog membership while sharing immutable prepared font faces.
+    /// Later publication/release cannot change an admitted render job's fonts.
+    pub fn frozen(&self) -> Result<Self> {
+        let entries = self
+            .dynamic
+            .0
+            .read()
+            .map_err(|_| anyhow::anyhow!("font catalog poisoned"))?
+            .clone();
+        let mut frozen = self.clone();
+        frozen.dynamic = Catalog(Arc::new(RwLock::new(entries)));
+        Ok(frozen)
+    }
     /// Share the dynamic resource catalog; declared static fonts remain unchanged.
     pub fn attach_dynamic_fonts(&mut self, source: &Self) {
         self.dynamic = source.dynamic.clone();

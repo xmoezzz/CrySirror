@@ -14,6 +14,9 @@ use std::{cell::RefCell, collections::HashMap};
 const OBJECT_LAYER_BASE: u32 = 1_000_000;
 /// Objects draw over DC 0 and under the text windows (order 999+).
 const OBJECT_ORDER: i32 = 100;
+/// Separate namespace for native screen-space clip groups. A sprite's own
+/// clip is local and transformed; native object clips are already on screen.
+const OBJECT_CLIP_GROUP: u32 = 0x1000_0000;
 
 pub(super) struct ObjectAssets {
     pub resources: Rc<RefCell<Resources>>,
@@ -25,6 +28,7 @@ pub(super) struct ObjectAssets {
 }
 
 impl AssetLoader for ObjectAssets {
+    fn owner_image_preparation(&self)->bool{true}
     fn image(&self, name: &str) -> Result<Rc<Image>> {
         let key = name.trim().to_lowercase();
         if let Some(image) = self.images.borrow().get(&key) {
@@ -121,14 +125,16 @@ impl RealLiveVm {
         let text = h.text_measurement(self.client).ok();
         m.sys.gfx.width = self.width as i32;
         m.sys.gfx.height = self.height as i32;
-        m.sys.gfx.loader = Some(Rc::new(ObjectAssets {
+        let assets=Rc::new(ObjectAssets {
             resources,
             exe: m.gameexe.clone(),
             metadata,
             text,
             font: self.config.font_alias.clone(),
             images: RefCell::new(HashMap::new()),
-        }));
+        });
+        m.sys.gfx.loader=Some(assets.clone());
+        self.object_assets=Some(assets);
         Ok(())
     }
 
@@ -209,10 +215,13 @@ impl RealLiveVm {
             }
             ObjectData::Parent(children) => {
                 let inherited = Inherited {
-                    x: p.x + px,
-                    y: p.y + py,
+                    x: p.x + ax + px,
+                    y: p.y + ay + py,
                     alpha,
-                    scale: parent_scale,
+                    // Original Object::render passes the parent's own scale
+                    // into each child's blit, alongside its adjusted position.
+                    // The parent is semantic state, not a drawable layer.
+                    scale: p.scale(),
                     clip: p.own_clip,
                 };
                 for (i, child) in children.iter().enumerate() {
@@ -228,7 +237,8 @@ impl RealLiveVm {
                 for (k, pattern) in digit_patterns(&p.digits).into_iter().enumerate().take(16) {
                     let region = image.region(pattern);
                     if pattern >= 0 {
-                        out.insert(id + k as u32, self.pattern_layer(p, image, region, (x, y), (0, 0), alpha, clip, parent_scale, id + k as u32, rank)?);
+                        let layer = self.pattern_layer(p, image, region, (x, y), (0, 0), alpha, parent_scale, id + k as u32, rank)?;
+                        self.insert_clipped(out, layer, clip, rank);
                     }
                     x += if p.digits.space > 0 { p.digits.space } else { region.width() };
                 }
@@ -249,7 +259,7 @@ impl RealLiveVm {
                 let size = p.text.size.clamp(1, 256);
                 let lines = text_lines(&p.text).join("\n");
                 let (w, hgt) = m.sys.gfx.text_size()(&p.text);
-                let mut layer = json!({
+                let layer = json!({
                     "id": id,
                     "rect": [(p.x + ax + px) as f32, (p.y + ay + py) as f32, w.max(1) as f32, hgt.max(1) as f32],
                     "paint": {"kind":"text","text":lines,"font":self.config.font_alias,"size":size,"color":[colour[0],colour[1],colour[2],255],"layout":crysirror_core::service::SIMPLE_TEXT_LAYOUT},
@@ -258,10 +268,7 @@ impl RealLiveVm {
                     "opacity": alpha.clamp(0, 255),
                     "transform": {"scale_x": sx * parent_scale.0, "scale_y": sy * parent_scale.1},
                 });
-                if let Some(c) = clip {
-                    layer["clip"] = json!([c.x, c.y, c.w, c.h]);
-                }
-                out.insert(id, layer);
+                self.insert_clipped(out, layer, clip, rank);
             }
             ObjectData::File { image, .. } | ObjectData::Gan { image, .. } => {
                 let (pattern, offset, frame_alpha) = object.current_frame(now);
@@ -271,24 +278,35 @@ impl RealLiveVm {
                 let pattern = pattern + p.button.state.max(0) * i32::from(p.button.is_button != 0);
                 let alpha = alpha * frame_alpha.clamp(0, 255) / 255;
                 let region = image.region(pattern);
-                out.insert(
-                    id,
-                    self.pattern_layer(
+                let layer = self.pattern_layer(
                         p,
                         image,
                         region,
                         (p.x + ax + px + offset.0, p.y + ay + py + offset.1),
                         (region.origin_x, region.origin_y),
                         alpha,
-                        clip,
                         parent_scale,
                         id,
                         rank,
-                    )?,
-                );
+                    )?;
+                self.insert_clipped(out, layer, clip, rank);
             }
         }
         Ok(())
+    }
+
+    fn insert_clipped(&self, out: &mut BTreeMap<u32, Value>, mut layer: Value, clip: Option<crate::vm::rect::Rect>, rank: i32) {
+        let id = layer["id"].as_u64().expect("native layer id") as u32;
+        if let Some(c) = clip {
+            let parent = OBJECT_CLIP_GROUP + id;
+            out.insert(parent, json!({
+                "id":parent,"parent":SCENE_ROOT,"rect":[0,0,self.width,self.height],
+                "paint":{"kind":"solid","color":[0,0,0,0]},"order":[OBJECT_ORDER,rank],
+                "clip":[c.x,c.y,c.w.max(0),c.h.max(0)]
+            }));
+            layer["parent"] = json!(parent);
+        }
+        out.insert(id, layer);
     }
 
     /// One pattern with the object's transform: upstream `blit_region`
@@ -302,7 +320,6 @@ impl RealLiveVm {
         position: (i32, i32),
         pattern_origin: (i32, i32),
         alpha: i32,
-        clip: Option<crate::vm::rect::Rect>,
         parent_scale: (f64, f64),
         id: u32,
         rank: i32,
@@ -348,9 +365,6 @@ impl RealLiveVm {
             layer["visible"] = json!(false);
             layer["rect"] = json!([0, 0, 1, 1]);
         }
-        if let Some(c) = clip {
-            layer["clip"] = json!([c.x, c.y, c.w.max(0), c.h.max(0)]);
-        }
         if p.has_effects() {
             layer["filter"] = filter(p)?;
         }
@@ -375,4 +389,51 @@ fn filter(p: &ObjectParams) -> Result<Value> {
         "mono": p.mono.clamp(0, 255) as f32 / 255.0,
         "invert": p.invert.clamp(0, 255) as f32 / 255.0,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vm::{archive, scenario};
+
+    #[test]
+    fn parent_scale_and_adjustments_reach_child_engine_sprite() {
+        let vm = RealLiveVm::new(ClientId(1), serde_json::from_value(json!({})).unwrap()).unwrap();
+        let code = crate::vm::bytecode::asm::command(crate::vm::bytecode::Opcode::new(1, 4, 100, 0), 1, &[crate::vm::expr::encode::int(1)]);
+        let archive = Archive::from_bytes(archive::build(&[(1, scenario::build(&code, &[], &[]))]), "synthetic", Nls::Sjis).unwrap();
+        let machine = Machine::new(Rc::new(archive), Rc::new(Gameexe::default())).unwrap();
+        let image = Rc::new(Image { asset: "synthetic.png".into(), width: 200, height: 120, regions: vec![crysirror_image::g00::Region::full(200, 120)] });
+        let mut child = Object::new(ObjectData::File { name: "synthetic".into(), image });
+        child.params.visible = true;
+        child.params.x = 7;
+        child.params.y = 11;
+        child.params.width = 80;
+        child.params.height = 60;
+        let mut parent = Object::new(ObjectData::Parent(vec![Some(child)]));
+        parent.params.visible = true;
+        parent.params.x = 23;
+        parent.params.y = 31;
+        parent.params.adjust_x[3] = 5;
+        parent.params.adjust_y[6] = -9;
+        parent.params.width = 25;
+        parent.params.height = 50;
+        parent.params.own_clip = Some(crate::vm::rect::Rect::new(2, 4, 50, 60));
+        let mut layers = BTreeMap::new();
+        vm.project(&machine, &parent, 0, None, 100, 0, &mut layers).unwrap();
+        let layer = &layers[&116];
+        assert_eq!(layer["rect"], json!([35.0, 33.0, 200.0, 120.0]));
+        assert_eq!(layer["transform"]["scale_x"], 0.2);
+        assert_eq!(layer["transform"]["scale_y"], 0.3);
+        assert!(layer.get("clip").is_none());
+        assert_eq!(layer["parent"], OBJECT_CLIP_GROUP + 116);
+        assert_eq!(layers[&(OBJECT_CLIP_GROUP + 116)]["clip"], json!([30, 26, 50, 60]));
+        assert_eq!(layer["uv"], json!([0.0, 0.0, 1.0, 1.0]));
+        let mut engine = crysirror_scene::layer::LayerSystem::default();
+        let root = json!({"id":SCENE_ROOT,"rect":[0,0,640,480],"paint":{"kind":"solid","color":[0,0,0,0]}});
+        let specs = std::iter::once(root).chain(layers.into_values()).map(serde_json::from_value).collect::<std::result::Result<Vec<crysirror_scene::layer::LayerSpec>,_>>().unwrap();
+        engine.install(ClientId(1), &specs).unwrap();
+        let primitives = engine.frame([640,480]).unwrap();
+        let sprite = primitives.iter().find(|p| matches!(&p.paint, crysirror_scene::layer::Paint::Image { .. })).unwrap();
+        assert_eq!(sprite.clip, Some([30.0,26.0,50.0,60.0]));
+    }
 }

@@ -1882,3 +1882,21 @@ fn native_primary_base_constructor_hook_is_not_the_extends_operand() {
         Variant::String("1:1:7:42".into())
     );
 }
+
+/// T_WITHDOT is not `haspropnode` in the native compiler: `.callback()`
+/// performs GPD then CALL, preserving the caller this for an unbound value.
+#[test]
+fn with_dot_callback_uses_call_site_this_and_preserves_an_explicit_binding() {
+    assert_eq!(ok(r#"
+        global.marker = "global";
+        var table = %[marker:"dictionary", callback:function(){return marker;}];
+        var direct = table.callback();
+        var dotted;
+        with(table) { dotted = .callback(); }
+        var owner = %[marker:"bound"];
+        table.callback = table.callback incontextof owner;
+        var bound;
+        with(table) { bound = .callback(); }
+        return direct + ":" + dotted + ":" + bound;
+    "#), Variant::String("dictionary:global:bound".into()));
+}

@@ -4,6 +4,85 @@ Newest first. Each entry is keyed by the API fingerprint printed in
 [REFERENCE.md](REFERENCE.md). `tests/api_docs.rs` fails until the current
 fingerprint appears here. Mark breaking changes with **Breaking**.
 
+## `d22690a23af1bf9f` (2026-11-01): explicit retained-canvas resource destruction
+
+- CanvasCommand.destroy is mapped to Canvases.apply. It releases an existing
+  client-owned surface only after every live presentation has been hidden.
+  Missing or presented surfaces fail atomically, including in command batches.
+- Frozen copies keep independent nodes and their referenced immutable image
+  generations. Releasing the source surface does not mutate those copies or
+  an already-admitted Canvas image capture.
+
+## `bd71afbaa37a19da` (2026-10-31): fixed sampling, progress envelopes and shared canvas limits
+
+- ImageEffect.piecewise_resample exposes immutable16.16 nearest sampling with
+  ordered bounded regions, signed destination strides, independent /256 weights
+  and explicit weighted/preserved/opaque alpha. Source/destination endpoints and
+  total work are checked; shared workers cancel by row without changing input.
+- ProgressCurve/ProgressKnot/ProgressShape expose reusable double-precision
+  scalar envelopes, right-continuous steps and caller-supplied time. Sampling
+  neither advances clocks nor owns/consumes random state.
+- Canvases.getLimits() reports the shared4096-surface per-client quota used by
+  Core, Scene and Runtime. Node, dimensions and byte budgets remain separate.
+- InputRouteSpec.drag_enabled, InputRoutePhase.Drag and InputRouteEvent.origin
+  describe explicit backend drag dispatch. This does not assert that automatic
+  hardware drag detection has been connected.
+
+## `1dbdf921cc54e571` (2026-10-31): device-free media preparation and canonical input receivers
+
+- Media.beginProbe/probeStatus/releaseProbe exposes scoped asynchronous header
+  and decoder preparation without a playback slot, Layer, picture or PCM.
+  Completion is retained; Runtime restore invalidates old public tickets.
+  Unknown audio identity/duration stays unknown; reflected duration_ms, when
+  present, is an exact decimal string.
+- InputRoutes exposes shared receiver registration, signed priority, coverage,
+  leased delivery and explicit acknowledgement. Receipt epoch/event/delivery
+  fields use exact decimal strings. The current profile admits one active
+  receiver client and rejects interactive Widget/dialog mixing explicitly.
+- Exported native contracts include MediaProbeInfo/State and the canonical
+  InputReceiverSpec, InputRouteCommand, event, delivery, receipt and stats data.
+
+## `93470c7fff47e60c` (2026-10-31): shared depth ordering, source precedence and fixed luminance
+
+- Layers.setDepth(id, depth?) opts a subtree into finite floating-depth painter
+  order. Equal depths preserve the last committed frame order, nested scopes
+  keep ordinary payloads together, and null restores existing ordinary order.
+  Runtime commits history once after accepting the frame; extraction is pure.
+- Resources.mountDecode(ticket, target, fallback?) keeps its existing two-argument
+  behavior. Explicit fallback=true puts existing overlays and real loose files
+  before the mounted provider; only missing paths use it. Opened readers retain
+  their source, and per-path origin queries identify actual loose bytes correctly.
+- ImageEffect.fixed_luma exposes FixedLumaSpec for grouped fixed-point luminance
+  reduction and Q8 mixing on the shared image worker, preserving stored alpha.
+
+## `53762232a1524668` (2026-10-31): bounded encoded-byte tokenization
+
+- Shared Text adds ByteSplitBoundary, ByteSplitLimits and ByteSplitOutput for
+  worker-side delimiter splitting with explicit single-byte or reviewed
+  Shift-JIS boundaries. Output spans/NUL bytes, input/output/token bounds and
+  cancellation are independent of CatSystem2's native buffer/ABI policy.
+- Core VM startup preparation can opt into a nonblocking readiness poll;
+  offline hosts settle dormant preparation without replaying peers or consuming
+  the first game input. The current integration does not claim that every later
+  native resource wait implements an offline frame barrier.
+
+## `a7c6ab240046fa4c` (2026-10-31): immutable raster resources, Canvas capture and precomputed fonts
+
+- Rust HostServices adds scoped persistent pattern generations, portable
+  RNG/snapshot receipts and immutable Canvas image jobs. Presenter preparation
+  freezes image/font generations; GPU readback and pixel resource construction
+  run on shared workers. Live mutable capture dependencies fail explicitly.
+- ImageInput accepts bounded encoded memory through the same worker decoder;
+  fixed-weight mixing declares integer rounding and alpha policy. GlyphReveal
+  can use an exact integer per-second rate while its original interval profile
+  remains the default.
+- Text.beginPrecomputedFont(alias, asset, pixelSize) admits TFT v0/v1 faces
+  through the ordinary FontLibrary lifecycle. Size participates in identity;
+  unsupported scaling/glyph/shaping profiles fail visibly.
+- The reference includes the partial System-NNN installed Config. Its dormant
+  factory prepares original data on workers, with shared text/image/audio and
+  clock completion. This does not claim a playable title or original saves.
+
 ## `1af7e309b18b2933` (2026-10-31): retained menu enable state and native template data
 
 - `Ui.setMenuEnabled(id, item, enabled)` maps to the owned SetMenuEnabled
@@ -1121,3 +1200,112 @@ full DLL catalog or whole-game completion is claimed.
     `virtual_shadows` (ADR 0023, ADR 0026, ADR 0027).
   - BGI adapter config (ADR 0037, ADR 0039).
 - Earlier changes were not logged. ADRs 0001–0039 describe them.
+
+### `e59e02899a2aa476` — shared release, tooltips and pixel queries
+
+- Audio exposes begin/advance/query/release for owner-clock retired voices; counters and capability generations preserve u64 values as decimal strings.
+- Ui exposes measured, delayed passive tooltips with client ownership. Canvases.readPixel exposes the bounded exact CPU sampling profile and fails on unsupported composition.
+- Document immutable Mesh paint, XML documents, sprite cursor layouts and explicit RealLive optical-disc host policy; policy continuation does not authenticate a disc.
+
+### `abf3adb03e242f64` — current shared resource and native capability reference
+
+Regenerated against the current registry after adding the shared `windows/msi` installed-file view and its metadata types, alongside the release/tooltip/pixel-query changes above. The resource reference includes bounded worker `beginProbe` and decode completion/mount operations. MSI/CAB access is read-only and does not execute installer actions or require filesystem extraction.
+
+### `d1da391dfe839e4a` — first-class Majiro adapter configuration
+
+Documents the original Majiro entry script, optional read-only executable ABI metadata and native run-mode policy. This partial native profile does not imply complete syscall or game support; unsupported calls retain the original VM instruction until a real engine operation can complete.
+
+### `61f9f936ff0989a4` — explicit Majiro ENV and portable settings policy
+
+Adds the original ENV resource path and `MajiroSettingsProfile` to the native configuration. Portable values belong to the current client Save namespace and preserve named decimal REG_SZ semantics; original Windows registry import remains explicitly unsupported. Setter completion follows the actual shared atomic-write receipt before the native PC advances.
+
+
+### `ca9c34c1e072ff84` — canonical client logs, logical locks and RGB lookup
+
+Adds `Engine.logs`, `Input.keyboardLocks` and `Input.setKeyboardLocks`. Log
+sequence/time and lock revisions use decimal strings in script snapshots.
+Native `HostServices.append_log` and Engine.log use the same bounded owner ring.
+Logical locks have explicit unknown physical state and no physical control.
+Majiro exposes its explicit logical/physical keyboard policy; unsupported physical
+requests fail at admission.
+
+Also documents shared arbitrary RGB lookup tables and strict straight-alpha
+processing, immutable ImageResource publication/release with retained leases,
+and the cancellable host civil-time worker contract. These Rust host services
+add no implicit device/window operation or serialized Runtime restoration of
+live published resources. RealLive keeps native TCC and filename policy only.
+
+
+### `f59d9a19867f34c9` — Circus opaque native save-image audit state
+
+Adds the public NativeLiveState reference alongside the shared host additions
+above. Its fields are opaque; gap/completed-opcode inspection does not establish
+original save compatibility. Unreviewed live mutations, selected native capture
+and restoration remain explicit admission barriers.
+
+
+### `f3a197f41c653ade` — shared loop metadata and interaction region copies
+
+Documents client-scoped AudioLoopTimebase/Range/Metadata/CatalogReceipt and the
+explicit atomic host catalog. Coordinates distinguish decoded source frames
+from a fixed reference sample rate; lookups never silently change PlayAsset.
+Live metadata requires reconstruction and is rejected by Runtime save/restore.
+
+RegionMap now supports bounded clipped snapshot copies, zero holes and resize.
+Generic copy/clip/state live in Core, while native province allocation and the
+reviewed absent-source coordinate policy stay in the KiriKiri adapter. XML
+children iteration is ordered, read-only and rejects foreign/cloned nodes.
+Decode-only image preparation accepts up to16MP separately from4MP effect
+outputs, preserving graph/worker limits and a512MiB shared memory budget.
+These host-only additions do not add a physical audio/window/device operation.
+
+
+### `c00e4f6cf51eac36` — bounded encoded-byte formatting and loop-frame rounding
+
+Adds ByteFormatValue/ByteFormatOutput for the shared Rust
+crysirror_text::format::format_one_bytes kernel. It replaces exactly the first
+compatible `%d` or `%s`, preserves surrounding encoded bytes and suffixes,
+uses byte widths, and reports whether the argument was consumed. Width/precision
+fields are bounded to510, template/output to1MiB. Integer/string precision is
+ignored in this explicit profile; string-value NUL bytes are retained, template
+NUL is rejected, and unsupported compatible conversions fail before publication.
+VMs retain only native type, encoding and refcount policy.
+
+Documents LoopFrameRounding and checked reference-rate conversion. This does not
+add a registered System4/System-NNN factory or claim complete game support.
+
+## 2026-11-01 — independent-product fixed-point mask blending
+
+Fingerprint: `6781d4170ef6e9f2` (previous `d22690a23af1bf9f`).
+
+- Added `ImageCompositeMath::MaskSeparate256` and serialized
+  `PixelMath::MaskSeparate256` (`mask_separate256`): zero mask skips, full mask
+  copies RGB, intermediate RGB sums two independently floored /256 products.
+- Destination alpha is retained; opacity must be255. Shared graph admission
+  rejects other opacities before worker allocation. Existing fixed-point
+  profiles keep their arithmetic, and the same512MiB processing budget applies.
+- This shared operation is usable without System-NNN. Native picture/effect
+  ordering remains adapter policy; this does not imply complete game support.
+
+## 2026-11-01 — bounded coverage clipping and two-input bitmap worker
+
+Fingerprint: `6c31b5c44d887345` (previous `6781d4170ef6e9f2`).
+
+- Added `AlphaClipRect` and `ImageEffect::AlphaClipRect`, with explicit source/
+  destination/clip rectangles, optional exterior coverage clear, optional RGB
+  multiplication, forward self-source semantics and empty-intersection profile.
+- `Bitmap.beginAlphaClip(slot, source, options)` prepares that shared operation
+  through existing scoped, epoch/revision-checked effect tickets. It uses
+  `effectStatus`/`cancelEffect`; self_source requires identical source/target slots.
+- Products are exact `(p + (p >> 7)) >> 8`. This is distinct from mask bounding
+  box detection and from RGB layer opacity. Pair processing remains on shared
+  ImageInput::Raster workers with existing image/graph/memory budgets.
+- Layer child-index caching is private derived state, skipped by serde. It does
+  not add a public or saved field.
+
+AlphaClipRect formatting follow-up: the final source was formatted while the
+first reference build was queued. Its Rust array spelling changed from
+`[i32;2]`/`[i32;4]` to `[i32; 2]`/`[i32; 4]`; the current reference fingerprint
+is `66c74a7ee0a69bf1` (previous `6c31b5c44d887345`). Field names, wire values,
+method signatures, defaults and behavior are unchanged. The generator currently
+includes that source type spelling in its fingerprint.

@@ -30,6 +30,8 @@ pure-magic = "=0.4.1"
 magic-db = "=0.6.0"
 encoding_rs = "0.8"
 quick-xml = "0.41"
+msi = "=0.10.0"
+cab = "=0.6.0"
 pelite = { version = "=0.10.0", default-features = false, features = ["std"] }
 
 [dev-dependencies]

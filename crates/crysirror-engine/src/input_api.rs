@@ -690,6 +690,8 @@ fn info() -> &'static ClassInfo {
     I.get_or_init(||ClassInfo{name:"Input",doc:"Session-scoped keyboard/mouse/gamepad actions with runtime rebinding and semantic prompt tokens.",properties:vec![
         PropertyInfo{name:"pointer",ty:T::List(Box::new(T::Int)),writable:false,doc:"Canvas pointer position."},PropertyInfo{name:"pointerDelta",ty:T::List(Box::new(T::Int)),writable:false,doc:"Pointer delta this frame."},PropertyInfo{name:"keys",ty:T::List(Box::new(T::String)),writable:false,doc:"Supported physical key names."},PropertyInfo{name:"lastDevice",ty:T::String,writable:false,doc:"keyboard_mouse or gamepad, based on meaningful activity."},PropertyInfo{name:"pendingRebind",ty:T::Optional(Box::new(T::String)),writable:false,doc:"Action waiting for a new physical binding."},
     ],methods:vec![
+        method("keyboardLocks",vec![],T::Map,"This client's logical Caps/Num/Scroll lock state and revision. Physical state is null unless imported; logical control never toggles the OS keyboard. Session state resets only on successful Runtime restore."),
+        method("setKeyboardLocks",vec![("state",T::Map)],T::Map,"Patch this client's logical caps_lock/num_lock/scroll_lock. mode must be logical; physical requests fail explicitly. Returns owner-committed state/revision, not device success."),
         method("enableEvents",vec![("capacity",T::Int)],T::Void,"Enable/replace this client's opt-in logical input journal (1..4096 samples). Accepted App frames feed it once. Disabled by default; action queries remain independent. Overflow is visible, with no silent edge drop."),
         method("disableEvents",vec![],T::Void,"Release this client's journal. Old receipts cannot affect a newly enabled journal."),
         method("events",vec![("maximum",T::Int)],T::Map,"Publish an ordered prefix {samples:[InputSample],receipt:InputReceipt|null}. Reads are idempotent until acknowledgement; leased samples cannot be rewritten by pointer-motion coalescing. Journal JSON u64 values are exact decimal strings (including masks, sequences and timestamps); echo receipts directly. Records model framed digital buttons/pointer, not raw OS/text/gamepad-axis events."),
@@ -750,6 +752,7 @@ impl Class for InputClass {
         args: &[Value],
     ) -> Result<Value> {
         if let Some(value)=crate::input_events_api::call(cx,method,args)? {return Ok(value);}
+        if let Some(value)=crate::input_locks_api::call(cx,method,args)? {return Ok(value);}
         let actions = &mut cx.state()?.actions;
         Ok(match method {
             "bind" => {

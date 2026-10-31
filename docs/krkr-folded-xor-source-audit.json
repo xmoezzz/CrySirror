@@ -1,0 +1,44 @@
+{
+  "scope": "Generic XP3 inline alternate filenames and checksum-validated folded-hash XOR resources. No original executable or DLL is executed, and no installed game bytes are included.",
+  "sources": [
+    {
+      "repository": "xp3-brute",
+      "commit": "c82cb14302138125640478556723705aa720007b",
+      "file": "src/xp3.rs",
+      "sha256": "b3d559f9715be017455e410e35cf0700c917a01c8e774d5342e326b4c50f9303",
+      "reviewed": "inline name record parser, exact/trailing-NUL lengths, next File association",
+      "license": "MIT"
+    },
+    {
+      "repository": "xp3-brute",
+      "commit": "c82cb14302138125640478556723705aa720007b",
+      "file": "src/brute.rs",
+      "sha256": "6b23b160c9bfacc80b4716d02b1d1af515102816a2190dae5057082d53b8c4a7",
+      "reviewed": "Adler-32 position weighting and candidate ambiguity policy; independent single-byte histogram specialization",
+      "license": "MIT"
+    },
+    {
+      "repository": "GARbro",
+      "commit": "b09ee4570ccb1daf6ac56710ee8934dc0b8baeb0",
+      "file": "ArcFormats/KiriKiri/CryptAlgorithms.cs",
+      "sha256": "d8688011770e7120f1e41776ce197ca12e60e0ebe9bc025a67a0081f52aae1d1",
+      "reviewed": "complete YuzuCrypt class: key folds entry hash xor seed; zero-key replacement; offset-independent XOR",
+      "license": "MIT"
+    }
+  ],
+  "implementation": {
+    "shared": "crates/crysirror-resource/src/xor_recovery.rs",
+    "archive": [
+      "crates/crysirror-formats-arc/src/xp3.rs",
+      "crates/crysirror-formats-arc/src/xp3/hash_fold_xor.rs",
+      "crates/crysirror-formats-arc/src/xp3/inline_names.rs"
+    ],
+    "detection": "crates/crysirror-desktop/src/detect.rs",
+    "inference": "Unique bias requires two distinct non-identity entry hashes and exact Adler-32 candidate compatibility. A zero-domain replacement is learned only from actual checksum-validated zero-domain bytes. All protected opens verify the complete logical bytes, including authenticated plain bootstrap exceptions.",
+    "limits": "64MiB total inference sample bytes, at most 32 samples; shared 64MiB input limit and cancellation; runtime per-entry/resident decode limits still apply.",
+    "ownership": "SourceArchive and AssetReader resources, independent of the KiriKiri VM; capability-scoped mount context carries archive parameters. No game-name cipher selection or title key catalogue.",
+    "name_namespace": "Verified inline preferred names take precedence over same-name plain-index fallback records. Native info-token aliases and original record IDs are retained; multiple inline candidates or alias/name conflicts fail. Original fallback bytes remain readable by archive record ID, with shadowed IDs recorded on the visible preferred resource.",
+    "namespace_evidence_scope": "The pinned parser defines alternate_name as preferred_name. Inline hash/MD5 relationships and separate plain versus inline startup records were observed in the owner container. Priority of that proven logical namespace over a colliding ordinary-index fallback is an explicit CrySirror archive policy; this audit does not claim a reverse-engineered native executable sort routine."
+  },
+  "fixtures": "Self-authored synthetic inline indexes, mixed plain/encrypted entries, independently computed checksums, zero-domain, wrong-profile and corrupt-later-entry cases. Owner archive test is ignored by default and explicitly selected at runtime."
+}

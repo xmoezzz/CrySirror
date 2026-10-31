@@ -16,7 +16,7 @@ impl Mixer {
             .filter(|v| v.handle == h)
             .context("stale release voice")?;
         let group = if freeze {
-            self.groups.output(v.mix_group)
+            self.groups.current_gain(v.mix_group)
         } else {
             1.
         };
@@ -43,7 +43,7 @@ impl Mixer {
             .context("release voice missing")?
             .mix_group;
         let group_gain = if spec.freeze_group_gain {
-            self.groups.output(group)
+            self.groups.current_gain(group)
         } else {
             1.
         };

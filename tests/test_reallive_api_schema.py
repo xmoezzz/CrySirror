@@ -12,9 +12,9 @@ import engine_schema as e
 
 class NativeSchemaTests(unittest.TestCase):
     def test_config_is_native_and_strict(self):
-        for config in ({}, {'root':'rusur','font_alias':'game','encoding':'Shift_JIS','start_scene':0}, {'encoding':'cp1252','start_scene':-1}):
+        for config in ({}, {'root':'rusur','font_alias':'game','encoding':'Shift_JIS','start_scene':0}, {'encoding':'cp1252','start_scene':-1}, {'optical_disc_check':'strict'}, {'optical_disc_check':'disabled_for_native_host'}):
             self.assertEqual(d.reallive_config(config), config)
-        for config in ({'font':'x.ttf'}, {'root':'../game'}, {'root':'./game'}, {'font_alias':''}, {'encoding':'unknown'}, {'start_scene':True}, {'start_scene':2**31}):
+        for config in ({'font':'x.ttf'}, {'root':'../game'}, {'root':'./game'}, {'font_alias':''}, {'encoding':'unknown'}, {'start_scene':True}, {'start_scene':2**31}, {'optical_disc_check':'authenticated'}, {'optical_disc_check':None}, {'optical_disc_check':True}):
             with self.subTest(config=config), self.assertRaises(d.ProjectError):d.reallive_config(config)
     def project(self):
         return {'schema':2,'name':'native','content_revision':'1','canvas':[640,480],'assets':'assets','fonts':{'default':'licensed.font'},'clients':[{'name':'main','adapter':'reallive','game':'test','config':{'root':'game'}}]}

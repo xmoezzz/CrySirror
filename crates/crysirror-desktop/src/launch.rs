@@ -62,7 +62,7 @@ pub fn bootstrap(rt: Runtime, plan: &Plan) -> Result<app::Core> {
                 cx.call(
                     resources,
                     "mountDecode",
-                    &[ticket.clone(), Value::Str(mount.target.clone())],
+                    &[ticket.clone(), Value::Str(mount.target.clone()),Value::Bool(mount.fallback)],
                 )?;
                 Ok(())
             })();
@@ -96,6 +96,8 @@ pub fn offscreen(
     font: Option<&Path>,
 ) -> Result<()> {
     let input = InputTrack::load(track)?;
+    // Native text callbacks may query metrics before the first presented frame.
+    app::load_fonts(runtime(&mut core)?,font)?;
     // Match the desktop canvas: on OS-bar platforms the menu lives outside
     // this render target. Keep its model/events, but do not replace an absent
     // OS bar with a different engine-drawn bar in the captured game picture.
@@ -126,6 +128,8 @@ pub fn offscreen(
         runtime(&mut core)?.host.mesh_frame_history =
             Some(materializer.mesh_frame_history_provider());
     }
+    runtime(&mut core)?.set_canvas_image_presenter(true);
+    app::settle_vm_preparations(runtime(&mut core)?)?;
     for frame in 0..frames {
         let dt = if frame == 0 { 0 } else { 16 };
         match &mut core {
@@ -200,6 +204,7 @@ mod tests {
             profiles: Default::default(),
             evidence: Vec::new(),
             mounts: vec![ArchiveMount {
+                fallback:false,
                 source: "arc.sar".into(),
                 target: "__nscript/arc.sar".into(),
                 options: serde_json::json!({"format":"nscripter/sar"}),

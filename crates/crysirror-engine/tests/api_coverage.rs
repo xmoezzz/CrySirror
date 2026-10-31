@@ -52,6 +52,7 @@ fn every_command_variant_has_an_api_method_that_exists() {
         ("world", variants::<WorldCommand>()),
         ("layer", variants::<LayerCommand>()),
         ("ui", variants::<UiCommand>()),
+        ("input_route", variants::<crysirror_scene::input_routes::InputRouteCommand>()),
     ] {
         assert!(ops.len() >= 6, "{system}: {ops:?}");
         for op in ops {

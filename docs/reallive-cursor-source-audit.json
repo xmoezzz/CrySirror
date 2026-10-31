@@ -1,0 +1,49 @@
+{
+  "repository": "https://github.com/eglaysher/rlvm",
+  "commit": "e38cda7783dc67539ce27901596ed93a2bb5c826",
+  "inspection": "Complete cursor/header and graphics configuration/selection source read; format facts only, no implementation copied",
+  "reference_license": "GPL-3.0-or-later",
+  "sources": {
+    "src/systems/base/mouse_cursor.cc": "35012dd8ff0a88cb1f2a7ca0518f2cf9dc2c2c8bd4566a33f6fb5e6efe3eac07",
+    "src/systems/base/mouse_cursor.h": "1c826c395a69da1b402f5ac14b296cb9dbaabffb9e76f89ff99cea68185af212",
+    "src/systems/base/graphics_system.cc": "1fae6a7ab0e791e6e3a6a6e1d4af6f8439cfd20897d4b259e76918e8de72447b",
+    "src/systems/base/graphics_system.h": "3a2c01928bc0f4316a7e97576ce2ebec41155ebc6568ba10de80cb44c8e4f133",
+    "src/modules/module_sys.cc": "05e391c4d3f56a88a15a4372305a2688220a97f499eab7914d7b78e9570418cc"
+  },
+  "layout": {
+    "size": [
+      32,
+      32
+    ],
+    "strip_start": [
+      8,
+      8
+    ],
+    "hotspot_marker_rect": [
+      8,
+      48,
+      32,
+      32
+    ],
+    "hotspot_marker_rgb": [
+      255,
+      255,
+      255
+    ],
+    "color_key_at": [
+      0,
+      0
+    ],
+    "frames": "Gameexe MOUSE_CURSOR.nnn.CONT default 1",
+    "period_ms": "MOUSE_CURSOR.nnn.SPEED default 800"
+  },
+  "implementation": {
+    "shared_header_and_sprite_kernel": "crates/crysirror-image/src/cursor/sprite.rs",
+    "shared_cursor_owner": "crysirror-scene::ui::cursor::CursorSystem",
+    "native_policy": "crates/crysirror-reallive/src/adapter/cursor.rs",
+    "resource_boundary": "capability header read; engine ImageJob full read/decode; native PC awaits completion; Ready immutable resource becomes shared Ui definition",
+    "source_pixel_budget": 1048576,
+    "cursor_pixel_budget": 262144,
+    "physical_os_cursor_verified": false
+  }
+}

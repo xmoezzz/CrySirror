@@ -1,0 +1,22 @@
+{
+  "scope": "Native Layer registry ownership and retirement; no change to general TJS collector/finalizer timing",
+  "reference": {
+    "repository": "https://github.com/krkrz/krkrz",
+    "commit": "fd5c4baa6a2ef5978db1bd043634351f48667daf",
+    "notice": "docs/third-party/krkrz.txt",
+    "files": [
+      {"file":"visual/LayerIntf.cpp","sha256":"9cf4cb58f0d63c53ba2c7ec7b0f09ca44a51bb43a92f09fb4aad6b1f90441556"},
+      {"file":"visual/LayerManager.cpp","sha256":"5a46fd6a3344b25312b2a17a1d9ecc46ac6ef543a22f0f064ce7a479c6b4dd71"},
+      {"file":"utils/ObjectList.h","sha256":"5b5bf5a199495fd31fa81324204721d8fef014d4f0872d02e5a19d46bacb82ae"}
+    ]
+  },
+  "evidence": {
+    "owner": "LayerIntf.cpp Construct assigns Owner=tjs_obj with explicit no-addref comment; ActionOwner retains the window closure.",
+    "children": "LayerIntf.cpp Join/Part/AddChild register raw native pointers in Children; ObjectList.h tVoidObjectList::Add writes the pointer without AddRef.",
+    "primary": "LayerManager.cpp AttachPrimary/DetachPrimary assign/clear a raw Primary pointer without AddRef.",
+    "retirement": "LayerIntf.cpp Invalidate releases transition/event/image/cache resources, parts from its parent and severs surviving children rather than owning all child script objects."
+  },
+  "implementation": "KrkrHost::gc_roots no longer unconditionally roots every native layer registry entry. Existing script fields, suspended VM frames, transitions, queued image operations and callbacks retain their explicit roots. object_collected retires a layer via existing engine Canvas/Layer operations and drops its native image lease; the adapter commits retirement commands after collection before rendering/slot reuse.",
+  "independent_verification": "Self-authored tests exercise dropped script references despite tree membership, active-work extra roots, external immutable image lease survival, and independently owned children surviving parent collection. Full-capacity test now intentionally retains all 2048 Layers in a script array.",
+  "limits": "This establishes Layer registry ownership, not exact reference-count finalizer timing or ownership correctness of every other native registry. Actual games are verified separately."
+}

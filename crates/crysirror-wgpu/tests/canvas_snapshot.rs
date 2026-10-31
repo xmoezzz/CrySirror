@@ -47,6 +47,43 @@ fn bakes(r: &mut Renderer) -> u64 {
 }
 #[test]
 #[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn canvas_image_job_uses_engine_compositor_and_freezes_its_admitted_generation() {
+    use crysirror_core::{image_processing::ImageProcessState,service::HostServices};
+    let (_root,mut rt,mut renderer)=fixture();
+    rt.set_canvas_image_presenter(true);
+    submit(&mut rt,json!({"layers":[
+        {"op":"put","layer":{"id":1,"rect":[0,0,4,4],"paint":{"kind":"solid","color":[0,0,0,0]}}},
+        {"op":"put","layer":{"id":2,"parent":1,"rect":[0,0,4,4],"clip":[0,0,4,4],"opacity":128,"paint":{"kind":"solid","color":[0,0,0,0]}}},
+        {"op":"put","layer":{"id":3,"parent":2,"rect":[0,0,3,4],"paint":{"kind":"solid","color":[255,0,0,255]}}},
+        {"op":"put","layer":{"id":4,"parent":2,"rect":[1,0,3,4],"order":[0,2],"paint":{"kind":"solid","color":[255,0,0,255]}}}
+    ]}));
+    submit(&mut rt,json!({"canvases":[
+        {"op":"create","id":10,"width":4,"height":4},
+        {"op":"copy_subtree","source":1,"destination":10,"rect":[0,0,4,4],"position":[0,0]}
+    ]}));
+    let mut job=rt.host.begin_canvas_image(ClientId(1),10).unwrap();
+    submit(&mut rt,json!({"canvases":[{"op":"clear","id":10,"color":[0,0,255,255]}],"layers":[{"op":"remove","id":1}]}));
+    let until=Instant::now()+Duration::from_secs(30);
+    let image=loop {
+        rt.tick(0,Default::default()).unwrap();
+        rt.prepare_canvas_images(|request,assets|renderer.snapshot_readback(assets,request.client,request.size,&request.layers)).unwrap();
+        match job.poll().unwrap() {
+            ImageProcessState::Ready(image)=>break image,
+            ImageProcessState::Failed(reason)=>panic!("{reason}"),
+            ImageProcessState::Pending=>{assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(1));},
+        }
+    };
+    assert_eq!(image.size(),[4,4]);assert_eq!(image.client(),ClientId(1));assert!(!image.opaque());
+    let rgba=image.rgba();
+    for pixel in rgba.chunks_exact(4) {
+        assert_eq!(pixel[3],128,"group alpha flattened per child: {pixel:?}");
+        // ImageResources contain straight RGBA; unlike the final framebuffer,
+        // the stored RGB has not yet been blended into a destination.
+        assert_eq!(pixel,&[255,0,0,128],"frozen straight-alpha red");
+    }
+}
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
 fn frozen_canvas_composes_overlapping_children_before_group_opacity() {
     let (_root, mut rt, mut r) = fixture();
     submit(&mut rt,json!({"layers":[
@@ -393,4 +430,79 @@ fn bgra_presenter_materializes_rgba_snapshot_without_swapping_red_and_blue() {
     let layers=Arc::new(layers);
     let image=renderer.materialize_snapshot(&mut rt.assets,1,[2,2],&layers).unwrap().unwrap();
     assert!(image.pixels().all(|pixel|pixel.0==[255,0,0,255]));
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn completed_dynamic_mesh_freezes_geometry_and_uses_shared_renderer_after_source_removal() {
+    let (_root, mut rt, mut r)=fixture();
+    let asset="__crysirror/frozen-mesh-white.png";
+    rt.assets.register_generated(ClientId(1),asset,png([255;4])).unwrap();
+    submit(&mut rt,json!({"layers":[
+        {"op":"put","layer":{"id":1,"rect":[0,0,16,16],"paint":{"kind":"solid","color":[0,0,0,0]}}},
+        {"op":"put","layer":{"id":2,"parent":1,"rect":[0,0,16,16],"paint":{"kind":"solid","color":[0,0,0,0]},"order":[0,1]}}
+    ]}));
+    let frame=crysirror_puppet::PuppetFrame {
+        size:[16.,16.],textures:vec![asset.into()],parts:vec![crysirror_puppet::FramePart{
+            id:"quad".into(),texture:0,positions:vec![[2.,2.],[10.,2.],[10.,10.],[2.,10.]],
+            uvs:vec![[0.,0.],[1.,0.],[1.,1.],[0.,1.]],indices:vec![0,1,2,0,2,3],
+            colors:vec![[1.,0.,0.,1.];4],blend:crysirror_puppet::PartBlend::Normal,
+            masks:vec![],invert_mask:false,visible:true,
+        }],
+    };
+    rt.host.engine.layers.set_dynamic_puppet(1,2,Arc::new(frame.clone())).unwrap();
+    let before=capture(&mut rt,&mut r);
+    assert!(before.get_pixel(5,5).0[0]>=250);
+    submit(&mut rt,json!({"canvases":[
+        {"op":"create","id":10,"width":16,"height":16},
+        {"op":"clear","id":10,"color":[0,0,0,0]},
+        {"op":"copy_subtree","source":1,"destination":10,"rect":[0,0,16,16],"position":[0,0]},
+        {"op":"present","id":10,"layer":10,"order":10}
+    ],"layers":[{"op":"remove","id":1}]}));
+    let frozen=capture(&mut rt,&mut r);
+    assert_eq!(before,frozen,"mesh geometry/blend changed during engine snapshot capture");
+    assert_eq!(bakes(&mut r),1);
+    submit(&mut rt,json!({"layers":[{"op":"set_opacity","id":10,"opacity":128}]}));
+    let half=capture(&mut rt,&mut r).get_pixel(5,5).0;
+    assert_eq!(half[3],128);assert!(half[0].abs_diff(188)<=2&&half[1]<=1&&half[2]<=1,"{half:?}");
+    assert_eq!(bakes(&mut r),1,"outer opacity should not re-evaluate captured mesh");
+    submit(&mut rt,json!({"layers":[
+        {"op":"put","layer":{"id":1,"rect":[0,0,16,16],"paint":{"kind":"solid","color":[0,0,0,0]}}},
+        {"op":"put","layer":{"id":2,"parent":1,"rect":[0,0,16,16],"paint":{"kind":"solid","color":[0,0,0,0]},"order":[0,1]}}
+    ]}));
+    let mut changed=frame;changed.parts[0].positions=vec![[4.,4.],[12.,4.],[12.,12.],[4.,12.]];
+    changed.parts[0].colors=vec![[0.,0.,1.,1.];4];
+    rt.host.engine.layers.set_dynamic_puppet(1,2,Arc::new(changed)).unwrap();
+    submit(&mut rt,json!({"canvases":[
+        {"op":"copy_subtree","source":1,"destination":10,"rect":[0,0,16,16],"position":[0,0]}
+    ],"layers":[{"op":"remove","id":1},{"op":"set_opacity","id":10,"opacity":255}]}));
+    let revised=capture(&mut rt,&mut r);
+    assert_eq!(revised.get_pixel(3,3).0,[0;4]);
+    assert!(revised.get_pixel(11,11).0[2]>=250,"mesh content was omitted from the snapshot cache identity");
+    assert_eq!(bakes(&mut r),2);
+
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn published_image_capture_keeps_admitted_resource_after_live_release_without_png_encoding(){
+    use crysirror_core::{image_processing::{ImageInput,ImageProcessState},service::HostServices};
+    let (_root,mut rt,mut renderer)=fixture();rt.set_canvas_image_presenter(true);
+    let mut source=rt.host.image_metadata(ClientId(1)).unwrap().begin_process(ImageInput::Solid{size:[4,4],color:[255,0,0,255]},b"[]".as_slice().into()).unwrap();
+    let deadline=Instant::now()+Duration::from_secs(10);
+    let image=loop{match source.poll().unwrap(){ImageProcessState::Ready(r)=>break r,ImageProcessState::Failed(e)=>panic!("{e}"),ImageProcessState::Pending=>{}}assert!(Instant::now()<deadline);std::thread::yield_now();};
+    let published=rt.host.publish_image_resource(ClientId(1),100,image).unwrap();let path=published.path.relative();
+    submit(&mut rt,json!({"layers":[{"op":"put","layer":{"id":1,"rect":[0,0,4,4],"paint":{"kind":"image","asset":path}}}]}));
+    submit(&mut rt,json!({"canvases":[{"op":"create","id":7,"width":4,"height":4},{"op":"copy_subtree","source":1,"destination":7,"rect":[0,0,4,4],"position":[0,0]}]}));
+    let mut capture=rt.host.begin_canvas_image(ClientId(1),7).unwrap();
+    submit(&mut rt,json!({"layers":[{"op":"remove","id":1}],"canvases":[{"op":"clear","id":7,"color":[0,0,255,255]}]}));
+    rt.host.release_image_resource(ClientId(1),path).unwrap();rt.tick(0,Default::default()).unwrap();
+    assert!(rt.assets.surface(ClientId(1),path).is_none(),"only the admitted capture retains this resource generation");
+    let image=loop{
+        rt.prepare_canvas_images(|request,assets|renderer.snapshot_readback(assets,request.client,request.size,&request.layers)).unwrap();
+        match capture.poll().unwrap(){ImageProcessState::Ready(r)=>break r,ImageProcessState::Failed(e)=>panic!("{e}"),ImageProcessState::Pending=>{}}
+        assert!(Instant::now()<deadline);std::thread::yield_now();
+    };
+    assert_eq!(image.size(),[4,4]);assert!(image.rgba().chunks_exact(4).all(|p|p==[255,0,0,255]));
+    assert_eq!(rt.host.now_ms(),0);
 }

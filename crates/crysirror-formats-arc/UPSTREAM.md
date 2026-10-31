@@ -185,3 +185,36 @@ Local logs under ignored `target/verification/` include
 `arc-i-review-corpus.log` and the individually named image/API validation logs.
 The manifests identify evidence references; the inventory tool does not run
 Cargo, claim GPU passes, or manufacture missing validation results.
+
+## Inline alternate names and folded-hash XOR (2026-10-31)
+
+The XP3 resource parser additionally accepts bounded inline M2 filename records
+with an exact UTF-16 length (optionally a terminating NUL). The FourCC is not a
+title selector: the record must immediately precede its File, match its `adlr`,
+and agree with its direct info name or the existing normalized UTF-16 MD5 token.
+Malformed, dangling and mismatched records remain explicit errors.
+
+The explicit `kirikiri/xp3.hash_fold_xor` profile is an offset-independent byte
+XOR whose key folds the entry hash and a byte bias. Its generic semantics were
+reviewed against the complete MIT GARbro `YuzuCrypt` implementation; the code
+contains no game-name lookup or key catalogue. An empty profile object infers a
+unique bias from two distinct protected entry hashes using CrySirror's shared
+`xor_recovery` service. A zero-derived-key substitute is inferred separately
+from actual zero-domain bytes. The resulting parameters can be carried to other
+archive mounts; each opened protected resource still verifies its entire decoded
+Adler-32 before publishing a random-access reader. A protected-bit bootstrap is
+accepted as plain only when its complete raw bytes already match its `adlr`.
+Unknown bias, ambiguous candidates, unproved zero substitution and later damaged
+entries fail visibly. Adler-32 here is format compatibility evidence, not a
+cryptographic authenticity claim.
+
+Pinned sources, hashes, reviewed semantics and file ownership are recorded in
+[`docs/krkr-folded-xor-source-audit.json`](../../docs/krkr-folded-xor-source-audit.json).
+
+Inline preferred names also form a distinct logical namespace: a proven inline
+name supersedes a same-name ordinary-index diagnostic fallback. The winning
+resource retains shadowed native record IDs in metadata, and every inline
+resource retains its original info-token lookup alias. The underlying records
+remain readable by ID; two conflicting inline entries or an alias colliding
+with another visible resource are explicit errors. This policy is implemented
+by a shared `Archive` wrapper, independent of any VM or bootstrap script.

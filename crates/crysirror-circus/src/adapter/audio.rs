@@ -75,6 +75,54 @@ pub(super) fn load_music_loops(storage: &dyn ClientStorage) -> Result<BTreeMap<S
     bail!("Circus native music loop profile requires a recognized original executable as read-only data")
 }
 impl Bridge<'_> {
+    pub(super) fn release_music(&mut self, forced: bool, steps: u32) -> Result<bool> {
+        use crysirror_core::service::{AudioReleasePhase as Phase, AudioReleaseSpec};
+        if forced {
+            ensure!(self.services.music_release_pending.is_none(), "Circus pending music release ownership");
+            for channel in [0,1] { self.host.submit_audio(self.client, AudioRequest::Stop {channel,fade_ms:0.})?; }
+            return Ok(true);
+        }
+        let handle=if let Some(handle)=self.services.music_release_pending {handle} else {
+            let handle=self.host.begin_audio_release(self.client, AudioReleaseSpec {
+                source_channel:0,tail_channel:1,threshold_db100:-3000,
+                target_above_db100:-3000,target_below_db100:-10000,steps,
+                pan:Some(0.),playback_rate:Some(1.),freeze_group_gain:true,
+                release_tail_when_source_missing:true,
+            })?;
+            self.services.music_release_pending=Some(handle);handle
+        };
+        match self.host.audio_release_info(self.client,handle)?.phase {
+            Phase::Pending=>Ok(false),
+            Phase::Cancelled=>bail!("Circus native music release cancelled before admission"),
+            phase=>{
+                self.services.music_release_pending=None;
+                if phase==Phase::Active { self.services.music_releases.push((handle,0)); }
+                else { self.host.release_audio_release(self.client,handle)?; }
+                Ok(true)
+            }
+        }
+    }
+    ///43D010 is called before the next native process, independently of PCM
+    ///frames or the200ms stream-refill timer. Resource/budget retries never tick.
+    pub(super) fn native_audio_update(&mut self) -> Result<()> {
+        use crysirror_core::service::AudioReleasePhase as Phase;
+        if !self.services.audio_update_due { return Ok(()); }
+        self.services.audio_update_due=false;
+        let mut active=Vec::new();
+        for (handle,updates) in self.services.music_releases.drain(..) {
+            let info=self.host.audio_release_info(self.client,handle)?;
+            if matches!(info.phase,Phase::Complete|Phase::Cancelled) {
+                self.host.release_audio_release(self.client,handle)?;
+            }else{
+                let updates=updates.checked_add(1).context("Circus audio update overflow")?;
+                self.host.advance_audio_release(self.client,handle,updates)?;
+                active.push((handle,updates));
+            }
+        }
+        self.services.music_releases=active;
+        Ok(())
+    }
+
     pub(super) fn sync_audio_controls(&mut self, controls: MixerControls) -> Result<()> {
         if self.services.mixer_controls == Some(controls) {
             return Ok(());
@@ -221,7 +269,10 @@ impl Bridge<'_> {
                 channel,
                 source: EncodedAudio {
                     bytes,
-                    frame_limit: None,
+                    //43BE10 copies only the native prepared PCM buffer extent.
+                    //The verified authored loop_end bounds that buffer before
+                    //retirement disables looping; no decoder is reopened.
+                    frame_limit: if channel == 0 && looping {loop_end} else {None},
                 },
                 intro: None,
                 parameters: AudioParameters {

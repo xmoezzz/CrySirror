@@ -70,16 +70,12 @@ fn tag(rt: &mut Rt, t: &Tag, extended: bool, owner: ObjectHandle) -> Result<Vari
         extended::apply_tag_values(rt, owner, h)?;
     }
     if extended {
-        // KAGParserEx: attribute names in written order (first occurrence).
-        let mut names: Vec<Variant> = Vec::new();
+        // KAGParserEx ArgValue::add appends every written name, starting
+        // with tagname; duplicate attributes remain in the ordered array.
+        let mut names = vec![Variant::String("tagname".into())];
         for a in &t.attributes {
             if let Attribute::Named { name, .. } = a {
-                if !names
-                    .iter()
-                    .any(|n| matches!(n, Variant::String(s) if s == name))
-                {
-                    names.push(Variant::String(name.clone()));
-                }
+                names.push(Variant::String(name.clone()));
             }
         }
         let list = rt.alloc_array_object(names);
@@ -283,6 +279,12 @@ pub fn install(rt: &mut Rt) {
             ("getNextTag", |rt, t, _| {
                 operate(rt, t, |p, h| match p.next_tag_with(h)? {
                     Some(t) => {
+                        if std::env::var_os("CRYSIRROR_KRKR_TRACE_TAGS").is_some() {
+                            let attributes = format!("{:?}", t.attributes)
+                                .chars().take(512).collect::<String>();
+                            eprintln!("[krkr-tag] {:?}:{:?} {:?} [{}] {}", p.cur_storage(),
+                                p.cur_line(), p.cur_label(), t.tagname, attributes);
+                        }
                         let state = h.rt.host_mut().parsers.get_mut(&h.owner.0).unwrap();
                         state.boundary = false;
                         let extended = state.extended;

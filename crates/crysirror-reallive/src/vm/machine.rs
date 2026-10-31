@@ -198,6 +198,13 @@ impl Machine {
         };
         machine.init_local_memory();
         machine.init_global_memory();
+        // Original Machine::new preloads the configured native DLL slots;
+        // these contain first-class Rust semantic implementations, not OS DLLs.
+        for entry in machine.gameexe.clone().filter("DLL.") {
+            if let (Some(slot), Some(name)) = (entry.key_number(1), entry.str(0)) {
+                machine.sys.dlls.load(slot, name);
+            }
+        }
         machine.mark_savepoint();
         Ok(machine)
     }

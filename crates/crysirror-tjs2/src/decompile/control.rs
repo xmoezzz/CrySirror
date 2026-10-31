@@ -381,8 +381,10 @@ impl<'f> BodyDecompiler<'f> {
         }
         self.unhandled += self.scanner.unhandled_count();
         statements.extend(self.scanner.take_out());
+        let mut prologue=self.scanner.take_local_prologue();
+        prologue.append(&mut statements);
         BodyOutput {
-            statements,
+            statements:prologue,
             unhandled: self.unhandled,
         }
     }
@@ -2147,7 +2149,9 @@ mod tests {
         let (text, unhandled) =
             decompile("var s = 0; for (var j = 0; j < 3; j++) { s += j; } return s;");
         assert_eq!(unhandled, 0, "{text}");
-        assert!(text.contains("while (j < 3)"), "{text}");
+        assert!(text.contains("while (l0 < 3)"), "{text}");
+        assert_eq!(text.matches("var l0").count(),1,"{text}");
+        assert!(text.contains("l0 = l0 + 1;"),"{text}");
     }
 
     #[test]

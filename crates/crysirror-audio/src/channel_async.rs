@@ -69,6 +69,7 @@ impl ChannelAudio {
     /// stay alive while any worker or stream still owns the corresponding data.
     pub fn reset(&mut self) {
         self.sequences.clear();
+        self.clear_releases();
         self.jobs.jobs.clear();
         self.jobs.intent.clear();
         self.jobs.channels.clear();
@@ -124,6 +125,7 @@ impl ChannelAudio {
         request: AudioRequest,
         storage: Arc<dyn ClientStorage>,
     ) -> Result<u64> {
+        self.poll_releases()?;
         let channel = channel(&request)?;
         self.jobs.jobs.admit(client)?;
         let p = match &request {
@@ -276,6 +278,7 @@ impl ChannelAudio {
         };
         self.jobs.channels.insert(ticket, channel);
         if !skip {
+            self.cancel_release_channel(client, channel);
             self.jobs.intent.insert((client, channel), ticket);
         }
         // Offline callers can acknowledge in the original frame. Realtime
@@ -289,6 +292,7 @@ impl ChannelAudio {
         if self.mixer.is_rendering() {
             return Ok(());
         }
+        self.poll_releases()?;
         let mut jobs = std::mem::take(&mut self.jobs);
         let result = (|| {
             for (owner, _, ticket) in jobs.jobs.tickets() {

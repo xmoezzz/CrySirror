@@ -34,6 +34,8 @@ impl Image {
 
 /// Resource access the object functions need, provided by the adapter.
 pub trait AssetLoader {
+    /// Engine-backed adapters may require an owner-polled immutable image job.
+    fn owner_image_preparation(&self)->bool {false}
     fn image(&self, name: &str) -> Result<Rc<Image>>;
     fn gan(&self, name: &str) -> Result<Vec<u8>>;
     /// Unscaled size of a text object's rendering.

@@ -150,7 +150,7 @@ fn snapshot_preserves_global_order_transform_clip_and_outlives_source_tree() {
 }
 
 #[test]
-fn hidden_dynamic_children_are_skipped_but_visible_motion_meshes_fail_atomically() {
+fn hidden_dynamic_children_are_skipped_and_completed_meshes_freeze_immutably() {
     let mut root = solid(100, None, [0., 0., 16., 16.], [255, 0, 0, 255], 0);
     root.visible = false;
     let mut child = solid(101, Some(100), [0., 0., 4., 4.], [0; 4], 1);
@@ -180,21 +180,20 @@ fn hidden_dynamic_children_are_skipped_but_visible_motion_meshes_fail_atomically
             }],
         )
         .unwrap();
-    let before = (
-        serde_json::to_value(&canvases).unwrap(),
-        serde_json::to_value(&layers).unwrap(),
-    );
-    let error = canvases
-        .apply_batch(CLIENT, &[copy(100)], &mut layers)
-        .unwrap_err();
-    assert!(error.to_string().contains("dynamic puppet"), "{error:#}");
-    assert_eq!(
-        (
-            serde_json::to_value(&canvases).unwrap(),
-            serde_json::to_value(&layers).unwrap()
-        ),
-        before
-    );
+    canvases.apply_batch(CLIENT, &[copy(100)], &mut layers).unwrap();
+    let snapshot=snapshot_primitive(&layers);
+    let Paint::Snapshot{layers:frozen,..}=snapshot.paint else{panic!("missing snapshot")};
+    let Paint::Mesh{frame,..}=&frozen.iter().find(|l|l.id==101).unwrap().paint else{panic!("mesh was not frozen")};
+    assert_eq!(frame.size,[4.,4.]);
+    layers.set_dynamic_puppet(1,101,std::sync::Arc::new(crysirror_puppet::PuppetFrame{size:[8.,8.],..Default::default()})).unwrap();
+    assert_eq!(frame.size,[4.,4.],"later worker frame aliased frozen state");
+    let encoded=serde_json::to_vec(&*frozen).unwrap();
+    let decoded:Vec<LayerSpec>=serde_json::from_slice(&encoded).unwrap();
+    let mut restored=LayerSystem::default();restored.install(CLIENT,&decoded).unwrap();
+    let primitive=restored.frame([16,16]).unwrap().into_iter().find(|p|p.id==101).unwrap();
+    assert_eq!(primitive.puppet.unwrap().size,[4.,4.]);
+    layers.apply_batch(CLIENT,&[L::Remove{id:100}]).unwrap();
+    assert_eq!(frame.size,[4.,4.]);
 }
 
 #[test]
@@ -504,4 +503,20 @@ fn serialized_snapshot_bounds_nesting_and_rejects_external_duplicate_and_oversiz
         .validate()
         .is_err()
     );
+}
+
+#[test]
+fn capture_requires_a_completed_owner_frame_and_refuses_live_surface_dependencies_atomically() {
+    let root=solid(100,None,[0.,0.,16.,16.],[0;4],0);
+    let mut child=solid(101,Some(100),[0.,0.,4.,4.],[0;4],1);
+    child.paint=Paint::Puppet{asset:"rig.json".into(),tint:[255;4]};
+    let mut layers=LayerSystem::default();layers.install(CLIENT,&[root.clone(),child]).unwrap();
+    let mut canvases=destination(&mut layers);
+    let before=serde_json::to_value(&canvases).unwrap();
+    assert!(canvases.apply_batch(CLIENT,&[copy(100)],&mut layers).unwrap_err().to_string().contains("completed owner publication"));
+    assert_eq!(serde_json::to_value(&canvases).unwrap(),before);
+    layers.apply_batch(CLIENT,&[L::Remove{id:101},L::Put{layer:solid(101,Some(100),[0.,0.,4.,4.],[0;4],1)}]).unwrap();
+    layers.set_dynamic_puppet(1,101,std::sync::Arc::new(crysirror_puppet::PuppetFrame{size:[4.,4.],textures:vec!["__surface/42".into()],..Default::default()})).unwrap();
+    assert!(canvases.apply_batch(CLIENT,&[copy(100)],&mut layers).unwrap_err().to_string().contains("live surface"));
+    assert_eq!(serde_json::to_value(&canvases).unwrap(),before);
 }

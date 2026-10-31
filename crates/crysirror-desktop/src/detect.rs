@@ -5,6 +5,8 @@
 //! protected archives through the shared resource formats to choose their
 //! profile, and produces a typed engine resource plan. Only data is read;
 //! no native executable or external launcher script runs.
+mod majiro;
+mod system_nnn;
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -27,6 +29,8 @@ pub struct FileEvidence {
 
 #[derive(Debug, serde::Serialize)]
 pub struct ArchiveMount {
+    #[serde(skip_serializing_if="std::ops::Not::not")]
+    pub fallback: bool,
     pub source: String,
     pub target: String,
     pub options: Value,
@@ -169,6 +173,8 @@ fn detect_layout(dir: &Path) -> Result<Plan> {
         if std::fs::File::open(path)?.read_exact(&mut signature).is_err() || signature != *b"KIF\0" { continue; }
         return catsystem2(dir,&local,&name,prefix,&format!("{config}/{startup}"));
     }
+    if let Some(plan) = majiro::detect(dir, &names, &name)? { return Ok(plan); }
+    if let Some(plan) = system_nnn::detect(dir, &names, &name)? { return Ok(plan); }
     if find(&names, "data.xp3").is_some() {
         return krkr(dir, &names, &name);
     }
@@ -291,7 +297,7 @@ fn catsystem2(dir:&Path,names:&[String],name:&str,prefix:&str,startup_path:&str)
         ensure!(find(names,archive).is_some_and(|p|Path::new(p).extension().and_then(|e|e.to_str()).is_some_and(|e|e.eq_ignore_ascii_case("int"))),"CatSystem2 startup archive is absent");
         let mut p=project(name,startup.canvas,"catsystem2",json!({"script":startup.script,"font":"default","heap_bytes":startup.heap_bytes,"executable":executable.clone(),"canvas":startup.canvas}));
         if !prefix.is_empty(){p["clients"][0]["asset_prefix"]=json!(prefix);}
-        let mounts=with_ext(names,"int").map(|source|ArchiveMount{source:source.clone(),target:source.clone(),options:json!({"format":"cat-system/int","profile":"game"})}).collect();
+        let mounts=with_ext(names,"int").map(|source|ArchiveMount{fallback:false,source:source.clone(),target:source.clone(),options:json!({"format":"cat-system/int","profile":"game"})}).collect();
         Ok(Plan{engine:"CatSystem2",project:p,profiles:std::collections::BTreeMap::from([("game".into(),json!({"limits":{"max_entry_size":1024u64*1024*1024},"parameters":{"cat-system/int":{"executable":executable}}}))]),mounts,evidence:vec![FileEvidence{path:if prefix.is_empty(){startup_path.to_owned()}else{format!("{prefix}/{startup_path}")},identity:None}]})
     }
 }
@@ -322,8 +328,56 @@ fn reallive(dir: &Path, names: &[String], name: &str) -> Result<Plan> {
         project: project(name, canvas, "reallive", json!({"root": ""})),
         evidence: Vec::new(),
         profiles: Default::default(),
-        mounts: Vec::new(),
+        mounts: reallive_voice_mounts(dir, &ini)?,
     })
+}
+
+// Keep the original voice packs intact. The common resource registry indexes
+// their numbered audio entries; the VM only selects the native pack/sample ID.
+#[cfg(feature = "reallive")]
+fn reallive_voice_mounts(dir: &Path, ini: &[u8]) -> Result<Vec<ArchiveMount>> {
+    use crysirror_reallive::vm::{Gameexe, Nls};
+    let exe = Gameexe::from_bytes(ini, Nls::Sjis);
+    let requested = exe.get("FOLDNAME.KOE").and_then(|e| e.str(0)).unwrap_or("koe").replace('\\', "/");
+    let root = dir.canonicalize()?;
+    let mut folder = dir.to_path_buf();
+    if !requested.is_empty() && requested != "." {
+        let path = crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Asset, &requested)?;
+        for component in path.relative().split('/') {
+            let names = listing(&folder)?;
+            let Some(actual) = find(&names, component) else { return voice_packs_in(dir, &root, &[dir.to_path_buf()]); };
+            folder.push(actual);
+            ensure!(folder.canonicalize()?.starts_with(&root), "RealLive voice directory escapes game capability root");
+        }
+    }
+    voice_packs_in(dir, &root, &[dir.to_path_buf(), folder])
+}
+#[cfg(not(feature = "reallive"))]
+fn reallive_voice_mounts(_: &Path, _: &[u8]) -> Result<Vec<ArchiveMount>> { Ok(Vec::new()) }
+
+#[cfg(feature = "reallive")]
+fn voice_packs_in(dir: &Path, root: &Path, folders: &[PathBuf]) -> Result<Vec<ArchiveMount>> {
+    let mut packs = std::collections::BTreeMap::new();
+    for folder in folders {
+        if !folder.is_dir() { continue; }
+        let names = listing(folder)?;
+        ensure!(names.len() <= 32768, "RealLive voice directory entry budget");
+        for name in names {
+            let format = match Path::new(&name).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+                Some("koe") => "real-live/koepac",
+                Some("ovk") => "real-live/ovk",
+                Some("nwk") => "real-live/nwk",
+                _ => continue,
+            };
+            let file = folder.join(&name);
+            ensure!(file.is_file() && file.canonicalize()?.starts_with(root), "RealLive voice pack escapes game capability root");
+            let relative = file.strip_prefix(dir)?.to_str().context("RealLive voice path is not UTF-8")?.replace('\\', "/");
+            packs.insert(relative, format);
+            ensure!(packs.len() <= crysirror_runtime::vfs::MAX_PROVIDER_MOUNTS, "RealLive voice archive mount budget");
+        }
+    }
+    ensure!(packs.is_empty() || cfg!(feature="arc-formats"), "RealLive voice packs require the shared arc-formats feature");
+    Ok(packs.into_iter().map(|(source, format)| ArchiveMount { fallback:false, target: source.clone(), source, options: json!({"format":format}) }).collect())
 }
 
 #[cfg(all(feature = "krkr", feature = "arc-formats"))]
@@ -363,12 +417,16 @@ fn krkr(dir: &Path, names: &[String], name: &str) -> Result<Plan> {
         modules: vec![exe.clone()],
         setup: true,
     });
+    candidates.push(Protection::HashFoldXor { key_bias: None, zero_key: None });
     candidates.push(Protection::Plain);
     for protection in candidates {
         match open(dir, &exe, &protection) {
-            Ok(archive) => match canvas(dir, &exe, &archive, &protection) {
-                Ok(canvas) => return Ok(plan(dir, names, name, &exe, protection, canvas)),
-                Err(e) => tried.push(format!("{} canvas: {e:#}", protection.label())),
+            Ok(archive) => {
+                let protection = protection.authenticated(&archive)?;
+                match canvas(dir, &exe, &archive, &protection) {
+                    Ok(canvas) => return Ok(plan(dir, names, name, &exe, protection, canvas)),
+                    Err(e) => tried.push(format!("{} canvas: {e:#}", protection.label())),
+                }
             },
             Err(e) => tried.push(format!("{}: {e:#}", protection.label())),
         }
@@ -396,12 +454,14 @@ mod krkr_probe {
         Hxv4,
         Cxdec { modules: Vec<String>, setup: bool },
         AdlerXor { modules: Vec<String> },
+        HashFoldXor { key_bias: Option<u8>, zero_key: Option<u8> },
         Plain,
     }
     impl Protection {
         pub fn label(&self) -> &'static str {
             match self {
                 Self::Hxv4 => "HXV4",
+                Self::HashFoldXor { .. } => "checksum-authenticated folded Adler XOR",
                 Self::AdlerXor { .. } => "rotating Adler XOR",
                 Self::Cxdec { modules, setup: false } if modules.len() > 1 => "CXDEC (combined modules)",
                 Self::Cxdec { setup: false, .. } => "CXDEC (classic module)",
@@ -409,10 +469,25 @@ mod krkr_probe {
                 Self::Plain => "plain XP3",
             }
         }
+        pub(super) fn authenticated(&self, opened: &Opened) -> Result<Self> {
+            if !matches!(self, Self::HashFoldXor { .. }) { return Ok(self.clone()); }
+            let profile = opened.archive.entries().iter()
+                .find_map(|e| e.metadata.get("hash_fold_xor"))
+                .context("folded Adler XOR profile has no authenticated entry metadata")?;
+            let bias = u8::try_from(profile["key_bias"].as_u64().context("folded Adler XOR key bias")?)?;
+            let zero_key = profile["zero_key"].as_u64().map(u8::try_from).transpose()?;
+            Ok(Self::HashFoldXor { key_bias: Some(bias), zero_key })
+        }
         /// `kirikiri/xp3` profile parameters, as the mount script declares.
         pub fn parameters(&self, exe: &str) -> Value {
             match self {
                 Self::AdlerXor { modules } => json!({"adler_xor_modules": modules}),
+                Self::HashFoldXor { key_bias, zero_key } => {
+                    let mut profile = serde_json::Map::new();
+                    if let Some(bias) = key_bias { profile.insert("key_bias".into(), json!(bias)); }
+                    if let Some(key) = zero_key { profile.insert("zero_key".into(), json!(key)); }
+                    json!({"hash_fold_xor": profile})
+                },
                 Self::Hxv4 => {
                     json!({"hxv4_executable": exe, "hxv4_startup_target": "__bootstrap/startup.tjs",
                     "hxv4_bootstrap_profile": "__bootstrap/protection.json", "hxv4_hashed_root": "__hxv4"})
@@ -667,6 +742,7 @@ mod krkr_probe {
             mounts: mounts
                 .into_iter()
                 .map(|(source, target)| ArchiveMount {
+                    fallback:false,
                     source,
                     target,
                     options: json!({"format":"kirikiri/xp3","profile":"game"}),
@@ -770,6 +846,7 @@ fn nscripter(dir: &Path, names: &[String], name: &str) -> Result<Plan> {
                 "nscripter/nsa"
             };
             ArchiveMount {
+                fallback:false,
                 target: format!("__nscript/{source}"),
                 source,
                 options: json!({"format":format}),
@@ -977,6 +1054,29 @@ pub fn system_font() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(all(feature="reallive", feature="arc-formats"))]
+    fn reallive_voice_archives_use_shared_mounts_without_extraction() {
+        let dir=tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("KOE")).unwrap();
+        for file in ["KOE/z0629.nwk", "KOE/z0751.ovk", "z0001.koe"] {
+            std::fs::write(dir.path().join(file), []).unwrap();
+        }
+        let mounts=reallive_voice_mounts(dir.path(), b"#FOLDNAME.KOE=\"koe\"\n").unwrap();
+        assert_eq!(mounts.len(),3);
+        assert_eq!(mounts[0].source,"KOE/z0629.nwk");
+        assert_eq!(mounts[0].target,mounts[0].source);
+        assert_eq!(mounts[0].options["format"],"real-live/nwk");
+        assert_eq!(mounts[1].options["format"],"real-live/ovk");
+        assert_eq!(mounts[2].options["format"],"real-live/koepac");
+        #[cfg(unix)] {
+            let outside=tempfile::tempdir().unwrap();
+            std::fs::write(outside.path().join("z0002.nwk"), []).unwrap();
+            std::os::unix::fs::symlink(outside.path().join("z0002.nwk"),dir.path().join("KOE/z0002.nwk")).unwrap();
+            assert!(reallive_voice_mounts(dir.path(), b"").unwrap_err().to_string().contains("escapes"));
+        }
+    }
 
     fn cat_startup_fixture(root:&Path) {
         std::fs::create_dir_all(root.join("config")).unwrap();

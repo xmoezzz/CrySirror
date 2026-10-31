@@ -258,6 +258,7 @@ fn inflate(
     let mut out = Vec::new();
     let mut block = [0u8; 16 * 1024];
     loop {
+        context.check_cancelled()?;
         if out.len() as u64 == limit {
             let mut extra = [0u8; 1];
             ensure!(
@@ -284,6 +285,7 @@ fn inflate(
     if let Some(size) = spec.expected_size {
         ensure!(out.len() as u64 == size, "decompressed entry size mismatch");
     }
+    context.check_cancelled()?;
     reservation.shrink(out.len() as u64);
     Ok(Arc::new(Resident {
         reader: MemoryAssetReader(Arc::from(out)),
@@ -420,5 +422,26 @@ mod cyclic_mask_tests {
         assert_eq!(full, [11; 17]);
         xor_cycle_in_place(&mut full, &[], u64::MAX);
         assert_eq!(full, [11; 17]);
+    }
+}
+
+#[cfg(test)]
+mod inflate_cancellation_tests {
+    use super::*;
+    struct CancelOnRead { remaining:usize,cancel:crysirror_tasks::Cancellation }
+    impl std::io::Read for CancelOnRead {
+        fn read(&mut self,out:&mut [u8])->std::io::Result<usize>{
+            let n=out.len().min(self.remaining);out[..n].fill(7);self.remaining-=n;self.cancel.cancel();Ok(n)
+        }
+    }
+    #[test]
+    fn cancel_during_inflate_or_its_final_read_never_publishes_partial_resource(){
+        for remaining in [0,65536] {
+            let cancel=crysirror_tasks::Cancellation::default();
+            let context=DecodeContext::new(crysirror_core::state::ClientId(1)).with_cancellation(cancel.clone());
+            let reader=CancelOnRead{remaining,cancel};
+            let err=inflate(reader,&TransformSpec::new("zlib"),&context).err().expect("cancelled inflate must not publish");
+            assert_eq!(err.to_string(),"task cancelled");
+        }
     }
 }

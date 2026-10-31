@@ -151,6 +151,10 @@ impl Machine {
             (4..=16 * 1024 * 1024).contains(&heap_bytes),
             "KCS heap budget"
         );
+        ensure!(
+            !program.code.is_empty() && program.code.len() <= MAX_SCRIPT_BYTES,
+            "KCS code byte budget"
+        );
         let memory_bytes = u64::from(program.globals_bytes) + u64::from(program.stack_bytes);
         ensure!(
             memory_bytes <= MAX_MEMORY_BYTES as u64 && program.stack_bytes >= 16,
@@ -297,12 +301,39 @@ impl Machine {
         self.pc = target;
         Ok(())
     }
+    /// 8762A0/877310 resume an original native71 yield. A normal owner tick
+    /// pushes0 without touching its event buffer; a message copies16bytes then
+    /// pushes1. Validate every write before mutation, preserving source stack.
+    pub fn resume_native_event(&mut self,event:Option<(u32,[u32;4])>)->Result<()> {
+        ensure!(self.pending.is_none()&&!self.halted,"KCS cannot resume native event at pending call/halt");
+        self.region(self.stack,4)?;self.stack.checked_add(4).context("KCS event resume stack overflow")?;
+        if let Some((address,_))=event{self.region(address,16)?;}
+        if let Some((address,words))=event{let mut bytes=[0u8;16];for (out,word) in bytes.chunks_exact_mut(4).zip(words){out.copy_from_slice(&word.to_le_bytes());}self.write_bytes(address,&bytes)?;}
+        self.push(u32::from(event.is_some()))?;Ok(())
+    }
     pub fn acknowledge(&mut self, result: Option<u32>) -> Result<()> {
         self.commit_native(result, &[])
     }
     /// Validate every native out parameter and result slot before committing
     /// any memory change. Overlapping writes retain native declaration order.
     pub fn commit_native(&mut self, result: Option<u32>, writes: &[(u32, Vec<u8>)]) -> Result<()> {
+        self.preflight_native(result.is_some(), writes)?;
+        for (address, bytes) in writes {
+            self.write_bytes(*address, bytes)?;
+        }
+        let call = self
+            .pending
+            .take()
+            .context("KCS has no pending native call")?;
+        self.pc = call.next;
+        self.stack = call.stack_after_arguments;
+        if let Some(value) = result {
+            self.push(value)?;
+        }
+        Ok(())
+    }
+    /// Admission check before publishing a native resource or shared operation.
+    pub fn preflight_native(&self, result: bool, writes: &[(u32, Vec<u8>)]) -> Result<()> {
         let pending = self
             .pending
             .as_ref()
@@ -316,20 +347,8 @@ impl Machine {
             ensure!(total <= MAX_SCRIPT_BYTES, "KCS native write byte budget");
             self.region(*address, bytes.len())?;
         }
-        if result.is_some() {
+        if result {
             self.region(pending.stack_after_arguments, 4)?;
-        }
-        for (address, bytes) in writes {
-            self.write_bytes(*address, bytes)?;
-        }
-        let call = self
-            .pending
-            .take()
-            .context("KCS has no pending native call")?;
-        self.pc = call.next;
-        self.stack = call.stack_after_arguments;
-        if let Some(value) = result {
-            self.push(value)?;
         }
         Ok(())
     }
@@ -418,7 +437,10 @@ impl Machine {
                         if y == 0 {
                             0
                         } else {
-                            (x as i32).wrapping_div(y as i32) as u32
+                            (x as i32)
+                                .checked_div(y as i32)
+                                .context("native signed division overflow")?
+                                as u32
                         }
                     }
                     4 => {
@@ -432,7 +454,10 @@ impl Machine {
                         if y == 0 {
                             0
                         } else if signed {
-                            (x as i32).wrapping_rem(y as i32) as u32
+                            (x as i32)
+                                .checked_rem(y as i32)
+                                .context("native signed remainder overflow")?
+                                as u32
                         } else {
                             x % y
                         }
@@ -515,8 +540,102 @@ impl Machine {
                 };
                 self.push(result)?;
             }
+            0x16..=0x19 => {
+                let dest = self.raw_operand(code)?;
+                // Native increment handlers always fetch/push the complete DWORD,
+                // even when only its low byte/word is changed.
+                let old = self.read_word(dest.value)?;
+                let kind = dest.flags & 15;
+                ensure!((1..=4).contains(&kind), "unsupported KCS increment width");
+                let increment = op == 0x16 || op == 0x18;
+                let value = if kind == 4 {
+                    (f32::from_bits(old) + if increment { 1.0 } else { -1.0 }).to_bits()
+                } else if increment {
+                    old.wrapping_add(1)
+                } else {
+                    old.wrapping_sub(1)
+                };
+                let width = match kind {
+                    1 => 1,
+                    2 => 2,
+                    _ => 4,
+                };
+                self.write_bytes(dest.value, &value.to_le_bytes()[..width])?;
+                self.push(if op >= 0x18 {
+                    old
+                } else {
+                    self.read_word(dest.value)?
+                })?;
+            }
+            0x1a => {
+                let a = self.operand(code)?;
+                self.push(if a.flags & 4 != 0 {
+                    (-f32::from_bits(a.value)).to_bits()
+                } else {
+                    a.value.wrapping_neg()
+                })?;
+            }
+            0x1b..=0x24 => {
+                let dest = self.raw_operand(code)?;
+                let right = self.operand(code)?;
+                let (x, y) = (self.read_word(dest.value)?, right.value);
+                let float = dest.flags & 4 != 0 || right.flags & 4 != 0;
+                let signed = dest.flags & 0x20 != 0 || right.flags & 0x20 != 0;
+                let result = match op {
+                    0x1b if y == 0 => 0,
+                    0x1b if signed => (x as i32)
+                        .checked_rem(y as i32)
+                        .context("native signed remainder overflow")?
+                        as u32,
+                    0x1b => x % y,
+                    0x1c => x & y,
+                    0x1d if float => (f32::from_bits(x) * f32::from_bits(y)).to_bits(),
+                    0x1d => x.wrapping_mul(y),
+                    0x1e if float => (f32::from_bits(x) + f32::from_bits(y)).to_bits(),
+                    0x1e => x.wrapping_add(y),
+                    0x1f if float => (f32::from_bits(x) - f32::from_bits(y)).to_bits(),
+                    0x1f => x.wrapping_sub(y),
+                    0x20 if float => {
+                        if f32::from_bits(y) == 0.0 {
+                            y
+                        } else {
+                            (f32::from_bits(x) / f32::from_bits(y)).to_bits()
+                        }
+                    }
+                    // The reviewed native unsigned compound divide stores EDX
+                    // (remainder), unlike its signed IDIV branch storing EAX.
+                    0x20 if y == 0 => 0,
+                    0x20 if signed => (x as i32)
+                        .checked_div(y as i32)
+                        .context("native signed division overflow")?
+                        as u32,
+                    0x20 => x % y,
+                    0x21 => x.wrapping_shl(y & 31),
+                    0x22 if signed => ((x as i32) >> (y & 31)) as u32,
+                    0x22 => x >> (y & 31),
+                    0x23 => x ^ y,
+                    0x24 => x | y,
+                    _ => unreachable!(),
+                };
+                self.store(dest, result)?;
+                // Compound operations return the full result, before narrow store.
+                self.push(result)?;
+            }
             0x25 => {
-                let a = self.raw_operand(code)?;
+                let at = self.pc as usize;
+                let flags = *code.get(at).context("truncated KCS push operand")?;
+                let value = u32_at(code, at + 1)?;
+                self.pc = self.pc.checked_add(5).context("KCS PC overflow")?;
+                // A stack value already in place is left untouched. Only a
+                // stack-supplied address is popped before dereferencing.
+                let a = Operand {
+                    flags,
+                    value: if flags & 0x50 == 0x50 {
+                        self.pop()?
+                    } else {
+                        value
+                    },
+                };
                 if a.flags & 0x10 != 0 {
                     let value = self.read_word(a.value)?;
                     self.push(value)?;
@@ -609,6 +728,9 @@ impl Machine {
                 self.stack += bytes;
                 self.jump(code, target)?;
             }
+            0x2d => {
+                self.pop()?;
+            }
             0x2e => {
                 let value = self.raw_operand(code)?.value;
                 self.push(value)?;
@@ -696,7 +818,12 @@ impl Machine {
                 self.push(self.frame_base.wrapping_add(offset))?;
             }
             0x3e => {
-                let a = self.operand(code)?.value;
+                let a = self.raw_operand(code)?;
+                let a = if a.flags & 0x10 != 0 {
+                    self.read_word(a.value)?
+                } else {
+                    a.value
+                };
                 let b = self.operand(code)?.value;
                 self.push(a.wrapping_add(b))?;
             }

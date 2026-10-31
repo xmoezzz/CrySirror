@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Capability-based roots. No adapter can open an ambient absolute path here.
 use crate::model::identity;
+mod fallback;
 use cap_std::{
     ambient_authority,
     fs::{Dir, OpenOptions},
@@ -23,6 +24,9 @@ use std::{
 };
 
 pub const MAX_FILE: u64 = 64 * 1024 * 1024;
+/// Bounded overlays per client, matching the common compound-storage budget.
+/// Voice-bank layouts commonly contain more than 64 independently indexed packs.
+pub const MAX_PROVIDER_MOUNTS: usize = 256;
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
 fn io(e: std::io::Error) -> Error {
     if e.kind() == std::io::ErrorKind::NotFound {
@@ -32,7 +36,10 @@ fn io(e: std::io::Error) -> Error {
     }
 }
 pub fn read_limited(dir: &Dir, path: impl AsRef<Path>) -> Result<Vec<u8>> {
-    let file = dir.open(path).map_err(io)?;
+    read_limited_virtual(dir,path,false)
+}
+fn read_limited_virtual(dir:&Dir,path:impl AsRef<Path>,virtual_directory:bool)->Result<Vec<u8>> {
+    let file=dir.open(path).map_err(|e|if virtual_directory&&e.kind()==std::io::ErrorKind::NotADirectory {Error::NotFound}else{io(e)})?;
     if !file.metadata().map_err(io)?.is_file() {
         return Err(Error::Invalid("not a regular file"));
     }
@@ -173,10 +180,23 @@ impl DiskVfs {
         };
         let mounts = self.providers.get(&client).ok_or(Error::NotFound)?;
         let mut list = mounts.write().unwrap_or_else(|error| error.into_inner());
-        if list.len() >= 64 {
+        if list.len() >= MAX_PROVIDER_MOUNTS {
             return Err(Error::Limit("provider mounts"));
         }
         list.insert(0, (point, provider));
+        Ok(())
+    }
+    /// Append a read-only fallback below existing overlays. Within this view,
+    /// real loose files precede the provider; only missing paths fall back.
+    /// Existing handles see the mount, while opened readers keep their source.
+    pub fn mount_fallback_provider(&mut self,client:ClientId,mount_point:&str,provider:Arc<dyn VfsProvider>)->Result<()> {
+        let mount=self.mounts.get(&client).ok_or(Error::NotFound)?;
+        let point=if mount_point.is_empty(){String::new()}else{VfsPath::new(Mount::Asset,mount_point)?.relative().to_owned()};
+        let provider=Arc::new(fallback::LooseFirst::new(mount.asset.try_clone().map_err(io)?,point.clone(),provider));
+        let mounts=self.providers.get(&client).ok_or(Error::NotFound)?;
+        let mut list=mounts.write().unwrap_or_else(|error|error.into_inner());
+        if list.len()>=MAX_PROVIDER_MOUNTS{return Err(Error::Limit("provider mounts"));}
+        list.push((point,provider));
         Ok(())
     }
     /// A thread-safe handle with this client's authority only (ADR 0008).
@@ -314,12 +334,14 @@ impl ClientStorage for CapStorage {
         }
         let virtual_info = |size: Option<u64>| StorageMetadata { is_directory: size.is_none(), size,
             created_ms: None, modified_ms: None, accessed_ms: None };
+        let mut virtual_directory=false;
         if mount == Mount::Asset {
             for (point, provider) in provider_snapshot(&self.providers) {
                 if relative == point || strip_mount(relative, &point).is_some() {
                     return Ok(Some(virtual_info(None)));
                 }
                 let Some(rest) = strip_mount(&point, relative) else { continue; };
+                virtual_directory|=!point.is_empty();
                 match provider.open(rest) {
                     Ok(reader) => return Ok(Some(virtual_info(Some(reader.len()?)))),
                     Err(Error::NotFound) => {},
@@ -330,7 +352,7 @@ impl ClientStorage for CapStorage {
         }
         let metadata = match self.dir(mount).metadata(if relative.is_empty() { "." } else { relative }) {
             Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.kind()==std::io::ErrorKind::NotFound || virtual_directory&&e.kind()==std::io::ErrorKind::NotADirectory=>return Ok(None),
             Err(e) => return Err(io(e)),
         };
         if !metadata.is_file() && !metadata.is_dir() { return Err(Error::Unsupported("special storage metadata")); }
@@ -355,7 +377,7 @@ impl ClientStorage for CapStorage {
         for (point, provider) in provider_snapshot(&self.providers) {
             let Some(rest) = strip_mount(&point, path.relative()) else { continue };
             if provider.exists(rest) {
-                return provider.container_source().is_some();
+                return provider.container_source_for(rest).is_some();
             }
         }
         false
@@ -367,7 +389,7 @@ impl ClientStorage for CapStorage {
         for (point, provider) in provider_snapshot(&self.providers) {
             let Some(rest) = strip_mount(&point, path.relative()) else { continue };
             if provider.exists(rest) {
-                return provider.container_source().map(|source| (source.to_owned(), point));
+                return provider.container_source_for(rest).map(|source| (source.to_owned(), point));
             }
         }
         None
@@ -431,17 +453,19 @@ impl ClientStorage for CapStorage {
         if path.mount() != Mount::Asset {
             return Err(Error::ReadOnly);
         }
+        let mut virtual_directory=false;
         for (point, provider) in provider_snapshot(&self.providers) {
             let Some(rest) = strip_mount(&point, path.relative()) else {
                 continue;
             };
+            virtual_directory|=!point.is_empty();
             match provider.open(rest) {
                 Err(Error::NotFound) => continue,
                 Ok(reader) => return Ok(reader),
                 Err(error) => return Err(error),
             }
         }
-        let file = self.asset.open(path.relative()).map_err(io)?;
+        let file = self.asset.open(path.relative()).map_err(|e|if virtual_directory&&e.kind()==std::io::ErrorKind::NotADirectory {Error::NotFound}else{io(e)})?;
         let metadata = file.metadata().map_err(io)?;
         if !metadata.is_file() {
             return Err(Error::Invalid("asset stream must be a file"));
@@ -459,11 +483,13 @@ impl ClientStorage for CapStorage {
         Ok(Arc::new(CapAssetReader{file:Mutex::new(file),len:metadata.len()}))
     }
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>> {
+        let mut virtual_directory=false;
         if path.mount() == Mount::Asset {
             for (point, provider) in provider_snapshot(&self.providers) {
                 let Some(rest) = strip_mount(&point, path.relative()) else {
                     continue;
                 };
+                virtual_directory|=!point.is_empty();
                 match provider.read(rest) {
                     Err(Error::NotFound) => continue,
                     Ok(b) if b.len() as u64 > MAX_FILE => return Err(Error::Limit("file size")),
@@ -471,7 +497,7 @@ impl ClientStorage for CapStorage {
                 }
             }
         }
-        read_limited(self.dir(path.mount()), path.relative())
+        read_limited_virtual(self.dir(path.mount()), path.relative(),virtual_directory)
     }
     fn write_atomic(&self, path: &VfsPath, data: &[u8]) -> Result<()> {
         if path.mount() == Mount::Asset {
@@ -494,6 +520,26 @@ impl ClientStorage for CapStorage {
             VfsPath::new(mount, dir)?.relative().to_owned()
         };
         let mut names = std::collections::BTreeSet::new();
+        // An explicit provider root is a virtual directory even when its
+        // lower disk path is the archive file itself. Inspect scoped overlays
+        // before the disk fallback; never suppress an unrelated disk error.
+        let mut virtual_directory = false;
+        if mount == Mount::Asset {
+            for (point, provider) in provider_snapshot(&self.providers) {
+                if rel == point {
+                    virtual_directory = true;
+                    names.extend(provider.list_dir("")?);
+                } else if let Some(rest) = strip_mount(&point, &rel) {
+                    let children = provider.list_dir(rest)?;
+                    virtual_directory |= !children.is_empty();
+                    names.extend(children);
+                } else if let Some(rest) = strip_mount(&rel, &point) {
+                    virtual_directory = true;
+                    if let Some(child) = rest.split('/').next().filter(|v| !v.is_empty()) { names.insert(child.into()); }
+                }
+                if names.len() > 65536 { return Err(Error::Limit("directory listing")); }
+            }
+        }
         let d = self.dir(mount);
         let entries = if rel.is_empty() {
             d.entries()
@@ -515,19 +561,8 @@ impl ClientStorage for CapStorage {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if virtual_directory && e.kind() == std::io::ErrorKind::NotADirectory => {}
             Err(e) => return Err(io(e)),
-        }
-        if mount == Mount::Asset {
-            for (point, provider) in provider_snapshot(&self.providers) {
-                if rel==point {
-                    names.extend(provider.list_dir("")?);
-                } else if let Some(rest)=strip_mount(&point,&rel) {
-                    names.extend(provider.list_dir(rest)?);
-                } else if let Some(rest)=strip_mount(&rel,&point) {
-                    if let Some(child)=rest.split('/').next().filter(|v|!v.is_empty()){names.insert(child.into());}
-                }
-                if names.len()>65536{return Err(Error::Limit("directory listing"))}
-            }
         }
         Ok(names.into_iter().collect())
     }
@@ -535,12 +570,14 @@ impl ClientStorage for CapStorage {
 impl FileSystem for DiskVfs {
     fn read(&mut self, client: ClientId, path: &VfsPath) -> Result<Vec<u8>> {
         let dir = self.dir(client, path.mount())?;
+        let mut virtual_directory=false;
         if path.mount() == Mount::Asset {
             let mounts = self.providers.get(&client).ok_or(Error::NotFound)?;
             for (point, provider) in provider_snapshot(mounts) {
                 let Some(rest) = strip_mount(&point, path.relative()) else {
                     continue;
                 };
+                virtual_directory|=!point.is_empty();
                 match provider.read(rest) {
                     Err(Error::NotFound) => continue,
                     Ok(b) if b.len() as u64 > MAX_FILE => return Err(Error::Limit("file size")),
@@ -548,7 +585,7 @@ impl FileSystem for DiskVfs {
                 }
             }
         }
-        read_limited(dir, path.relative())
+        read_limited_virtual(dir, path.relative(),virtual_directory)
     }
     fn write_atomic(&mut self, client: ClientId, path: &VfsPath, data: &[u8]) -> Result<()> {
         if path.mount() == Mount::Asset {
@@ -859,6 +896,33 @@ mod tests {
         );
     }
     #[test]
+    fn mounted_archive_file_is_a_virtual_directory_only_for_its_client() {
+        use crysirror_core::vfs::MemoryProvider;
+        let assets = tempfile::tempdir().unwrap();
+        let writable = tempfile::tempdir().unwrap();
+        std::fs::create_dir(assets.path().join("koe")).unwrap();
+        std::fs::write(assets.path().join("koe/z0629.nwk"), b"native archive").unwrap();
+        let mut fs = DiskVfs::new(assets.path(), writable.path()).unwrap();
+        fs.register(ClientId(1), "test", "one").unwrap();
+        fs.register(ClientId(2), "test", "two").unwrap();
+        let mut provider = MemoryProvider::new();
+        provider.insert("sample00017.nwa", b"voice".to_vec()).unwrap();
+        fs.mount_provider(ClientId(1), "koe/z0629.nwk", Arc::new(provider)).unwrap();
+        let own = fs.storage(ClientId(1)).unwrap();
+        assert_eq!(own.list(Mount::Asset, "koe/z0629.nwk").unwrap(), ["sample00017.nwa"]);
+        let path = VfsPath::new(Mount::Asset, "koe/z0629.nwk/sample00017.nwa").unwrap();
+        assert_eq!(own.read(&path).unwrap(), b"voice");
+        let missing=VfsPath::new(Mount::Asset,"koe/z0629.nwk/missing.nwa").unwrap();
+        assert!(matches!(own.open_asset(&missing),Err(Error::NotFound)));
+        assert!(matches!(own.read(&missing),Err(Error::NotFound)));
+        assert!(matches!(fs.read(ClientId(1),&missing),Err(Error::NotFound)));
+        assert!(own.metadata(Mount::Asset,missing.relative()).unwrap().is_none());
+
+
+        assert!(fs.storage(ClientId(2)).unwrap().list(Mount::Asset, "koe/z0629.nwk").is_err());
+        assert!(own.list(Mount::Save, "koe/z0629.nwk").unwrap().is_empty());
+    }
+    #[test]
     fn shared_provider_mounts_keep_the_per_client_limit() {
         use crysirror_core::vfs::MemoryProvider;
         let assets = tempfile::tempdir().unwrap();
@@ -867,7 +931,7 @@ mod tests {
         fs.register(ClientId(1), "test", "one").unwrap();
         fs.register(ClientId(2), "test", "two").unwrap();
         let _held = fs.storage(ClientId(1)).unwrap();
-        for _ in 0..64 {
+        for _ in 0..MAX_PROVIDER_MOUNTS {
             fs.mount_provider(ClientId(1), "", Arc::new(MemoryProvider::new()))
                 .unwrap();
         }
@@ -875,7 +939,7 @@ mod tests {
             fs.mount_provider(ClientId(1), "", Arc::new(MemoryProvider::new())),
             Err(Error::Limit("provider mounts"))
         );
-        assert_eq!(fs.provider_mounts(ClientId(1)).len(), 64);
+        assert_eq!(fs.provider_mounts(ClientId(1)).len(), MAX_PROVIDER_MOUNTS);
         fs.mount_provider(ClientId(2), "", Arc::new(MemoryProvider::new()))
             .unwrap();
         assert_eq!(fs.provider_mounts(ClientId(2)).len(), 1);

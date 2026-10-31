@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [features]
 arc-formats = ["dep:crysirror-formats-arc"]
+blackcyc-formats = ["dep:crysirror-formats-blackcyc"]
 
 [dependencies]
 crysirror-tasks.workspace = true
@@ -22,6 +23,7 @@ crysirror-siglus-vm.workspace = true
 crysirror-image.workspace = true
 crysirror-resource.workspace = true
 crysirror-formats-arc = { workspace = true, optional = true }
+crysirror-formats-blackcyc = { workspace = true, optional = true }
 crysirror-text.workspace = true
 encoding_rs = "0.8"
 crysirror-video = { path = "../crysirror-video" }
@@ -31,6 +33,7 @@ anyhow.workspace = true
 toml_edit = { version = "=0.25.17", default-features = false, features = ["parse"] }
 blake3.workspace = true
 cap-std.workspace = true
+chrono = "=0.4.45"
 
 [dev-dependencies]
 crysirror-acoustics.workspace = true

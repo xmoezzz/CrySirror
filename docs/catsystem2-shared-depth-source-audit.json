@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-31",
+  "kind": "shared capability extraction and original semantic mapping",
+  "source_audit": "catsystem2-task-plane-source-audit.json",
+  "implementation": "crysirror-scene/layer/depth_order.rs; canonical client side-map, shared compare_primitives, no VM renderer/private float sort",
+  "public_api": {
+    "command": "LayerCommand::SetDepth{id:u32,depth:Option<f32>}",
+    "owner_boundary": "LayerSystem::commit_frame_order(&mut self)->Result<()>",
+    "query": "LayerSystem::depth(&self,client:ClientId,id:u32)->Result<Option<f32>>",
+    "primitive": "depth_order:Option<DepthOrderKey>; DepthOrderKey.path:Vec<DepthOrderStep>; scope:u32/major:i32/depth:f32/rank:u32"
+  },
+  "rules": [
+    "Finite depths only; order[0] major bucket remains primary.",
+    "Ordinary layers retain minor/owner/id/sub ordering and precede explicit depth scopes within same major.",
+    "Depth scopes sort depth then client then last committed rank. New scopes append in admission order.",
+    "Explicit group scope is inherited by payload descendants; nested scopes remain within parent scope. Cat native flat Z is mapped only to payloads.",
+    "frame(&self) computes pure keys; history mutates only on accepted owner frame. Intermediate SetDepth and None->Some updates do not change unseen order. None committed for a frame retires ordering admission.",
+    "Remove/clear purge side-map; clone/restore/transactions preserve and validate owner/id/admission/history.",
+    "Frozen subtree snapshots bake effective order into immutable LayerSpec.order before group-alpha isolation. Later live depths cannot change snapshot."
+  ],
+  "validation": {
+    "command": "cargo test --release -p crysirror-scene --lib depth_order",
+    "result": "4 passed",
+    "log": "target/verification/catsystem2/shared-depth-history-tests.log",
+    "compile": "cargo check --release -p crysirror-scene -p crysirror-wgpu passed shared-depth-check.log",
+    "hardware": "No GPU behavior result claimed by these CPU tests"
+  }
+}

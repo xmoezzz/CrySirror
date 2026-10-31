@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-31",
+  "scope": "Original KCS native209-213 and kcInterpriter variable/expression state; not a renderer or complete CatSystem2 implementation",
+  "module_sha256": "f8a1fb4fed8a0c64c3fbc0bcf009f63e8f3181cfbc1a0dbd60f9ddefc8e25b3d",
+  "method": "Owner-authorized local IDA 9 static decompilation and data reads only. Original executable is never run. Generated code remains ignored under target/verification/catsystem2.",
+  "functions": {
+    "643650": "209 constructs task-owned interpreter only when no inherited or existing interpreter; returns native void status2",
+    "728460": "live DWORD variables are zero initialized; backup allocation has no constructor writes; 22528-byte command memory zeroed; default and dirty zero; per-task map empty; lexer constructed in non-KCS keyword mode",
+    "728580": "complete destructor confirms maps own local symbol tables and private variable allocations, rather than scene/render state",
+    "7286d0/728800/728870": "per-task local-bank create/select/remove with512 DWORDs and symbol map; KCS native209 does not create a selected local bank",
+    "728970/728990/7289d0": "bounded flag read returns0 outside live bank; write marks dirty even when rejected; default value assignment",
+    "643620/643740/6436f0": "native210 read flag;211 write flag;212 set expression default; missing interpreter preserves native0/void behavior",
+    "643530/728ad0": "native213 copies original expression bytes, removes a final percent byte, loads lexer, compiles command/tree and evaluates; no string interpolation",
+    "877640/878750/87cab0/6735b0": "lexer initial source empty, reserved symbol container empty, keyword mode explicitly0 for kcInterpriter",
+    "877710/877780/877880/877940/877a30/8780d0/878190/878640/8786b0/878760": "complete lexical routines reviewed, including signed-byte character accumulation, native integer wrapping, operators, @, comments and line accounting",
+    "728e60": "command memory has256 slots of88 bytes; whitespace and newline tokens discarded; @ substituted with interpreter default",
+    "729470/729340": "prefix/postfix rewriting and unary/binary arity",
+    "728fa0/7292f0/8f31a0": "operator/value stacks and native left/right precedence table; logical indices replace native expression pointers",
+    "729c20/72ad60/72ada0": "integer expression evaluation and lvalue records; eager logical operands, signed comparisons/division/right shifts and wrapping arithmetic; global mutation dirty; absent selected symbol map resolves names to0",
+    "650400/876d70/5cac00": "Native1 VM string substitution then literal-percent protection for the native500-byte debug sink. Adapter uses existing engine append_log/LogBook owner commit and bounded shared text decoding, without passing native printf strings or invoking debug windows."
+  },
+  "ownership": {
+    "vm": "Native flags/default/dirty/backup-initialization policy, task-local namespaces, original token IDs, precedence, typed lvalues and pending native completion",
+    "shared_engine": "All resource I/O, parsing of engine resources, image/text/UI/layer/audio algorithms and async publication remain shared services",
+    "boundary": "No pointers or original machine code enter CrySirror state. Source count, tokens, recursion and variable indexes are bounded; unsupported literals/layouts fail without acknowledging the call. Expressions validate a full tree and execute on a VM copy before committing effects."
+  },
+  "limitations": [
+    "Original backup/save/load semantics and task-local creation consumers are not yet exposed by adapters.",
+    "Float/string expression values and unsupported lexical forms remain explicit failures.",
+    "CST/FES execution, task spawning, presentation and original saves are not established by native209 construction.",
+    "Native1 consecutive literal-percent runs are explicitly unsupported because the reviewed formatter can produce an incomplete printf run; no undefined native printf behavior is invented."
+  ],
+  "validation": "See STATUS.md for actual completed commands and behavior; source audit alone is not a build or game pass."
+}

@@ -893,6 +893,10 @@ fn common_args(object: &mut Object, v: &[i32], with_pattern: bool) {
     }
 }
 
+/// Original target/argument layout, exposed for the thin preparation fence.
+pub fn creation_image_name(machine:&mut Machine,command:&Command)->Result<Option<String>>{
+    if matches!(command.op.opcode,1000..=1004|1300|1400){let t=targets(machine,command,false)?;Ok(Some(machine.str_param(command,t.args)?))}else{Ok(None)}
+}
 pub fn creation(machine: &mut Machine, command: &Command) -> Result<Next> {
     let t = targets(machine, command, false)?;
     let r = t.refs[0];

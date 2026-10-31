@@ -1,0 +1,11 @@
+layerExMovie semantic reference
+Author: わたなべごう (Go Watanabe).
+Source: https://github.com/krkrz/krkrz/tree/49c4d53506edecb824cd7b2cff8d32959b1f1b70/src/plugins/win32/layerExMovie
+Pinned commit: 49c4d53506edecb824cd7b2cff8d32959b1f1b70
+Original readme licence statement: このプラグインのライセンスは吉里吉里本体に準拠してください。
+The original KiriKiri/W.Dee and contributors notice is retained in krkrz.txt.
+Full reference hashes are recorded in ../krkr-bound-xp3-label-sources.json.
+No DirectShow/COM implementation, temporary-file extraction, framebuffer copier,
+private playback clock or native executable code is adopted. Native semantic
+methods/callback/resource/wait policy is independently maintained in the
+first-class crysirror-krkr crate and calls engine-owned Media/Canvas services.

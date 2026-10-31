@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "date": "2026-10-31",
+  "scope": "Independently written native audio plans, shared worker-backed text/UI bridges and original legacy save record parsing; supported profiles and incomplete restoration are explicit.",
+  "research_repository": "https://github.com/tinyan/SystemNNN",
+  "research_commit": "78a05053c78b3b80065a9a209c6685a7c60a2e83",
+  "licence": "No source licence grant found; only behavior facts inspected. No implementation copied, linked or translated.",
+  "owner_module": {
+    "resource": "mugen2/mugen2.exe inside owner-supplied MSI",
+    "sha256": "e85e92ec538d50eae08d27286177149972d443a96d1415277c1ae1f9ee108bdb",
+    "execution": "Never executed; static IDA9 decompilation only",
+    "static_evidence_directory": "target/verification/systemnnn",
+    "inspection_script": "ida-text-audio-save.py",
+    "functions_read_completely": {
+      "0x531170": "legacy music callback, parameter defaults and stop/volume/play discriminants",
+      "0x5321a0": "legacy SE callback, channel/loop/volume and signed spatial operands, skip policy",
+      "0x531820": "legacy voice callback, pre-received filename, character flags, skip/switch/read policy, loop work and 62-byte name limit",
+      "0x538a70": "legacy PRINT callback sets message-window flag, forwards native code, script/id, encoded text and cutin",
+      "0x5389c0": "legacy LPRINT callback clears message-window flag and forwards native message data",
+      "0x538910": "legacy APPEND callback clears message-window flag in this reviewed legacy binary; modern APPEND source does not assign it",
+      "0x5387a0": "legacy SELECT callback (decompilation saved; layout/result contract requires further audit)",
+      "0x530f80": "legacy STARTMESSAGE callback (decompilation saved; further audit required)",
+      "0x447130": "music volume helper (decompilation saved; downstream native volume curve not yet audited)",
+      "0x439910": "SetVolume native centi-decibels = percent*100-10000; no zero shortcut",
+      "0x4397f0": "Native loopFlag nonzero chooses DSBPLAY_LOOPING",
+      "0x46c420": "Music clock advances in100ms increments with millisecond remainder",
+      "0x46c630": "Music sequence EOF: repeat0 infinite,1 once,positive total repetitions",
+      "0x46cb20": "Music fade-in native integer centi-decibel interpolation",
+      "0x46cbd0": "Music fade-out native integer centi-decibel interpolation",
+      "0x52f9c0": "Music configured volume+delta sentinel/clamp",
+      "0x500fa0": "Complete original message constructor and config/default/speed table bindings",
+      "0x4fca30": "Complete original selection constructor; advanced UI profiles remain unimplemented",
+      "0x4da970": "Native slot writer original record order",
+      "0x4da2f0": "Native INFO64 and version/optional/extension count fields",
+      "0x4d9c20": "Native block header32, little endian byte size/code, zero reserved words,15-byte label",
+      "0x4da1e0": "Native STATUS7088 record and local timestamp",
+      "0x5343f0": "Legacy save writes1000 variables into1024-slot record",
+      "0x53ad20": "Complete native status acquisition function; field positions exposed for inspection only",
+      "0x53ab90": "Native MESSAGE64 rows of256 bytes, at most254 bytes then two NULs"
+    }
+  },
+  "complete_reference_functions_read": [
+    "nnnLib/execscript.cpp: ExecScript IDENTIFY_SYSTEMCOMMAND message/draw/overlap/select and IDENTIFY_SYSTEMFUNCTION audio dispatch",
+    "nnnLib/gamecallback.cpp: SystemCommandPrint, SystemCommandLPrint, SystemCommandAppend, SystemCommandDraw, SystemCommandSelect",
+    "nnnLib/gamecallback.cpp: SystemFunctionMusic, PlayMusic overloads, StopMusic",
+    "nnnLib/gamecallback.cpp: SystemFunctionNextFadeSe, SystemFunctionNextFadeVoice, SystemFunctionVolumeOnlySe, SystemFunctionVolumeOnlyVoice, SystemFunctionMusicVolumeOnly",
+    "nnnUtilLib/musicControl.cpp: complete file",
+    "nnnUtilLib/scriptSoundControl.cpp: complete file"
+  ],
+  "verified_facts": {
+    "music": {
+      "code": "0x33330007",
+      "parameters": [
+        "one-based music number or -1 stop or -2 volume-only",
+        "loop count (default 0); stop uses this slot as fade-out",
+        "delta volume (default -9999 sentinel)",
+        "fade-in (default -1 sentinel)",
+        "fade-out (default -1 sentinel)"
+      ],
+      "volume_only": "Native configured music volume+delta clamp1..100; positive play default -9999 preserves configured volume; direct gain=10^((percent-100)/20), including0->1e-5.",
+      "resource_name_policy": "Original PlayMusic0x52fa40 resolves bgmList[n*2]. ResourceNames music_lookup preserves MML precedence; a playlist must never be decoded as audio.",
+      "unresolved": [
+        "Shared stepped centi-decibel envelope execution (native tick unit proven100ms)",
+        "Shared finite repeat>1/MML source sequence playback",
+        "Skip/auto/read-history policy outside admitted normal profile"
+      ]
+    },
+    "se_voice": {
+      "codes": [
+        "0x33330009",
+        "0x33330008"
+      ],
+      "parameters": [
+        "SE number / voice string-table ID or -1 stop",
+        "native channel",
+        "delta volume (default 0)",
+        "loop flag (default 0)",
+        "start X",
+        "start Y",
+        "start Z",
+        "move time",
+        "end X",
+        "end Y",
+        "end Z",
+        "doppler"
+      ],
+      "spatial_decode": "Each supplied coordinate >=128 has 256 subtracted once; nonzero spatial policy must not be silently ignored",
+      "voice_filename": "Native dispatch pre-receives string-table bytes; adapter must not treat string ID as an audio filename or SE number",
+      "voice_name_limit": "Legacy callback copies at most 62 bytes into its 64-byte stored name and writes two NUL bytes",
+      "unresolved": [
+        "Nonzero native spatial/motion profile requires shared audio mapping",
+        "Character-level switch/skip/read policy outside admitted normal profile",
+        "Muted voice still requires resource/duration preparation and is explicitly rejected until wired"
+      ]
+    },
+    "message": {
+      "codes": [
+        "0x22220001 PRINT",
+        "0x22220002 LPRINT",
+        "0x22220003 APPEND"
+      ],
+      "instruction_payload": "message-table0 text ID, serial ID, optional cutin; raw text is encoded bytes",
+      "identity": "Callback combines original script number in upper16 and serial low16",
+      "legacy_window_policy": "Reviewed legacy binary sets window flag 1 for PRINT, 0 for LPRINT and 0 for APPEND. Modern APPEND differs and cannot override this binary evidence.",
+      "unresolved": [
+        "Inline # markup/ruby/replacement/gaiji policies are explicit unsupported boundaries",
+        "Original font decoration and advanced window/cutin policies require mapping",
+        "Full real-game text presentation has not yet been observed"
+      ]
+    },
+    "modern_only_boundaries": "Modern NextFade/VolumeOnly/MessageEffect opcodes are absent from the inspected legacy callback dispatch and must not be inferred as supported on Mugen2Legacy",
+    "save": "Original Mugen2 save envelope and exact record sizes statically proven; bounded native parser/validator/round-trip/variables/messages and scoped async atomic-write admission implemented. Native STATUS/effect/resource reconstruction and VM restoration remain unimplemented; framework snapshots are not claimed compatible."
+  },
+  "implementation_handoff": {
+    "files_created": [
+      "src/native_audio.rs",
+      "src/native_text.rs",
+      "src/native_ui.rs",
+      "src/native_save.rs",
+      "tests/native_services.rs"
+    ],
+    "audio_boundary": "NativeAudioPolicy pure candidate -> NativeAudioPlan and typed Music/Sound/Voice lookups; zero-fade normal playback submits shared AudioRequest. Parent AudioBridge owns async resource preparation and exact acknowledgement. Nonzero fade/spatial/finite repeats fail visibly at request conversion.",
+    "text_boundary": "NativeTextBridge retains original receipt across task admission, shared Text measurement/cell layout, atomic Layer GlyphRun publication, shared rational-rate reveal and click completion. Profile is read from the reviewed legacy setup. Original owner module supplies single-byte conversion table as data after exact SHA guard.",
+    "ui_boundary": "NativeSelectionBridge prepares common GlyphRuns and retained interaction-only Widgets on scoped tasks, observes engine activation serials, validates CASE continuation before removing UI, and acknowledges only a real activation. Timed/special profiles fail visibly.",
+    "save_boundary": "NativeSaveFile preserves complete raw legacy records and unmodified/padding bytes, validates caller-supplied original header/version/layout, and exposes inspected native fields. It does not manufacture a complete new-game save or claim native VM restore.",
+    "validation": "Static inspection complete; release compilation/tests are being run and will be recorded from actual results.",
+    "unresolved": [
+      "Original save full restoration",
+      "Native text markup/decoration/cutin",
+      "UI theme/cursor/scroll/timer/special profiles",
+      "Stepped audio fades and finite playlist repeats",
+      "Original skip/auto/character routing policies"
+    ]
+  },
+  "external_contracts": [
+    {
+      "url": "https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ee418150(v=vs.85)",
+      "scope": "IDirectSoundBuffer8::SetVolume units are hundredths of dB. Minimum-10000 means100dB attenuation (effectively silent), supporting mathematical amplitude10^(centi_dB/2000)."
+    }
+  ]
+}

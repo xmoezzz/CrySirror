@@ -1,0 +1,17 @@
+{
+  "scope": "KAGParserEx ordered native tag dictionary facade; no rendering or image algorithms in the adapter.",
+  "reference": {
+    "repository": "https://github.com/wamsoft/KAGParserEx",
+    "commit": "61d5f1e65f500b5aef5a621333f86f3457939b31",
+    "file": "KAGParser.cpp",
+    "sha256": "c8980baa39704e636021bfe20d700b68f2fe917d59aac14362ea9e33bacd0a13"
+  },
+  "evidence": {
+    "ArgValue_add": "Lines1326-1343: every add sets the dictionary value and pushes the name onto the ordered array; duplicate names remain ordered while the dictionary stores the last value.",
+    "getReturn": "Lines1351-1358: attaches the ordered array as taglist.",
+    "native_tag": "Lines1824-1825: first adds tagname via the same ArgValue::add, before attributes.",
+    "macro_spread_distinction": "Lines1557-1564 exclude tagname only when enumerating macro arguments; this is not the ordinary tag list rule."
+  },
+  "actual_trigger": "Owner title background command with one flag produced taglist.count1, causing original scene object creation policy (count>1) to return null. Correct list is tagname,show. Native game scripts remain unmodified.",
+  "validation": "Self-authored release regression checks existing ordinary parser format, single attribute creation guard, duplicate attribute names with final dictionary value, and empty tag; actual title/game progression recorded separately."
+}

@@ -15,6 +15,7 @@ pub fn dispatch(machine: &mut Machine, command: &Command) -> anyhow::Result<Next
         (1, 10) if command.op.opcode != 100 => str::dispatch(machine, command),
         (1, 11) if !(300..=307).contains(&command.op.opcode) => mem::dispatch(machine, command),
         (1 | 2, 60..=62) => obj::management(machine, command),
+        (1 | 2, 71 | 72) if matches!(command.op.opcode,1000..=1004|1300|1400) && machine.sys.gfx.loader.as_ref().is_some_and(|l|l.owner_image_preparation()) => machine.request_command(command),
         (1 | 2, 71 | 72) => obj::creation(machine, command),
         (1 | 2, 73 | 74) => obj::animation(machine, command),
         (1 | 2, 81 | 82 | 87 | 88 | 90 | 91 | 93 | 94) => obj::properties(machine, command),

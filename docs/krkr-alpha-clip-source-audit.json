@@ -1,0 +1,23 @@
+{
+  "scope":"Native clipAlphaRect semantics mapped to a reusable engine image effect, with existing Canvas image preparation for composed inputs",
+  "reference":{
+    "repository":"https://github.com/wtnbgo/layerExBTOA",
+    "commit":"a57e7a25a9e079f95b93cf9768949e0f8789f685",
+    "notice":"docs/third-party/layerexbtoa.txt",
+    "files":[
+      {"file":"Main.cpp","sha256":"71955c066dc69bd6accf9fda774e9115ec13246c4bacccf312b162718545d7f5"},
+      {"file":"manual.tjs","sha256":"66b11d8b4b53c6d908fdf8ddd91dac0904a06649e9431195c85e0b1911fe2310"},
+      {"file":"readme.txt","sha256":"26e6dde28e04a6f0b7c1a2b820517ee8592be0d6c37be5c6a5d37e41501b364b"}
+    ],
+    "inspection":"Complete Main.cpp, manual, readme and build manifest inspected. Secondary Rust implementations were read as navigation aids, not embedded or used as the engine boundary."
+  },
+  "semantics":{
+    "arguments":"Seven mandatory values; coordinates and optional clear use signed32 coercion. Source width/height must be positive; clear applies only when0..255 and not void.",
+    "coverage":"Source/destination image bounds and destination clip bound the operation; source clip does not. Alpha product is (p+(p>>7))>>8 for p=da*sa. Normal profile retains hidden RGB.",
+    "associated":"ltAddAlpha profile scales all four stored bytes by source coverage with the same rounding. With clear, exterior RGBA is scaled; entirely disjoint source uses the original special coverage-only clear policy.",
+    "alias":"Original source pointers may alias destination; forward writes, including exterior clearing, can affect later source samples. The public self_source option explicitly preserves this.",
+    "publication":"Native policy captures only its own Canvas when no immutable CPU source graph is available, then calls the shared ImageInput::Raster/ImageEffect::AlphaClipRect pipeline and existing immutable resource publication. No native pixel loop or framebuffer."
+  },
+  "shared_api":"crysirror_image::alpha_clip::AlphaClipRect::validate/apply; ImageEffect::AlphaClipRect; public Bitmap.beginAlphaClip(slot,source,options) with existing worker tickets and client/epoch/revision checks.",
+  "limits":"This adds clipAlphaRect, not every layerExBTOA helper or a new renderer blend model. Unknown methods remain visible failures. Native callbacks require a resumable boundary; presenter-less composed capture fails explicitly. No original EXE/DLL executed."
+}

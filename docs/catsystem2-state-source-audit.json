@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-31",
+  "module_sha256": "f8a1fb4fed8a0c64c3fbc0bcf009f63e8f3181cfbc1a0dbd60f9ddefc8e25b3d",
+  "method": "Owner-authorized local static IDA9 review; original EXE never run",
+  "sound_definition": {
+    "native": "938/647D60 ->714E10 manager[40815]",
+    "bootstrap": "WndProc5316A0 message0x40C ->714D80 before original KCS;71EC50 sets startup SOUNDCONFIG,714D80 resource presence storesflag1 before7182B0 imports declarations",
+    "representation": "Actual shared XmlDocument AST retained after bounded scoped worker I/O/parse. Native938 found flag observes real resource, not invented default0. XML errors remain explicit.",
+    "source": "7182B0 groups/MASTER/PART/718CB0 plus optional719930 preferences; field projection/default/name binding pending later native calls.",
+    "division": "Original config representation does not imply mixer or routing creation. Generic gain/mix/routing/decoder must use shared audio APIs; audio_playback_mapped=false.",
+    "behavior": "Real config.int/soundconf.xml loose-first mode3 load;5groups/6parts; native938 called once. Lognative938-owner.log,1/1,19947instructions then247."
+  },
+  "css_load": {
+    "native": "247/6497E0 formats VM filename, UTF16 conversion,78B600 container,78BB10 load",
+    "layout": "CSS\\0 four-byte magic, compressed size32, uncompressed size32, original tag32, then zlib. Original constructor reserves0x80000;native load capacity=(uncompressed>>19+1)<<19. Adapter stores actual semantic bytes/records, never address/capacity as pointer.",
+    "records": "78B750 appends id32+size32+rawpayload.78B790 lookup returns first matching record. Adapter validates bounded extents and preserves duplicate order;restore is not yet mapped.",
+    "division": "Client Save/open_read and existing shared Resource TransformRegistry zlib; owner publishes original container value/handle beforeACK; no private compression or ambient Windows save path.",
+    "limits": "256 live logical handles,16MiBsource/decoded/65536records; missing returns0, wrong signature returns0;damaged header/records fail beforeACK. Other native save serialize/write/restore calls stay unsupported.",
+    "behavior": "Actual savegen.dat absent in isolated owner client Save; native247 returns0 after actual read.19957instructions then276;native247-owner.log1/1. Synthetic CSS header/tag/duplicate records/truncation unit passes."
+  },
+  "string_variables": {
+    "natives": "276/657DC0 ->73FE70/740450;277/657D60 ->740150",
+    "semantics": "Per-KCS u32 key to raw byte-string value, overwrite or create, assignment dirty184=1. Query returns1 for assigned empty value,0 for absent;missing writes one NUL;presentstrcpy includes one NUL. No printf/interpolation applied.",
+    "division": "Original VM values belong in adapter, analogous native flag banks. Text layout/rendering/encoding algorithms remain shared.278/73FF40 generic $str replacement is not mapped.",
+    "limits": "65536variables,16MiBtotal,65534bytes/value;scope retained in VM and no original pointer exposed."
+  },
+  "shared_inflate_cancellation": {
+    "implementation": "Resource transforms.rs inflate loop checks context cancellation before every16KiBblock and before publication, preserving existingcodec/budgetlogic",
+    "validation": "cargo test --release -p crysirror-resource --lib transforms,2/2 passed;customreader cancels during firstblock and finalEOF,neither partial result published;shared-inflate-cancel-tests.log"
+  }
+}

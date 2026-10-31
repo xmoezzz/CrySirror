@@ -220,6 +220,7 @@ fn info() -> &'static ClassInfo {
         fn m(name:&'static str,params:Vec<(&'static str,T)>,returns:T,doc:&'static str)->MethodInfo {MethodInfo{name,params,returns,doc}}
         ClassInfo{name:"Text",doc:"CPU-shaped rich text rendered to client-owned RGBA surfaces. Fonts must be explicitly installed.",properties:vec![],methods:vec![
             m("beginFont",vec![("alias",T::String),("asset",T::String),("faceIndex",T::Optional(Box::new(T::Int)))],T::Int,"Begin bounded asset read and font preparation. fontStatus publishes the immutable face to this client's measurement and renderer catalog."),
+            m("beginPrecomputedFont",vec![("alias",T::String),("asset",T::String),("pixelSize",T::Int)],T::Int,"Begin bounded TFT v0/v1 fixed-size coverage font preparation. Uses the same scoped fontStatus, measurement, TextRun and GlyphRun resources; missing glyphs or a different size fail explicitly."),
             m("fontStatus",vec![("ticket",T::Int)],T::Map,"Poll font workers. Ready contains canonical alias, digest, revision, families and resource handle; failed contains an error."),
             m("resolveFont",vec![("aliasOrFamily",T::String)],T::Any,"Resolve a client-owned logical alias or font family to immutable font metadata, or null."),
             m("releaseFontJob",vec![("ticket",T::Int)],T::Void,"Cancel/release registration ticket. Published faces remain until releaseFont."),

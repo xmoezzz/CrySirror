@@ -44,6 +44,18 @@ fn call(
 }
 
 #[test]
+fn canvas_capacity_is_available_through_public_reflection_without_a_native_vm() {
+    let root=tempfile::tempdir().unwrap();
+    let mut app=app(root.path());
+    let expected=json!({"surfacesPerClient":crysirror_core::service::MAX_CANVAS_SURFACES_PER_CLIENT});
+    assert_eq!(call(&mut app,"Canvases","getLimits",json!([])).unwrap().to_json(),expected);
+    let b=app.runtime().unwrap().client_id("b").unwrap();
+    app.context().state().unwrap().client=b;
+    assert_eq!(call(&mut app,"Canvases","getLimits",json!([])).unwrap().to_json(),expected);
+    assert!(app.typescript_declarations().unwrap().contains("getLimits()"));
+}
+
+#[test]
 fn data_vm_client_uses_the_same_retained_canvas_state_and_transactional_commands() {
     let root = tempfile::tempdir().unwrap();
     let mut app = app(root.path());
@@ -129,6 +141,14 @@ fn data_vm_client_uses_the_same_retained_canvas_state_and_transactional_commands
         before
     );
     assert!(call(&mut app, "Canvases", "get", json!([-1])).is_err());
+    assert!(call(&mut app,"Canvases","apply",json!([[{"op":"destroy","id":2}]] )).is_err());
+    call(&mut app,"Canvases","apply",json!([[
+        {"op":"hide","layer":42},{"op":"destroy","id":2}
+    ]])).unwrap();
+    assert_eq!(call(&mut app,"Canvases","get",json!([2])).unwrap(),Value::Null);
+    app.context().state().unwrap().client=b;
+    assert_eq!(call(&mut app,"Canvases","get",json!([2])).unwrap().to_json()["width"],1,
+        "destroying a's surface must preserve b's same-numbered resource");
 }
 
 #[test]

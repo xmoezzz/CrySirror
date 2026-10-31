@@ -6,10 +6,11 @@ use anyhow::bail;
 mod entis;
 mod extra;
 mod images;
+mod int_aliases;
+mod int_executable;
 mod pac3;
 mod profiles;
 mod structured;
-mod int_executable;
 pub(crate) static FORMATS: &[Legacy] = &[
     Legacy {
         id: "unity/assets",
@@ -456,6 +457,7 @@ fn index_profile(
     Ok(out)
 }
 fn int(s: &dyn AssetReader, cx: &DecodeContext) -> Result<Vec<Row>> {
+    cx.check_cancelled()?;
     ensure!(magic(s, 0, b"KIF\0")?, "missing KIF");
     let n = le32(&bytes(s, 4, 4, 4)?, 0)? as usize;
     limits(cx, n)?;
@@ -464,18 +466,26 @@ fn int(s: &dyn AssetReader, cx: &DecodeContext) -> Result<Vec<Row>> {
         .chunks_exact(72)
         .find(|p| zstr(&p[..64]) == b"__key__.dat");
     let mut rows = Vec::new();
+    let mut known_decode = native_key.is_none();
     if let Some(key_record) = native_key {
         let profile = cx.parameters.get("cat-system/int");
         let alias = profile
             .and_then(|p| p.get("game_id_key_id"))
             .and_then(|v| v.as_str());
-        let executable = profile.and_then(|p| p.get("executable")).and_then(|v| v.as_str());
+        let executable = profile
+            .and_then(|p| p.get("executable"))
+            .and_then(|v| v.as_str());
         let game_id = if let Some(alias) = alias {
             Some(cx.keys.key(cx.client, alias)?.with_bytes(|b| b.to_vec()))
         } else if let Some(path) = executable {
             Some(int_executable::game_id(cx, path)?)
-        } else { None };
+        } else {
+            None
+        };
         if let Some(game_id) = game_id {
+            // Native body Blowfish uses only this archive's file key. Offset
+            // and ordinal are index metadata, never body cipher inputs.
+            known_decode = true;
             let seed = {
                 let b = &game_id;
                 let mut seed = 0xffffffffu32;
@@ -494,6 +504,7 @@ fn int(s: &dyn AssetReader, cx: &DecodeContext) -> Result<Vec<Row>> {
             };
             let file_key = mt_classic_first(le32(key_record, 68)?).to_le_bytes();
             for (i, p) in raw.chunks_exact(72).enumerate() {
+                cx.check_cancelled()?;
                 if zstr(&p[..64]) == b"__key__.dat" {
                     continue;
                 }
@@ -547,15 +558,19 @@ fn int(s: &dyn AssetReader, cx: &DecodeContext) -> Result<Vec<Row>> {
             }
         }
     } else {
-        for p in raw.chunks_exact(72) {
-            rows.push(Row::raw(
-                sjis(zstr(&p[..64]))?,
-                le32(p, 64)? as u64,
-                le32(p, 68)? as u64,
-            ));
+        for (i, p) in raw.chunks_exact(72).enumerate() {
+            cx.check_cancelled()?;
+            rows.push(
+                Row::raw(
+                    sjis(zstr(&p[..64]))?,
+                    le32(p, 64)? as u64,
+                    le32(p, 68)? as u64,
+                )
+                .meta(serde_json::json!({"native_index":i,"encrypted":false})),
+            );
         }
     }
-    checked_rows(s, cx, rows)
+    int_aliases::coalesce(s, cx, rows, known_decode)
 }
 /// MT19937 classic seeding differs from the modern standard recurrence.
 fn mt_classic_first(mut seed: u32) -> u32 {

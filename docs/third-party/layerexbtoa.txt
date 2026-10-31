@@ -1,0 +1,11 @@
+layerExBTOA — Go Watanabe (わたなべごう)
+Source: https://github.com/wtnbgo/layerExBTOA
+Pinned revision: a57e7a25a9e079f95b93cf9768949e0f8789f685
+
+The upstream readme states:
+このプラグインのライセンスは吉里吉里本体に準拠してください。
+
+Retain the KiriKiri licence and contributor notices in krkrz.txt alongside
+this notice. CrySirror's alpha-clip byte operation and thin native mapping
+were written in Rust after inspecting the complete pinned Main.cpp, manual
+and readme; no original DLL, engine core or renderer is embedded or executed.

@@ -101,6 +101,9 @@ pub(crate) struct Scanner<'f> {
     regs: BTreeMap<i16, Expr>,
     flag: Option<Cond>,
     declared: BTreeSet<i16>,
+    /// Top-level bytecode locals need one dominating source declaration.
+    /// Redeclaring on loop writes would shadow the loop's live value.
+    hoisted_locals: BTreeSet<i16>,
     /// Bytecode offsets whose instructions were processed. The control-flow
     /// walk reads it when the body is finished: an instruction nobody
     /// processed belongs to a region the decompilation dropped, and the
@@ -144,6 +147,7 @@ impl<'f> Scanner<'f> {
             regs: BTreeMap::new(),
             flag: None,
             declared: BTreeSet::new(),
+            hoisted_locals: BTreeSet::new(),
             scanned: BTreeSet::new(),
             declaration_offsets: declaration_offsets(file, object),
             materialized: BTreeSet::new(),
@@ -201,6 +205,15 @@ impl<'f> Scanner<'f> {
     /// Takes the emitted statements.
     pub(crate) fn take_out(&mut self) -> Vec<Stmt> {
         std::mem::take(&mut self.out)
+    }
+
+    pub(crate) fn take_local_prologue(&mut self) -> Vec<Stmt> {
+        let declarations=std::mem::take(&mut self.hoisted_locals).into_iter().rev()
+            .map(|reg|VarDecl{name:Ident::new(self.names.name(reg)),ty:None,initializer:None,span:Span::empty(0)})
+            .collect::<Vec<_>>();
+        if declarations.is_empty() {Vec::new()} else {
+            vec![Stmt::new(StmtKind::Var{kind:VarKind::Var,declarations},Span::empty(0))]
+        }
     }
 
     /// Restores the statement output (undoing a speculative scan).
@@ -544,14 +557,12 @@ impl<'f> Scanner<'f> {
     fn assign_stmt(&mut self, reg: i16, expr: Expr) -> Stmt {
         let name = self.names.name(reg);
         let is_local = reg <= -3 && self.object.func_decl_arg_count as i16 + 3 <= -reg;
-        // A top-level register has no other source form: outside a function a
-        // bare `name = value` is a *global member* write (`VM_SPD`), not the
-        // register store the bytecode performs, and a member nobody carries
-        // makes that write raise where the register store always worked.  So
-        // every top-level local assignment re-declares its name, while inside
-        // a function one `var` is enough and later assignments reach the same
-        // register.
-        if is_local && (self.at_top_level || !self.declared.contains(&reg)) {
+        // A root declaration dominates every branch/loop write. A repeated
+        // `var lN` inside a nested scope would create a different binding,
+        // whereas the bytecode writes the same negative register.
+        if is_local && self.at_top_level {
+            self.hoisted_locals.insert(reg);
+        } else if is_local && !self.declared.contains(&reg) {
             self.declared.insert(reg);
             return Stmt::new(
                 StmtKind::Var {
@@ -772,7 +783,10 @@ impl<'f> Scanner<'f> {
             }
             3 => {
                 let reg = inst.operands[0];
-                if reg < 0 {
+                let is_local=reg<=-3 && self.object.func_decl_arg_count as i16+3 <= -reg;
+                if self.at_top_level && is_local {
+                    Effect::Stmt(self.assign_stmt(reg,Expr::new(ExprKind::Void,Span::empty(0))))
+                } else if reg < 0 {
                     // `var x;` — mark the local as declared.
                     if !self.declared.contains(&reg) {
                         self.declared.insert(reg);

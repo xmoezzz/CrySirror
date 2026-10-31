@@ -262,6 +262,9 @@ pub struct Renderer {
     texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     textures: BTreeMap<String, Texture>,
+    /// Explicit capture-only generations are bounded even in a headless host
+    /// that prepares images without submitting a normal display frame.
+    snapshot_readbacks: std::collections::VecDeque<String>,
     glyph_cells: BTreeMap<String, glyph_run::GlyphBitmap>,
     camera_buffer: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
@@ -608,6 +611,7 @@ impl Renderer {
             texture_layout,
             sampler,
             textures: BTreeMap::new(),
+            snapshot_readbacks: Default::default(),
             glyph_cells: BTreeMap::new(),
             camera_buffer,
             camera_bind,
@@ -1044,14 +1048,14 @@ impl Renderer {
         // Their source layer keeps its retained transform/opacity/order and does
         // not need a fictional rig asset merely to publish a worker result.
         for primitive in &mut frame {
-            if primitive.puppet.is_some() && !matches!(primitive.paint, Paint::Puppet { .. }) {
+            if primitive.puppet.is_some() && !matches!(primitive.paint, Paint::Puppet { .. } | Paint::Mesh { .. }) {
                 primitive.paint = Paint::Puppet {
                     asset: String::new(),
                     tint: [255; 4],
                 };
             }
         }
-        frame.sort_by_key(|p| (p.order, p.owner, p.id, p.sub));
+        frame.sort_by(crysirror_scene::layer::compare_primitives);
         // Retained runs remain logical engine state; only extraction expands
         // them to independent reusable glyph resources and transformed quads.
         let frame = self.expand_glyph_runs(frame, assets)?;
@@ -1146,7 +1150,7 @@ impl Renderer {
                 }
                 Paint::Text { .. } => assets.text.for_client(crysirror_core::state::ClientId(p.owner)).key(&text(p).expect("text paint")),
                 Paint::GlyphRun { .. } => glyph_run::key(assets, p.owner, &p.paint),
-                Paint::Puppet { .. } => {
+                Paint::Puppet { .. } | Paint::Mesh { .. } => {
                     let [w, h] = Self::puppet_size(p);
                     Ok(format!("puppet:{}:{}:{w}x{h}", p.owner, p.id))
                 }
@@ -1179,7 +1183,7 @@ impl Renderer {
         let mut puppet_textures: Vec<Vec<String>> = Vec::new();
         for p in &frame {
             let names = match (&p.paint, &p.puppet) {
-                (Paint::Puppet { .. }, Some(f)) => f
+                (Paint::Puppet { .. } | Paint::Mesh { .. }, Some(f)) => f
                     .textures
                     .iter()
                     .map(|t| match crysirror_core::service::frame_history_layer(t) {
@@ -1268,7 +1272,7 @@ impl Renderer {
                     }
                     *tint
                 }
-                Paint::Puppet { tint, .. } => {
+                Paint::Puppet { tint, .. } | Paint::Mesh { tint, .. } => {
                     let size = Self::puppet_size(p);
                     if !self.textures.contains_key(&key) {
                         self.render_texture(key.clone(), size)?;

@@ -45,30 +45,24 @@ fn malformed_glyph_data_rejects_without_partially_replacing_layers() {
         if let Paint::GlyphRun { glyphs, .. } = &mut bad.paint {
             glyphs[0].size = Some(size);
         }
-        assert!(
-            layers
-                .apply_batch(ClientId(1), &[LayerCommand::Put { layer: bad }])
-                .is_err()
-        );
+        assert!(layers
+            .apply_batch(ClientId(1), &[LayerCommand::Put { layer: bad }])
+            .is_err());
         assert_eq!(serde_json::to_value(&layers).unwrap(), before);
     }
     let mut bad = spec();
     if let Paint::GlyphRun { glyphs, .. } = &mut bad.paint {
         glyphs[0].baseline[0] = f32::INFINITY;
     }
-    assert!(
-        layers
-            .apply_batch(ClientId(1), &[LayerCommand::Put { layer: bad }])
-            .is_err()
-    );
+    assert!(layers
+        .apply_batch(ClientId(1), &[LayerCommand::Put { layer: bad }])
+        .is_err());
     assert_eq!(serde_json::to_value(&layers).unwrap(), before);
     let mut bad = spec();
     bad.uv = Some([0., 0., 0.5, 0.5]);
-    assert!(
-        layers
-            .apply_batch(ClientId(1), &[LayerCommand::Put { layer: bad }])
-            .is_err()
-    );
+    assert!(layers
+        .apply_batch(ClientId(1), &[LayerCommand::Put { layer: bad }])
+        .is_err());
     assert!(
         serde_json::from_value::<Paint>(json!({"kind":"glyph_run","font":"f","size":24.,
         "glyphs":[{"character":"two","baseline":[0.,0.]}]}))
@@ -85,6 +79,74 @@ fn reveal_layer(initial_visible: usize, interval_ms: u64) -> LayerSpec {
             {"character":"C","baseline":[36,24]}],
         "reveal":{"unit":"unicode_scalar","initial_visible":initial_visible,"interval_ms":interval_ms}
     }})).unwrap()
+}
+
+#[test]
+fn exact_scalar_rate_retains_fractional_progress_and_snapshot_clock() {
+    use crysirror_scene::layer::GlyphReveal;
+    let mut reveal: GlyphReveal = serde_json::from_value(
+        serde_json::json!({"interval_ms":0,"rate_per_second":60,"initial_visible":1}),
+    )
+    .unwrap();
+    reveal.validate(1000).unwrap();
+    reveal.elapsed_ms = 16;
+    assert_eq!(reveal.visible_count(1000), 1);
+    assert_eq!(reveal.rate_remainder(), 960);
+    reveal.elapsed_ms = 17;
+    assert_eq!(reveal.visible_count(1000), 2);
+    assert_eq!(reveal.rate_remainder(), 20);
+    reveal.elapsed_ms = 1000;
+    assert_eq!(reveal.visible_count(1000), 61);
+    let roundtrip: GlyphReveal =
+        serde_json::from_slice(&serde_json::to_vec(&reveal).unwrap()).unwrap();
+    assert_eq!(roundtrip, reveal);
+    reveal.elapsed_ms = u64::MAX;
+    assert_eq!(reveal.visible_count(1000), 1000);
+    reveal.rate_per_second = Some(0);
+    assert!(reveal.validate(1000).is_err());
+}
+
+#[test]
+fn exact_rate_advances_on_engine_ticks_without_rounding_each_frame() {
+    use crysirror_scene::{EngineSystems, SystemsSpec};
+    let mut layer = reveal_layer(0, 0);
+    if let Paint::GlyphRun {
+        reveal: Some(reveal),
+        ..
+    } = &mut layer.paint
+    {
+        reveal.rate_per_second = Some(60)
+    }
+    let mut engine = EngineSystems::default();
+    engine
+        .install(
+            ClientId(1),
+            &SystemsSpec {
+                layers: vec![layer],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    engine.tick(16, Default::default(), [100, 50]).unwrap();
+    assert_eq!(
+        engine.layers.reveal_status(ClientId(1), 7).unwrap().visible,
+        0
+    );
+    let mut restored: EngineSystems =
+        serde_json::from_value(serde_json::to_value(&engine).unwrap()).unwrap();
+    restored.validate().unwrap();
+    for _ in 0..4 {
+        restored.tick(10, Default::default(), [100, 50]).unwrap();
+    }
+    engine.tick(40, Default::default(), [100, 50]).unwrap();
+    assert_eq!(
+        restored.layers.reveal_status(ClientId(1), 7),
+        engine.layers.reveal_status(ClientId(1), 7)
+    );
+    assert_eq!(
+        engine.layers.reveal_status(ClientId(1), 7).unwrap().visible,
+        3
+    );
 }
 
 #[test]
@@ -154,19 +216,17 @@ fn complete_reveal_is_scoped_and_works_when_paused_without_a_private_clock() {
     assert!(layers.reveal_status(ClientId(1), 7).unwrap().complete);
     assert_eq!(layers.reveal_status(ClientId(2), 7).unwrap().visible, 2);
     let before = serde_json::to_value(&layers).unwrap();
-    assert!(
-        layers
-            .apply_batch(
-                ClientId(1),
-                &[
-                    LayerCommand::SetOpacity { id: 7, opacity: 2 },
-                    LayerCommand::Put {
-                        layer: reveal_layer(5, 20)
-                    }
-                ]
-            )
-            .is_err()
-    );
+    assert!(layers
+        .apply_batch(
+            ClientId(1),
+            &[
+                LayerCommand::SetOpacity { id: 7, opacity: 2 },
+                LayerCommand::Put {
+                    layer: reveal_layer(5, 20)
+                }
+            ]
+        )
+        .is_err());
     assert_eq!(serde_json::to_value(&layers).unwrap(), before);
     layers
         .apply_batch(

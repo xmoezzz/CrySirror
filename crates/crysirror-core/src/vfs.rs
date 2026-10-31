@@ -18,6 +18,9 @@ pub trait VfsProvider: Send + Sync {
     fn kind(&self) -> &'static str;
     /// Logical input that originated this container; never an OS filename.
     fn container_source(&self) -> Option<&str> { None }
+    /// Actual origin for one selected path. A fallback mount can serve a loose
+    /// file without pretending those bytes came from its archive container.
+    fn container_source_for(&self,_relative:&str)->Option<&str>{self.container_source()}
     /// `relative` is canonical (validated by [`VfsPath`]) and mount-relative.
     fn read(&self, relative: &str) -> Result<Vec<u8>>;
     /// Open random-access data without materializing an entire archive entry.

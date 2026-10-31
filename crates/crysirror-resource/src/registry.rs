@@ -123,6 +123,8 @@ pub struct ArchiveMount {
 }
 impl ArchiveMount {
     pub fn new(archive: Box<dyn Archive>, context: DecodeContext) -> Result<Self> {
+        // An indexing job's cancellation authority must not survive publication.
+        let context = context.published();
         ensure!(
             archive.entries().len() <= context.limits.max_entries,
             "archive entry limit"

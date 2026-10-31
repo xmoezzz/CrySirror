@@ -5,4 +5,4 @@ pub mod vm;
 
 pub mod adapter;
 mod resources;
-pub use adapter::{Config, RealLiveFactory, RealLiveVm, register};
+pub use adapter::{Config, OpticalDiscPolicy, RealLiveFactory, RealLiveVm, register};

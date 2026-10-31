@@ -1,0 +1,179 @@
+{
+  "research": [
+    {
+      "repository": "https://github.com/nunuhara/libsys4",
+      "commit": "b14839f23af0963abbdb17f7cac57a36fd8e9bd2",
+      "files": [
+        "src/ain.c",
+        "include/system4/ain.h",
+        "include/system4/instructions.h",
+        "src/mt19937int.c",
+        "src/instructions.c",
+        "src/string.c"
+      ],
+      "license": "GPL-2.0-or-later; MT reference LGPL-2.0-or-later",
+      "credit": "Nunuhara Cabbage; format reverse engineering SLC; MT19937 Matsumoto/Nishimura"
+    },
+    {
+      "repository": "https://github.com/nunuhara/xsystem4",
+      "commit": "a85467d78eb5c7fb6e581d7fe5a6fdaec42b9ef7",
+      "license": "GPL-2.0-or-later",
+      "credit": "Nunuhara Cabbage",
+      "files": [
+        {
+          "path": "src/vm.c",
+          "sha256": "4ddc9d9abfc3eb583c91a55650a1a5c44001d81a8e1568f7a93acf479d5bd860"
+        },
+        {
+          "path": "src/heap.c",
+          "sha256": "bc0c7dd69e05fda432fcb0277b634c19dfade5d43497b1cab80227d66e1fefd6"
+        },
+        {
+          "path": "src/page.c",
+          "sha256": "a3db5e4fe4b358dc1b5c65dffe9fde89e7b348f6dace3bf088da1632037185df"
+        },
+        {
+          "path": "src/ffi.c",
+          "sha256": "b0c0f0d18fd36e1917028d6b1ee1e388efb554de97845af1ecd75b1f386ff027"
+        },
+        {
+          "path": "include/vm.h",
+          "sha256": "6077eb9886ee78c66e85693e0b3e55183105355dd7c6c751c598d315589eecb7"
+        },
+        {
+          "path": "include/vm/heap.h",
+          "sha256": "89e03ec70f84764d892627a0630a87e0a54b5be17d32f845bdb2c0cd9305947a"
+        },
+        {
+          "path": "include/vm/page.h",
+          "sha256": "e63fa7757976a84328013ee6dc70f6b5d59a75f2d947b7cf0aa1eaa780da7823"
+        },
+        {
+          "path": "src/system4.c",
+          "sha256": "b8995f7b6f5b5d14971fdc70e1b4fb999baf22d548ff63aa37c05e01929c150e"
+        },
+        {
+          "path": "src/hll/OutputLog.c",
+          "sha256": "16dc918e8a02c41fc2a3418e9d01b2ac6aedd28558433d507eb4343995fea0c6"
+        },
+        {
+          "path": "src/hll/SystemService.c",
+          "sha256": "89b2452a85167b1b30b1d342161efeb8f8e65869b2dd178a03725178a35f7b8b"
+        },
+        {
+          "path": "src/hll/InputString.c",
+          "sha256": "b2e4fc9d504f46949e69bd7d133ca1314ce6d725623659b932906e2d32aee6a3"
+        },
+        {
+          "path": "src/hll/MsgSkip.c",
+          "sha256": "19fdb1a29d80c4e4e7f090b0003633b987b2b3b20b90805594584ee4e120fb85"
+        },
+        {
+          "path": "src/hll/SACT2.c",
+          "sha256": "99ae6388dedc7adee16405e9c8920128d793a4001623b2d681f7537a55d67983"
+        },
+        {
+          "path": "include/sact.h",
+          "sha256": "4f6e6330a3c1cf4e62ec58c65d74a0040d7f72537e2c923371aad6b8e2b7012c"
+        },
+        {
+          "path": "src/sprite.c",
+          "sha256": "197eda00e469c9a65a250d5881323e49226015ab3c93859cee5ede11ec0ee644"
+        },
+        {
+          "path": "src/scene.c",
+          "sha256": "fb22bd32af3c21fcdadca0df0e735054d47fcf3a34069045b9e0c0f178acc50d"
+        },
+        {
+          "path": "src/text.c",
+          "sha256": "1ea8de64bd8e5608df18a77a67227a33ef2f1750dd7d0f4adb265db557a68c8c"
+        },
+        {
+          "path": "src/audio.c",
+          "sha256": "16b0cde1cbe04a69bedb6e52200cfeb673032b91509faf5cfccfe68d5a3d9cb6"
+        },
+        {
+          "path": "src/audio_mixer.c",
+          "sha256": "ee1b2907db00c20cd9e988cd7d38a7606c19fa77cb2b91b1d57fea57e02d5dbb"
+        },
+        {
+          "path": "src/format.c",
+          "sha256": "7f4e0e431184d10aa57553027cf673fd38cabc6bef9b1b353ca63b7010de7fd2"
+        }
+      ]
+    }
+  ],
+  "scope": "First-class safe Rust AIN v5 VM/heap, worker execution and thin shared host mappings. SACT2 logical Init materializes shared hidden main Canvas/Layer and checks published fonts/audio services. No complete SACT HLL, sprite renderer, playable factory, original saves or serialized native snapshots.",
+  "ownership": {
+    "native": [
+      "AIN encoding, operands and byte PCs",
+      "i32/f32 bit values, heap slot identity/reference count/sequence and typed pages",
+      "native calls, argument transfer, variable references, constructor/destructor continuation",
+      "reviewed OutputLog.dll absent Windows debug-interface policy",
+      "SACT2 main-surface number and logical canvas metadata; repeated-init and typed HLL completion",
+      "S_MOD native value kinds, argument ownership and original string-slot release policy"
+    ],
+    "shared": [
+      "crysirror-resource legacy MT19937-1998 envelope decode and capability read_all",
+      "crysirror-tasks bounded worker ownership/admission/cancellation/completion",
+      "crysirror-core client storage and HostServices.now_ms; VmYield deadline",
+      "crysirror-scene Canvas/Layer transactional main resource and background state",
+      "crysirror-core scoped FontLibrary/TextMeasurement and ChannelAudio readiness",
+      "crysirror-text::format bounded first-compatible byte formatting independent of VM and fonts"
+    ],
+    "not_imported": [
+      "xsystem4 C runtime or FFI engine",
+      "renderer, SDL/window loop, fonts/text layout",
+      "image/effect/audio kernels",
+      "xsystem4 private logs/buffers/save stubs"
+    ]
+  },
+  "static_abi_evidence": {
+    "module": "owner-installed OutputLog.dll",
+    "sha256": "8c023f38776994db5c7cc36a5ce409b433efc251a879fcf832b607b62fee04c8",
+    "bytes": 33280,
+    "exports_rva": {
+      "Create": "0x1000",
+      "Output": "0x1070",
+      "Clear": "0x10a0",
+      "Save": "0x10c0",
+      "EnableAutoSave": "0x10f0",
+      "DisableAutoSave": "0x1120"
+    },
+    "condition": "Create first calls GetModuleHandleA(\"DPLogViewer.ade\"), then GetProcAddress(\"GetInterface\") and GUID interface lookup. Absent loaded module/interface returns -1 at VA0x10001056. Native host provides no such Windows module. No original code is executed.",
+    "proof_limits": "DLL hash guard restricts this branch to reviewed ABI. Connected interface/native logging resources are unsupported; no arbitrary DLL or unknown export can silently succeed."
+  },
+  "sact_profile": {
+    "logical_canvas": "explicit Config.canvas from original view configuration, never DisplayInfo physical pixels",
+    "fonts": "explicit Gothic/Mincho aliases must already be published by shared font jobs; portable aliases do not claim original Windows font import",
+    "audio": "existing shared device-free channel service; no original SDL mixer or fake prepared voice",
+    "init": "original main surface -1, opaque black, hidden; original same-engine repeat returns1 without reinitialization",
+    "reviewed_owner_view": [
+      800,
+      600
+    ]
+  },
+  "string_format_profile": {
+    "shared_api": "crysirror_text::format::format_one_bytes",
+    "native_types": [
+      2,
+      4,
+      48,
+      56
+    ],
+    "conversions": [
+      "%d",
+      "%s"
+    ],
+    "encoding": "ASCII syntax, surrounding and string payload bytes unchanged; width counts encoded bytes",
+    "bounds": "template/output <=1MiB, numeric width/precision <=510; unknown syntax, unimplemented compatible conversion and template NUL fail before VM mutation",
+    "unsupported": [
+      "float",
+      "fullwidth D/F",
+      "character c",
+      "boolean b"
+    ],
+    "value_nul": "%s uses val->size and string_append memcpy, preserving embedded NUL; it is not strlen",
+    "precision": "integer and string precision parsed but ignored; string zero-pad ignored"
+  }
+}

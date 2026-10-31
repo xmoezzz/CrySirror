@@ -8,6 +8,8 @@
 //! animated cursors (display rates are in jiffies, 1/60 s).
 use crate::ImageSurface;
 use anyhow::{Context, Result, bail, ensure};
+mod sprite;
+pub use sprite::{SpriteCursorLayout, SpriteHotspot, cursor_from_sprite, sprite_source_size};
 
 /// Largest cursor edge accepted; Windows cursors are at most 256 pixels.
 pub const MAX_CURSOR_EDGE: u32 = 256;

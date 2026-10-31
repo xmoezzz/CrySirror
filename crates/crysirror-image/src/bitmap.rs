@@ -45,6 +45,13 @@ pub enum PixelMath {
     /// MaskScalar256's RGB interpolation that keeps the destination alpha
     /// (krkr `TVPAlphaBlend_HDA`: sopa = s.a, or s.a*opacity>>8 below 255).
     MaskHoldAlphaScalar256,
+    /// Explicit per-mask /256 profile: mask0 skips; mask255 uses weight and
+    /// 256-weight; partial masks use a=mask*weight>>8 and 255-a. RGB products
+    /// are summed then shifted. Destination alpha is retained.
+    MaskPiecewise256 { weight: u16 },
+    /// Independent /256 floors for source-alpha RGB products. Mask0 skips;
+    /// mask255 copies RGB. Destination alpha is retained; opacity must be255.
+    MaskSeparate256,
     /// Photoshop-like blend (krkr `tvpps.c`): per channel `f(s, d)`, then
     /// d + ((f - d)·a >> 8) with a = s.a (·opacity >> 8 below 255). With
     /// `hold_alpha` the destination alpha is kept (`_HDA`), otherwise the
@@ -163,8 +170,16 @@ fn ps_tables() -> &'static [[[u8; 256]; 256]; 4] {
                 } else {
                     ((df / 255.0).powf((1.0 - sf / 255.0) / 0.5) * 255.0) as u8
                 };
-                t[1][s][d] = if 255 - s <= d { 0xff } else { (d * 255 / (255 - s)) as u8 };
-                t[2][s][d] = if s <= 255 - d { 0 } else { (255 - (255 - d) * 255 / s) as u8 };
+                t[1][s][d] = if 255 - s <= d {
+                    0xff
+                } else {
+                    (d * 255 / (255 - s)) as u8
+                };
+                t[2][s][d] = if s <= 255 - d {
+                    0
+                } else {
+                    (255 - (255 - d) * 255 / s) as u8
+                };
                 t[3][s][d] = if d < 128 {
                     (s * d * 2 / 255) as u8
                 } else {
@@ -192,6 +207,13 @@ fn ps_channel(blend: PsBlend, s: u8, d: u8) -> u8 {
 }
 
 fn check_mode(mode: PixelMath, opacity: u8) -> Result<()> {
+    ensure!(mode!=PixelMath::MaskSeparate256||opacity==255,"mask_separate256 requires opacity255");
+    if let PixelMath::MaskPiecewise256 { weight } = mode {
+        ensure!(
+            weight <= 256 && opacity == 255,
+            "mask_piecewise256 weight/opacity bounds"
+        );
+    }
     ensure!(
         mode != PixelMath::PremultipliedMask256 || opacity == 255,
         "premultiplied_mask256 requires opacity 255; native fades are not implemented"
@@ -204,18 +226,48 @@ fn combine(d: &mut [u8], s: &[u8], opacity: u8, mode: PixelMath) {
         return;
     }
     match mode {
+        PixelMath::MaskSeparate256 => {
+            match s[3] {
+                0=>{},
+                255=>d[..3].copy_from_slice(&s[..3]),
+                mask=>{let a=u32::from(mask);for c in 0..3 {d[c]=((u32::from(s[c])*a>>8)+(u32::from(d[c])*(256-a)>>8))as u8;}},
+            }
+        }
+        PixelMath::MaskPiecewise256 { weight } => {
+            if weight == 0 || s[3] == 0 {
+                return;
+            }
+            let (a, b) = if s[3] == 255 {
+                (u32::from(weight), 256 - u32::from(weight))
+            } else {
+                let a = u32::from(s[3]) * u32::from(weight) >> 8;
+                (a, 255 - a)
+            };
+            for c in 0..3 {
+                d[c] = ((u32::from(s[c]) * a + u32::from(d[c]) * b) >> 8) as u8;
+            }
+        }
         PixelMath::Ps { blend, hold_alpha } => {
-            let a = if opacity == 255 { u32::from(s[3]) } else { u32::from(s[3]) * op >> 8 } as i32;
+            let a = if opacity == 255 {
+                u32::from(s[3])
+            } else {
+                u32::from(s[3]) * op >> 8
+            } as i32;
             for c in 0..3 {
                 let f = ps_channel(blend, s[c], d[c]);
-                d[c] = (i32::from(d[c]) + ((i32::from(f) - i32::from(d[c])) * a).div_euclid(256)) as u8;
+                d[c] = (i32::from(d[c]) + ((i32::from(f) - i32::from(d[c])) * a).div_euclid(256))
+                    as u8;
             }
             if !hold_alpha {
                 d[3] = 0;
             }
         }
         PixelMath::MaskHoldAlphaScalar256 => {
-            let a = if opacity == 255 { u32::from(s[3]) } else { u32::from(s[3]) * op >> 8 } as i32;
+            let a = if opacity == 255 {
+                u32::from(s[3])
+            } else {
+                u32::from(s[3]) * op >> 8
+            } as i32;
             for c in 0..3 {
                 d[c] = (i32::from(d[c]) + ((i32::from(s[c]) - i32::from(d[c])) * a).div_euclid(256))
                     as u8;
@@ -406,6 +458,53 @@ impl ImageSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn separate_mask_floors_each_product_and_keeps_destination_alpha() {
+        let source=ImageSurface{width:5,height:1,rgba:[0,1,128,254,255].into_iter().flat_map(|a|[255,255,255,a]).collect()};
+        let mut target=ImageSurface::filled(5,1,[255,255,255,91]).unwrap();
+        target.blit(&source,options(BitmapRect::new(0,0,5,1),[0,0],PixelMath::MaskSeparate256)).unwrap();
+        assert_eq!(target.rgba,[255,254,254,254,255].into_iter().flat_map(|c|[c,c,c,91]).collect::<Vec<_>>());
+        let saved=target.clone();let mut invalid=options(BitmapRect::new(0,0,5,1),[0,0],PixelMath::MaskSeparate256);invalid.opacity=128;
+        assert!(target.blit(&source,invalid).is_err());assert_eq!(target,saved);
+        assert_eq!(serde_json::from_str::<PixelMath>("\"mask_separate256\"").unwrap(),PixelMath::MaskSeparate256);
+    }
+    #[test]
+    fn piecewise_mask_uses_distinct_partial_complement_and_preserves_coverage() {
+        let source = ImageSurface {
+            width: 3,
+            height: 1,
+            rgba: vec![1, 1, 1, 0, 1, 1, 1, 128, 1, 1, 1, 255],
+        };
+        let mut target = ImageSurface::filled(3, 1, [255, 255, 255, 99]).unwrap();
+        target
+            .blit(
+                &source,
+                BlitOptions {
+                    source_rect: BitmapRect::new(0, 0, 3, 1),
+                    destination: [0, 0],
+                    opacity: 255,
+                    mode: PixelMath::MaskPiecewise256 { weight: 128 },
+                    color_key: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            target.rgba,
+            [255, 255, 255, 99, 190, 190, 190, 99, 128, 128, 128, 99]
+        );
+        assert!(target
+            .blit(
+                &source,
+                BlitOptions {
+                    source_rect: BitmapRect::new(0, 0, 3, 1),
+                    destination: [0, 0],
+                    opacity: 128,
+                    mode: PixelMath::MaskPiecewise256 { weight: 128 },
+                    color_key: None
+                }
+            )
+            .is_err());
+    }
     fn options(rect: BitmapRect, destination: [i32; 2], mode: PixelMath) -> BlitOptions {
         BlitOptions {
             source_rect: rect,
@@ -481,20 +580,46 @@ mod tests {
         assert_eq!(ps_channel(PsBlend::Overlay, 64, 64), 32);
         assert_eq!(ps_channel(PsBlend::ColorDodge, 255, 1), 255);
         let mut d = [100, 100, 100, 77];
-        combine(&mut d, &[200, 200, 200, 255], 255, PixelMath::Ps { blend: PsBlend::SoftLight, hold_alpha: true });
+        combine(
+            &mut d,
+            &[200, 200, 200, 255],
+            255,
+            PixelMath::Ps {
+                blend: PsBlend::SoftLight,
+                hold_alpha: true,
+            },
+        );
         assert_eq!(d, [139, 139, 139, 77]);
         let mut d = [100, 100, 100, 77];
-        combine(&mut d, &[200, 200, 200, 255], 255, PixelMath::Ps { blend: PsBlend::SoftLight, hold_alpha: false });
+        combine(
+            &mut d,
+            &[200, 200, 200, 255],
+            255,
+            PixelMath::Ps {
+                blend: PsBlend::SoftLight,
+                hold_alpha: false,
+            },
+        );
         assert_eq!(d[3], 0);
     }
     #[test]
     fn hold_alpha_blend_keeps_destination_alpha() {
         // krkrz TVPAlphaBlend_HDA(_o): rgb d + ((s-d)*sopa >> 8), alpha kept.
         let mut d = [100, 200, 0, 77];
-        combine(&mut d, &[200, 0, 255, 128], 255, PixelMath::MaskHoldAlphaScalar256);
+        combine(
+            &mut d,
+            &[200, 0, 255, 128],
+            255,
+            PixelMath::MaskHoldAlphaScalar256,
+        );
         assert_eq!(d, [150, 100, 127, 77]);
         let mut d = [100, 200, 0, 77];
-        combine(&mut d, &[200, 0, 255, 128], 128, PixelMath::MaskHoldAlphaScalar256);
+        combine(
+            &mut d,
+            &[200, 0, 255, 128],
+            128,
+            PixelMath::MaskHoldAlphaScalar256,
+        );
         assert_eq!(d, [125, 150, 63, 77]);
     }
     #[test]

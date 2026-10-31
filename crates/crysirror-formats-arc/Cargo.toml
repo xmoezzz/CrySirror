@@ -27,5 +27,6 @@ chacha20poly1305 = "=0.10.1"
 pelite = {version="=0.10.0", default-features=false, features=["std"]}
 
 [dev-dependencies]
+crysirror-tasks.workspace = true
 blowfish = "=0.9.1"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

@@ -11,8 +11,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+mod sample;
+mod image_dependencies;
 /// Per-client surface budget; native layer trees keep one surface per layer.
-pub const MAX_SURFACES: usize = 1024;
+pub const MAX_SURFACES: usize = crysirror_core::service::MAX_CANVAS_SURFACES_PER_CLIENT;
 /// A surface whose node tree grows past this is frozen into one snapshot
 /// draw (same pixels) and queued for materialization into a plain image.
 /// Region copies between surfaces (save/restore of a glyph cell, say) split
@@ -70,6 +72,9 @@ pub enum CanvasCommand {
         width: u32,
         height: u32,
     },
+    /// Release one unpresented surface. Hide its presentations first. Frozen
+    /// copies own their draw nodes and remain valid after the source is gone.
+    Destroy { id: u32 },
     Clear {
         id: u32,
         color: [u8; 4],
@@ -325,6 +330,14 @@ impl CanvasSystem {
         for command in commands {
             let mut provenance = None;
             match command {
+                CanvasCommand::Destroy { id } => {
+                    ensure!(!next.presentations.get(&c.0).is_some_and(|owner|owner.values().any(|p|p.source==*id)),
+                        "cannot destroy a presented canvas; hide its presentations first");
+                    ensure!(next.clients.get_mut(&c.0).and_then(|owner|owner.remove(id)).is_some(),"canvas surface absent");
+                    next.revisions.remove(&(c.0,*id));
+                    next.materialize.remove(&(c.0,*id));
+                    next.provenance.retain(|(owner,surface),p|*owner!=c.0 || (*surface!=*id && p.source!=*id));
+                }
                 CanvasCommand::Create { id, width, height } => {
                     ensure!(
                         *width > 0 && *height > 0 && *width <= 8192 && *height <= 8192,
@@ -816,7 +829,7 @@ impl CanvasSystem {
                     dirty_presentations.insert(*layer);
                     None
                 }
-                CanvasCommand::Hide { .. } => None,
+                CanvasCommand::Hide { .. } | CanvasCommand::Destroy { .. } => None,
             };
             if let Some(id) = touched {
                 dirty_sources.insert(id);
@@ -863,6 +876,15 @@ impl CanvasSystem {
             self.provenance.remove(&(c.0, id));
             self.materialize.insert((c.0, id), request);
         }
+    }
+    /// Snapshots of compacted surfaces still waiting for a renderer.
+    /// Freeze the current logical surface without modifying it. Composition,
+    /// clipping and group isolation use the same snapshot contract as copies.
+    pub fn capture_request(&self, client: ClientId, id: u32) -> Result<MaterializeRequest> {
+        let surface = self.surface(client, id).context("Canvas not found")?;
+        let (paint, _) = region_paint(&surface.nodes, [0., 0., surface.width as f32, surface.height as f32])?;
+        let Paint::Snapshot { size, layers } = paint else { anyhow::bail!("Canvas snapshot contract") };
+        Ok(MaterializeRequest { client: client.0, surface: id, size, layers })
     }
     /// Snapshots of compacted surfaces still waiting for a renderer.
     pub fn materialize_requests(&self) -> Vec<MaterializeRequest> {

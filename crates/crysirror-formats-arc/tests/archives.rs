@@ -280,6 +280,99 @@ fn xp3_versions_zlib_indices_and_multisegment_entries_use_shared_transforms() {
     }
 }
 #[test]
+fn bound_xp3_uses_aligned_mark_relative_segments_and_chained_indices() {
+    let ctx = DecodeContext::new(ClientId(1));
+    for version in [1, 2] {
+        for compressed in [false, true] {
+            let ordinary = xp3(version, compressed, false);
+            let expected = Xp3.open(memory(ordinary.clone()), &ctx).unwrap();
+            let expected = read_all(expected.open(0, &ctx).unwrap().as_ref(), 1024).unwrap();
+            let mut bound = vec![0u8; 64];
+            bound[..2].copy_from_slice(b"MZ");
+            // Unaligned decoy is ignored, including when its signature crosses
+            // an aligned scan candidate.
+            bound[17..28].copy_from_slice(&ordinary[..11]);
+            bound.extend(&ordinary);
+            if version == 1 {
+                let real_index = u64::from_le_bytes(ordinary[11..19].try_into().unwrap());
+                bound[75..83].copy_from_slice(&(-32i64).to_le_bytes());
+                bound[32] = 0x80; // zero-byte raw index then continuation
+                bound[41..49].copy_from_slice(&real_index.to_le_bytes());
+            }
+            assert_eq!(
+                Xp3.probe(memory(bound.clone()).as_ref())
+                    .unwrap()
+                    .confidence,
+                100
+            );
+            let archive = Xp3.open(memory(bound), &ctx).unwrap();
+            assert_eq!(
+                read_all(archive.open(0, &ctx).unwrap().as_ref(), 1024).unwrap(),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+fn bound_xp3_scan_crosses_chunks_without_tiny_or_whole_file_reads() {
+    struct BoundedRead {
+        bytes: Vec<u8>,
+        reads: AtomicUsize,
+    }
+    impl AssetReader for BoundedRead {
+        fn len(&self) -> crysirror_core::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn read_at(&self, at: u64, out: &mut [u8]) -> crysirror_core::Result<usize> {
+            assert!(out.len() <= 256 * 1024 + 10);
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            let data = self.bytes.get(at as usize..).unwrap_or(&[]);
+            let n = data.len().min(out.len());
+            out[..n].copy_from_slice(&data[..n]);
+            Ok(n)
+        }
+    }
+    let mut bytes = vec![0; 256 * 1024 + 16];
+    bytes[..2].copy_from_slice(b"MZ");
+    bytes.extend(xp3(1, true, false));
+    let source = BoundedRead {
+        bytes,
+        reads: AtomicUsize::new(0),
+    };
+    assert_eq!(Xp3.probe(&source).unwrap().confidence, 100);
+    assert!(source.reads.load(Ordering::Relaxed) <= 4);
+}
+
+#[test]
+fn bound_xp3_rejects_unaligned_missing_cycles_and_out_of_range_segments() {
+    let ctx = DecodeContext::new(ClientId(1));
+    let mut missing = vec![0; 64];
+    missing[..2].copy_from_slice(b"MZ");
+    missing[17..28].copy_from_slice(b"XP3\r\n \n\x1a\x8bg\x01");
+    assert_eq!(
+        Xp3.probe(memory(missing.clone()).as_ref())
+            .unwrap()
+            .confidence,
+        0
+    );
+    assert!(Xp3.open(memory(missing), &ctx).is_err());
+    let mut bound = vec![0; 64];
+    bound[..2].copy_from_slice(b"MZ");
+    bound.extend(xp3(1, false, false));
+    bound[75..83].copy_from_slice(&(-32i64).to_le_bytes());
+    bound[32] = 0x80;
+    bound[41..49].copy_from_slice(&(-32i64).to_le_bytes());
+    assert!(format!("{:#}", Xp3.open(memory(bound), &ctx).err().unwrap()).contains("cycle"));
+    let mut bound = vec![0; 64];
+    bound[..2].copy_from_slice(b"MZ");
+    bound.extend(xp3(1, false, false));
+    let segm = bound.windows(4).position(|b| b == b"segm").unwrap();
+    bound[segm + 16..segm + 24].copy_from_slice(&1000000u64.to_le_bytes());
+    assert!(Xp3.open(memory(bound), &ctx).is_err());
+}
+
+#[test]
 fn encrypted_xp3_requires_client_scoped_profile_and_never_embeds_a_game_key() {
     let mut ctx = DecodeContext::new(ClientId(10));
     let archive = Xp3.open(memory(xp3(1, true, true)), &ctx).unwrap();

@@ -260,6 +260,7 @@ pub fn movie_on(
 /// snapshot trees stop nesting. A request whose images are still loading is
 /// retried next frame.
 pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result<()> {
+    rt.prepare_canvas_images(|request,assets| renderer.snapshot_readback(assets,request.client,request.size,&request.layers))?;
     for request in rt.host.engine.canvases.materialize_requests() {
         let Some(image) = renderer.materialize_snapshot(&mut rt.assets, request.client, request.size, &request.layers)?
         else {
@@ -282,6 +283,18 @@ pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result
         log::debug!("canvas {} materialized as {path}", request.surface);
     }
     renderer.advance_frame_histories(&mut rt.assets,rt.host.engine.layers.frame(rt.project.canvas)?,rt.project.canvas)?;
+    Ok(())
+}
+
+/// Offline startup has an explicit dependency fence. Counting simulated frames
+/// while a cold resource worker is still preparing a VM can otherwise produce
+/// a successful empty capture before any original instruction has run.
+pub fn settle_vm_preparations(rt:&mut Runtime)->Result<()> {
+    let started=Instant::now();
+    while rt.poll_vm_preparations()? {
+        ensure!(started.elapsed()<Duration::from_secs(120),"native startup preparation timeout");
+        std::thread::sleep(Duration::from_millis(1));
+    }
     Ok(())
 }
 /// Explicit capture fence on the live renderer, retaining GPU simulation state.
@@ -546,6 +559,7 @@ impl App {
             caps.alpha_modes
         );
         let mut renderer = Renderer::new(gpu, format);
+        self.core.rt().set_canvas_image_presenter(true);
         if std::env::var_os("CRYSIRROR_CPU_FRAME_HISTORY").is_none() {
             self.core.rt().host.mesh_frame_history = Some(renderer.mesh_frame_history_provider());
         }

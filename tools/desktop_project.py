@@ -119,7 +119,7 @@ def siglus_config(config: Any) -> dict:
 
 def reallive_config(config: Any) -> dict:
     """Native RealLive bytecode adapter; no hosted-engine configuration."""
-    config = obj(config, set(), {"root", "font_alias", "encoding", "start_scene"})
+    config = obj(config, set(), {"root", "font_alias", "encoding", "start_scene", "optical_disc_check"})
     root = config.get("root", "")
     require(isinstance(root, str) and (not root or logical_path(root) == root), "canonical RealLive root required")
     require(isinstance(config.get("font_alias", "default"), str) and bool(config.get("font_alias", "default")), "font alias required")
@@ -129,6 +129,8 @@ def reallive_config(config: Any) -> dict:
         key = "".join(c.lower() for c in encoding if c.isascii() and c.isalnum())
         require(key in {"sjis", "shiftjis", "cp932", "ms932", "ja", "gbk", "gb2312", "gb18030", "cp936", "chs", "zhcn", "big5", "cp950", "cht", "zhtw", "utf8", "utf", "unicode", "western", "cp1252", "latin1", "en", "korean", "cp949", "euckr", "ko"}, "unknown RealLive encoding")
     require(config.get("start_scene") is None or integer(config["start_scene"], -(2**31), 2**31-1), "RealLive start scene")
+    policy = config.get("optical_disc_check", "disabled_for_native_host")
+    require(isinstance(policy, str) and policy in {"disabled_for_native_host", "strict"}, "RealLive optical-disc policy")
     return config
 
 

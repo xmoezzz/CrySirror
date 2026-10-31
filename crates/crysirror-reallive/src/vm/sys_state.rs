@@ -15,7 +15,7 @@ pub struct Sys {
     pub default_bgr: String,
     /// Set when a volume or mute setting changed; the adapter applies it.
     pub volumes_changed: bool,
-    pub dlls: reallive_dll::Dlls,
+    pub dlls: crysirror_reallive_dll::Dlls,
     /// Retained objects (state only; the adapter projects them to layers).
     pub gfx: crate::vm::graphics::Gfx,
     /// Engine clock in ms, set by the adapter before each step.

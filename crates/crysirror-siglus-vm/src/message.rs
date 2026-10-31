@@ -265,6 +265,7 @@ pub fn append(ctx: &mut CommandContext, text: &str, read_flag: i64) -> Result<bo
     ctx.ui.reveal = Some(GlyphReveal {
         unit: Default::default(),
         interval_ms,
+        rate_per_second:None,
         initial_visible: ctx.ui.visible_chars,
         elapsed_ms: 0,
         forced_complete: false,

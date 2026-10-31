@@ -84,6 +84,12 @@ project font; it is not an ambient font path. Optional `encoding` is an NLS
 override and `start_scene` is a diagnostic override. Native clients execute
 Seen bytecode and must not contain a data-VM `program`.
 
+`optical_disc_check` is `disabled_for_native_host` by default or `strict`.
+The portable policy disables the exact native Windows disc step and maps its
+continuation value; it does not perform authentication or report a verified
+disc. Diagnostics retain `authentication_performed: false` and
+`verification_result: null`. Strict mode fails at that native call.
+
 ```sh
 cargo run -p crysirror-desktop --features reallive -- inspect /absolute/project.json
 cargo run -p crysirror-desktop --features reallive -- run /absolute/project.json \
@@ -158,8 +164,11 @@ were rehashed with no content, size, mtime or inventory changes.
   the rejected hosted implementation. No complete-game support is claimed.
 - Native save-file import/export and whole-adapter snapshots are not
   supported. `LoadDLL`/`CallDLL` (2:1:10-12) run the owner's EF00/PT00/DT00
-  emulation (vendored `reallive-dll`); it has run only on synthetic inputs, no
-  Little Busters!/Tomoyo After install has been tested. VM bank/call-stack savepoint bookkeeping is not a save-file
+  native semantics (`crysirror-reallive-dll`, shared VFX spatial kernels and
+  Resource PE views). Installed Little Busters! NewGame has exercised EF00 and
+  reached original dialogue; PT00/DT00 static-table tests are separate from
+  full minigame gameplay, which remains unverified. VM bank/call-stack
+  savepoint bookkeeping is not a save-file
   implementation. These capabilities must not silently serialize a different
   substitute format.
 - The native syscall mapping is partial. Unsupported text/layout/graphics,

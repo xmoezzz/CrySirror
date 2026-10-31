@@ -13,12 +13,14 @@ anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 encoding_rs = "0.8"
-reallive-dll.workspace = true
+crysirror-reallive-dll.workspace = true
 crysirror-image.workspace = true
+crysirror-resource.workspace = true
+crysirror-tasks.workspace = true
+blake3.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [dev-dependencies]
 crysirror-acoustics.workspace = true
 crysirror-audio.workspace = true
-crysirror-tasks.workspace = true
 tempfile = "3.12"

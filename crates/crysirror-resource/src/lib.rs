@@ -22,8 +22,11 @@ mod file;
 pub mod io;
 pub mod keys;
 pub mod lzss;
+pub mod legacy_stream;
+pub mod installer;
 pub mod registry;
 pub mod transforms;
+pub mod xor_recovery;
 
 pub use context::{DecodeContext, DecodeLimits, PipelineRules, PipelineSelector};
 pub use crypto::rsa_public_decrypt;

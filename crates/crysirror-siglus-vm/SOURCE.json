@@ -51,7 +51,7 @@
     "src/message/frame.rs": "be64fde3e6a80abe64346558e10903c880aab658c735c3d105598b8472b849df",
     "src/message/metadata.rs": "d9b5251f1938c48890c3bc9c99418ec8ff372ec7529486eae99ed3b347fccd10",
     "src/message/ops.rs": "16cb255d77ca9054635852d0b63c0ff83da0a2909e8f2bbeca02539707e2a46f",
-    "src/message.rs": "3a74cf3e51ab744a77b1d6bbe10bab3f6cf93095585230bc6f18903d81d89115",
+    "src/message.rs": "fdf70315cc3490bde28dd3455e289c3257fcac3f3c72fbcfe62fdb3304b5ed4b",
     "src/movie.rs": "19dfbf40833cf3dff7da89669f7fbd0d1130479de846083e6423ab2ea43d07bc",
     "src/native_save_tests.rs": "257adad0c41b9596d9e7175e56b76b48afe11f97dfd791b296f364d9fa8a3c22",
     "src/original_save.rs": "af421c612e22c8bcd314fe59aaea8007b8a0f4ba7b2b59ce7e05f3fe14dc868b",
@@ -109,6 +109,9 @@
     "src/vm/short_save.rs": "1d875bfed4bb422c14dad8a2baf92728be940672379b28beed16be7bc78dfd8f",
     "src/vm.rs": "a03bef5843e15f8d309e7e56c6ba92e09e7649f6d9755a3d6a1afa07fced0bbe"
   },
+  "shared_api_adaptations": [
+    "GlyphReveal optional rate_per_second is None for Siglus; preserve its original integer interval_ms reveal profile. Original source hashes remain in upstream-files.json."
+  ],
   "native_policy_references": {
     "crates/siglus_scene_vm/src/host.rs": {
       "sha256": "0b9af6fa829d72621b9d05ac0532eb59e48efb7d8d900a39d7fad57487df18df",

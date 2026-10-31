@@ -20,11 +20,14 @@ mod kag_save;
 pub mod host;
 mod menus;
 pub mod natives;
+mod native_mouse;
 mod plugins;
 mod sound;
 mod save_struct;
 mod video;
 mod pointer;
+mod tooltip;
+mod layer_movie;
 pub mod storage;
 
 pub use adapter::{Config, KrkrFactory, KrkrVm, register};

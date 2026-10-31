@@ -642,6 +642,9 @@ impl Renderer {
                     assets.text.for_client(crysirror_core::state::ClientId(owner)).font_digest(font)?;
                 }
                 Paint::Snapshot { .. } => {}
+                Paint::Mesh { frame, .. } => {
+                    for texture in &frame.textures {names.insert(texture.as_str());}
+                }
                 Paint::Puppet { .. } => anyhow::bail!("dynamic snapshot dependency"),
             }
             if let Some(filter) = &layer.filter {
@@ -656,6 +659,16 @@ impl Renderer {
         let mut ready = true;
         let mut pins = Vec::new();
         for name in names {
+            // Immutable worker images have no encoded file at this logical
+            // name. Resolve the actual scoped catalog entry; the capture's
+            // frozen SurfaceSnapshot retains its resource lease throughout
+            // preflight/upload. Never accept a namespace-shaped fake path or
+            // fall back to another client's resource/filesystem.
+            if name.starts_with("__image_resource/") {
+                assets.surface(ClientId(owner),name).with_context(||format!("snapshot published image is missing from owner catalog: {name}"))?;
+                continue;
+            }
+
             // Engine-published images must be self-contained PNG (other codecs
             // can read mutable companion files). Images served by a mounted
             // container are immutable while mounted; plain files are refused.
@@ -925,19 +938,26 @@ impl Renderer {
             .map(Some)
     }
 
-    /// Rasterize one snapshot now, outside a frame (a compacted canvas a
-    /// headless host has not drawn yet), and read its pixels back. `None`
-    /// while its image dependencies are still loading.
-    pub fn materialize_snapshot(
+    /// Prepare an immutable texture using the normal engine compositor. The
+    /// returned capability reads/de-pads GPU pixels lazily on the calling
+    /// worker; preparing it never waits for mapping or copies pixel bytes.
+    /// None means image dependencies are still loading.
+    pub fn snapshot_readback(
         &mut self,
         assets: &mut Assets,
         owner: u32,
         size: [u32; 2],
         layers: &std::sync::Arc<Vec<crysirror_scene::layer::LayerSpec>>,
-    ) -> Result<Option<image::RgbaImage>> {
+    ) -> Result<Option<std::sync::Arc<dyn crysirror_core::service::AssetReader>>> {
         let key = Self::snapshot_key(assets, owner, size, layers)?;
+        self.snapshot_readbacks.retain(|cached|cached!=&key);
+        self.snapshot_readbacks.push_back(key.clone());
+        while self.snapshot_readbacks.len()>2 {
+            if let Some(previous)=self.snapshot_readbacks.pop_front(){self.textures.remove(&previous);}
+        }
         if !self.textures.contains_key(&key) {
             let probe = crysirror_scene::layer::Primitive {
+                depth_order:None,
                 composite: None,
                 owner,
                 id: 0,
@@ -963,7 +983,44 @@ impl Renderer {
             self.engine_frame = saved;
             result?;
         }
-        self.read_snapshot(assets, owner, size, layers)
+        Ok(self.textures.get(&key).map(|texture| {
+            std::sync::Arc::new(SnapshotReadback {
+                gpu: self.gpu.clone(), texture: texture.texture.clone(), size,
+                pixels: std::sync::OnceLock::new(),
+            }) as std::sync::Arc<dyn crysirror_core::service::AssetReader>
+        }))
+    }
+    /// Synchronous compaction helper. Explicit ImageJobs use snapshot_readback
+    /// and put its read fence on an engine worker instead.
+    pub fn materialize_snapshot(
+        &mut self, assets: &mut Assets, owner: u32, size: [u32;2],
+        layers: &std::sync::Arc<Vec<crysirror_scene::layer::LayerSpec>>,
+    ) -> Result<Option<image::RgbaImage>> {
+        if self.snapshot_readback(assets,owner,size,layers)?.is_none() { return Ok(None); }
+        self.read_snapshot(assets,owner,size,layers)
+    }
+}
+
+struct SnapshotReadback {
+    gpu: std::sync::Arc<crate::Gpu>,
+    texture: wgpu::Texture,
+    size: [u32;2],
+    pixels: std::sync::OnceLock<std::result::Result<std::sync::Arc<[u8]>,String>>,
+}
+impl crysirror_core::service::AssetReader for SnapshotReadback {
+    fn len(&self) -> crysirror_core::Result<u64> { Ok(u64::from(self.size[0])*u64::from(self.size[1])*4) }
+    fn read_at(&self,offset:u64,output:&mut[u8])->crysirror_core::Result<usize> {
+        if output.is_empty()||offset>=u64::from(self.size[0])*u64::from(self.size[1])*4 {return Ok(0);}
+        let pixels=self.pixels.get_or_init(|| {
+            super::frame_history::read_texture(&self.gpu,&self.texture,self.size[0],self.size[1])
+                .map(|image| std::sync::Arc::<[u8]>::from(image.into_raw()))
+                .map_err(|reason|format!("{reason:#}"))
+        }).as_ref().map_err(|reason|crysirror_core::Error::Io(reason.clone()))?;
+        if offset>=pixels.len() as u64 { return Ok(0); }
+        let offset=offset as usize;
+        let count=output.len().min(pixels.len()-offset);
+        output[..count].copy_from_slice(&pixels[offset..offset+count]);
+        Ok(count)
     }
 }
 
@@ -977,4 +1034,33 @@ fn self_contained_image(name: &str, bytes: &[u8]) -> bool {
         || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
         || bytes.starts_with(b"BM")
         || (ext == "g00" && bytes.first().is_some_and(|v| *v <= 2))
+}
+
+
+#[cfg(test)]
+mod published_snapshot_tests {
+    use super::*;
+    use crysirror_core::{image_processing::{ImageInput,ImageProcessState},service::HostServices};
+    use std::time::{Duration,Instant};
+    #[test]
+    fn snapshot_preflight_resolves_scoped_immutable_worker_images_without_file_assets(){
+        let root=tempfile::tempdir().unwrap();std::fs::create_dir(root.path().join("game")).unwrap();
+        let project:crysirror_runtime::Project=serde_json::from_value(serde_json::json!({"schema":2,"name":"published snapshot","content_revision":"1","assets":"game","canvas":[4,4],"clients":[{"name":"one","adapter":"crysirror-script-v1","game":"authored"},{"name":"two","adapter":"crysirror-script-v1","game":"authored"}]})).unwrap();
+        let mut rt=crysirror_runtime::Runtime::with_asset_root(project,root.path(),&root.path().join("state"),Default::default()).unwrap();
+        let mut job=rt.host.image_metadata(ClientId(1)).unwrap().begin_process(ImageInput::Solid{size:[4,4],color:[200,10,30,255]},b"[]".as_slice().into()).unwrap();
+        let until=Instant::now()+Duration::from_secs(10);
+        let image=loop{match job.poll().unwrap(){ImageProcessState::Ready(r)=>break r,ImageProcessState::Failed(e)=>panic!("{e}"),ImageProcessState::Pending=>{}}assert!(Instant::now()<until);std::thread::yield_now();};
+        let published=rt.host.publish_image_resource(ClientId(1),100,image).unwrap();let path=published.path.relative();
+        let layers=vec![serde_json::from_value(serde_json::json!({"id":1,"rect":[0,0,4,4],"paint":{"kind":"image","asset":path}})).unwrap()];
+        let mut hashes=Default::default();
+        assert!(Renderer::snapshot_dependencies(&mut hashes,&mut rt.assets,1,&layers).unwrap().unwrap().is_empty(),"published RGBA must not schedule a file decode/AssetLease");
+        assert!(Renderer::snapshot_dependencies(&mut hashes,&mut rt.assets,2,&layers).is_err(),"another owner cannot borrow the same logical name");
+        let frozen=rt.assets.freeze_surfaces();rt.host.release_image_resource(ClientId(1),path).unwrap();
+        assert!(Renderer::snapshot_dependencies(&mut hashes,&mut rt.assets,1,&layers).is_err(),"released live resource is absent");
+        rt.assets.with_frame_surfaces(frozen,|assets|{
+            assert!(Renderer::snapshot_dependencies(&mut hashes,assets,1,&layers)?.is_some());
+            assert!(Renderer::snapshot_dependencies(&mut hashes,assets,2,&layers).is_err());Ok(())
+        }).unwrap();
+        assert!(rt.assets.surface(ClientId(1),path).is_none());
+    }
 }

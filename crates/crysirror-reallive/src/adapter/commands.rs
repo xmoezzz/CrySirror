@@ -13,7 +13,23 @@ impl RealLiveVm {
             return self.selection(m, h, c);
         }
         match (c.op.modtype, c.op.module) {
+            (1 | 2,71 | 72) => return self.object_creation(m,h,c),
             (1, 4) => self.system(m, h, input, c)?,
+            (1, 5) if c.op.opcode == 114 && c.op.overload == 0 => {
+                // Exact original DUMMYCHECK_DISC(string,int,string) ABI.
+                // Native-host policy disables this Windows disc step. The
+                // store value selects the original script's continuation;
+                // it does not represent an authentication/verification result.
+                use crate::vm::expr::{Expr, bank};
+                let string = |e: &Expr| matches!(e, Expr::Str(_) | Expr::Mem { bank: bank::STR_K | bank::STR_M | bank::STR_S, .. });
+                ensure!(c.argc == 3 && c.params.len() == 3 && string(&c.params[0].value) && string(&c.params[2].value), "DUMMYCHECK_DISC expects exactly (string,int,string)");
+                let _file = m.str_param(c, 0)?;
+                let _key = m.int_param(c, 1)?;
+                let _code = m.str_param(c, 2)?;
+                ensure!(self.config.optical_disc_check == OpticalDiscPolicy::DisabledForNativeHost, "DUMMYCHECK_DISC is unsupported under strict optical-disc policy");
+                self.optical_disc_checks += 1;
+                m.store = 1;
+            }
             (0, 4) => match c.op.opcode {
                 303 => m.yield_frame = true,
                 _ => bail!("unsupported native event-loop operation"),
@@ -21,6 +37,17 @@ impl RealLiveVm {
             (1, 30) => match c.op.opcode {
                 0 => self.draw_stack.clear(),
                 3 => m.store = self.draw_stack.len() as i32,
+                // GetDCPixel(x,y,dc,r,g,b): read the actual retained engine
+                // surface. Unsupported paint profiles fail in the shared
+                // query; the adapter never guesses a colour or composites.
+                31 => {
+                    ensure!(c.op.overload == 0 && c.argc == 6 && c.params.len() == 6, "GetDCPixel expects (x,y,dc,r,g,b)");
+                    let point = [u32::try_from(m.int_param(c, 0)?)?, u32::try_from(m.int_param(c, 1)?)?];
+                    let id = u32::try_from(m.int_param(c, 2)?)?;
+                    let targets = [m.int_target_param(c,3)?,m.int_target_param(c,4)?,m.int_target_param(c,5)?];
+                    let rgba: [u8;4] = serde_json::from_value(self.query(h,EngineQuery::CanvasPixel {id,point})?)?;
+                    write_pixel_targets(m,targets,rgba)?;
+                }
                 // Auto / semi-auto show every draw; manual shows refreshes only.
                 20 | 21 => self.set_manual(h, false)?,
                 22 => self.set_manual(h, true)?,
@@ -635,7 +662,7 @@ impl RealLiveVm {
             (20, 0..=2) | (21, 0..=2) => {
                 let mut name = m.str_param(c, 0)?;
                 let mut loop_start = 0;
-                let start_ms = 0;
+                let mut start_frame = None;
                 let mut frame_limit = None;
                 if module == 20 {
                     for e in m.gameexe.filter("DSTRACK") {
@@ -647,12 +674,13 @@ impl RealLiveVm {
                         {
                             let v = e.ints();
                             name = strings[0].to_string();
-                            loop_start = v.get(2).copied().unwrap_or(0).max(0) as u64;
-                            if v.first().copied().unwrap_or(0) != 0 {
-                                bail!(
-                                    "nonzero native music segment start needs shared segment source API"
-                                );
-                            }
+                            // Original Sound::bgm_pcm trims decoded frames to
+                            // [from,to), then makes looped_from relative to
+                            // that trim. Shared audio keeps the full source,
+                            // so retain the same boundaries in source units.
+                            let from = v.first().copied().unwrap_or(0).max(0) as u64;
+                            start_frame = Some(from);
+                            loop_start = (v.get(2).copied().unwrap_or(0).max(0) as u64).max(from);
                             frame_limit = v.get(1).copied().filter(|v| *v > 0).map(|v| v as u64);
                             break;
                         }
@@ -678,7 +706,8 @@ impl RealLiveVm {
                             parameters: AudioParameters {
                                 looping: if module == 20 { op != 2 } else { op == 2 },
                                 loop_start,
-                                start_ms,
+                                start_frame,
+                                clamp_range: module == 20,
                                 fade_ms: fade,
                                 replace_fade_ms: replace_fade,
                                 bus: if module == 20 {
@@ -1284,6 +1313,33 @@ impl RealLiveVm {
         Ok(Next::Advance)
     }
 }
+fn write_pixel_targets(m: &mut Machine, targets: [IntTarget;3], rgba: [u8;4]) -> Result<()> {
+    // IntRef read/write use the same bank/index validation. Check all three
+    // before mutating any native destination, including aliased packed slots.
+    for target in targets { m.get_target(target)?; }
+    for (target,value) in targets.into_iter().zip(rgba) { m.set_target(target,i32::from(value))?; }
+    Ok(())
+}
+#[cfg(test)]
+mod pixel_tests {
+    use super::*;
+    use crate::vm::{archive,scenario,bytecode::{Opcode,asm},expr::encode,memory::IntRef};
+    #[test]
+    fn invalid_third_pixel_output_leaves_first_two_native_slots_unchanged() {
+        let code=asm::command(Opcode::new(1,4,100,0),1,&[encode::int(1)]);
+        let archive=Archive::from_bytes(archive::build(&[(1,scenario::build(&code,&[],&[]))]),"synthetic",Nls::Sjis).unwrap();
+        let mut m=Machine::new(Rc::new(archive),Rc::new(Gameexe::default())).unwrap();
+        let first=IntTarget::Mem(IntRef::named("A",0).unwrap());
+        let second=IntTarget::Mem(IntRef::named("A",1).unwrap());
+        let third=IntTarget::Mem(IntRef::named("A",i32::MAX).unwrap());
+        m.set_target(first,7).unwrap();m.set_target(second,8).unwrap();
+        assert!(write_pixel_targets(&mut m,[first,second,third],[17,81,202,255]).is_err());
+        assert_eq!(m.get_target(first).unwrap(),7);assert_eq!(m.get_target(second).unwrap(),8);
+        let third=IntTarget::Mem(IntRef::named("A",2).unwrap());
+        write_pixel_targets(&mut m,[first,second,third],[17,81,202,255]).unwrap();
+        assert_eq!([m.get_target(first).unwrap(),m.get_target(second).unwrap(),m.get_target(third).unwrap()],[17,81,202]);
+    }
+}
 fn rgb(m: &mut Machine, c: &Command, at: usize) -> Result<[u8; 4]> {
     Ok([
         m.int_param(c, at)?.clamp(0, 255) as u8,
@@ -1786,7 +1842,8 @@ mod text_style_tests {
 
 impl RealLiveVm {
     /// `LoadDLL` / `UnloadDLL` / `CallDLL` (2:1), as upstream `modules::dll`.
-    /// The EF00/PT00/DT00 emulation is the vendored `reallive-dll` crate.
+    /// The EF00/PT00/DT00 native ABI lives in `crysirror-reallive-dll`; shared
+    /// VFX/Resource services own spatial kernels and PE data admission.
     fn dll(&mut self, m: &mut Machine, c: &Command) -> Result<()> {
         match c.op.opcode {
             10 => {
@@ -1827,7 +1884,7 @@ struct DllSystem<'a> {
     rng: &'a mut crate::vm::sys_state::Sys,
     resources: &'a mut Resources,
 }
-impl reallive_dll::System for DllSystem<'_> {
+impl crysirror_reallive_dll::System for DllSystem<'_> {
     fn random(&mut self, low: i32, high: i32) -> i32 {
         self.rng.random(low, high)
     }
@@ -1845,7 +1902,7 @@ struct Banks<'a> {
     memory: &'a mut crate::vm::memory::Memory,
     frame: &'a mut crate::vm::memory::FrameMemory,
 }
-impl reallive_dll::DllMemory for Banks<'_> {
+impl crysirror_reallive_dll::DllMemory for Banks<'_> {
     fn bank(&mut self, bank: u8) -> Result<&mut [i32]> {
         self.memory.words_mut(bank, self.frame)
     }

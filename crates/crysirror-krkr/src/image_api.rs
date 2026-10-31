@@ -63,7 +63,7 @@ pub(crate) fn begin_chain(
             "a resumable TJS boundary",
         ));
     }
-    if rt.host().image_job.is_some() {
+    if rt.host().image_job.is_some() || rt.host().image_pair.is_some() {
         return Err(TjsError::runtime("native image operation already pending"));
     }
     let kind = rt.host().layer(h)?.kind;
@@ -78,12 +78,13 @@ pub(crate) fn begin_chain(
 }
 
 pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyhow::Result<bool> {
-    let Some((id, mut job, flip)) = rt.host_mut().image_job.take() else {
+    if !poll_pair(rt,host,client)?{return Ok(false);}
+    let Some((id, mut job, flip, publish_surface)) = rt.host_mut().image_job.take() else {
         return Ok(true);
     };
     match job.poll()? {
         ImageProcessState::Pending => {
-            rt.host_mut().image_job = Some((id, job, flip));
+            rt.host_mut().image_job = Some((id, job, flip, publish_surface));
             Ok(false)
         }
         ImageProcessState::Failed(e) => anyhow::bail!("native image processing failed: {e}"),
@@ -96,11 +97,11 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                 .map_err(|e| anyhow::anyhow!("{e}"))?
                 .clone();
             let [w, height] = image.size();
-            let slot = 0x4000_0000u32
-                .checked_add(l.slot)
-                .ok_or_else(|| anyhow::anyhow!("image resource slot exhausted"))?;
-            let path = host.present_surface(client, slot, w, height, &image.rgba())?;
-            rt.host_mut().canvas_op(json!({"op":"set","id":l.slot,"layer":{"id":0,"rect":[0,0,w,height],"paint":{"kind":"image","asset":path.relative()}}}));
+            if publish_surface {
+                let uploaded=host.publish_image_resource(client,l.slot,image.clone())?;
+                rt.host_mut().retired_images.push(uploaded.path.relative().to_owned());
+                rt.host_mut().canvas_op(json!({"op":"set","id":l.slot,"layer":{"id":0,"rect":[0,0,w,height],"paint":{"kind":"image","asset":uploaded.path.relative()}}}));
+            }
             let l = rt
                 .host_mut()
                 .layer_mut(h)
@@ -115,6 +116,88 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
             Ok(true)
         }
     }
+}
+
+/// Native suspension policy only. Every missing CPU input is a client Canvas
+/// capture through the shared presenter, followed by an ordinary shared job.
+pub(crate) struct PairPreparation{
+    pub target:usize,pub source:usize,
+    inputs:[Option<ImageInput>;2],
+    captures:[Option<crysirror_core::image_processing::ImageJob>;2],
+    effects:std::sync::Arc<[u8]>,
+}
+fn poll_pair(rt:&mut Rt,host:&mut dyn HostServices,client:ClientId)->anyhow::Result<bool>{
+    let Some(mut pair)=rt.host_mut().image_pair.take() else{return Ok(true)};
+    for index in 0..2 {
+        if index==1&&pair.target==pair.source{pair.inputs[1]=pair.inputs[0].clone();}
+        if pair.inputs[index].is_some(){continue;}
+        let id=[pair.target,pair.source][index];
+        if pair.captures[index].is_none(){
+            let layer=rt.host().layer(ObjectHandle(id)).map_err(|e|anyhow::anyhow!("{e}"))?;
+            pair.captures[index]=Some(host.begin_canvas_image(client,layer.slot)?);
+        }
+        match pair.captures[index].as_mut().unwrap().poll()?{
+            ImageProcessState::Pending=>{rt.host_mut().image_pair=Some(pair);return Ok(false);}
+            ImageProcessState::Failed(e)=>anyhow::bail!("native alpha input capture failed: {e}"),
+            ImageProcessState::Ready(image)=>{pair.inputs[index]=Some(ImageInput::Resource(image));pair.captures[index]=None;}
+        }
+    }
+    let [destination,source]=pair.inputs;
+    let input=ImageInput::Raster{destination:Box::new(destination.unwrap()),source:Box::new(source.unwrap())};
+    let job=rt.host().images.as_ref().ok_or_else(||anyhow::anyhow!("image service absent"))?.begin_process(input,pair.effects)?;
+    rt.host_mut().image_job=Some((pair.target,job,[false;2],true));Ok(true)
+}
+pub fn clip_alpha(rt:&mut Rt,t:Option<ObjectHandle>,args:Vec<Variant>)->Result<Variant>{
+    const M:&str="Layer.clipAlphaRect";
+    if args.len()<7{return Err(TjsError::bad_param_count());}
+    if !rt.host().can_suspend{return Err(unsupported(M,"a resumable native boundary"));}
+    if rt.host().image_job.is_some()||rt.host().image_pair.is_some(){return Err(TjsError::runtime("native image operation already pending"));}
+    let target=this_of(rt,t,M)?;
+    let source=object_arg(&args[2]).map(|h|rt.bound_this(h).unwrap_or(h)).ok_or_else(||TjsError::runtime("clipAlphaRect: src must be Layer"))?;
+    let d=rt.host().layer(target)?.clone();let s=rt.host().layer(source)?.clone();
+    if !d.has_image||!s.has_image{return Err(TjsError::runtime("clipAlphaRect requires drawable images"));}
+    let coordinate=|index|need_int(&args,index,M).map(|n|n as i32);
+    let destination=[coordinate(0)?,coordinate(1)?];
+    let source_rect=[coordinate(3)?,coordinate(4)?,coordinate(5)?,coordinate(6)?];
+    if source_rect[2]<=0||source_rect[3]<=0{return Err(TjsError::runtime("clipAlphaRect: invalid source extent"));}
+    let clip=clip_of(&d).map(|n|n as i32);
+    if clip[2]<=0||clip[3]<=0{return Err(TjsError::runtime("clipAlphaRect: destination clip is empty"));}
+    let clear=match args.get(7){None|Some(Variant::Void)=>None,Some(v)=>{let n=v.to_integer()? as i32;(0..=255).contains(&n).then_some(n as u8)}};
+    let spec=crysirror_image::alpha_clip::AlphaClipRect{destination,source:source_rect,clip,clear,multiply_rgb:d.kind==12,self_source:target==source,clear_empty_alpha_only:true};
+    let effects=serde_json::to_vec(&[crysirror_image::effects::ImageEffect::AlphaClipRect{spec}]).map_err(|e|TjsError::runtime(e.to_string()))?;
+    rt.host_mut().image_pair=Some(PairPreparation{target:target.0,source:source.0,inputs:[d.image_source,s.image_source],captures:[None,None],effects:effects.into()});
+    rt.request_suspend();Ok(Variant::Void)
+}
+
+/// Prepare native mask coverage before consuming an input receipt. The same
+/// shared ImageJob evaluates immutable copy/fill/resize graphs; no Canvas paint
+/// is retargeted, and no pointer callback or TJS continuation is replayed.
+pub(crate) fn prepare_hit_images(rt: &mut Rt, frame: crysirror_core::service::InputFrame) -> anyhow::Result<bool> {
+    anyhow::ensure!(rt.host().image_job.is_none(), "hit preparation overlaps native image job");
+    let candidates = rt.host().hits(frame.pointer_x.into(), frame.pointer_y.into());
+    for (id, x, y) in candidates {
+        let h = ObjectHandle(id);
+        let kind = rt.object_member(h, "__lp_hitType").to_integer().map_err(|e|anyhow::anyhow!("{e}"))?;
+        let threshold = rt.object_member(h, "__lp_hitThreshold").to_integer().map_err(|e|anyhow::anyhow!("{e}"))?;
+        let layer = rt.host().layer(h).map_err(|e|anyhow::anyhow!("{e}"))?;
+        let px=x-layer.image_left; let py=y-layer.image_top;
+        if kind!=0 || !(1..256).contains(&threshold) || !layer.has_image
+            || layer.kind==1 || layer.full_alpha.is_some()
+            || px<0 || py<0 || px>=layer.image_width || py>=layer.image_height {
+            continue;
+        }
+        let Some(source)=layer.image_source.as_ref() else { continue; };
+        if matches!(source,ImageInput::Resource(_)) { continue; }
+        let source=source.clone();
+        let job=rt.host().images.as_ref().ok_or_else(||anyhow::anyhow!("image service absent"))?
+            .begin_process(source,std::sync::Arc::from(&b"[]"[..]))
+            .map_err(|e|anyhow::anyhow!("{e}"))?;
+        // Only coverage becomes ready. Existing retained Canvas nodes and copied
+        // immutable resources continue to own the visible image.
+        rt.host_mut().image_job=Some((id,job,[false;2],false));
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// A real layerExRaster facade. Only full clip boxes and shared source resources
@@ -174,7 +257,7 @@ pub(crate) fn queue_chain(
             "a resumable TJS boundary",
         ));
     }
-    if rt.host().image_job.is_some() {
+    if rt.host().image_job.is_some() || rt.host().image_pair.is_some() {
         return Err(TjsError::runtime("native image operation already pending"));
     }
     let flip = effects.iter().fold([false; 2], |mut flags, e| {
@@ -184,6 +267,10 @@ pub(crate) fn queue_chain(
         }
         flags
     });
+    // Preparing coverage of an unchanged immutable asset must not retarget its
+    // Canvas paint to a mutable per-Layer surface. Canvas copies retain the
+    // original asset independently of later loads into a temporary Layer.
+    let publish_surface = !effects.is_empty() || !matches!(&input, ImageInput::Asset { .. });
     let data = serde_json::to_vec(&effects).map_err(|e| TjsError::runtime(e.to_string()))?;
     let job = rt
         .host()
@@ -192,7 +279,7 @@ pub(crate) fn queue_chain(
         .ok_or_else(|| TjsError::runtime("image service absent"))?
         .begin_process(input, data.into())
         .map_err(|e| TjsError::runtime(e.to_string()))?;
-    rt.host_mut().image_job = Some((h.0, job, flip));
+    rt.host_mut().image_job = Some((h.0, job, flip, publish_surface));
     rt.request_suspend();
     Ok(Variant::Void)
 }

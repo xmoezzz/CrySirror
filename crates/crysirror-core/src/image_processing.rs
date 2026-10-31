@@ -20,6 +20,13 @@ pub enum ImageCompositeMath {
     /// MaskScalar256's RGB interpolation, keeping the destination alpha
     /// (krkr `_HDA` hold-destination-alpha blend).
     MaskHoldAlphaScalar256,
+    /// mask0 skips; mask255 uses weight/(256-weight), partial mask uses
+    /// a=mask*weight>>8 and255-a; sum then/256, keeping destination alpha.
+    /// Composite-layer opacity must be255; weight is0..=256.
+    MaskPiecewise256 {weight:u16},
+    /// Mask0 skips, mask255 copies RGB; partial RGB is floor(s*a/256) +
+    /// floor(d*(256-a)/256). Retains destination alpha; opacity must be255.
+    MaskSeparate256,
     /// Opaque input over a straight-alpha destination with scalar /256 tables.
     OpaqueOnAlphaScalar256,
     /// Straight-alpha input over straight-alpha destination, scalar /256 tables.
@@ -91,6 +98,10 @@ pub trait ImageResource: Send + Sync + core::fmt::Debug {
 }
 #[derive(Clone, Debug)]
 pub enum ImageInput {
+    /// Capability-resolved encoded bytes, for archive members and embedded
+    /// resources. Shared workers decode using the same registry as file assets.
+    /// Declared dimensions bound admission and must match the decoded result.
+    Encoded {name: alloc::string::String, bytes:Arc<[u8]>, size:[u32;2]},
     /// Immutable ordered bitmap operation graph, evaluated by shared CPU workers.
     /// Base and descendants retain original channel bytes; no screen is captured.
     Composite {

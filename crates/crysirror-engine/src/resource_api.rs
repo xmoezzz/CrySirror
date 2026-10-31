@@ -42,13 +42,19 @@ impl Default for ResourceRuntime {
     fn default() -> Self {
         #[allow(unused_mut)]
         let mut formats = FormatRegistry::default();
+        formats.register(Arc::new(crysirror_resource::installer::MsiArchiveFormat))
+            .expect("built-in MSI identifier is unique");
         formats.register(Arc::new(crysirror_resource::circus_pck::CircusPck))
             .expect("built-in Circus PCK identifier is unique");
         #[cfg(feature = "arc-formats")]
         crysirror_formats_arc::register(&mut formats)
             .expect("built-in archive identifiers are unique");
+        #[cfg(feature = "blackcyc-formats")]
+        crysirror_formats_blackcyc::register_archives(&mut formats).expect("BlackCyc archive identifiers are unique");
         #[allow(unused_mut)]
         let mut files = FileRegistry::default();
+        #[cfg(feature = "blackcyc-formats")]
+        crysirror_formats_blackcyc::register_audio(&mut files).expect("BlackCyc audio identifiers are unique");
         #[cfg(feature = "arc-formats")]
         {
             crysirror_formats_arc::register_files(&mut files).expect("file decoder IDs are unique");
@@ -275,6 +281,7 @@ fn mount_decoded(
     file: crysirror_resource::DecodedFile,
     context: DecodeContext,
     target: &str,
+    fallback: bool,
 ) -> Result<serde_json::Value> {
     let canonical = VfsPath::new(Mount::Asset, target).map_err(|e| anyhow::anyhow!("{e}"))?;
     ensure!(
@@ -294,9 +301,8 @@ fn mount_decoded(
         reader: file.reader,
     };
     let mount = ArchiveMount::new(Box::new(archive), context)?;
-    state
-        .runtime
-        .mount_provider(state.client, parent, Arc::new(mount))?;
+    if fallback {state.runtime.mount_fallback_provider(state.client,parent,Arc::new(mount))?;}
+    else {state.runtime.mount_provider(state.client,parent,Arc::new(mount))?;}
     Ok(
         json!({"format":format,"extension":file.extension,"size":size,"path":target,"metadata":file.metadata}),
     )
@@ -370,7 +376,7 @@ impl Class for ResourcesClass {
                 method("beginDecode",vec![("asset",T::String),("kind",T::String),("options",T::Optional(Box::new(T::Map)))],T::Int,"Schedule file/audio conversion (kind=file) or archive indexing (kind=archive) on the bounded CPU pool. Options {format?,profile?}. Returns a scoped ticket; owner calls never join. At most 64 retained tickets per client and 256 per host."),
                 method("decodeStatus",vec![("ticket",T::Int)],T::Map,"Poll pending/ready/failed resource work without blocking. A completed decoder failure remains visible until cancelled."),
                 method("readDecode",vec![("ticket",T::Int),("offset",T::Optional(Box::new(T::Int))),("limit",T::Optional(Box::new(T::Int)))],T::Map,"Read a ready file's bounded byte page (maximum 65536) or archive metadata page (maximum 1024 entries). Pending work fails visibly rather than waiting or returning fabricated data."),
-                method("mountDecode",vec![("ticket",T::Int),("target",T::String)],T::Map,"Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. No CPU decoder runs during publication."),
+                method("mountDecode",vec![("ticket",T::Int),("target",T::String),("fallback",T::Optional(Box::new(T::Bool)))],T::Map,"Publish a completed worker result into this client's VFS. For files target is a full logical filename; for archives it is a mount directory. Optional fallback=true puts existing overlays and real loose files ahead of this provider; default false preserves ordinary overlay priority. No CPU decoder runs during publication."),
                 method("cancelDecode",vec![("ticket",T::Int)],T::Void,"Cancel pending work or release a retained result. Late worker output is discarded. Already mounted readers retain their own decoded-resource reservation."),
                 method("transforms",vec![],T::List(Box::new(T::String)),"List installed byte transform IDs; profiles refer to keys supplied by the Rust host."),
                 method("imageFormats",vec![],T::Map,"List installed native image format IDs and standard image extensions; the runtime, Bitmap, text icons and renderer use this same registry."),
@@ -494,6 +500,7 @@ impl Class for ResourcesClass {
                                     decoded,
                                     context,
                                     arg(args, 1)?.as_str()?,
+                                    args.get(2).filter(|value|!matches!(value,Value::Null)).map(Value::as_bool).transpose()?.unwrap_or(false),
                                 )?
                             } else {
                                 let offset = args
@@ -539,12 +546,10 @@ impl Class for ResourcesClass {
                                 let count = archive.entries().len();
                                 let mount =
                                     ArchiveMount::new(Box::new(SharedArchive(archive)), context)?;
-                                state.runtime.mount_provider(
-                                    state.client,
-                                    target,
-                                    Arc::new(mount),
-                                )?;
-                                json!({"kind":"archive","format":format,"entries":count,"mount_point":target})
+                                let fallback=args.get(2).filter(|value|!matches!(value,Value::Null)).map(Value::as_bool).transpose()?.unwrap_or(false);
+                                if fallback {state.runtime.mount_fallback_provider(state.client,target,Arc::new(mount))?;}
+                                else {state.runtime.mount_provider(state.client,target,Arc::new(mount))?;}
+                                json!({"kind":"archive","format":format,"entries":count,"mount_point":target,"fallback":fallback})
                             } else {
                                 let offset = args
                                     .get(1)
@@ -615,7 +620,7 @@ impl Class for ResourcesClass {
                         .decode(path, input, opts.format.as_deref(), &context)?;
                 let size = file.reader.len().map_err(|e| anyhow::anyhow!("{e}"))?;
                 if name == "mountDecoded" {
-                    mount_decoded(state, format, file, context, arg(args, 1)?.as_str()?)?
+                    mount_decoded(state, format, file, context, arg(args, 1)?.as_str()?,false)?
                 } else {
                     ensure!(opts.offset as u64 <= size, "decoded resource page offset");
                     let n = usize::try_from((size - opts.offset as u64).min(limit as u64))?;

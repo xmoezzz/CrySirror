@@ -576,21 +576,17 @@ fn install_player(rt: &mut Rt, c: ObjectHandle) {
         },
         read_only,
     );
-    rt.register_object_native_property(
-        c,
-        "variableKeys",
-        |rt: &mut Rt, t| {
-            let h = this_of(rt, t, "variableKeys")?;
-            let a = player(rt, h)?
-                .variables
-                .keys()
-                .cloned()
-                .map(Variant::String)
-                .collect();
-            Ok(Variant::Object(rt.alloc_array_object(a)))
-        },
-        read_only,
-    );
+    // Legacy Player exposes the historical `varibleKeys` spelling. Static
+    // registration in the owner DLL binds it to a real own-variable array
+    // getter (+0x2e8, 0x30-byte records); source audit retains that evidence.
+    for key in ["variableKeys", "varibleKeys"] {
+        rt.register_object_native_property(c,key,
+            move |rt: &mut Rt,t| {
+                let h=this_of(rt,t,key)?;
+                let values=player(rt,h)?.variables.keys().cloned().map(Variant::String).collect();
+                Ok(Variant::Object(rt.alloc_array_object(values)))
+            },read_only);
+    }
     rt.register_object_native_property(
         c,
         "outline",

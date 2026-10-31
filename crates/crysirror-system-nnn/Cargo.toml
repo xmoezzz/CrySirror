@@ -1,0 +1,26 @@
+[package]
+name = "crysirror-system-nnn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "First-class System-NNN native script data and instruction semantics"
+[features]
+runtime = ["dep:crysirror-runtime"]
+[dependencies]
+anyhow.workspace = true
+crysirror-resource.workspace = true
+crysirror-image.workspace = true
+crysirror-core.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+crysirror-runtime = {workspace=true,optional=true}
+encoding_rs = "0.8"
+crysirror-tasks.workspace = true
+crysirror-text.workspace = true
+crysirror-scene.workspace = true
+crysirror-formats-blackcyc.workspace = true
+[dev-dependencies]
+crysirror-runtime.workspace = true
+tempfile = "3.12"

@@ -14,7 +14,12 @@ fn info(f: FontInfo) -> serde_json::Value {
 pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Result<Option<Value>> {
     if !matches!(
         method,
-        "beginFont" | "fontStatus" | "resolveFont" | "releaseFontJob" | "releaseFont"
+        "beginFont"
+            | "beginPrecomputedFont"
+            | "fontStatus"
+            | "resolveFont"
+            | "releaseFontJob"
+            | "releaseFont"
     ) {
         return Ok(None);
     }
@@ -30,6 +35,31 @@ pub(crate) fn call(state: &mut EngineState, method: &str, args: &[Value]) -> Res
                 name,
                 source: FontLoadSource::Storage(VfsPath::new(Mount::Asset, path)?),
                 face_index: index.try_into()?,
+            })?;
+            Value::Int(ticket.id.try_into()?)
+        }
+        "beginPrecomputedFont" => {
+            let name = arg.as_str()?.to_owned();
+            let path = args
+                .get(1)
+                .context("precomputed font asset path")?
+                .as_str()?;
+            let pixel_size: u16 = args
+                .get(2)
+                .context("precomputed font pixel size")?
+                .as_i64()?
+                .try_into()?;
+            anyhow::ensure!(
+                (1..=512).contains(&pixel_size),
+                "precomputed font pixel size must be 1..512"
+            );
+            let ticket = library.begin(FontLoadSpec {
+                name,
+                source: FontLoadSource::PrecomputedStorage {
+                    path: VfsPath::new(Mount::Asset, path)?,
+                    pixel_size,
+                },
+                face_index: 0,
             })?;
             Value::Int(ticket.id.try_into()?)
         }

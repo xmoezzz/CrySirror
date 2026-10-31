@@ -127,7 +127,7 @@ impl<'de> Deserialize<'de> for InputInbox {
 /// Human-readable transports use decimal strings for exact 64-bit values.
 /// Binary snapshots keep native u64 encoding. Small numeric input is accepted;
 /// large JS numbers are rejected rather than silently losing low button bits.
-mod exact_u64 {
+pub(crate) mod exact_u64 {
     use serde::{
         Deserializer, Serializer,
         de::{Error, Visitor},

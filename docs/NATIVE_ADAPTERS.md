@@ -760,3 +760,27 @@ Real-game title completion still requires separate behavior evidence. Authored
 native button/wait/snapshot callbacks and generic UI tests have passed, while
 rich/vertical layout, wipes, other object profiles and original-save
 reconstruction are not implied by that verified subset.
+
+### CatSystem2 native KCS foundation (2026-10-31)
+
+`crysirror-catsystem2` is a first-class original KCS v2 VM and thin semantic
+adapter. It does not host an original engine or reuse a composed framebuffer.
+The original configured KCS entry is parsed and stepped; substituting a CST
+scenario for the KCS boot is not accepted. `SOURCE.json` records inspected public
+source pins and the owner module SHA256 used only to guard reviewed native ABI
+semantics. Unknown ABI, opcode, native call or native menu command fails visibly.
+
+Shared `cat-system/int` archive loading can derive the encrypted archive profile
+from capability-scoped PE V_CODE2 resources. Shared `resource::pe_menu` parses
+bounded standard MENU v0 resources; the adapter translates original menu IDs to
+engine-owned retained UI trees and maps enabled state through public UI commands.
+Shared `resource::xml` owns bounded immutable XML element/attribute/text parsing
+and path lookup. CatSystem2 retains only original numeric XML handles, native
+format/address/default/close policy, and pending-call completion. Task admission
+precedes XML source reads and CPU parsing; only the owner publishes completed Arc
+resources and native handles. Original logical addresses never become pointers.
+
+This is partial implementation. Parsing all original containers/scripts and
+reaching a native frontier does not validate a title screen, text/image/audio
+playback, CST/FES execution, original saves or complete game compatibility.
+Observed behavior and compilation results are separately logged in STATUS.md.

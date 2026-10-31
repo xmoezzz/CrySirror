@@ -32,6 +32,7 @@ pub const GLOBALS: &[(&str, &str)] = &[
     ("audio", "Audio"),
     ("save", "Save"),
     ("input", "Input"),
+    ("inputRoutes", "InputRoutes"),
     ("localization", "Localization"),
     ("text", "Text"),
     ("bitmap", "Bitmap"),
@@ -54,6 +55,7 @@ pub fn register(r: &mut ClassRegistry) -> Result<()> {
     crate::services::register(r)?;
     crate::physics_api::register(r)?;
     crate::canvas_api::register(r)?;
+    crate::input_routes_api::register(r)?;
     crate::assets_api::register(r)?;
     crate::profiler_api::register(r)?;
     crate::vfx_api::register(r)?;
@@ -190,6 +192,7 @@ fn engine_info() -> &'static ClassInfo {
                 T::Void,
                 "Append a line to the bounded engine log.",
             ),
+            method("logs", vec![], T::Map, "Read this client's canonical bounded engine log and dropped count. Sequences and virtual timestamps are exact decimal strings; no filesystem/device output is implied."),
             method(
                 "quit",
                 vec![],
@@ -235,6 +238,11 @@ impl Class for EngineClass {
                 let line = arg(args, 0, "message")?.as_str()?;
                 ensure!(line.len() <= 4096, "log line exceeds 4 KiB");
                 cx.log(line)?;
+            }
+            "logs" => {
+                use crysirror_core::service::HostServices;
+                let s=cx.state()?;let log=s.runtime.host.log_snapshot(s.client).map_err(|e|anyhow::anyhow!("{e}"))?;
+                return Ok(Value::from_json(serde_json::json!({"client":log.client.0,"dropped":log.dropped.to_string(),"records":log.records.into_iter().map(|v|serde_json::json!({"sequence":v.sequence.to_string(),"time_ms":v.time_ms.to_string(),"message":v.message})).collect::<Vec<_>>()})));
             }
             "quit" => cx.state()?.quit_requested = true,
             "clients" => {

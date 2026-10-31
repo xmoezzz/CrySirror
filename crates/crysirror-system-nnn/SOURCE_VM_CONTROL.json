@@ -1,0 +1,69 @@
+{
+  "implementation": "Independent first-class Rust VM/control/bootstrap/resource-name policy; no original source implementation copied or linked.",
+  "public_source": {
+    "repository": "https://github.com/tinyan/SystemNNN",
+    "commit": "78a05053c78b3b80065a9a209c6685a7c60a2e83",
+    "files_reviewed": [
+      "nnnLib/execscript.cpp (complete)",
+      "nnnLib/execscript.h (complete)",
+      "nnnUtilLib/scriptDefine.h (complete)",
+      "nnnUtilLib/scriptcommand.h (value identities)",
+      "nnnUtilLib/namelist.cpp (complete loading/name/block routines)",
+      "nnnUtilLib/namelist.h",
+      "nnnUtilLib/varNumber.cpp (complete)",
+      "nnnLib/maincontrol.cpp (CheckSystem and InitRandomSeed)",
+      "nnnLib/gamecallback.cpp (GeneralCreate script/config/name/variable setup, InitNewGame, YoyakuExecRoutine, GetScript, SystemFunctionScript, GetVarData/SetVarData/GetCalcuVarData, LoadDWQ/PreLoadDWQ)",
+      "nyanPictureLib/Picture.cpp (static tags, LoadDWQ, InitStaticData, OpenDWQFile)",
+      "nnnUtilLib/wavedata.cpp (complete)",
+      "nnnUtilLib/wavemusic.cpp (OpenNewFile)",
+      "nyanLib/myFile.cpp (scoped-resource mapping facts only)"
+    ],
+    "licence": "No licence grant found. Source used only to research format/behaviour facts, not copied, vendored or linked."
+  },
+  "reviewed_owner_module": {
+    "sha256": "e85e92ec538d50eae08d27286177149972d443a96d1415277c1ae1f9ee108bdb",
+    "source": "Owner MSI logical mugen2/mugen2.exe, read via shared InstallerCatalog. Static IDA inspection only; never executed or distributed.",
+    "actual_game": "RTTI CGame vtable 0x564ad4; constructor 0x401660 assigns it after CGameCallBack construction. Relevant slots equal base vtable 0x564f04; no guessed derived overrides.",
+    "functions_reviewed": {
+      "0x4ea210": "Complete original ExecScript dispatch; original PCs, control, user command/function parameters and selection/voice arguments",
+      "0x4e95e0": "Complete original postfix/direct expression evaluator; direct 0x91 token high-nibble behaviour confirmed",
+      "0x533490": "Actual rnd/date/year/holiday/week name bindings",
+      "0x5335e0": "Complete calculated reads; rnd rejects first 50 draws >=30000, then accepts draw 51; output modulo 10000; unbound names read stored bank",
+      "0x533c20": "Complete ordinary variable read bank, literal-reference and out-of-range rules",
+      "0x533b40": "Complete variable write bank and layerOffVar visibility effects",
+      "0x542180": "Original constructor config/name/binding sections: sys/project/command/function/initial tables, system bindings, date=101/year=2000 and layerOffVar setup",
+      "0x53a710": "Complete actual InitNewGame; reset ranges, configured initial table, sys PC/context zero and scheduled execution",
+      "0x53a9f0": "Original opening-mode reset path; distinct from NewGame and not substituted for it",
+      "0x538530": "Complete SCRIPT/SUBSCRIPT/JUMP context and original project identity policy",
+      "0x538ba0": "Complete outer Yoyaku execution; NEXT pops context, END restarts sys, film/exit/user-command/skip boundaries",
+      "0x534060": "Complete original four-context script selector",
+      "0x52d130": "Complete original InitRandomSeed; -1 wall-clock seconds, positive fixed seed, otherwise preserves startup CRT state",
+      "0x541020": "Complete original script LOADDWQ prefix, load-mask and source-rectangle policy; modern rename policy not inferred",
+      "0x540f20": "Complete original PRELOADDWQ prefix/load-mask policy",
+      "0x4d7680": "Complete original CPicture LoadDWQ resource naming/call chain; codec implementation remains shared",
+      "0x4d4260": "Complete original pack tag/prefix, highest-level matching entry, GPK and loose fallback lookup",
+      "0x4d4960": "Complete original GTB level/tag table admission",
+      "0x444d90": "Complete original vaw/[directory/]name.vaw system-wave naming",
+      "0x444e90": "Complete original loose cdvaw/tag/name.vaw naming",
+      "0x444f80": "Complete original packed cdvaw/tag.vpk lookup; no invented loose fallback",
+      "0x445350": "Complete original companion cdvaw/tag.vtb lookup",
+      "0x46d890": "Complete original music control .mml priority and plain .wgq fallback check",
+      "0x46cc70": "Complete original wgq/name.wgq source naming"
+    },
+    "non_distributed_evidence": "target/verification/systemnnn/bootstrap-control-*.c, actual-game-vtables.json and bootstrap-image-tags.json"
+  },
+  "ownership": {
+    "vm": "Original encoded tokens, word PCs, scalar variable bank, return/context/continuation IDs, rejection/seed policy, config and resource naming",
+    "engine": "Task/dependency admission, scoped resource readers, archive/file/image/audio decoding, PatternRng next_draw algorithm, retained Layer/Canvas/Text/UI/audio operations and all renderer/device state",
+    "random": "One optional shared PatternRng transaction state is copied with the native variable bank. Script reads and shared effect workers exchange the same state; no VM-local RNG algorithm, hidden seed or effect-local stream.",
+    "variable_writes": "CALCU/conditional layerOffVar writes yield original-PC receipts and candidate banks. Only owner completion acknowledges both shared visibility and bank/PC changes."
+  },
+  "explicit_limits": [
+    "Bootstrap is guarded for this exact reviewed module, not automatic support for arbitrary System-NNN versions.",
+    "Host wall-clock/startup RNG state must be supplied explicitly; no seed is fabricated.",
+    "Unknown opcode/native operation/calculated service remains a visible original-PC boundary.",
+    "Packed lookup plans are policy data for host-owned shared archive registries; no VM archive decoder or renderer is provided.",
+    "Music .mml semantics and original save reconstruction are not established by these resource names.",
+    "No original arbitrary array opcode is invented: inspected SPT values address the native scalar bank and original parameter/continuation tables."
+  ]
+}

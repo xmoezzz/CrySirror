@@ -47,10 +47,14 @@ impl Class for CanvasesClass {
         INFO.get_or_init(||ClassInfo {
             name:"Canvases", doc:"Client-scoped retained drawing canvases backed by inspectable engine Layer nodes.",
             properties:vec![], methods:vec![
+                method("getLimits",vec![],T::Map,
+                    "Return shared retained-canvas capacity: surfacesPerClient. Pixel-byte, dimension and node limits are admitted separately."),
                 method("apply",vec![("commands",T::List(Box::new(T::Map)))],T::Void,
-                    "Atomically apply typed canvas commands: create, clear, draw, set, copy, present and hide. Draws contain ordinary Layer specs, including positioned glyph runs."),
+                    "Atomically apply typed canvas commands: create, destroy, clear, draw, set, copy, present and hide. Destroy releases an existing unpresented surface; hide its presentations first. Frozen copies survive source destruction. Draws contain ordinary Layer specs, including positioned glyph runs."),
                 method("get",vec![("id",T::Int)],T::Optional(Box::new(T::Map)),
                     "Inspect this client's canvas dimensions and logical draw nodes, or null when absent. No flattened native frame is returned."),
+                method("readPixel",vec![("id",T::Int),("x",T::Int),("y",T::Int)],T::List(Box::new(T::Int)),
+                    "Read exact RGBA bytes from supported retained solid canvas nodes. Missing/outside coordinates and unsupported image/text/group/filter/transform/blend profiles fail; no guessed matte or GPU readback."),
             ],
         })
     }
@@ -65,6 +69,7 @@ impl Class for CanvasesClass {
         args: &[Value],
     ) -> Result<Value> {
         match name {
+            "getLimits" => json(serde_json::json!({"surfacesPerClient":crysirror_core::service::MAX_CANVAS_SURFACES_PER_CLIENT})),
             "apply" => {
                 let Value::List(values) = arg(args, 0, "commands")? else {
                     anyhow::bail!("canvas commands must be a list");
@@ -94,6 +99,15 @@ impl Class for CanvasesClass {
                     Some(surface) => json(surface),
                     None => Ok(Value::Null),
                 }
+            }
+            "readPixel" => {
+                let target=id(args)?;
+                let point=[u32::try_from(arg(args,1,"x")?.as_i64()?)?,u32::try_from(arg(args,2,"y")?.as_i64()?)?];
+                let state=cx.state()?;
+                let bytes=state.runtime.host.query_engine(state.client,
+                    crysirror_core::service::EngineQuery::CanvasPixel{id:target,point})?;
+                let rgba:[u8;4]=serde_json::from_slice(&bytes)?;
+                json(&rgba)
             }
             _ => unreachable!(),
         }
@@ -132,6 +146,9 @@ impl Class for MediaClass {
         INFO.get_or_init(||ClassInfo {
             name:"Media",doc:"Shared asynchronous media resources; decoding, clocks and errors belong to the engine.",
             properties:vec![],methods:vec![
+                method("beginProbe",vec![("asset",T::String)],T::Int,"Begin scoped video decoder/header preparation without playback, pictures or PCM. probeStatus retains Pending/Ready/Failed; audio facts remain unknown when not probed."),
+                method("probeStatus",vec![("ticket",T::Int)],T::Map,"Poll header preparation without joining; Ready exposes size/container/video decoder, optional audio facts, frame_ms and exact duration_ms as a decimal string or null."),
+                method("releaseProbe",vec![("ticket",T::Int)],T::Void,"Release this client's header probe; unfinished work is cancelled. Tickets become obsolete after restore."),
                 method("play",vec![("id",T::Int),("asset",T::String),("options",T::Optional(Box::new(T::Map)))],T::String,
                     "Start a scoped media resource; options {loop?:false,audio?:true,gain?:1}. Returns its logical image resource path for Layer/Canvas/Material APIs; inspect status for loading, playback and errors."),
                 method("stop",vec![("id",T::Int)],T::Void,"Stop only this client's media resource."),
@@ -156,6 +173,7 @@ impl Class for MediaClass {
         name: &str,
         args: &[Value],
     ) -> Result<Value> {
+        if let Some(result)=crate::media_probe_api::call(cx.state()?,name,args)? {return Ok(result);}
         let id = id(args)?;
         match name {
             "play" => {

@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 use crate::{ArchiveEntry, KeyProvider, MemoryKeyProvider, TransformRegistry, TransformSpec};
-use anyhow::{Result, ensure};
+use anyhow::{ensure, Result};
 use crysirror_core::{
     service::{AssetReader, MemoryAssetReader},
     state::ClientId,
@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     sync::{
-        Arc,
         atomic::{AtomicU64, Ordering},
+        Arc,
     },
 };
 
@@ -100,6 +100,7 @@ pub struct DecodeContext {
     /// Scoped companion resources; workers capture the same immutable authority.
     pub resolver: Option<Arc<dyn crate::DependencyResolver>>,
     budget: Arc<AtomicU64>,
+    cancellation: crysirror_tasks::Cancellation,
 }
 impl DecodeContext {
     pub fn new(client: ClientId) -> Self {
@@ -113,7 +114,21 @@ impl DecodeContext {
             parameters: BTreeMap::new(),
             resolver: None,
             budget: Arc::new(AtomicU64::new(0)),
+            cancellation: Default::default(),
         }
+    }
+    /// Attach a worker cancellation token to bounded CPU/stream decode loops.
+    pub fn with_cancellation(mut self, cancellation: crysirror_tasks::Cancellation) -> Self {
+        self.cancellation = cancellation;
+        self
+    }
+    pub(crate) fn published(mut self) -> Self {
+        self.cancellation = Default::default();
+        self
+    }
+    /// Check cooperative cancellation without publishing partial resources.
+    pub fn check_cancelled(&self) -> Result<()> {
+        self.cancellation.check()
     }
     pub fn pipeline(&self, format: &str, entry: &ArchiveEntry) -> Result<Vec<TransformSpec>> {
         self.pipelines.pipeline(format, entry)

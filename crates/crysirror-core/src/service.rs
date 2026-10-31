@@ -7,16 +7,32 @@ use crate::{
     state::{ClientId, Command, SceneState, TextRun},
 };
 use alloc::{string::String, sync::Arc, vec::Vec};
+mod pattern;
+pub use pattern::*;
+mod media_probe;
+pub use media_probe::*;
+mod audio_loop;
+pub use audio_loop::*;
 mod audio_release;
 pub use audio_release::*;
 mod audio_sequence;
 pub use audio_sequence::*;
+mod civil_time;
+pub use civil_time::*;
+mod diagnostics;
+pub use diagnostics::*;
+mod keyboard_locks;
+pub use keyboard_locks::*;
 mod font;
 pub use font::*;
 mod frame_history;
 pub use frame_history::*;
 
 pub const SIMPLE_TEXT_LAYOUT: &str = "simple-horizontal-v1";
+/// Shared per-client count budget for retained drawing canvases and their
+/// materialized images. Pixel bytes, dimensions and node graphs have separate
+/// admission limits; reserving a logical surface does not allocate its pixels.
+pub const MAX_CANVAS_SURFACES_PER_CLIENT: usize = 4096;
 /// The same horizontal glyph metrics without automatic width wrapping.
 pub const UNWRAPPED_TEXT_LAYOUT: &str = "simple-horizontal-unwrapped-v1";
 
@@ -573,11 +589,18 @@ pub struct FontMetrics {
 }
 #[derive(Clone, Copy, Debug)]
 pub enum EngineQuery {
+    /// Poll one engine-routed input lease. Repeated polls retain its receipt.
+    InputRouteDelivery,
+    InputRouteReceiver(u32),
+    InputRouteStats,
     Layer(u32),
     LayerCrossfade(u32),
     /// Owned layer motion tracks and their engine-sampled values.
     LayerMotion(u32),
     Canvas(u32),
+    /// Exact stored RGBA sample of an owned canvas. Unsupported paint profiles
+    /// fail explicitly; no device readback or default matte is implied.
+    CanvasPixel { id: u32, point: [u32; 2] },
     UiWidget(u32),
     /// Owner-scoped retained button pointer/focus/press state.
     UiInteraction(u32),
@@ -750,6 +773,32 @@ pub trait TextMeasurement: Send + Sync {
 }
 
 pub trait HostServices: FileSystem {
+    fn begin_media_probe(&mut self,_client:ClientId,_asset:&VfsPath)->Result<MediaProbeJob>{Err(crate::Error::Unsupported("media decoder header probe"))}
+    /// Freeze a client Canvas and asynchronously prepare an immutable engine
+    /// image. Requires an installed presenter; polling never waits for a GPU.
+    fn begin_canvas_image(&mut self, _client: ClientId, _canvas: u32) -> Result<crate::image_processing::ImageJob> {
+        Err(crate::Error::Unsupported("Canvas image capture presenter"))
+    }
+    fn begin_pattern(&mut self,_client:ClientId,_request:PatternRequest)->Result<PatternJob>{Err(crate::Error::Unsupported("persistent pattern worker"))}
+
+    /// Atomically upsert explicit decoded-frame metadata; duplicate batch keys fail.
+    fn publish_audio_loop_metadata(&mut self,_client:ClientId,_entries:&[AudioLoopMetadata])->Result<AudioLoopCatalogReceipt>{Err(crate::Error::Unsupported("audio loop catalog"))}
+    fn audio_loop_metadata(&self,_client:ClientId,_asset:&str)->Result<Option<AudioLoopMetadata>>{Err(crate::Error::Unsupported("audio loop catalog"))}
+    fn clear_audio_loop_metadata(&mut self,_client:ClientId)->Result<AudioLoopCatalogReceipt>{Err(crate::Error::Unsupported("audio loop catalog"))}
+
+    /// Sample host local time on a worker; Ready carries its actual Unix instant
+    /// and local offset. Does not substitute the deterministic engine clock.
+    fn begin_civil_time(&mut self,_client:ClientId)->Result<alloc::boxed::Box<dyn CivilTimeQuery>>{Err(crate::Error::Unsupported("host civil clock"))}
+
+    /// Append to the canonical engine log at its exclusive owner boundary.
+    /// The returned receipt means committed, not just queued. No filesystem sink.
+    fn append_log(&mut self,_client:ClientId,_message:&str)->Result<LogReceipt>{Err(crate::Error::Unsupported("engine log"))}
+    fn log_snapshot(&self,_client:ClientId)->Result<LogSnapshot>{Err(crate::Error::Unsupported("engine log"))}
+    /// Read client logical locks and explicit physical capability availability.
+    fn keyboard_locks(&self,_client:ClientId)->Result<KeyboardLockSnapshot>{Err(crate::Error::Unsupported("keyboard locks"))}
+    /// Commit logical state only; must not toggle an ambient OS keyboard.
+    fn set_keyboard_locks(&mut self,_client:ClientId,_state:KeyboardLockState)->Result<KeyboardLockSnapshot>{Err(crate::Error::Unsupported("keyboard locks"))}
+
     /// Admit a client-owned live-voice retirement and external-clock release.
     fn begin_audio_release(&mut self,_client:ClientId,_spec:AudioReleaseSpec)->Result<AudioReleaseHandle>{Err(crate::Error::Unsupported("audio voice release"))}
     /// Submit a monotonic caller update; completion is observed separately.
@@ -973,6 +1022,11 @@ pub trait HostServices: FileSystem {
     fn submit_engine(&mut self, _client: ClientId, _schema: u32, _data: &[u8]) -> Result<()> {
         Err(crate::Error::Unsupported("engine services"))
     }
+    /// Publish an already-completed immutable ImageResource on the owner.
+    /// No pixel algorithm/encoding/copy; returned path is a new generation.
+    fn publish_image_resource(&mut self,_client:ClientId,_id:u32,_image:Arc<dyn crate::image_processing::ImageResource>)->Result<UploadedImage>{Err(crate::Error::Unsupported("image resource publication"))}
+    /// Retire a live path. Frozen renderer frames may retain its resource lease.
+    fn release_image_resource(&mut self,_client:ClientId,_path:&str)->Result<()>{Err(crate::Error::Unsupported("image resource publication"))}
     /// Register decoded pixels under a host-minted client-scoped logical path.
     fn upload_rgba(
         &mut self,

@@ -28,6 +28,8 @@ var rm=new Motion.ResourceManager();var p=new Motion.Player(rm);
 if(p.playing||p.motion!=''||p.speed!=1||p.opacity!=255)throw new Exception('player defaults');
 p.speed=2;p.tickCount=500;if(p.frameTickCount!=30)throw new Exception('clock unit');
 p.setVariable('test',3);if(p.getVariable('test')!=3||p.variableKeys[0]!='test')throw new Exception('parameter mapping');
+if(p.varibleKeys.count!=1||p.varibleKeys[0]!='test')throw new Exception('legacy parameter keys');
+p.setVariable('alpha',2);if(p.varibleKeys.count!=2||p.variableKeys.count!=2)throw new Exception('live parameter keys');
 var bad=false;try{p.play('missing',Motion.PlayFlagJoin);}catch(e){bad=true;}if(!bad)throw new Exception('unsupported join accepted');
 bad=false;try{p.setVariable('test',4,60);}catch(e){bad=true;}if(!bad)throw new Exception('unsupported tween accepted');
 var w=new Window();var base=new Layer(w,null);var child=new Layer(w,base);child.setSize(320,200);child.visible=true;

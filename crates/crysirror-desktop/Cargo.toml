@@ -24,6 +24,8 @@ nscripter = ["dep:crysirror-nscripter"]
 bgi = ["dep:crysirror-bgi"]
 circus = ["dep:crysirror-circus"]
 catsystem2 = ["dep:crysirror-catsystem2", "arc-formats"]
+majiro = ["dep:crysirror-majiro", "arc-formats"]
+system-nnn = ["dep:crysirror-system-nnn", "crysirror-engine/blackcyc-formats", "crysirror-runtime/blackcyc-formats", "scripting"]
 audio = ["crysirror-audio/cpal-output"]
 gamepad = ["dep:gilrs", "scripting"]
 siglus-resources = ["dep:crysirror-siglus"]
@@ -44,6 +46,8 @@ crysirror-nscripter = {workspace=true,optional=true}
 crysirror-bgi = {workspace=true,optional=true}
 crysirror-circus = {workspace=true,optional=true,features=["runtime"]}
 crysirror-catsystem2 = {workspace=true,optional=true,features=["runtime"]}
+crysirror-majiro = {workspace=true,optional=true,features=["runtime"]}
+crysirror-system-nnn = {workspace=true,optional=true,features=["runtime"]}
 crysirror-core.workspace = true
 crysirror-resource.workspace = true
 crysirror-formats-arc = { workspace = true, optional = true }

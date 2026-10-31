@@ -1,0 +1,23 @@
+[package]
+name = "crysirror-majiro"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+rust-version.workspace = true
+publish = false
+description = "First-class Majiro original bytecode and thin engine adapter"
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+crysirror-core.workspace = true
+crysirror-resource.workspace = true
+crysirror-tasks.workspace = true
+crysirror-vfx = {workspace=true,optional=true}
+crysirror-runtime = { workspace = true, optional = true }
+encoding_rs = "0.8"
+[features]
+runtime = ["dep:crysirror-runtime", "dep:crysirror-vfx"]
+[dev-dependencies]
+crysirror-formats-arc.workspace = true
+tempfile = "3"

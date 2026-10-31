@@ -130,7 +130,15 @@ fn dynamic_font_publication_is_shared_scoped_idempotent_and_immutable() {
     let second: Arc<[u8]> = std::fs::read(std::env::var("CRYSIRROR_TEST_FONT_SECOND").unwrap())
         .unwrap()
         .into();
-    let (resources, render, a, b) = setup();
+    let (resources, mut render, a, b) = setup();
+    // Desktop installs its default font after constructing the resource actor.
+    // A newly scoped library must see that current static alias as well as the
+    // live dynamic catalog, despite TextSystem static storage being copy-on-write.
+    render.add_font("late-default", first.to_vec()).unwrap();
+    assert!(!a.is_loaded("late-default").unwrap());
+    let late = resources.for_client_with_text(ClientId(1), Arc::new(Empty), &render);
+    assert!(late.is_loaded("late-default").unwrap());
+    assert!(render.for_client(ClientId(1)).measure_simple("late-default", 24., "ABC").is_ok());
     let measurement = resources.measurement(ClientId(1));
     let info = load(a.as_ref(), "game", first.clone(), 0);
     let duplicate = load(a.as_ref(), "game", first, 0);

@@ -148,9 +148,11 @@
   "partial_copies": {
     "rect.rs": "Rect only from surface.rs; pixel operations are engine services",
     "object.rs": "object state, properties, mutators and animation; render/blit/text rasterization removed (engine layers)",
-    "graphics.rs": "ObjectRef, object store, promotion, animation queues; DCs/composition removed (engine canvases)",
+    "graphics.rs": "ObjectRef, object store, promotion and animation queues. AssetLoader includes an owner-preparation seam so native file creation can await shared image jobs; no pixel/composition algorithms.",
     "clock.rs": "frame counters; the clock is the engine's",
     "modules/sys.rs": "VM-state 1:4 functions (arithmetic, date, settings, syscom, frames, flags); adapter maps the rest",
-    "modules/obj.rs": "unchanged except image/GAN loading through the adapter's AssetLoader and LOADTHUMBNAIL failing visibly"
+    "modules/obj.rs": "Original creation/target/common-argument semantics retained. Exposes original image-name argument layout for thin preparation; engine-backed asset creation may be fenced as a pending native command before resource loading. LOADTHUMBNAIL remains visibly unsupported.",
+    "machine.rs": "Original native bytecode/value/call/init policy with pending CrySirror command seam. The original Gameexe DLL.nnn preload loop (machine.rs at the pinned source) targets Sys.dlls native semantic slots; no OS DLL or executable is loaded.",
+    "modules/mod.rs": "Original pure dispatch plus existing pending Command boundary; engine-backed file/GAN object creation may await the shared resource adapter, without advancing PC or duplicating original creation semantics."
   }
 }

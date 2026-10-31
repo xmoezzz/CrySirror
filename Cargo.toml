@@ -22,6 +22,7 @@ members = [
     "crates/crysirror-image",
     "crates/crysirror-resource",
     "crates/crysirror-formats-arc",
+    "crates/crysirror-formats-blackcyc",
     "crates/crysirror-physics",
     "crates/crysirror-siglus",
     "crates/crysirror-text",
@@ -48,7 +49,10 @@ members = [
     "crates/crysirror-bgi",
     "crates/crysirror-circus",
     "crates/crysirror-catsystem2",
-    "crates/reallive-upstream/reallive-dll",
+    "crates/crysirror-system4",
+    "crates/crysirror-system-nnn",
+    "crates/crysirror-majiro",
+    "crates/crysirror-reallive-dll",
 ]
 exclude = [
     "vendor/sofar",
@@ -74,6 +78,8 @@ crysirror-wgpu = { path = "crates/crysirror-wgpu" }
 crysirror-image = { path = "crates/crysirror-image" }
 crysirror-resource = { path = "crates/crysirror-resource" }
 crysirror-formats-arc = { path = "crates/crysirror-formats-arc" }
+crysirror-formats-blackcyc = { path = "crates/crysirror-formats-blackcyc" }
+crysirror-system-nnn = { path = "crates/crysirror-system-nnn" }
 crysirror-physics = { path = "crates/crysirror-physics" }
 crysirror-siglus = { path = "crates/crysirror-siglus" }
 crysirror-text = { path = "crates/crysirror-text" }
@@ -93,7 +99,8 @@ crysirror-bgi-vm = { path = "crates/crysirror-bgi-vm" }
 crysirror-bgi = { path = "crates/crysirror-bgi" }
 crysirror-circus = { path = "crates/crysirror-circus" }
 crysirror-catsystem2 = { path = "crates/crysirror-catsystem2" }
-reallive-dll = { path = "crates/reallive-upstream/reallive-dll" }
+crysirror-majiro = { path = "crates/crysirror-majiro" }
+crysirror-reallive-dll = { path = "crates/crysirror-reallive-dll" }
 crysirror-avg32 = { path = "crates/crysirror-avg32" }
 crysirror-krkr = { path = "crates/crysirror-krkr" }
 crysirror-tjs2 = { path = "crates/crysirror-tjs2" }

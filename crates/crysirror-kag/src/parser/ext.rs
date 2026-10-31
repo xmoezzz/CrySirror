@@ -261,8 +261,22 @@ impl KagParser {
     /// Native argument dictionaries remain live across call-suspended macro
     /// expansions. Embedded-text expansions do not allocate argument frames.
     pub fn macro_argument_depth(&self) -> usize {
-        self.macro_stack.iter().filter(|frame| frame.previous_params.is_some()).count()
-            + self.call_stack.iter().map(|frame| frame.resume.macro_stack.iter().filter(|frame| frame.previous_params.is_some()).count()).sum::<usize>()
+        self.macro_stack
+            .iter()
+            .filter(|frame| frame.previous_params.is_some())
+            .count()
+            + self
+                .call_stack
+                .iter()
+                .map(|frame| {
+                    frame
+                        .resume
+                        .macro_stack
+                        .iter()
+                        .filter(|frame| frame.previous_params.is_some())
+                        .count()
+                })
+                .sum::<usize>()
     }
     pub(super) fn validate_ext_macro_arguments(&self, tag: &Tag) -> Result<()> {
         if self.is_ext_kag()
@@ -766,11 +780,19 @@ mod tests {
     }
     #[test]
     fn assignment_copies_loop_cursor_but_keeps_destination_owner_switches() {
-        let mut source = parser("[while init=\"i=0\" exp=\"i<3\" each=\"i++\"][item i=&i][endwhile][done]");
+        let mut source =
+            parser("[while init=\"i=0\" exp=\"i<3\" each=\"i++\"][item i=&i][endwhile][done]");
         source.set_multi_line_tag_enabled(true).unwrap();
         source.set_numeric_macro_arguments_enabled(true).unwrap();
         let mut host = Host::default();
-        assert_eq!(source.next_tag_with(&mut host).unwrap().unwrap().literal_attr("i"), Some("0"));
+        assert_eq!(
+            source
+                .next_tag_with(&mut host)
+                .unwrap()
+                .unwrap()
+                .literal_attr("i"),
+            Some("0")
+        );
         let mut destination = KagParser::new();
         destination.enable_ext_kag();
         destination.set_process_special_tags(false);
@@ -784,10 +806,24 @@ mod tests {
         assert!(destination.interrupted);
         destination.reset_interrupt();
         destination.set_process_special_tags(true);
-        assert_eq!(destination.next_tag_with(&mut host).unwrap().unwrap().literal_attr("i"), Some("1"));
+        assert_eq!(
+            destination
+                .next_tag_with(&mut host)
+                .unwrap()
+                .unwrap()
+                .literal_attr("i"),
+            Some("1")
+        );
         destination.clear();
         assert_eq!(source.while_stack_depth(), 1);
-        assert_eq!(source.next_tag_with(&mut host).unwrap().unwrap().literal_attr("i"), Some("2"));
+        assert_eq!(
+            source
+                .next_tag_with(&mut host)
+                .unwrap()
+                .unwrap()
+                .literal_attr("i"),
+            Some("2")
+        );
     }
     #[test]
     fn break_continue_snapshot_and_structural_errors_match_extension_scope() {

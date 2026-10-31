@@ -13,6 +13,7 @@ pub mod padding;
 pub mod wipe_mask;
 mod png;
 pub use png::{encode_png_uncompressed, png_uncompressed_len};
+pub mod alpha_clip;
 pub fn rgba_len(width: u32, height: u32) -> Result<usize> {
     ensure!(
         width > 0 && height > 0 && width <= 8192 && height <= 8192,
@@ -64,6 +65,9 @@ pub mod crx;
 pub mod cximage;
 mod dds;
 pub mod effects;
+pub mod temporal_pattern;
+pub mod fixed_mix;
+pub mod rgb_lut;
 pub mod sprite_alpha;
 pub mod packed;
 pub mod row_copy;
@@ -231,3 +235,10 @@ pub mod buffer {
         DynamicImage, GenericImageView, GrayAlphaImage, ImageBuffer, LumaA, Rgb, Rgba, RgbaImage,
     };
 }
+
+/// Grouped fixed-point luminance with exact integer colour mixing.
+pub mod fixed_luma;
+
+pub mod piecewise_resample;
+
+pub mod progress_curve;

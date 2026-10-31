@@ -1,0 +1,22 @@
+{
+  "scope": "Historical Motion.Player.varibleKeys semantic property over the existing reusable motion parameter sampling path. No DLL code is executed or distributed.",
+  "reference": {
+    "repository": "https://github.com/liulifox233/Kirakira",
+    "commit": "c451918023477620ff9055a2eb8a6714b947d9c1",
+    "file": "crates/krkr-plugins/src/motion_player.rs",
+    "reviewed": "register_player_variable_keys plus native registration and owning player parameter records; previously mapped variableKeys."
+  },
+  "owner_static_evidence": {
+    "relative_path": "plugin/motionplayer.dll",
+    "sha256": "51f83e8050fd0d47c60f73b8d988c8841f390cb4c6276946a297f8140c674a06",
+    "analysis": "IDA Pro static database/decompiler only, never original DLL execution",
+    "registration_va": "0x1004a2a8",
+    "registration_function_va": "0x10049220",
+    "property": "varibleKeys",
+    "getter_va": "0x10015190",
+    "getter_observation": "Constructs a TJS Array and appends each name in own player variable records at offset 0x2e8, stride 0x30.",
+    "distinction": "Same DLL also has EmotePlayer.variableKeys with a separate cached-variant getter at0x100511f0. This audit does not assume the two native implementations are identical."
+  },
+  "implementation": "Expose legacy varibleKeys on the CrySirror Motion.Player facade, returning its actual parameter records used by get/setVariable and passed to shared motion sampling. Existing variableKeys profile is retained. Both are live read-only arrays, never an unconditional empty shell.",
+  "verification": "Self-authored TJS set/get round-trip, legacy and current key counts before and after writing a second variable; actual Sabbat title progression tested separately."
+}

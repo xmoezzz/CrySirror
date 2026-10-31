@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Float-positioned glyph coverage cells. Native layout and reveal stay with callers.
 use crate::TextSystem;
-use ab_glyph::{Font, GlyphId, PxScale, ScaleFont, point};
-use anyhow::{Result, ensure};
+use ab_glyph::{point, Font, GlyphId, PxScale, ScaleFont};
+use anyhow::{ensure, Context, Result};
 
 #[derive(Clone, Copy, Debug)]
 pub struct GlyphRaster {
@@ -48,6 +48,11 @@ impl TextSystem {
         ))
     }
     pub fn glyph_id(&self, font: &str, ch: char) -> Result<u32> {
+        if let Some(face) = self.precomputed_face(font)? {
+            return face
+                .glyph_id(ch)
+                .with_context(|| format!("precomputed font '{font}' missing U+{:04X}", ch as u32));
+        }
         let id = self.font(font)?.glyph_id(ch);
         ensure!(
             id.0 != 0 || ch.is_control(),
@@ -61,6 +66,14 @@ impl TextSystem {
             size.is_finite() && (0.0..=1024.0).contains(&size) && size > 0.,
             "invalid glyph size"
         );
+        if let Some(face) = self.precomputed_face(font)? {
+            face.check_size(size)?;
+            return Ok(GlyphMetrics {
+                ascent: face.ascent(),
+                descent: face.descent(),
+                advance: f32::from(face.glyph(glyph_id)?.advance[0]),
+            });
+        }
         let font = self.font(font)?;
         ensure!(
             (glyph_id as usize) < font.glyph_count(),
@@ -82,6 +95,9 @@ impl TextSystem {
                 .all(|v| v.is_finite() && v.abs() <= 1_000_000.),
             "invalid glyph baseline"
         );
+        if let Some(face) = self.precomputed_face(font)? {
+            return face.cell(request);
+        }
         let font = self.font(font)?;
         let glyph = GlyphId(request.glyph_id as u16).with_scale_and_position(
             PxScale::from(request.size),
@@ -128,8 +144,8 @@ mod tests {
     #[test]
     fn unloaded_font_and_invalid_float_requests_fail_without_allocation() {
         let text = TextSystem::default();
-        assert!(
-            text.rasterize_glyph_cell(
+        assert!(text
+            .rasterize_glyph_cell(
                 "missing",
                 GlyphRaster {
                     glyph_id: 1,
@@ -137,8 +153,7 @@ mod tests {
                     baseline: [0., 0.]
                 }
             )
-            .is_err()
-        );
+            .is_err());
         assert!(text.glyph_metrics("missing", 1, f32::NAN).is_err());
     }
 }

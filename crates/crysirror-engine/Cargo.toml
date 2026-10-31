@@ -10,6 +10,7 @@ description = "Engine object model, lifecycle, plugins and script-host contracts
 # GPL archive migration plugins are explicitly selected by the host.
 arc-formats = ["dep:crysirror-formats-arc", "crysirror-runtime/arc-formats"]
 acoustics-obvhs = ["crysirror-acoustics/obvhs"]
+blackcyc-formats = ["dep:crysirror-formats-blackcyc", "crysirror-runtime/blackcyc-formats"]
 
 [dependencies]
 crysirror-vfx.workspace = true
@@ -26,6 +27,7 @@ crysirror-text.workspace = true
 crysirror-image.workspace = true
 crysirror-resource.workspace = true
 crysirror-formats-arc = { workspace = true, optional = true }
+crysirror-formats-blackcyc = { workspace = true, optional = true }
 intl_pluralrules = "=7.0.2"
 unic-langid = "0.9"
 serde.workspace = true
@@ -34,5 +36,6 @@ anyhow.workspace = true
 glam.workspace = true
 
 [dev-dependencies]
+crysirror-system4 = {path="../crysirror-system4"}
 tempfile = "3.12"
 crysirror-siglus-vm.workspace = true

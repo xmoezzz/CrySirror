@@ -13,14 +13,37 @@ pub const MAX_EFFECT_PIXELS: u64 = 4_194_304;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ImageEffect {
+    /// Replace coverage while retaining all stored RGB bytes. Useful for
+    /// opaque XRGB resources and explicitly authored mask normalisation.
+    OverrideAlpha {
+        alpha: u8,
+    },
+    /// Arbitrary straight RGB tables; premultiplied profiles fail before admission.
+    RgbLookup {
+        spec: crate::rgb_lut::RgbLookup,
+    },
+    /// Explicit grouped luminance rounding and integer /256 colour mixture.
+    FixedLuma {
+        spec: crate::fixed_luma::FixedLumaSpec,
+    },
+    /// Fixed16.16 piecewise nearest sampling and explicit /256 mixtures.
+    PiecewiseResample {
+        spec: crate::piecewise_resample::PiecewiseResampleSpec,
+    },
     /// Bounded generic stripe/stagger mask for retained transitions.
-    StripeReveal { spec: crate::sprite_alpha::StripeReveal },
+    StripeReveal {
+        spec: crate::sprite_alpha::StripeReveal,
+    },
     /// Extract reusable sprite transparency from decoded resource pixels.
-    SpriteAlpha { spec: crate::sprite_alpha::SpriteAlpha },
+    SpriteAlpha {
+        spec: crate::sprite_alpha::SpriteAlpha,
+    },
     /// Two-input whole-pixel row copy; preserves uncovered destination pixels.
     SineRowCopy {
         spec: crate::row_copy::SineRowCopy,
     },
+    /// Two-input clipped coverage multiplication with optional exterior clear.
+    AlphaClipRect { spec:crate::alpha_clip::AlphaClipRect },
     Transition {
         spec: crate::transition::ImageTransition,
     },
@@ -103,9 +126,13 @@ pub enum ImageEffect {
 impl ImageEffect {
     pub fn validate(&self) -> Result<()> {
         match self {
+            Self::RgbLookup { spec } => spec.validate()?,
+            Self::FixedLuma { spec } => spec.validate()?,
+            Self::PiecewiseResample { spec } => spec.validate()?,
             Self::StripeReveal { spec } => spec.validate()?,
             Self::SpriteAlpha { spec } => spec.validate()?,
             Self::SineRowCopy { .. } => (),
+            Self::AlphaClipRect {spec} => spec.validate()?,
             Self::Transition { spec } => spec.validate()?,
             Self::Vector { path } => path.validate()?,
             Self::Perspective { quad } => crate::warp::validate_quad(quad)?,
@@ -192,11 +219,22 @@ impl ImageSurface {
         check()?;
         if matches!(
             effect,
-            ImageEffect::Transition { .. } | ImageEffect::SineRowCopy { .. }
+            ImageEffect::Transition { .. } | ImageEffect::SineRowCopy { .. } | ImageEffect::AlphaClipRect {..}
         ) {
             anyhow::bail!("transition requires a two-image context")
         }
-        if let ImageEffect::StripeReveal { spec } = effect {return self.stripe_reveal(spec,check);}
+        if let ImageEffect::RgbLookup { spec } = effect {
+            return spec.apply(self, check);
+        }
+        if let ImageEffect::FixedLuma { spec } = effect {
+            return spec.apply(self, check);
+        }
+        if let ImageEffect::PiecewiseResample { spec } = effect {
+            return spec.apply(self, check);
+        }
+        if let ImageEffect::StripeReveal { spec } = effect {
+            return self.stripe_reveal(spec, check);
+        }
         if let ImageEffect::SpriteAlpha { spec } = effect {
             return self.sprite_alpha(spec, check);
         }
@@ -209,7 +247,12 @@ impl ImageSurface {
         if let ImageEffect::GaussianBlur { sigma } = effect {
             return self.gaussian(*sigma, check);
         }
-        if let ImageEffect::BoxBlur { rect, area, alpha_weighted } = effect {
+        if let ImageEffect::BoxBlur {
+            rect,
+            area,
+            alpha_weighted,
+        } = effect
+        {
             return self.box_blur(*rect, *area, *alpha_weighted, check);
         }
         let mut out = self.clone();
@@ -260,6 +303,7 @@ impl ImageSurface {
                 let at = (y * w + x) * 4;
                 let p = &self.rgba[at..at + 4];
                 match effect {
+                    ImageEffect::OverrideAlpha { alpha } => out.rgba[at + 3] = *alpha,
                     ImageEffect::Gamma { .. } => {
                         if p[3] != 0 {
                             for c in 0..3 {
@@ -278,7 +322,8 @@ impl ImageSurface {
                         saturation,
                         blend,
                     } => {
-                        let v = crate::cximage::colorize([p[0], p[1], p[2]], *hue, *saturation, *blend);
+                        let v =
+                            crate::cximage::colorize([p[0], p[1], p[2]], *hue, *saturation, *blend);
                         out.rgba[at..at + 3].copy_from_slice(&v);
                     }
                     ImageEffect::HslModulate {
@@ -286,7 +331,12 @@ impl ImageSurface {
                         saturation,
                         luminance,
                     } => {
-                        let v = crate::cximage::modulate([p[0], p[1], p[2]], *hue, *saturation, *luminance);
+                        let v = crate::cximage::modulate(
+                            [p[0], p[1], p[2]],
+                            *hue,
+                            *saturation,
+                            *luminance,
+                        );
                         out.rgba[at..at + 3].copy_from_slice(&v);
                     }
                     ImageEffect::WhiteNoise { .. } => {
@@ -403,7 +453,11 @@ impl ImageSurface {
                 if alpha_weighted {
                     let a = mean[3];
                     for c in 0..3 {
-                        px[c] = if a == 0 { 0 } else { (mean[c] * 255 / a).min(255) as u8 };
+                        px[c] = if a == 0 {
+                            0
+                        } else {
+                            (mean[c] * 255 / a).min(255) as u8
+                        };
                     }
                     px[3] = a as u8;
                 } else {
@@ -487,7 +541,11 @@ mod tests {
     use super::*;
 
     fn surface(w: u32, h: u32, px: &[[u8; 4]]) -> ImageSurface {
-        ImageSurface { width: w, height: h, rgba: px.concat() }
+        ImageSurface {
+            width: w,
+            height: h,
+            rgba: px.concat(),
+        }
     }
 
     #[test]
@@ -495,7 +553,11 @@ mod tests {
         // 3x1 row, 3x1 window: edge pixels average two neighbours.
         let s = surface(3, 1, &[[0, 0, 0, 255], [9, 30, 100, 255], [20, 0, 0, 255]]);
         let out = s
-            .apply_effect(&ImageEffect::BoxBlur { rect: None, area: [-1, 0, 1, 0], alpha_weighted: false })
+            .apply_effect(&ImageEffect::BoxBlur {
+                rect: None,
+                area: [-1, 0, 1, 0],
+                alpha_weighted: false,
+            })
             .unwrap();
         assert_eq!(out.rgba, [4, 15, 50, 255, 9, 10, 33, 255, 14, 15, 50, 255]);
     }
@@ -504,7 +566,11 @@ mod tests {
     fn box_blur_rect_limits_writes_not_reads() {
         let s = surface(2, 1, &[[100, 0, 0, 255], [0, 0, 0, 255]]);
         let out = s
-            .apply_effect(&ImageEffect::BoxBlur { rect: Some([1, 0, 1, 1]), area: [-1, 0, 1, 0], alpha_weighted: false })
+            .apply_effect(&ImageEffect::BoxBlur {
+                rect: Some([1, 0, 1, 1]),
+                area: [-1, 0, 1, 0],
+                alpha_weighted: false,
+            })
             .unwrap();
         assert_eq!(out.rgba, [100, 0, 0, 255, 50, 0, 0, 255]);
     }
@@ -513,7 +579,11 @@ mod tests {
     fn alpha_weighted_box_blur_ignores_transparent_colour() {
         let s = surface(2, 1, &[[255, 0, 0, 255], [0, 255, 0, 0]]);
         let out = s
-            .apply_effect(&ImageEffect::BoxBlur { rect: None, area: [-1, 0, 1, 0], alpha_weighted: true })
+            .apply_effect(&ImageEffect::BoxBlur {
+                rect: None,
+                area: [-1, 0, 1, 0],
+                alpha_weighted: true,
+            })
             .unwrap();
         // Mean alpha 127; premultiplied red 255*256>>8 = 255 -> 127 -> 255*127/127.
         assert_eq!(&out.rgba[0..4], &[255, 0, 0, 127]);
