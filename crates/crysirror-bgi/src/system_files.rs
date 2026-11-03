@@ -63,7 +63,23 @@ pub(super) fn count_files(
     pattern: &str,
     recursive: bool,
 ) -> Result<i32> {
-    let recursive = recursive && pattern.contains('\\');
+    Ok(enumerate(
+        storage,
+        config,
+        pattern,
+        recursive && pattern.contains('\\'),
+        false,
+    )?
+    .len()
+    .min(i32::MAX as usize) as i32)
+}
+pub(super) fn enumerate(
+    storage: &dyn ClientStorage,
+    config: &Config,
+    pattern: &str,
+    recursive: bool,
+    directories: bool,
+) -> Result<Vec<String>> {
     let normalized = pattern.replace('\\', "/");
     let (root, mask) = normalized
         .rsplit_once('/')
@@ -73,11 +89,11 @@ pub(super) fn count_files(
         "BGI native file pattern"
     );
     let root = relative(config, root)?;
-    let mut found = std::collections::BTreeSet::new();
+    let mut found = std::collections::BTreeMap::new();
     let mut examined = 0usize;
     for mount in [Mount::Save, Mount::Asset] {
-        let mut pending = vec![(root.clone(), 0usize)];
-        while let Some((dir, depth)) = pending.pop() {
+        let mut pending = vec![(root.clone(), String::new(), 0usize)];
+        while let Some((dir, prefix, depth)) = pending.pop() {
             ensure!(depth <= 64, "BGI native directory depth");
             let path = if mount == Mount::Asset {
                 if dir.is_empty() {
@@ -99,8 +115,8 @@ pub(super) fn count_files(
                 }
                 examined = examined
                     .checked_add(1)
-                    .context("BGI native directory entry overflow")?;
-                ensure!(examined <= 1_000_000, "BGI native directory entry budget");
+                    .context("BGI directory entry overflow")?;
+                ensure!(examined <= 1_000_000, "BGI directory enumeration budget");
                 let relative = if dir.is_empty() {
                     name.clone()
                 } else {
@@ -114,15 +130,22 @@ pub(super) fn count_files(
                 let Some(info) = storage.metadata(mount, &path)? else {
                     continue;
                 };
-                if info.is_directory {
-                    if recursive {
-                        pending.push((relative, depth + 1));
-                    }
-                } else if crysirror_resource::dos_glob::matches(mask, &name) {
-                    found.insert(relative);
+                let output = if prefix.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{prefix}\\{name}")
+                };
+                if info.is_directory && recursive {
+                    pending.push((relative, output.clone(), depth + 1));
+                }
+                if info.is_directory == directories
+                    && crysirror_resource::dos_glob::matches(mask, &name)
+                {
+                    // A writable overlay shadows the same Windows path in assets.
+                    found.entry(output.to_ascii_lowercase()).or_insert(output);
                 }
             }
         }
     }
-    Ok(found.len().min(i32::MAX as usize) as i32)
+    Ok(found.into_values().collect())
 }

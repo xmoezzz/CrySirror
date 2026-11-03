@@ -17,6 +17,10 @@ pub(super) struct GraphPlan {
     pub inputs: Vec<GraphInput>,
     pub operation: Option<Raster>,
     pub quad: Option<[u32; 4]>,
+    pub source_format: Option<i32>,
+    pub compound: Option<super::graph_backf::BackFPlan>,
+    pub projection: Option<super::graph_projection::ProjectionPlan>,
+    pub warp: Option<([u32; 2], crysirror_core::image_processing::FieldWarpSpec)>,
     pub format: i32,
     pub force_opaque: bool,
     pub filters: Vec<(u8, i32, u16)>,
@@ -27,6 +31,10 @@ impl GraphPlan {
             inputs: vec![GraphInput::Bitmap(id)],
             operation: None,
             quad: None,
+            source_format: None,
+            warp: None,
+            compound: None,
+            projection: None,
             format,
             force_opaque: format == 1,
             filters: Vec::new(),
@@ -42,8 +50,13 @@ struct Work {
     inputs: Vec<Prepared>,
     operation: Option<Raster>,
     quad: Option<[u32; 4]>,
+    source_format: Option<i32>,
+    compound: Option<super::graph_backf::BackFPlan>,
+    projection: Option<super::graph_projection::ProjectionPlan>,
+    warp: Option<([u32; 2], crysirror_core::image_processing::FieldWarpSpec)>,
     filters: Vec<(u8, i32, u16)>,
     phase: Option<ImageJob>,
+    mask: Option<(Prepared, DisplayRaster)>,
     force_opaque: bool,
     format: i32,
     stage: u8,
@@ -135,6 +148,15 @@ impl BgiVm {
             (0x90, 0x42) => &[0, 1, 2, 3],
             (0x90, 0x75) => &[3],
             (0x90, 0x66) => &[3],
+            (0x90, 0x45) => &[0, 1, 2],
+            (0x90, 0x43) => &[2, 5, 6],
+            (0x90, 0x47) => &[0, 1],
+            (0x90, 0x5b) => &[3, 4],
+            (0x90, 0x5c | 0x5d) => &[4, 5],
+            (0x90, 0x55) => &[1],
+            (0x91, 0x65) => &[1, 2],
+            (0x91, 0x67) => &[1],
+            (0x91, 0x10..=0x17) | (0x92, 0x10 | 0x11) => &[0],
             _ => &[],
         };
         for &index in indices {
@@ -145,6 +167,19 @@ impl BgiVm {
             }
         }
         for object in self.graph.descendants(object) {
+            if let Some(recipe) = self.sprite_mask_recipe(object)? {
+                ids.push(recipe.bitmap as u32);
+            }
+
+            if let Some(effector) = self
+                .graph
+                .filters
+                .get(&object)
+                .and_then(|f| f.effector.as_ref())
+            {
+                ids.extend(effector.bitmap_dependencies());
+            }
+
             if let Some(plan) = self.graph.images.plans.get(&object) {
                 for input in &plan.inputs {
                     if let GraphInput::Bitmap(id) = input {
@@ -182,12 +217,19 @@ impl BgiVm {
         Ok(ids)
     }
     pub(crate) fn invalidate_graph_bitmap(&mut self, bitmap: u32) {
+        self.graph.bitmap_clock = self.graph.bitmap_clock.wrapping_add(1);
+        self.graph
+            .bitmap_versions
+            .insert(bitmap, self.graph.bitmap_clock);
         let raw = self
             .sprites
             .iter()
             .filter_map(|(&id, s)| (s.bitmap == Some(bitmap)).then_some(id as i32))
             .collect::<Vec<_>>();
         for id in raw {
+            if self.graph.sprite_affine.contains_key(&id) {
+                self.graph.affine_rebuild.insert(id);
+            }
             self.graph.mark_visual(id);
         }
         let masks = self
@@ -195,9 +237,9 @@ impl BgiVm {
             .filters
             .iter()
             .filter_map(|(&id, f)| {
-                f.mask
-                    .is_some_and(|(b, _)| b as u32 == bitmap)
-                    .then_some(id)
+                (f.mask.is_some_and(|(b, _)| b as u32 == bitmap)
+                    || f.effector.as_ref().is_some_and(|e| e.uses_bitmap(bitmap)))
+                .then_some(id)
             })
             .collect::<Vec<_>>();
         for id in masks {
@@ -226,6 +268,18 @@ impl BgiVm {
         affected.sort_unstable();
         affected.dedup();
         for object in affected {
+            if self
+                .graph
+                .background_args
+                .get(&object)
+                .is_some_and(|(id, _)| matches!(id, 0x45 | 0x47))
+            {
+                self.graph.field_rebuild.insert(object);
+            }
+            if self.graph.sprite_wave_args.contains_key(&object) {
+                self.graph.field_rebuild.insert(object);
+            }
+
             // CDspObjMap retains a copied tile cache. Atlas pixel changes do
             // not repaint it until the native invalidation/viewport operation.
             if !self.graph.maps.contains_key(&object) {
@@ -240,13 +294,24 @@ impl BgiVm {
         Ok(())
     }
     pub(crate) fn graph_tick(&mut self, host: &mut dyn HostServices) -> Result<()> {
+        self.refresh_native_sprite_masks()?;
         self.release_graph_retired(host)?;
+        for object in std::mem::take(&mut self.graph.affine_rebuild) {
+            self.rebuild_native_sprite_affine(object)?;
+        }
+        for object in std::mem::take(&mut self.graph.field_rebuild) {
+            if self.graph.sprite_wave_args.contains_key(&object) {
+                self.rebuild_native_sprite_wave(object)?;
+            } else {
+                self.rebuild_backdrop_plan(object)?;
+            }
+        }
         let objects = self.graph.images.dirty.iter().copied().collect::<Vec<_>>();
         let mut changed = false;
         for object in objects {
             changed |= self.refresh_graph_image(host, object)?;
         }
-        if changed || self.graph.needs_publish {
+        if changed || self.graph.needs_publish || !self.graph.compositions.is_empty() {
             self.publish_graph(host)?;
         }
         self.refresh_native_filters(host)?;
@@ -304,18 +369,13 @@ impl BgiVm {
         }) {
             return self.expire_graph_image(host, object);
         }
-        if self.graph.filters.contains_key(&object) {
-            let cut = self.graph.tree.chain_position(object).unwrap_or(0);
-            if self.graph.images.dirty.iter().any(|id| {
-                *id != object
-                    && self
-                        .graph
-                        .tree
-                        .chain_position(*id)
-                        .is_some_and(|position| position < cut)
-            }) {
-                return Ok(false);
-            }
+        if self.graph.mask_unready.contains(&object) {
+            self.graph.images.jobs.remove(&object);
+            self.graph.images.dirty.remove(&object);
+            return Ok(true);
+        }
+        if self.graph.filters.contains_key(&object) && !self.graph_prefix_ready(object) {
+            return Ok(false);
         }
         if !self.graph.images.dirty.contains(&object) {
             return Ok(false);
@@ -334,6 +394,9 @@ impl BgiVm {
                     GraphInput::Solid(size, color) => Prepared::Solid(size, color),
                     GraphInput::Prefix(size, cut) => {
                         self.publish_graph(host)?;
+                        if !self.graph_prefix_ready(object) {
+                            return Ok(false);
+                        }
                         Prepared::Job(host.begin_layer_prefix_image_over(
                             self.client,
                             size,
@@ -351,17 +414,41 @@ impl BgiVm {
                     }
                 });
             }
+            let mask = if let Some(recipe) = self.sprite_mask_recipe(object)? {
+                let bitmap = self.bitmap(recipe.bitmap)?.1;
+                let input = if let Some(image) = &bitmap.image {
+                    Prepared::Ready(image.clone())
+                } else {
+                    Prepared::Job(host.begin_canvas_image(self.client, recipe.bitmap as u32)?)
+                };
+                Some((input, recipe.raster))
+            } else {
+                None
+            };
+            let force_opaque = plan.force_opaque && mask.is_none();
             Work {
                 inputs,
+                mask,
                 operation: plan.operation,
                 quad: plan.quad,
+                source_format: plan.source_format,
+                compound: plan.compound,
+                projection: plan.projection,
+                warp: plan.warp,
                 filters: plan.filters,
                 phase: None,
-                force_opaque: plan.force_opaque,
+                force_opaque,
                 format: plan.format,
                 stage: 0,
             }
         };
+        if let Some((Prepared::Job(job), _)) = &mut work.mask {
+            let Some(image) = job_image(job)? else {
+                self.graph.images.jobs.insert(object, work);
+                return Ok(false);
+            };
+            work.mask.as_mut().unwrap().0 = Prepared::Ready(image);
+        }
         loop {
             let current = if let Some(job) = &mut work.phase {
                 let Some(image) = job_image(job)? else {
@@ -379,6 +466,54 @@ impl BgiVm {
                         };
                         *input = Prepared::Ready(image);
                     }
+                }
+                if let Some(plan) = work.projection.as_ref().cloned() {
+                    let sources = work
+                        .inputs
+                        .iter()
+                        .map(|input| match input {
+                            Prepared::Ready(image) => Ok(image.clone()),
+                            _ => bail!("BGI projected source lease"),
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let Some(input) = self.projection_image(object, &plan, sources)? else {
+                        self.graph.images.jobs.insert(object, work);
+                        return Ok(false);
+                    };
+                    work.projection = None;
+                    work.phase = Some(
+                        host.image_metadata(self.client)?
+                            .begin_process(input, Arc::from(b"[]".as_slice()))?,
+                    );
+                    work.stage = 1;
+                    continue;
+                }
+                if let Some(compound) = work.compound.take() {
+                    let input = compound.input(
+                        work.inputs
+                            .iter()
+                            .map(image_input)
+                            .collect::<Result<Vec<_>>>()?,
+                    )?;
+                    work.phase = Some(
+                        host.image_metadata(self.client)?
+                            .begin_process(input, Arc::from(b"[]".as_slice()))?,
+                    );
+                    work.stage = 1;
+                    continue;
+                }
+                if let Some((size, spec)) = work.warp.take() {
+                    ensure!(work.inputs.len() == 1, "BGI field warp source count");
+                    work.phase = Some(host.image_metadata(self.client)?.begin_process(
+                        ImageInput::FieldWarp {
+                            source: Box::new(image_input(&work.inputs[0])?),
+                            size,
+                            spec,
+                        },
+                        Arc::from(b"[]".as_slice()),
+                    )?);
+                    work.stage = 1;
+                    continue;
                 }
                 if let Some([x, y, w, h]) = work.quad.take() {
                     ensure!(work.inputs.len() == 4, "BGI four-cell backdrop image count");
@@ -426,10 +561,13 @@ impl BgiVm {
                     }
                 }
                 if let Some(operation) = work.operation.take() {
-                    ensure!(work.inputs.len() == 2, "BGI graph pair input count");
+                    ensure!(
+                        (1..=2).contains(&work.inputs.len()),
+                        "BGI graph raster input count"
+                    );
                     let spec = IntegerRaster {
                         destination_format: work.format as u32,
-                        source_format: work.format as u32,
+                        source_format: work.source_format.unwrap_or(work.format) as u32,
                         raster: operation,
                     };
                     let effects =
@@ -439,7 +577,7 @@ impl BgiVm {
                     work.phase = Some(host.image_metadata(self.client)?.begin_process(
                         ImageInput::Raster {
                             destination: Box::new(image_input(&work.inputs[0])?),
-                            source: Box::new(image_input(&work.inputs[1])?),
+                            source: Box::new(image_input(&work.inputs[work.inputs.len() - 1])?),
                         },
                         effects,
                     )?);
@@ -462,6 +600,22 @@ impl BgiVm {
                     _ => unreachable!(),
                 }
             };
+            if let Some((mask, raster)) = work.mask.take() {
+                let spec = IntegerRaster {
+                    destination_format: 2,
+                    source_format: 2,
+                    raster: Raster::Display { spec: raster },
+                };
+                work.phase = Some(host.image_metadata(self.client)?.begin_process(
+                    ImageInput::Raster {
+                        destination: Box::new(ImageInput::Resource(current)),
+                        source: Box::new(image_input(&mask)?),
+                    },
+                    serde_json::to_vec(&vec![ImageEffect::IntegerRaster { spec }])?.into(),
+                )?);
+                work.stage = 1;
+                continue;
+            }
             if work.stage <= 1 && !work.filters.is_empty() {
                 let spec = IntegerRaster {
                     destination_format: 2,
@@ -496,6 +650,16 @@ impl BgiVm {
                 work.stage = 3;
                 continue;
             }
+            if let Some(effector) = self
+                .graph
+                .filters
+                .get_mut(&object)
+                .and_then(|filter| filter.effector.as_mut())
+            {
+                if effector.mode == 4 {
+                    effector.feedback = Some(current.clone());
+                }
+            }
             let uploaded = host.publish_image_resource(
                 self.client,
                 0xd0000000 ^ (object as u32),
@@ -519,8 +683,20 @@ impl BgiVm {
     pub(crate) fn graph_alpha(&mut self, object: i32, value: i32) -> Result<()> {
         let objects = self.graph.descendants(object);
         let mut backdrops = Vec::new();
+        let mut sprites = Vec::new();
+        let mut effectors = Vec::new();
         for object in objects {
             let p = self.graph.objects.entry(object).or_default();
+            if self
+                .graph
+                .filters
+                .get(&object)
+                .is_some_and(|f| f.effector.is_some())
+            {
+                p.set_alpha_parameter(value);
+                effectors.push(object);
+                continue;
+            }
             if let Some(background) = p.background {
                 let changed = p.alpha_parameter() != value;
                 p.set_alpha_parameter(value);
@@ -534,6 +710,11 @@ impl BgiVm {
                 .get("target-object-mode")
                 .copied()
                 .unwrap_or(0);
+            if mode == 4 {
+                p.set_alpha_parameter(value);
+                sprites.push(object);
+                continue;
+            }
             if mode == 1 && p.background.is_none() {
                 let selector = p
                     .named_properties
@@ -563,6 +744,59 @@ impl BgiVm {
         }
         for object in backdrops {
             self.rebuild_backdrop_plan(object)?;
+        }
+        for object in sprites {
+            self.rebuild_native_sprite_wave(object)?;
+        }
+        for object in effectors {
+            self.sync_native_effector(object)?;
+        }
+        Ok(())
+    }
+}
+
+impl BgiVm {
+    /// CProc control writes raw 8.24 progress, whereas Graph90:35 first
+    /// shifts its wrapper operand. Both reach the same native virtual state.
+    pub(crate) fn set_control_parameters(
+        &mut self,
+        _host: &mut dyn HostServices,
+        object: i32,
+        alpha: Option<i32>,
+        fixed_raw: Option<i32>,
+    ) -> Result<()> {
+        self.graph.require(object)?;
+        if let Some(alpha) = alpha {
+            self.graph_alpha(object, alpha)?;
+        }
+        let objects = self.graph.descendants(object);
+        for id in objects {
+            if let Some(raw) = fixed_raw {
+                let p = self.graph.objects.entry(id).or_default();
+                p.native.fixed_parameter_16_16 = raw;
+                p.properties.insert(0x35, (raw, 0));
+                if let Some(plan) = self.graph.images.plans.get_mut(&id) {
+                    if let Some(Raster::Display {
+                        spec: DisplayRaster::ThresholdMask { threshold, .. },
+                    }) = &mut plan.operation
+                    {
+                        *threshold = (raw as u32) >> 16;
+                        self.graph.images.dirty(id);
+                    }
+                }
+                if self
+                    .graph
+                    .objects
+                    .get(&id)
+                    .and_then(|p| p.background)
+                    .is_some_and(|b| b.class == BackClass::BackF)
+                {
+                    self.rebuild_native_backf(id)?;
+                }
+                self.sync_native_effector(id)?;
+                self.sync_native_projection_fixed(id, raw)?;
+            }
+            self.graph.mark_visual(id);
         }
         Ok(())
     }

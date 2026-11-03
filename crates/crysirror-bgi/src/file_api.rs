@@ -7,7 +7,11 @@ pub(crate) struct FileReply {
     pub(super) writes: Vec<HostMemoryWrite>,
 }
 pub(crate) fn handles(group: u8, id: u16) -> bool {
-    group == 0x80 && matches!(id, 0x24 | 0x28 | 0x29 | 0x2a | 0x2c | 0x2f | 0x30..=0x35)
+    group == 0x80
+        && matches!(
+            id,
+            0x24 | 0x27 | 0x28 | 0x29 | 0x2a | 0x2c | 0x2f | 0x30..=0x35
+        )
 }
 impl BgiVm {
     pub(crate) fn file_call(
@@ -16,12 +20,14 @@ impl BgiVm {
         vm: &mut Machine,
         call: &NativeCall,
     ) -> Result<bool> {
-        if self.file_load.is_none() && matches!(call.id, 0x24 | 0x28 | 0x29 | 0x2a | 0x2c | 0x2f) {
+        if self.file_load.is_none()
+            && matches!(call.id, 0x24 | 0x27 | 0x28 | 0x29 | 0x2a | 0x2c | 0x2f)
+        {
             let storage = host.storage(self.client)?;
             let config = self.config.clone();
             let id = call.id;
             let first = vm.string(call.args[0])?;
-            let second = if id == 0x2f {
+            let second = if matches!(id, 0x27 | 0x2f) {
                 Some(vm.string(call.args[1])?)
             } else {
                 None
@@ -76,6 +82,19 @@ impl BgiVm {
                                 Err(error @ Error::Unsupported(_)) => return Err(error.into()),
                                 Err(_) => 0,
                             }
+                        }
+                    }
+                    0x27 => {
+                        let source = VfsPath::new(
+                            Mount::Save,
+                            &program_io::relative(&config, second.as_deref().unwrap())?,
+                        )?;
+                        let target =
+                            VfsPath::new(Mount::Save, &program_io::relative(&config, &first)?)?;
+                        match storage.rename_no_replace(&source, &target) {
+                            Ok(()) => 1,
+                            Err(error @ Error::Unsupported(_)) => return Err(error.into()),
+                            Err(_) => 0,
                         }
                     }
                     0x2f => {
@@ -183,7 +202,10 @@ impl BgiVm {
                         let path =
                             VfsPath::new(Mount::Save, &program_io::relative(&config, &file)?)?;
                         let bytes = write.as_ref().context("BGI write payload")?;
-                        i32::from(storage.write_atomic(&path, bytes).is_ok() || bytes.is_empty())
+                        i32::from(
+                            storage.write_atomic_existing_parent(&path, bytes).is_ok()
+                                || bytes.is_empty(),
+                        )
                     }
                     0x33 => {
                         let path =

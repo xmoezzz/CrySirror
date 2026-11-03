@@ -58,3 +58,7 @@ pub mod region_map;
 
 pub mod image_processing;
 pub mod image_encoding;
+
+pub mod frame_image;
+
+pub mod vector_scene;

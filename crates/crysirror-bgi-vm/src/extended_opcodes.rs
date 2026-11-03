@@ -139,9 +139,13 @@ impl Vm {
         Ok(())
     }
 
-    pub(super) fn execute_clipboard_set(&mut self) -> VmResult<i32> {
-        self.extended_opcodes.clipboard_text = self.pop_string_lossy()?;
-        Ok(1)
+    pub(super) fn execute_clipboard_set<A: crate::SysApi>(&mut self, api: &mut A) -> VmResult<i32> {
+        let text = self.pop_string_lossy()?;
+        let accepted = !api.host_requests_enabled() || api.set_clipboard_text(&text);
+        if accepted {
+            self.extended_opcodes.clipboard_text = text;
+        }
+        Ok(i32::from(accepted))
     }
 
     pub(super) fn execute_resource_blend(&mut self) -> VmResult<()> {
@@ -171,7 +175,10 @@ impl Vm {
             return Ok(returns_value.then_some(Value::Int(result)));
         }
 
-        Err(VmError::UnknownDispatch { group: 0xd0, id: u16::from(id) })
+        Err(VmError::UnknownDispatch {
+            group: 0xd0,
+            id: u16::from(id),
+        })
     }
 
     pub(super) fn execute_debug_inspect(&mut self, id: u8) -> VmResult<()> {

@@ -5,6 +5,23 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DisplayRaster {
+    CoverageMask {
+        origin: [i32; 2],
+        channel: u8,
+        replace: bool,
+        attenuation: u16,
+        retain_full: bool,
+        bounds: Option<[u32; 2]>,
+    },
+    PerspectiveRaster {
+        transform: super::perspective_blit::PerspectiveBlit,
+        origin: [i32; 2],
+    },
+    InverseAffine {
+        destination: [i32; 2],
+        transform: [i32; 5],
+        bilinear: bool,
+    },
     DestinationFilter {
         enabled: bool,
         mode: i32,
@@ -50,6 +67,28 @@ pub enum DisplayRaster {
 impl DisplayRaster {
     pub fn validate(&self) -> Result<()> {
         match self {
+            Self::CoverageMask {
+                origin,
+                channel,
+                attenuation,
+                ..
+            } => ensure!(
+                *channel < 4
+                    && *attenuation <= 256
+                    && origin.iter().all(|v| v.unsigned_abs() <= 1_000_000),
+                "stored coverage mask"
+            ),
+            Self::InverseAffine {
+                destination,
+                transform,
+                ..
+            } => ensure!(
+                destination
+                    .iter()
+                    .chain(transform)
+                    .all(|v| v.unsigned_abs() <= 0x7000_0000),
+                "integer affine coordinates"
+            ),
             Self::DestinationFilter {
                 enabled,
                 mode,
@@ -120,6 +159,78 @@ impl DisplayRaster {
         secondary.validate()?;
         crate::rgba_len(size[0], size[1])?;
         let mut output = match self {
+            Self::CoverageMask {
+                origin,
+                channel,
+                replace,
+                attenuation,
+                retain_full,
+                bounds,
+            } => {
+                let mut image = primary.clone();
+                let bounds = bounds.unwrap_or([secondary.width, secondary.height]);
+                for y in 0..image.height {
+                    check()?;
+                    for x in 0..image.width {
+                        let sx = i64::from(x) + i64::from(origin[0]);
+                        let sy = i64::from(y) + i64::from(origin[1]);
+                        let m = if sx >= 0
+                            && sy >= 0
+                            && sx < i64::from(secondary.width.min(bounds[0]))
+                            && sy < i64::from(secondary.height.min(bounds[1]))
+                        {
+                            secondary.rgba[((sy as u32 * secondary.width + sx as u32) * 4) as usize
+                                + usize::from(*channel)]
+                        } else {
+                            0
+                        };
+                        let at = ((y * image.width + x) * 4 + 3) as usize;
+                        let weight = u32::from(m) * u32::from(256 - *attenuation);
+                        image.rgba[at] = if *replace {
+                            (weight >> 8) as u8
+                        } else if *retain_full && weight == 65280 {
+                            image.rgba[at]
+                        } else {
+                            ((weight * u32::from(image.rgba[at])) >> 16) as u8
+                        };
+                    }
+                }
+                image
+            }
+
+            Self::PerspectiveRaster { transform, origin } => {
+                let mut image = primary.clone();
+                let mut corners = super::perspective_blit::project_corners(
+                    secondary.width,
+                    secondary.height,
+                    transform,
+                );
+                for corner in &mut corners {
+                    corner[0] -= origin[0] as f32;
+                    corner[1] -= origin[1] as f32;
+                }
+                let spans = super::perspective_blit::rasterize(&corners, size[1] as i32);
+                ensure!(
+                    super::perspective_blit::draw(
+                        &mut image,
+                        2,
+                        &super::perspective_blit::Surface {
+                            image: secondary,
+                            format: 2
+                        },
+                        spans.as_ref(),
+                        transform
+                    ),
+                    "projected raster formats"
+                );
+                image
+            }
+
+            Self::InverseAffine {
+                destination,
+                transform,
+                bilinear,
+            } => inverse_affine(secondary, size, *destination, *transform, *bilinear, check)?,
             Self::DestinationFilter {
                 enabled,
                 mode,
@@ -510,7 +621,7 @@ fn native_stretch_background(
     Ok(image)
 }
 
-fn sample_background_pixel(
+pub(crate) fn sample_background_pixel(
     source: &DecodedImage,
     x: i32,
     y: i32,
@@ -626,4 +737,135 @@ fn filter_pixel(pixel: &mut [u8], mode: i32, color: i32, p: i32, shift: i32, mas
         };
         pixel[c] = value.clamp(0, 255) as u8;
     }
+}
+
+fn inverse_affine(
+    source: &DecodedImage,
+    size: [u32; 2],
+    destination: [i32; 2],
+    t: [i32; 5],
+    bilinear: bool,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<DecodedImage> {
+    let [anchor_x, anchor_y, angle, scale_x, scale_y] = t;
+    let mut out = DecodedImage {
+        width: size[0],
+        height: size[1],
+        rgba: vec![0; crate::rgba_len(size[0], size[1])?],
+    };
+    if scale_x == 0 || scale_y == 0 {
+        return Ok(out);
+    }
+    let theta = -(angle as f64) * std::f64::consts::PI / 11796480.;
+    let (sin, cos) = theta.sin_cos();
+    let (sx, sy) = (
+        65536. / (scale_x as u32 as f64),
+        65536. / (scale_y as u32 as f64),
+    );
+    let cx = destination[0] as f64 / 65536.;
+    let cy = destination[1] as f64 / 65536.;
+    let start = [
+        (((-cx * cos - cy * sin) * sx + anchor_x as f64 / 65536.) * 65536.) as i64 as i32,
+        ((anchor_y as f64 / 65536. - (cy * cos - cx * sin) * sy) * 65536.) as i64 as i32,
+    ];
+    let dx = [
+        (cos * sx * 65536.) as i64 as i32,
+        (-sin * sy * 65536.) as i64 as i32,
+    ];
+    let reverse = std::f64::consts::FRAC_PI_2 - angle as f64 * std::f64::consts::PI / 11796480.;
+    let dy = [
+        (-reverse.cos() * sx * 65536.) as i64 as i32,
+        (reverse.sin() * sy * 65536.) as i64 as i32,
+    ];
+    for y in 0..out.height {
+        check()?;
+        for x in 0..out.width {
+            let fx = start[0]
+                .wrapping_add(dx[0].wrapping_mul(x as i32))
+                .wrapping_add(dy[0].wrapping_mul(y as i32));
+            let fy = start[1]
+                .wrapping_add(dx[1].wrapping_mul(x as i32))
+                .wrapping_add(dy[1].wrapping_mul(y as i32));
+            let (px, py) = (
+                (fx >> 16).clamp(-32768, 32767),
+                (fy >> 16).clamp(-32768, 32767),
+            );
+            let color = sample_background_pixel(
+                source,
+                px,
+                py,
+                if bilinear {
+                    (fx as u32 >> 12 & 15) as i32
+                } else {
+                    0
+                },
+                if bilinear {
+                    (fy as u32 >> 12 & 15) as i32
+                } else {
+                    0
+                },
+                16,
+            );
+            let index = ((y * out.width + x) * 4) as usize;
+            out.rgba[index..index + 4].copy_from_slice(&color);
+        }
+    }
+    Ok(out)
+}
+
+/// Conservative inclusive sample footprint for a fixed-point affine image.
+/// The returned rectangle is relative to the caller's object origin. Bilinear
+/// coverage includes the one-pixel zero border consumed by stored-byte kernels.
+pub fn affine_sample_bounds(
+    size: [u32; 2],
+    pivot: [i32; 2],
+    angle: i32,
+    factors: [u32; 2],
+    filtered: bool,
+) -> Result<[i32; 4]> {
+    crate::rgba_len(size[0], size[1])?;
+    ensure!(
+        factors.iter().all(|v| *v != 0 && *v <= 0x1000_0000),
+        "affine footprint scale"
+    );
+    let (sin, cos) = (f64::from(angle) * std::f64::consts::PI / 11_796_480.).sin_cos();
+    let [sx, sy] = factors.map(|v| f64::from(v) / 65536.);
+    let border = if filtered { 1. } else { 0. };
+    let mut bounds = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for [x, y] in [
+        [-border, -border],
+        [-border, f64::from(size[1]) - 1. + border],
+        [
+            f64::from(size[0]) - 1. + border,
+            f64::from(size[1]) - 1. + border,
+        ],
+        [f64::from(size[0]) - 1. + border, -border],
+    ] {
+        let x = (x - f64::from(pivot[0])) * sx;
+        let y = (y - f64::from(pivot[1])) * sy;
+        let ox = f64::from(pivot[0]) + x * cos - y * sin;
+        let oy = f64::from(pivot[1]) + x * sin + y * cos;
+        bounds[0] = bounds[0].min(ox);
+        bounds[1] = bounds[1].min(oy);
+        bounds[2] = bounds[2].max(ox);
+        bounds[3] = bounds[3].max(oy);
+    }
+    ensure!(
+        bounds
+            .iter()
+            .all(|v| v.is_finite() && v.abs() <= 1_000_000.),
+        "affine footprint coordinates"
+    );
+    let [left, top, right, bottom] = [
+        bounds[0].floor() as i32,
+        bounds[1].floor() as i32,
+        bounds[2].ceil() as i32,
+        bounds[3].ceil() as i32,
+    ];
+    Ok([left, top, right - left + 1, bottom - top + 1])
 }

@@ -32,6 +32,7 @@ crysirror-majiro = {workspace=true,features=["runtime"]}
 crysirror-system-nnn = {workspace=true,features=["runtime"]}
 crysirror-system4 = {path="../crysirror-system4",features=["runtime"]}
 crysirror-core.workspace = true
+crysirror-tasks.workspace = true
 crysirror-resource.workspace = true
 crysirror-formats-arc.workspace = true
 crysirror-tjs2.workspace = true

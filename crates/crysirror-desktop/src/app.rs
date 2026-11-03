@@ -498,6 +498,7 @@ impl App {
             )?,
         );
         window.set_ime_allowed(true);
+        crate::desktop_provider::install(self.core.rt(),true)?;
         self.focused = window.has_focus();
         self.core.rt().host.window_focused = Some(self.focused);
         self.core.rt().host.window_minimized=window.is_minimized();
@@ -737,7 +738,8 @@ impl App {
         // KiriKiri setCursorPos: move the OS pointer to a canvas position.
         if let Some((_, [x, y])) = self.core.rt().host.engine.ui.pointer_warp.take() {
             let canvas = self.core.rt().project.canvas;
-            let vp = Viewport::fit(canvas, [w.config.width, w.config.height]);
+            let mode=self.core.rt().host.engine.ui.presentation_scale.map(|(_,mode)|mode).unwrap_or_default();
+            let vp = Viewport::with_mode(canvas, [w.config.width, w.config.height],mode);
             let wx = f64::from(vp.x) + f64::from(x) / f64::from(canvas[0]) * f64::from(vp.width);
             let wy = f64::from(vp.y) + f64::from(y) / f64::from(canvas[1]) * f64::from(vp.height);
             if let Err(e) = w.window.set_cursor_position(winit::dpi::PhysicalPosition::new(wx, wy)) {
@@ -791,7 +793,11 @@ impl App {
             w.snapshot_store = rt.assets.store_id();
             w.snapshot_restored = rt.restored;
         }
-        if w.pending_snapshot.is_none() && !rt.presentation_pending() {
+        // Always submit the first picture: startup time must not depend on a
+        // bitmap callback finishing before the window has ever presented.
+        if w.pending_snapshot.is_none()
+            && (w.render_snapshot.is_none() || !rt.presentation_pending())
+        {
             w.pending_snapshot = Some(rt.schedule_render_snapshot()?);
         }
         if let Some(pending) = &mut w.pending_snapshot {
@@ -827,6 +833,7 @@ impl App {
         drop(acquire_span);
         let view = frame.texture.create_view(&Default::default());
         let rt = self.core.rt();
+        w.renderer.set_presentation_scale(rt.host.engine.ui.presentation_scale.map(|(_,mode)|mode).unwrap_or_default());
         w.renderer.set_scene3d(snapshot.simple.as_ref())?;
         w.renderer.set_pbr_scene(snapshot.pbr.clone())?;
         w.renderer.set_engine_frame(snapshot.layers.clone())?;
@@ -1062,9 +1069,10 @@ impl App {
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(w) = &self.window {
                     if !w.minimized {
-                        let vp = Viewport::fit(
+                        let mode=self.core.rt().host.engine.ui.presentation_scale.map(|(_,mode)|mode).unwrap_or_default();
+                        let vp = Viewport::with_mode(
                             self.core.rt().project.canvas,
-                            [w.config.width, w.config.height],
+                            [w.config.width, w.config.height],mode,
                         );
                         let [x, y] =
                             vp.pointer(position.x, position.y, self.core.rt().project.canvas);
@@ -1105,6 +1113,7 @@ impl ApplicationHandler for App {
     fn suspended(&mut self, el: &ActiveEventLoop) {
         self.window = None;
         self.core.rt().host.window_focused = None;
+        if let Err(error)=crate::desktop_provider::install(self.core.rt(),false){self.fail(el,error);return;}
         self.core.rt().host.window_minimized=None;
         self.core.rt().host.window_geometry=None;
         self.core.rt().host.pointer_observation = Default::default();

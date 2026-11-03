@@ -129,6 +129,9 @@ impl BgiVm {
         &self,
         window: &NativeWindow,
     ) -> Option<crysirror_core::image_processing::BitmapTextShadow> {
+        if window.shadow_configured {
+            return window.shadow;
+        }
         window.shadow.or_else(|| {
             self.messages.shadow_enabled.then(|| {
                 crysirror_core::image_processing::BitmapTextShadow {
@@ -144,9 +147,11 @@ impl BgiVm {
         })
     }
     fn style_window_message(&mut self, window: i32, color: u32, style: [i32; 5]) -> Result<()> {
+        self.text.output_color = color as i32;
         let w = self.windows.get_mut(window)?;
         let [mode, x, y, rgb, density] = style;
         w.color = color & 0xffffff;
+        w.shadow_configured = true;
         w.shadow = (matches!(mode, 1 | 2)
             && (0..=100).contains(&x)
             && (0..=100).contains(&y)
@@ -245,6 +250,27 @@ impl BgiVm {
             w.variant == 1,
             &advance,
         );
+        let (fragment_positions, _) = place_message_glyphs(
+            &parsed.text,
+            [state.x, state.y],
+            pitch,
+            false,
+            &|ch: char| if ch.is_ascii() { size * 0.5 } else { size },
+        );
+        self.text.fragments = parsed
+            .link_spans
+            .iter()
+            .filter_map(|link| {
+                let g = fragment_positions
+                    .iter()
+                    .find(|g| g.index >= link.start_char)?;
+                Some(crysirror_bgi_vm::System92TextFragmentRecord {
+                    text: link.text.clone(),
+                    x: g.position[0].round() as i32,
+                    y: g.position[1].round() as i32,
+                })
+            })
+            .collect();
         let w = self.windows.get_mut(window)?;
         w.page = markup;
         w.page_origin = origin;
@@ -330,18 +356,6 @@ impl BgiVm {
                 glyphs.push(glyph);
             }
         }
-        self.text.fragments = parsed
-            .link_spans
-            .iter()
-            .filter_map(|link| {
-                let g = placed.iter().find(|g| g.index >= link.start_char)?;
-                Some(crysirror_bgi_vm::System92TextFragmentRecord {
-                    text: link.text.clone(),
-                    x: g.position[0].round() as i32,
-                    y: g.position[1].round() as i32,
-                })
-            })
-            .collect();
         let mut ruby_glyphs = Vec::new();
         // Ruby spans appear only after all their base glyphs are committed.
         for span in parsed.ruby_spans.iter().filter(|s| s.end_char <= visible) {
@@ -377,7 +391,10 @@ impl BgiVm {
             }
         }
         let canvas = NativeWindow::canvas(window, 1);
-        let mut commands = vec![json!({"op":"clear","id":canvas,"color":[0,0,0,0]})];
+        let mut commands = vec![
+            json!({"op":"clear","id":canvas,"color":[0,0,0,0]}),
+            json!({"op":"copy","source":NativeWindow::canvas(window,4),"destination":canvas,"replace":true,"rect":[0,0,w.size[0],w.size[1]],"position":[0,0],"opacity":255}),
+        ];
         let shadow = self.message_shadow(&w);
         let shadow_offset = shadow
             .filter(|s| s.mode == 2)
@@ -394,7 +411,7 @@ impl BgiVm {
                     glyph["baseline"][0] = json!(origin + (x as f32 - origin) / scale);
                 }
             }
-            json!({"id":id,"rect":[position[0],position[1],w.size[0],w.size[1]],"transform":{"scale_x":scale,"pivot_x":origin},"paint":{"kind":"glyph_run","font":font,"size":size,"color":[255,255,255,255],"glyphs":glyphs,"blur":blur}})
+            json!({"id":id,"order":[if matches!(id,0|1|4){0}else{1},id as i32],"rect":[position[0],position[1],w.size[0],w.size[1]],"transform":{"scale_x":scale,"pivot_x":origin},"paint":{"kind":"glyph_run","font":font,"size":size,"color":[255,255,255,255],"glyphs":glyphs,"blur":blur}})
         };
         if let Some(shadow) = shadow {
             let dx = u8::try_from(shadow.offset[0])?;
@@ -467,7 +484,10 @@ impl BgiVm {
                     self.messages.input_scope_value = a[1];
                 }
             }
-            (0x90, 0x92) => self.messages.input_filter = a[0] != 0,
+            (0x90, 0x92) => {
+                self.messages.input_filter = a[0] != 0;
+                vm.set_message_input_filter(a[0] != 0);
+            }
             (0x90, 0x94) => {
                 self.messages.animation.set_glyph_delay(a[0]);
                 self.messages.runtime.set_glyph_delay_ms(a[0]);
@@ -531,6 +551,10 @@ impl BgiVm {
                     );
                 }
                 if call.group == 0x92 {
+                    let next_color = a[2] as u32 & 0xffffff;
+                    if !w.page.text.is_empty() && w.color != next_color {
+                        self.archive_window_text(host, window)?;
+                    }
                     self.style_window_message(
                         window,
                         a[2] as u32,
@@ -556,12 +580,13 @@ impl BgiVm {
                     self.messages.active = Some(window);
                     let class = if call.group == 0x90 {
                         NativeMessageProcedureClass::DspMsg
-                    } else if self.windows.get(window)?.variant == 1 {
+                    } else if call.group == 0x92 && self.windows.get(window)?.variant == 1 {
                         NativeMessageProcedureClass::DspMsgExVE
                     } else {
                         NativeMessageProcedureClass::DspMsgEx
                     };
                     let mut config = self.message_config(window, class);
+                    config.auxiliary_input_mask = vm.message_auxiliary_input_mask();
                     let reversed = |i: usize| a[a.len() - 1 - i];
                     if call.group == 0x90 {
                         config.allow_high_bit_input = reversed(0) != 0;

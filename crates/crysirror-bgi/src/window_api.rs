@@ -1,5 +1,6 @@
 //! Native window handles and three-pass policy over shared Canvas/Layer state.
 use super::*;
+mod composition;
 mod raster;
 use crate::display_tree::NativeDisplayKind;
 use crysirror_bgi_vm::HostMemoryWrite;
@@ -13,6 +14,7 @@ pub(crate) struct NativeIcon {
 #[derive(Clone, Debug)]
 pub(crate) struct NativeWindow {
     pub size: [u32; 2],
+    pub content_version: u64,
     pub valid: [i32; 4],
     pub order: [usize; 3],
     pub isolated: bool,
@@ -28,18 +30,22 @@ pub(crate) struct NativeWindow {
     pub cursor: [i32; 2],
     pub color: u32,
     pub shadow: Option<crysirror_core::image_processing::BitmapTextShadow>,
+    pub shadow_configured: bool,
     pub page: crysirror_text::message::ParsedMessageMarkup,
     pub page_origin: [i32; 2],
     pub background: Option<u32>,
     pub backing_raw: Option<Arc<dyn crysirror_core::image_processing::ImageResource>>,
+    pub backing_path: Option<String>,
     pub dirty: bool,
     pub icons: BTreeMap<i32, NativeIcon>,
     pub text_overlays: BTreeMap<i32, Value>,
+    pub control_layers: BTreeMap<i32, Vec<Value>>,
 }
 impl NativeWindow {
     fn new(size: [u32; 2]) -> Self {
         Self {
             size,
+            content_version: 0,
             valid: [0, 0, size[0] as i32 - 1, size[1] as i32 - 1],
             order: [0, 1, 2],
             isolated: false,
@@ -55,13 +61,16 @@ impl NativeWindow {
             cursor: [0; 2],
             color: 0xffffff,
             shadow: None,
+            shadow_configured: false,
             page: Default::default(),
             page_origin: [0; 2],
             background: None,
             backing_raw: None,
+            backing_path: None,
             dirty: true,
             icons: BTreeMap::new(),
             text_overlays: BTreeMap::new(),
+            control_layers: BTreeMap::new(),
         }
     }
     pub fn reset_cursor(&mut self) {
@@ -88,6 +97,9 @@ pub(crate) struct WindowState {
     pub records: BTreeMap<i32, NativeWindow>,
     pub input_locks: std::collections::BTreeSet<i32>,
     blends: BTreeMap<i32, raster::WindowRasterJob>,
+    compositions: BTreeMap<i32, composition::WindowComposition>,
+    captures: BTreeMap<u64, crysirror_core::image_processing::ImageJob>,
+    capture_sources: BTreeMap<u64, i32>,
 }
 impl WindowState {
     pub fn has_window(&self, id: i32) -> bool {
@@ -108,14 +120,13 @@ impl WindowState {
 pub(crate) fn handles(group: u8, id: u16) -> bool {
     matches!(
         (group, id),
-        (0x90, 0x80 | 0x81 | 0x82 | 0x84..=0x89)
-            | (0x91, 0x88..=0x8e)
-            | (0x92, 0x88 | 0x89 | 0x8c | 0x8d | 0x8e)
+        (0x90, 0x80..=0x89) | (0x91, 0x88..=0x8e) | (0x92, 0x88 | 0x89 | 0x8c | 0x8d | 0x8e)
     )
 }
 impl BgiVm {
     pub(crate) fn publish_windows(&mut self, host: &mut dyn HostServices) -> Result<()> {
-        let handles = self.windows.records.keys().copied().collect::<Vec<_>>();
+        let mut handles = self.windows.records.keys().copied().collect::<Vec<_>>();
+        handles.sort_by_key(|handle| self.graph.tree.chain_position(*handle).unwrap_or(0));
         for handle in handles {
             let w = self.windows.records.get(&handle).unwrap();
             let p = self
@@ -143,36 +154,37 @@ impl BgiVm {
                     canvases.push(json!({"op":"copy","source":NativeWindow::canvas(handle,plane as u32),"destination":canvas,"rect":[0,0,w.size[0],w.size[1]],"position":[0,0],"opacity":255,"clip":clip}));
                 }
             }
-            let offset = if n.global_display_offset_enabled != 0 {
-                self.graph.display_offset
-            } else {
-                [0; 2]
-            };
-            let position = [
-                n.position_x
-                    .wrapping_add(n.primary_offset_x)
-                    .wrapping_add(n.secondary_offset_x)
-                    .wrapping_add(offset[0]),
-                n.position_y
-                    .wrapping_add(n.primary_offset_y)
-                    .wrapping_add(n.secondary_offset_y)
-                    .wrapping_add(offset[1]),
-            ];
-            canvases.push(json!({"op":if w.isolated{"present_isolated"}else{"present"},"id":canvas,"layer":layer,"order":n.priority,"position":position}));
+            let position = self
+                .graph
+                .draw_position(handle)
+                .context("BGI window has no native position")?;
             let visible = self.graph.global_enabled != 0
                 && n.draw_enabled != 0
                 && n.suppress_draw == 0
+                && p.mask_alpha < 256
+                && p.alpha_multiplier != 0
                 && self.graph.tree.chain_drawable(handle);
-            let blend = match p.blend_mode {
-                128 => "normal",
-                2 => "add",
-                3 => "subtract",
-                mode => bail!("BGI window blend {mode} requires its shared composition profile"),
-            };
             let serial = self.graph.tree.chain_position(handle).unwrap_or(0) as i32;
-            let descriptor = json!({"position":position,"size":w.size,"isolated":w.isolated,"visible":visible,"opacity":(p.opacity()*255.).round() as u8,"blend":blend,"order":[n.priority,serial]});
+            let mode = p.blend_mode;
+            let opacity = (p.opacity() * 255.).round() as u8;
+            let isolated = w.isolated;
             let content_changed = w.dirty;
-            self.submit(host,json!({"canvases":canvases,"layers":[{"op":"set_visible","id":layer,"visible":visible},{"op":"set_opacity","id":layer,"opacity":(p.opacity()*255.).round() as u8},{"op":"set_blend","id":layer,"blend":blend},{"op":"set_order","id":layer,"order":[n.priority,serial]}]}))?;
+            let descriptor = json!({"position":position,"size":w.size,"isolated":isolated,"visible":visible,"opacity":opacity,"blend":mode,"order":[n.priority,serial]});
+            if content_changed {
+                let w = self.windows.get_mut(handle)?;
+                w.content_version = w.content_version.wrapping_add(1);
+            }
+            if mode == 128 {
+                self.release_window_composition(host, handle)?;
+                canvases.push(json!({"op":if isolated{"present_isolated"}else{"present"},"id":canvas,"layer":layer,"order":n.priority,"position":position}));
+                self.submit(host,json!({"canvases":canvases,"layers":[{"op":"set_visible","id":layer,"visible":visible},{"op":"set_opacity","id":layer,"opacity":opacity},{"op":"set_blend","id":layer,"blend":"normal"},{"op":"set_order","id":layer,"order":[n.priority,serial]}]}))?;
+            } else {
+                canvases.push(json!({"op":"hide","layer":layer}));
+                self.submit(host, json!({"canvases":canvases}))?;
+                let (paint, size) =
+                    self.window_composition_paint(host, handle, position, visible)?;
+                self.submit(host,json!({"layers":[{"op":"put","layer":{"id":layer,"rect":[0,0,size[0],size[1]],"order":[n.priority,serial],"visible":visible,"paint":paint}}]}))?;
+            }
             self.windows.records.get_mut(&handle).unwrap().dirty = false;
             if content_changed {
                 self.graph.mark_visual(handle);
@@ -201,6 +213,18 @@ impl BgiVm {
             let (source, size) = self.window_image_source(icon.bitmap)?;
             commands.push(json!({"op":"copy","source":source,"destination":canvas,"rect":[0,0,size[0],size[1]],"position":icon.position,"opacity":255}));
         }
+        let mut controls = w.control_layers.values().flatten().collect::<Vec<_>>();
+        controls.sort_by_key(|layer| {
+            (
+                layer["order"][0].as_i64().unwrap_or(0),
+                layer["order"][1].as_i64().unwrap_or(0),
+            )
+        });
+        for (id, layer) in controls.into_iter().enumerate() {
+            let mut layer = layer.clone();
+            layer["id"] = json!(0x10000 + id as u32);
+            commands.push(json!({"op":"draw","id":canvas,"layer":layer}));
+        }
         for layer in w.text_overlays.values() {
             commands.push(json!({"op":"draw","id":canvas,"layer":layer}));
         }
@@ -212,6 +236,19 @@ impl BgiVm {
         self.windows.get_mut(window)?.dirty = true;
         Ok(())
     }
+    pub(crate) fn archive_window_text(
+        &mut self,
+        host: &mut dyn HostServices,
+        window: i32,
+    ) -> Result<()> {
+        let size = self.windows.get(window)?.size;
+        self.submit(host,json!({"canvases":[{"op":"clear","id":NativeWindow::canvas(window,4),"color":[0,0,0,0]},
+            {"op":"copy","source":NativeWindow::canvas(window,1),"destination":NativeWindow::canvas(window,4),"replace":true,"rect":[0,0,size[0],size[1]],"position":[0,0],"opacity":255}]}))?;
+        let w = self.windows.get_mut(window)?;
+        w.page = Default::default();
+        w.page_origin = w.cursor;
+        Ok(())
+    }
     pub(crate) fn reset_window_text(
         &mut self,
         host: &mut dyn HostServices,
@@ -220,7 +257,7 @@ impl BgiVm {
         let w = self.windows.get_mut(window)?;
         w.reset_cursor();
         w.dirty = true;
-        self.submit(host,json!({"canvases":[{"op":"clear","id":NativeWindow::canvas(window,1),"color":[0,0,0,0]}]}))?;
+        self.submit(host,json!({"canvases":[{"op":"clear","id":NativeWindow::canvas(window,1),"color":[0,0,0,0]},{"op":"clear","id":NativeWindow::canvas(window,4),"color":[0,0,0,0]}]}))?;
         Ok(())
     }
     pub(crate) fn window_call(
@@ -234,8 +271,60 @@ impl BgiVm {
         }
         let a = &call.args;
         let request = vm.request_id().context("BGI window request identity")?;
+        if call.group == 0x90 && call.id == 0x83 {
+            target_checks::bitmap(a[0])?;
+            self.windows.get(a[1])?;
+            self.publish_windows(host)?;
+            self.windows.capture_sources.insert(request, a[1]);
+            let mut capture = if let Some(job) = self.windows.captures.remove(&request) {
+                job
+            } else {
+                host.begin_canvas_image(self.client, NativeWindow::canvas(a[1], 3))?
+            };
+            match capture.poll()? {
+                crysirror_core::image_processing::ImageProcessState::Pending => {
+                    self.windows.captures.insert(request, capture);
+                    return Ok(false);
+                }
+                crysirror_core::image_processing::ImageProcessState::Failed(error) => {
+                    bail!("BGI window bitmap capture: {error}")
+                }
+                crysirror_core::image_processing::ImageProcessState::Ready(image) => {
+                    self.windows.capture_sources.remove(&request);
+                    self.publish_bitmap_reallocated(
+                        host,
+                        a[0] as u32,
+                        2,
+                        [-1; 2],
+                        image.clone(),
+                        image,
+                    )?;
+                    vm.commit_call(&[])?;
+                    self.calls += 1;
+                    return Ok(true);
+                }
+            }
+        }
         if matches!((call.group, call.id), (0x92, 0x89 | 0x8d)) {
-            self.windows.get(a[0])?;
+            if !self.windows.has_window(a[0]) && self.bitmaps.contains_key(&(a[0] as u32)) {
+                let equivalent = NativeCall {
+                    group: 0x90,
+                    id: 0x18,
+                    args: call.args.clone(),
+                    outputs: call.outputs,
+                };
+                return self.bitmap_call(host, vm, &equivalent);
+            }
+            let size = self.windows.get(a[0])?.size;
+            let source = self.bitmap(a[3])?.1;
+            let overlaps = (a[1] as i64) < i64::from(size[0])
+                && (a[2] as i64) < i64::from(size[1])
+                && i64::from(a[1]) + i64::from(source.size[0]) > 0
+                && i64::from(a[2]) + i64::from(source.size[1]) > 0;
+            ensure!(
+                !overlaps || matches!(source.format, 1 | 2),
+                "BGI window bitmap is not screen-compatible"
+            );
             target_checks::bitmap(a[3])?;
             target_checks::effect_mode(a[4])?;
             target_checks::effect_level(a[5])?;
@@ -286,11 +375,20 @@ impl BgiVm {
                     .graph
                     .allocate(0xb0000000, 16, NativeDisplayKind::Window);
                 ensure!(handle != 0, "BGI window pool exhausted");
-                let commands=(0..4).flat_map(|plane|[json!({"op":"create","id":NativeWindow::canvas(handle,plane),"width":width,"height":height}),json!({"op":"clear","id":NativeWindow::canvas(handle,plane),"color":[0,0,0,0]})]).collect::<Vec<_>>();
+                let commands=(0..5).flat_map(|plane|[json!({"op":"create","id":NativeWindow::canvas(handle,plane),"width":width,"height":height}),json!({"op":"clear","id":NativeWindow::canvas(handle,plane),"color":[0,0,0,0]})]).collect::<Vec<_>>();
                 self.submit(host, json!({"canvases":commands}))?;
                 self.windows
                     .records
                     .insert(handle, NativeWindow::new([width, height]));
+                // CDspObjWindow constructor sub_42AE20 overrides the base
+                // CDspObj blend (128) with source-alpha mode 1.
+                self.graph.objects.entry(handle).or_default().blend_mode = 1;
+                self.graph
+                    .objects
+                    .entry(handle)
+                    .or_default()
+                    .native
+                    .blend_mode = 1;
                 let n = &mut self.graph.objects.entry(handle).or_default().native;
                 n.enabled = 1;
                 n.draw_enabled = 1;
@@ -298,10 +396,17 @@ impl BgiVm {
             }
             (0x90, 0x81) => {
                 let handle = a[0];
-                if self.windows.blends.contains_key(&handle) {
+                if self.windows.blends.contains_key(&handle)
+                    || self
+                        .windows
+                        .capture_sources
+                        .values()
+                        .any(|source| *source == handle)
+                {
                     return Ok(false);
                 }
                 self.windows.get(handle)?;
+                self.release_window_inputs(host, vm, handle)?;
                 ensure!(
                     self.graph.tree.parent(handle).is_none(),
                     "指定されたウィンドウにはオーナーが存在します"
@@ -315,10 +420,19 @@ impl BgiVm {
                     "指定されたウィンドウには協調しているプロシージャが存在します"
                 );
                 let mut commands = vec![json!({"op":"hide","layer":NativeWindow::layer(handle)})];
-                for plane in 0..4 {
+                for plane in 0..5 {
                     commands.push(json!({"op":"destroy","id":NativeWindow::canvas(handle,plane)}));
                 }
-                self.submit(host, json!({"canvases":commands}))?;
+                let layers = if self.windows.compositions.contains_key(&handle) {
+                    vec![json!({"op":"remove","id":NativeWindow::layer(handle)})]
+                } else {
+                    Vec::new()
+                };
+                self.submit(host, json!({"canvases":commands,"layers":layers}))?;
+                self.release_window_composition(host, handle)?;
+                if let Some(path) = self.windows.get(handle)?.backing_path.clone() {
+                    host.release_image_resource(self.client, &path)?;
+                }
                 self.windows.records.remove(&handle);
                 self.selections.columns.remove(&handle);
                 self.graph.objects.remove(&handle);
@@ -393,7 +507,7 @@ impl BgiVm {
                 w.dirty = true;
             }
             (0x90, 0x88) => {
-                let w = self.windows.get_mut(a[0])?;
+                let w = self.windows.get(a[0])?;
                 let right = a[1].wrapping_add(a[3]).wrapping_sub(1);
                 let bottom = a[2].wrapping_add(a[4]).wrapping_sub(1);
                 let inside = |v: i32, max: u32| v >= 0 && (v as u32) < max;
@@ -404,6 +518,8 @@ impl BgiVm {
                         && inside(bottom, w.size[1]),
                     "BGI invalid window valid region"
                 );
+                self.archive_window_text(host, a[0])?;
+                let w = self.windows.get_mut(a[0])?;
                 w.valid = [a[1], a[2], right, bottom];
                 w.reset_cursor();
             }
@@ -423,6 +539,9 @@ impl BgiVm {
                 );
                 ensure!((4..=200).contains(&a[2]), "BGI invalid native font height");
                 ensure!((25..=200).contains(&a[3]), "BGI invalid native font width");
+                if !self.windows.get(a[0])?.page.text.is_empty() {
+                    self.archive_window_text(host, a[0])?;
+                }
                 let w = self.windows.get_mut(a[0])?;
                 w.font = a[1];
                 w.font_size = a[2];
@@ -449,6 +568,7 @@ impl BgiVm {
             }
             (0x91, 0x8a) => {
                 ensure!(a[1] as u32 <= 1, "BGI message variant");
+                self.archive_window_text(host, a[0])?;
                 let w = self.windows.get_mut(a[0])?;
                 w.variant = a[1];
                 w.reset_cursor();
@@ -458,6 +578,7 @@ impl BgiVm {
                 self.windows.get_mut(a[0])?.layout_mode = a[1];
             }
             (0x91, 0x8c) => {
+                self.archive_window_text(host, a[0])?;
                 let w = self.windows.get_mut(a[0])?;
                 w.cursor = [a[1], a[2]];
                 w.page = Default::default();

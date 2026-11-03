@@ -4,22 +4,22 @@
 //! letterbox mapping are ported from RFVP exit_confirm_ui.rs (see UPSTREAM.md).
 pub mod cursor;
 pub mod dialog;
-pub mod menu;
-pub mod snapshot;
 pub mod hit_mask;
+pub mod menu;
 pub mod navigation;
+pub mod pointer_motion;
+pub mod snapshot;
 pub mod tooltip;
 pub mod window_requests;
-pub mod pointer_motion;
-pub use hit_mask::WidgetHitMask;
-use crate::layer::motion::{MotionProperty,MotionTrackSpec,MotionStatus,MotionTracks};
+use crate::layer::motion::{MotionProperty, MotionStatus, MotionTrackSpec, MotionTracks};
 use crate::{
     input::{InputState, VmKey, VmMouseButton},
-    layer::{intersect, rect_valid, rectangle, Paint, Primitive},
+    layer::{Paint, Primitive, intersect, rect_valid, rectangle},
     world::WorldCommand,
 };
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use crysirror_core::{service::InputFrame, state::ClientId};
+pub use hit_mask::WidgetHitMask;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 fn yes() -> bool {
@@ -95,7 +95,7 @@ pub struct WidgetSpec {
     pub z: i32,
     /// Optional immutable local pointer coverage; ordinary rectangular input is the default.
     #[serde(default)]
-    pub hit_mask:Option<WidgetHitMask>,
+    pub hit_mask: Option<WidgetHitMask>,
     /// Inherited visibility.
     #[serde(default = "yes")]
     pub visible: bool,
@@ -199,8 +199,12 @@ pub struct WidgetTextAction {
     pub serial: u32,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all="snake_case")]
-pub enum WidgetTextActionKind { Submit, Cancel, Tab }
+#[serde(rename_all = "snake_case")]
+pub enum WidgetTextActionKind {
+    Submit,
+    Cancel,
+    Tab,
+}
 /// Requested desktop decorations and resizing, owned by the submitting client.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -229,29 +233,31 @@ pub struct UiSystem {
     #[serde(skip)]
     pub pointer_warp: Option<(u32, [i32; 2])>,
     #[serde(skip)]
-    pointer_motion:Option<(u32,pointer_motion::PointerMotion,bool)>,
+    pointer_motion: Option<(u32, pointer_motion::PointerMotion, bool)>,
     #[serde(skip)]
-    pointer_elapsed:u64,
+    pointer_elapsed: u64,
     /// Live presentation observations set by the window owner.
     #[serde(skip)]
-    pub pointer_surface:[u32;2],
+    pub pointer_surface: [u32; 2],
     #[serde(skip)]
-    pub pointer_window_focused:Option<bool>,
+    pub pointer_window_focused: Option<bool>,
     #[serde(skip)]
-    pointer_raw:Option<[i32;2]>,
+    pointer_raw: Option<[i32; 2]>,
     #[serde(skip)]
-    pointer_override:Option<[i32;2]>,
+    pointer_override: Option<[i32; 2]>,
     #[serde(skip)]
-    pub window_requests:window_requests::WindowRequests,
+    pub window_requests: window_requests::WindowRequests,
     #[serde(default)]
     pub title: Option<(u32, String)>,
     #[serde(default)]
     pub window_policy: Option<(u32, WindowPolicy)>,
     #[serde(default)]
     pub fullscreen: Option<(u32, bool)>,
+    #[serde(default)]
+    pub presentation_scale: Option<(u32, crysirror_core::service::PresentationScale)>,
     clients: BTreeMap<u32, BTreeMap<u32, Widget>>,
     #[serde(default)]
-    motions:MotionTracks,
+    motions: MotionTracks,
     pub focus: Option<WidgetId>,
     pub events: Vec<UiEvent>,
     #[serde(skip)]
@@ -267,11 +273,11 @@ pub struct UiSystem {
     #[serde(default)]
     activation_serial: u32,
     #[serde(skip)]
-    text_actions:BTreeMap<(u32,u32),WidgetTextAction>,
+    text_actions: BTreeMap<(u32, u32), WidgetTextAction>,
     #[serde(skip)]
-    text_action_serial:u32,
+    text_action_serial: u32,
     #[serde(skip)]
-    focus_suppressed:BTreeSet<(u32,u32)>,
+    focus_suppressed: BTreeSet<(u32, u32)>,
 }
 struct Layout {
     id: WidgetId,
@@ -285,16 +291,39 @@ struct Layout {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiCommand {
-    PutTooltip { tooltip: tooltip::TooltipSpec },
-    RemoveTooltip { id:u32 },
-    ShowTooltip { id:u32, position:[f32;2] },
-    HideTooltip { #[serde(default)] id:Option<u32> },
+    PutTooltip {
+        tooltip: tooltip::TooltipSpec,
+    },
+    RemoveTooltip {
+        id: u32,
+    },
+    ShowTooltip {
+        id: u32,
+        position: [f32; 2],
+    },
+    HideTooltip {
+        #[serde(default)]
+        id: Option<u32>,
+    },
     /// Start or replace a local X/Y rectangle track on an owned widget.
-    BeginMotion {id:u32,track:MotionTrackSpec},
+    BeginMotion {
+        id: u32,
+        track: MotionTrackSpec,
+    },
     /// Advance one external widget track in caller-declared units.
-    SetMotionElapsed {id:u32,property:MotionProperty,elapsed:u64},
+    SetMotionElapsed {
+        id: u32,
+        property: MotionProperty,
+        elapsed: u64,
+    },
     /// Cancel selected/all tracks, optionally applying their final positions.
-    EndMotion {id:u32,#[serde(default)] property:Option<MotionProperty>,#[serde(default)] finish:bool},
+    EndMotion {
+        id: u32,
+        #[serde(default)]
+        property: Option<MotionProperty>,
+        #[serde(default)]
+        finish: bool,
+    },
     SetMenu {
         menu: menu::MenuSpec,
     },
@@ -342,7 +371,9 @@ pub enum UiCommand {
         id: u32,
     },
     /// Release explicit focus until navigation or a pointer gesture selects it again.
-    Blur {id:u32},
+    Blur {
+        id: u32,
+    },
     SetCursorVisible {
         visible: bool,
     },
@@ -359,16 +390,31 @@ pub enum UiCommand {
     WarpPointer {
         position: [i32; 2],
     },
-    MovePointer {motion:pointer_motion::PointerMotionSpec,#[serde(default)]aspect_fit:bool},
+    MovePointer {
+        motion: pointer_motion::PointerMotionSpec,
+        #[serde(default)]
+        aspect_fit: bool,
+    },
     SetTitle {
         text: String,
     },
     /// Physical client size, applied by the host after presentation-mode changes.
-    SetWindowSize {size:[u32;2]},
+    SetWindowSize {
+        size: [u32; 2],
+    },
+    SetPresentationScale {
+        mode: crysirror_core::service::PresentationScale,
+    },
     /// Outer frame coordinates in the host display space.
-    SetWindowPosition {position:[i32;2]},
-    SetWindowVisible {visible:bool},
-    SetWindowMinimized {minimized:bool},
+    SetWindowPosition {
+        position: [i32; 2],
+    },
+    SetWindowVisible {
+        visible: bool,
+    },
+    SetWindowMinimized {
+        minimized: bool,
+    },
     SetWindowPolicy {
         decorated: bool,
         resizable: bool,
@@ -383,7 +429,10 @@ pub enum UiCommand {
         id: u32,
     },
     /// Replace or clear one owned widget's pointer coverage without repainting it.
-    SetHitMask {id:u32,mask:Option<WidgetHitMask>},
+    SetHitMask {
+        id: u32,
+        mask: Option<WidgetHitMask>,
+    },
     SetVisible {
         id: u32,
         visible: bool,
@@ -405,32 +454,61 @@ pub enum UiCommand {
 impl UiSystem {
     /// Enumerate logical font references without layout, metric lookup or
     /// cloning a widget/menu/glyph buffer.
-    pub fn visit_font_dependencies(&self,visitor:&mut dyn FnMut(ClientId,&str)) {
-        for (owner,widgets) in &self.clients {for widget in widgets.values(){
-            if let Some(font)=&widget.spec.font {visitor(ClientId(*owner),font);}
-        }}
-        self.menus.visit_font_dependencies(&mut |owner,font|visitor(ClientId(owner),font));
-        self.tooltips.visit_font_dependencies(&mut |owner,font|visitor(ClientId(owner),font));
-        for owner in self.dialogs.client_ids(){if let Some(dialog)=self.dialogs.get(owner){visitor(ClientId(owner),&dialog.font);}}
+    pub fn visit_font_dependencies(&self, visitor: &mut dyn FnMut(ClientId, &str)) {
+        for (owner, widgets) in &self.clients {
+            for widget in widgets.values() {
+                if let Some(font) = &widget.spec.font {
+                    visitor(ClientId(*owner), font);
+                }
+            }
+        }
+        self.menus
+            .visit_font_dependencies(&mut |owner, font| visitor(ClientId(owner), font));
+        self.tooltips
+            .visit_font_dependencies(&mut |owner, font| visitor(ClientId(owner), font));
+        for owner in self.dialogs.client_ids() {
+            if let Some(dialog) = self.dialogs.get(owner) {
+                visitor(ClientId(owner), &dialog.font);
+            }
+        }
     }
-    pub(crate) fn input_routing_compatible(&self)->bool {
-        self.dialogs.is_empty() && !self.clients.values().flat_map(|owner|owner.values()).any(|w|w.spec.visible&&w.spec.enabled&&matches!(w.spec.kind,WidgetKind::Button|WidgetKind::Toggle|WidgetKind::Slider|WidgetKind::TextField))
+    pub(crate) fn input_routing_compatible(&self) -> bool {
+        self.dialogs.is_empty()
+            && !self
+                .clients
+                .values()
+                .flat_map(|owner| owner.values())
+                .any(|w| {
+                    w.spec.visible
+                        && w.spec.enabled
+                        && matches!(
+                            w.spec.kind,
+                            WidgetKind::Button
+                                | WidgetKind::Toggle
+                                | WidgetKind::Slider
+                                | WidgetKind::TextField
+                        )
+                })
     }
 
     /// Owner-scoped widget motion state; an unknown widget is an error.
     /// Logical pointer generated by engine operations, until a real movement
     /// supersedes it. Offscreen hosts need no operating-system warp callback.
-    pub fn pointer_override(&self)->Option<[i32;2]>{self.pointer_override}
-    pub fn motion_status(&self,client:ClientId,id:u32)->Result<MotionStatus>{
-        ensure!(self.get(client.0,id).is_some(),"motion widget missing");
-        Ok(self.motions.status(client.0,id))
+    pub fn pointer_override(&self) -> Option<[i32; 2]> {
+        self.pointer_override
+    }
+    pub fn motion_status(&self, client: ClientId, id: u32) -> Result<MotionStatus> {
+        ensure!(self.get(client.0, id).is_some(), "motion widget missing");
+        Ok(self.motions.status(client.0, id))
     }
     /// Advance only automatic widget tracks before input layout is evaluated.
-    pub fn advance_motions(&mut self,delta_ms:u64){
-        self.pointer_elapsed=self.pointer_elapsed.saturating_add(delta_ms);
+    pub fn advance_motions(&mut self, delta_ms: u64) {
+        self.pointer_elapsed = self.pointer_elapsed.saturating_add(delta_ms);
         self.tooltips.advance(delta_ms);
-        for(owner,id,property,value)in self.motions.tick(delta_ms){
-            if let Some(widget)=self.clients.get_mut(&owner).and_then(|o|o.get_mut(&id)){property.set_rect(&mut widget.spec.rect,value);}
+        for (owner, id, property, value) in self.motions.tick(delta_ms) {
+            if let Some(widget) = self.clients.get_mut(&owner).and_then(|o| o.get_mut(&id)) {
+                property.set_rect(&mut widget.spec.rect, value);
+            }
         }
     }
 
@@ -440,30 +518,46 @@ impl UiSystem {
         let owner = staged.clients.entry(client.0).or_default();
         for command in commands {
             match command {
-                UiCommand::PutTooltip{tooltip} => staged.tooltips.put(client.0,tooltip.clone())?,
-                UiCommand::RemoveTooltip{id} => staged.tooltips.remove(client.0,*id)?,
-                UiCommand::ShowTooltip{id,position} => staged.tooltips.show(client.0,*id,*position)?,
-                UiCommand::HideTooltip{id} => staged.tooltips.hide(client.0,*id),
-                UiCommand::SetHitMask{id,mask}=>{
-                    let widget=owner.get_mut(id).context("hit mask widget missing")?;
-                    if let Some(mask)=mask{mask.validate(widget.spec.rect)?;}
-                    widget.spec.hit_mask=mask.clone();
+                UiCommand::PutTooltip { tooltip } => {
+                    staged.tooltips.put(client.0, tooltip.clone())?
                 }
-                UiCommand::BeginMotion{id,track}=>{
-                    let widget=owner.get_mut(id).context("motion widget missing")?;
-                    let current=track.property.rect_value(widget.spec.rect)?;
-                    let value=staged.motions.begin(client.0,*id,track,current,false)?;
-                    track.property.set_rect(&mut widget.spec.rect,value);
+                UiCommand::RemoveTooltip { id } => staged.tooltips.remove(client.0, *id)?,
+                UiCommand::ShowTooltip { id, position } => {
+                    staged.tooltips.show(client.0, *id, *position)?
                 }
-                UiCommand::SetMotionElapsed{id,property,elapsed}=>{
-                    let widget=owner.get_mut(id).context("motion widget missing")?;
+                UiCommand::HideTooltip { id } => staged.tooltips.hide(client.0, *id),
+                UiCommand::SetHitMask { id, mask } => {
+                    let widget = owner.get_mut(id).context("hit mask widget missing")?;
+                    if let Some(mask) = mask {
+                        mask.validate(widget.spec.rect)?;
+                    }
+                    widget.spec.hit_mask = mask.clone();
+                }
+                UiCommand::BeginMotion { id, track } => {
+                    let widget = owner.get_mut(id).context("motion widget missing")?;
+                    let current = track.property.rect_value(widget.spec.rect)?;
+                    let value = staged.motions.begin(client.0, *id, track, current, false)?;
+                    track.property.set_rect(&mut widget.spec.rect, value);
+                }
+                UiCommand::SetMotionElapsed {
+                    id,
+                    property,
+                    elapsed,
+                } => {
+                    let widget = owner.get_mut(id).context("motion widget missing")?;
                     property.rect_value(widget.spec.rect)?;
-                    let value=staged.motions.advance(client.0,*id,*property,*elapsed)?;
-                    property.set_rect(&mut widget.spec.rect,value);
+                    let value = staged.motions.advance(client.0, *id, *property, *elapsed)?;
+                    property.set_rect(&mut widget.spec.rect, value);
                 }
-                UiCommand::EndMotion{id,property,finish}=>{
-                    let widget=owner.get_mut(id).context("motion widget missing")?;
-                    for(p,value)in staged.motions.end(client.0,*id,*property,*finish)?{p.set_rect(&mut widget.spec.rect,value);}
+                UiCommand::EndMotion {
+                    id,
+                    property,
+                    finish,
+                } => {
+                    let widget = owner.get_mut(id).context("motion widget missing")?;
+                    for (p, value) in staged.motions.end(client.0, *id, *property, *finish)? {
+                        p.set_rect(&mut widget.spec.rect, value);
+                    }
                 }
                 UiCommand::SetMenu { menu } => staged.menus.put(client.0, menu.clone())?,
                 UiCommand::OpenDialog { dialog } => {
@@ -507,17 +601,22 @@ impl UiSystem {
                 }
                 UiCommand::Focus { id } => {
                     ensure!(editable(owner, *id), "text field is not editable");
-                    staged.focus_suppressed.remove(&(client.0,*id));
+                    staged.focus_suppressed.remove(&(client.0, *id));
                     staged.focus = Some(WidgetId {
                         owner: client.0,
                         id: *id,
                     });
                 }
-                UiCommand::Blur{id}=>{
-                    ensure!(owner.contains_key(id),"widget missing");
-                    let widget=WidgetId{owner:client.0,id:*id};
-                    if staged.focus==Some(widget){staged.focus=None;}
-                    staged.focus_suppressed.insert((client.0,*id));
+                UiCommand::Blur { id } => {
+                    ensure!(owner.contains_key(id), "widget missing");
+                    let widget = WidgetId {
+                        owner: client.0,
+                        id: *id,
+                    };
+                    if staged.focus == Some(widget) {
+                        staged.focus = None;
+                    }
+                    staged.focus_suppressed.insert((client.0, *id));
                 }
                 UiCommand::SetCursorVisible { visible } => {
                     staged.cursor = Some((client.0, *visible))
@@ -526,10 +625,21 @@ impl UiSystem {
                     staged.cursors.define(client.0, *id, cursor.clone())?
                 }
                 UiCommand::SetCursor { cursor } => staged.cursors.select(client.0, *cursor)?,
-                UiCommand::MovePointer{motion,aspect_fit}=>{
-                    ensure!(motion.start.iter().chain(motion.target.iter()).all(|n|n.unsigned_abs()<=65536),"pointer motion position range");
-                    staged.pointer_motion=Some((client.0,pointer_motion::PointerMotion::new(*motion),*aspect_fit));
-                    staged.pointer_elapsed=0;
+                UiCommand::MovePointer { motion, aspect_fit } => {
+                    ensure!(
+                        motion
+                            .start
+                            .iter()
+                            .chain(motion.target.iter())
+                            .all(|n| n.unsigned_abs() <= 65536),
+                        "pointer motion position range"
+                    );
+                    staged.pointer_motion = Some((
+                        client.0,
+                        pointer_motion::PointerMotion::new(*motion),
+                        *aspect_fit,
+                    ));
+                    staged.pointer_elapsed = 0;
                 }
                 UiCommand::WarpPointer { position } => {
                     ensure!(
@@ -537,7 +647,7 @@ impl UiSystem {
                         "pointer warp range"
                     );
                     staged.pointer_warp = Some((client.0, *position));
-                    staged.pointer_override=Some(*position);
+                    staged.pointer_override = Some(*position);
                 }
                 UiCommand::SetFullscreen { enabled } => {
                     staged.fullscreen = Some((client.0, *enabled));
@@ -554,10 +664,21 @@ impl UiSystem {
                         },
                     ));
                 }
-                UiCommand::SetWindowSize{size}=>staged.window_requests.set_size(client.0,*size)?,
-                UiCommand::SetWindowPosition{position}=>staged.window_requests.set_position(client.0,*position)?,
-                UiCommand::SetWindowVisible{visible}=>staged.window_requests.visible=Some((client.0,*visible)),
-                UiCommand::SetWindowMinimized{minimized}=>staged.window_requests.minimized=Some((client.0,*minimized)),
+                UiCommand::SetPresentationScale { mode } => {
+                    staged.presentation_scale = Some((client.0, *mode))
+                }
+                UiCommand::SetWindowSize { size } => {
+                    staged.window_requests.set_size(client.0, *size)?
+                }
+                UiCommand::SetWindowPosition { position } => {
+                    staged.window_requests.set_position(client.0, *position)?
+                }
+                UiCommand::SetWindowVisible { visible } => {
+                    staged.window_requests.visible = Some((client.0, *visible))
+                }
+                UiCommand::SetWindowMinimized { minimized } => {
+                    staged.window_requests.minimized = Some((client.0, *minimized))
+                }
                 UiCommand::SetTitle { text } => {
                     ensure!(
                         text.len() <= 1024 && !text.chars().any(char::is_control),
@@ -566,7 +687,7 @@ impl UiSystem {
                     staged.title = Some((client.0, text.clone()));
                 }
                 UiCommand::Put { widget } => {
-                    staged.motions.cancel(client.0,widget.id);
+                    staged.motions.cancel(client.0, widget.id);
                     owner.insert(
                         widget.id,
                         Widget {
@@ -590,10 +711,16 @@ impl UiSystem {
                             break;
                         }
                     }
-                    for id in &remove{staged.motions.cancel(client.0,*id);}
+                    for id in &remove {
+                        staged.motions.cancel(client.0, *id);
+                    }
                     owner.retain(|id, _| !remove.contains(id));
-                    staged.text_actions.retain(|(owner,id),_|*owner!=client.0||!remove.contains(id));
-                    staged.focus_suppressed.retain(|(owner,id)|*owner!=client.0||!remove.contains(id));
+                    staged
+                        .text_actions
+                        .retain(|(owner, id), _| *owner != client.0 || !remove.contains(id));
+                    staged
+                        .focus_suppressed
+                        .retain(|(owner, id)| *owner != client.0 || !remove.contains(id));
                 }
                 other => {
                     let id = match other {
@@ -639,19 +766,49 @@ impl UiSystem {
     }
     /// Inspect engine-owned state using a client-local handle.
     /// Inspect interaction only for a widget belonging to this client.
-    pub fn input_eligible(&self,client:u32,id:u32,canvas:[u32;2])->Result<Option<bool>>{
-        let Some(widget)=self.clients.get(&client).and_then(|owner|owner.get(&id))else{return Ok(None);};
-        let layouts=self.layout(canvas)?;
-        let modal=layouts.iter().rev().find(|l|self.clients[&l.id.owner][&l.id.id].spec.modal).map(|l|l.id);
-        Ok(Some(layouts.iter().find(|l|l.id==WidgetId{owner:client,id}).is_some_and(|l|l.enabled&&matches!(widget.spec.kind,WidgetKind::Button|WidgetKind::Toggle|WidgetKind::Slider|WidgetKind::TextField)&&modal.is_none_or(|m|m.owner==l.id.owner&&l.ancestry.contains(&m.id)))))
+    pub fn input_eligible(&self, client: u32, id: u32, canvas: [u32; 2]) -> Result<Option<bool>> {
+        let Some(widget) = self.clients.get(&client).and_then(|owner| owner.get(&id)) else {
+            return Ok(None);
+        };
+        let layouts = self.layout(canvas)?;
+        let modal = layouts
+            .iter()
+            .rev()
+            .find(|l| self.clients[&l.id.owner][&l.id.id].spec.modal)
+            .map(|l| l.id);
+        Ok(Some(
+            layouts
+                .iter()
+                .find(|l| l.id == WidgetId { owner: client, id })
+                .is_some_and(|l| {
+                    l.enabled
+                        && matches!(
+                            widget.spec.kind,
+                            WidgetKind::Button
+                                | WidgetKind::Toggle
+                                | WidgetKind::Slider
+                                | WidgetKind::TextField
+                        )
+                        && modal.is_none_or(|m| m.owner == l.id.owner && l.ancestry.contains(&m.id))
+                }),
+        ))
     }
-    pub fn text_action(&self,client:u32,id:u32)->Option<WidgetTextAction>{
+    pub fn text_action(&self, client: u32, id: u32) -> Option<WidgetTextAction> {
         self.clients.get(&client)?.get(&id)?;
-        self.text_actions.get(&(client,id)).copied()
+        self.text_actions.get(&(client, id)).copied()
     }
-    fn record_text_action(&mut self,id:WidgetId,kind:WidgetTextActionKind)->Result<()> {
-        self.text_action_serial=self.text_action_serial.checked_add(1).context("UI text action serial exhausted")?;
-        self.text_actions.insert((id.owner,id.id),WidgetTextAction{kind,serial:self.text_action_serial});
+    fn record_text_action(&mut self, id: WidgetId, kind: WidgetTextActionKind) -> Result<()> {
+        self.text_action_serial = self
+            .text_action_serial
+            .checked_add(1)
+            .context("UI text action serial exhausted")?;
+        self.text_actions.insert(
+            (id.owner, id.id),
+            WidgetTextAction {
+                kind,
+                serial: self.text_action_serial,
+            },
+        );
         Ok(())
     }
     pub fn interaction(&self, client: u32, id: u32) -> Option<WidgetInteraction> {
@@ -692,13 +849,22 @@ impl UiSystem {
     /// Native client restore forgets only its old deliveries/capture/focus.
     /// The current physical input state and every peer's capture remain live;
     /// this is not a framework snapshot's global input reset.
-    pub fn reset_client_input_after_restore(&mut self,owner:ClientId) {
-        self.text_actions.retain(|(client,_),_|*client!=owner.0);
-        self.events.retain(|event|event.widget.owner!=owner.0);
-        if self.focus.is_some_and(|value|value.owner==owner.0){self.focus=None;}
-        if self.pressed.is_some_and(|value|value.owner==owner.0){self.pressed=None;}
-        if self.hover.is_some_and(|value|value.owner==owner.0){self.hover=None;}
-        if self.activated.is_some_and(|value|value.owner==owner.0){self.activated=None;}
+    pub fn reset_client_input_after_restore(&mut self, owner: ClientId) {
+        self.text_actions
+            .retain(|(client, _), _| *client != owner.0);
+        self.events.retain(|event| event.widget.owner != owner.0);
+        if self.focus.is_some_and(|value| value.owner == owner.0) {
+            self.focus = None;
+        }
+        if self.pressed.is_some_and(|value| value.owner == owner.0) {
+            self.pressed = None;
+        }
+        if self.hover.is_some_and(|value| value.owner == owner.0) {
+            self.hover = None;
+        }
+        if self.activated.is_some_and(|value| value.owner == owner.0) {
+            self.activated = None;
+        }
         self.menus.reset_client_input_after_restore(owner.0);
         self.dialogs.reset_client_input_after_restore(owner.0);
         self.tooltips.reset_client_input_after_restore(owner.0);
@@ -709,14 +875,15 @@ impl UiSystem {
             .keys()
             .copied()
             .chain(self.cursor.map(|v| v.0))
-            .chain(self.pointer_motion.as_ref().map(|v|v.0))
+            .chain(self.pointer_motion.as_ref().map(|v| v.0))
             .chain(self.title.as_ref().map(|v| v.0))
             .chain(self.window_policy.as_ref().map(|v| v.0))
             .chain(self.fullscreen.as_ref().map(|v| v.0))
-            .chain(self.window_requests.size.as_ref().map(|v|v.0))
-            .chain(self.window_requests.position.as_ref().map(|v|v.0))
-            .chain(self.window_requests.visible.as_ref().map(|v|v.0))
-            .chain(self.window_requests.minimized.as_ref().map(|v|v.0))
+            .chain(self.presentation_scale.as_ref().map(|v| v.0))
+            .chain(self.window_requests.size.as_ref().map(|v| v.0))
+            .chain(self.window_requests.position.as_ref().map(|v| v.0))
+            .chain(self.window_requests.visible.as_ref().map(|v| v.0))
+            .chain(self.window_requests.minimized.as_ref().map(|v| v.0))
             .chain(self.menus.client_ids())
             .chain(self.dialogs.client_ids())
             .chain(self.tooltips.client_ids())
@@ -757,7 +924,11 @@ impl UiSystem {
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {
-        self.motions.validate(false,|owner,id|self.clients.get(&owner).is_some_and(|o|o.contains_key(&id)))?;
+        self.motions.validate(false, |owner, id| {
+            self.clients
+                .get(&owner)
+                .is_some_and(|o| o.contains_key(&id))
+        })?;
         self.menus.validate()?;
         self.dialogs.validate()?;
         self.tooltips.validate()?;
@@ -767,14 +938,32 @@ impl UiSystem {
                 && self.events.len() <= 256,
             "UI size limit"
         );
-        let total_mask_bytes=self.clients.values().flat_map(|o|o.values()).filter_map(|w|w.spec.hit_mask.as_ref()).map(|m|m.coverage.len() as u64).sum::<u64>();
-        ensure!(total_mask_bytes<=128*1024*1024,"UI total hit coverage limit");
+        let total_mask_bytes = self
+            .clients
+            .values()
+            .flat_map(|o| o.values())
+            .filter_map(|w| w.spec.hit_mask.as_ref())
+            .map(|m| m.coverage.len() as u64)
+            .sum::<u64>();
+        ensure!(
+            total_mask_bytes <= 128 * 1024 * 1024,
+            "UI total hit coverage limit"
+        );
         for owner in self.clients.values() {
-            let mask_bytes=owner.values().filter_map(|w|w.spec.hit_mask.as_ref()).map(|m|m.coverage.len() as u64).sum::<u64>();
-            ensure!(mask_bytes<=64*1024*1024,"UI owner hit coverage limit");
+            let mask_bytes = owner
+                .values()
+                .filter_map(|w| w.spec.hit_mask.as_ref())
+                .map(|m| m.coverage.len() as u64)
+                .sum::<u64>();
+            ensure!(
+                mask_bytes <= 64 * 1024 * 1024,
+                "UI owner hit coverage limit"
+            );
             for (id, widget) in owner {
                 let s = &widget.spec;
-                if let Some(mask)=&s.hit_mask{mask.validate(s.rect)?;}
+                if let Some(mask) = &s.hit_mask {
+                    mask.validate(s.rect)?;
+                }
                 ensure!(
                     !s.activate_on_press || s.kind == WidgetKind::Button,
                     "press activation requires a Button"
@@ -933,29 +1122,50 @@ impl UiSystem {
         canvas: [u32; 2],
     ) -> Result<(Vec<(u32, Vec<WorldCommand>)>, bool)> {
         self.activated = None;
-        let raw=[frame.pointer_x,frame.pointer_y];
-        if self.pointer_raw.is_some_and(|previous|previous!=raw){self.pointer_override=None;}
-        self.pointer_raw=Some(raw);
-        if let Some(point)=self.pointer_override{frame.pointer_x=point[0];frame.pointer_y=point[1];}
-        let elapsed=std::mem::take(&mut self.pointer_elapsed).min(u32::MAX as u64)as u32;
-        if let Some((owner,mut motion,aspect_fit))=self.pointer_motion.take(){
-            let surface=self.pointer_surface;
-            let tolerance=if canvas.contains(&0)||surface.contains(&0){[1,1]}else if aspect_fit{
-                let fixed=((f64::from(surface[0])/f64::from(canvas[0])).min(f64::from(surface[1])/f64::from(canvas[1]))*65536.0)as u32;
-                [fixed.wrapping_add(65535)>>16;2]
-            }else{
-                std::array::from_fn(|axis|{
-                    let (a,b)=(canvas[axis],surface[axis]);
-                    let fixed=if b>a{b.wrapping_shl(16)/a}else{a.wrapping_shl(16)/b};
-                    fixed.wrapping_add(65535)>>16
+        let raw = [frame.pointer_x, frame.pointer_y];
+        if self.pointer_raw.is_some_and(|previous| previous != raw) {
+            self.pointer_override = None;
+        }
+        self.pointer_raw = Some(raw);
+        if let Some(point) = self.pointer_override {
+            frame.pointer_x = point[0];
+            frame.pointer_y = point[1];
+        }
+        let elapsed = std::mem::take(&mut self.pointer_elapsed).min(u32::MAX as u64) as u32;
+        if let Some((owner, mut motion, aspect_fit)) = self.pointer_motion.take() {
+            let surface = self.pointer_surface;
+            let tolerance = if canvas.contains(&0) || surface.contains(&0) {
+                [1, 1]
+            } else if aspect_fit {
+                let fixed = ((f64::from(surface[0]) / f64::from(canvas[0]))
+                    .min(f64::from(surface[1]) / f64::from(canvas[1]))
+                    * 65536.0) as u32;
+                [fixed.wrapping_add(65535) >> 16; 2]
+            } else {
+                std::array::from_fn(|axis| {
+                    let (a, b) = (canvas[axis], surface[axis]);
+                    let fixed = if b > a {
+                        b.wrapping_shl(16) / a
+                    } else {
+                        a.wrapping_shl(16) / b
+                    };
+                    fixed.wrapping_add(65535) >> 16
                 })
             };
-            if let Some(point)=motion.advance(elapsed,Some([frame.pointer_x,frame.pointer_y]),tolerance,self.pointer_window_focused.unwrap_or(true)){
-                frame.pointer_x=point[0];frame.pointer_y=point[1];
-                self.pointer_warp=Some((owner,point));
-                self.pointer_override=Some(point);
+            if let Some(point) = motion.advance(
+                elapsed,
+                Some([frame.pointer_x, frame.pointer_y]),
+                tolerance,
+                self.pointer_window_focused.unwrap_or(true),
+            ) {
+                frame.pointer_x = point[0];
+                frame.pointer_y = point[1];
+                self.pointer_warp = Some((owner, point));
+                self.pointer_override = Some(point);
             }
-            if !motion.finished(){self.pointer_motion=Some((owner,motion,aspect_fit));}
+            if !motion.finished() {
+                self.pointer_motion = Some((owner, motion, aspect_fit));
+            }
         }
         if self.ignore_held {
             if frame.buttons_down == 0 {
@@ -1064,9 +1274,14 @@ impl UiSystem {
             .map(|l| l.id)
             .collect::<Vec<_>>();
         if self.focus.is_none_or(|f| !focusable.contains(&f)) {
-            self.focus = focusable.iter().find(|id|!self.focus_suppressed.contains(&(id.owner,id.id))).copied();
+            self.focus = focusable
+                .iter()
+                .find(|id| !self.focus_suppressed.contains(&(id.owner, id.id)))
+                .copied();
         }
-        let text_tab = self.focus.filter(|_| self.input.vk_down_stock(0x09) && self.focused_text_field());
+        let text_tab = self
+            .focus
+            .filter(|_| self.input.vk_down_stock(0x09) && self.focused_text_field());
         if self.input.vk_down_stock(0x09) || self.input.vk_down_stock(0x28) {
             if !focusable.is_empty() {
                 let next = self
@@ -1075,7 +1290,8 @@ impl UiSystem {
                     .map(|n| (n + 1) % focusable.len())
                     .unwrap_or(0);
                 self.focus = Some(focusable[next]);
-                self.focus_suppressed.remove(&(focusable[next].owner,focusable[next].id));
+                self.focus_suppressed
+                    .remove(&(focusable[next].owner, focusable[next].id));
             }
         }
         self.hover = layouts
@@ -1083,13 +1299,27 @@ impl UiSystem {
             .rev()
             .find(|l| {
                 interactive(l)
-                    && self.clients[&l.id.owner][&l.id.id].spec.hit_mask.as_ref().map_or_else(||hit(frame.pointer_x,frame.pointer_y,l.rect),|m|m.hit(frame.pointer_x,frame.pointer_y,l.rect))
+                    && self.clients[&l.id.owner][&l.id.id]
+                        .spec
+                        .hit_mask
+                        .as_ref()
+                        .map_or_else(
+                            || hit(frame.pointer_x, frame.pointer_y, l.rect),
+                            |m| m.hit(frame.pointer_x, frame.pointer_y, l.rect),
+                        )
                     && hit(frame.pointer_x, frame.pointer_y, l.clip)
             })
             .map(|l| l.id);
         let hit_ui = layouts.iter().rev().any(|l| {
             allowed(l)
-                && self.clients[&l.id.owner][&l.id.id].spec.hit_mask.as_ref().map_or_else(||hit(frame.pointer_x,frame.pointer_y,l.rect),|m|m.hit(frame.pointer_x,frame.pointer_y,l.rect))
+                && self.clients[&l.id.owner][&l.id.id]
+                    .spec
+                    .hit_mask
+                    .as_ref()
+                    .map_or_else(
+                        || hit(frame.pointer_x, frame.pointer_y, l.rect),
+                        |m| m.hit(frame.pointer_x, frame.pointer_y, l.rect),
+                    )
                 && hit(frame.pointer_x, frame.pointer_y, l.clip)
         });
         if let Some(id) = text_tab {
@@ -1103,7 +1333,9 @@ impl UiSystem {
                 .is_some_and(|id| self.clients[&id.owner][&id.id].spec.keyboard_focusable)
             {
                 self.focus = self.hover;
-                if let Some(id)=self.focus{self.focus_suppressed.remove(&(id.owner,id.id));}
+                if let Some(id) = self.focus {
+                    self.focus_suppressed.remove(&(id.owner, id.id));
+                }
             }
             if let Some(id) = self
                 .hover
@@ -1129,8 +1361,15 @@ impl UiSystem {
             let backspace = self.input.vk_down_stock(0x08);
             let submit = self.input.vk_down_stock(0x0d);
             let cancel = self.input.vk_down_stock(0x1b);
-            if submit||cancel {
-                self.record_text_action(id,if cancel{WidgetTextActionKind::Cancel}else{WidgetTextActionKind::Submit})?;
+            if submit || cancel {
+                self.record_text_action(
+                    id,
+                    if cancel {
+                        WidgetTextActionKind::Cancel
+                    } else {
+                        WidgetTextActionKind::Submit
+                    },
+                )?;
             }
             let w = self
                 .clients

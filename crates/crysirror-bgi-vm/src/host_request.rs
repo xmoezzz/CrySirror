@@ -1236,6 +1236,10 @@ impl Vm {
             }
             return Ok(pending);
         }
+        let async_decode = (opcode.group, opcode.id) == (0x90, 0xf6)
+            && self.next_binary_or_bmv_async;
+        let outputs = if async_decode { 0 } else { self.effective_output_count(opcode.group, opcode.id) };
+        api.capture_native_contract(opcode, outputs, async_decode);
         api.capture_native_inputs(opcode, &args, &|address, count| {
             let range = self.resolve_range(address, count)?;
             Ok(self.memory[range].to_vec())
@@ -1243,9 +1247,13 @@ impl Vm {
         let pending = self.begin_host_continuation(
             api,
             HostRequest::Native { opcode, args },
-            self.effective_output_count(opcode.group, opcode.id),
+            outputs,
         )?;
         if pending {
+            // Only an accepted continuation consumes the owning thread's flag.
+            if (opcode.group, opcode.id) == (0x90, 0xf6) {
+                self.next_binary_or_bmv_async = false;
+            }
             // Use the normal operand-ring pop path, not Vec::truncate.
             self.take_dispatch_call_frame(opcode.group, opcode.id)?;
         }
@@ -1294,7 +1302,7 @@ impl Vm {
     /// Duplicate/stale/cancelled IDs fail; restarting execution cancels the
     /// local continuation. Hosts must also reject old-session IDs themselves.
     pub fn complete_host_request(&mut self, id: u64, response: HostResponse) -> VmResult<()> {
-        self.complete_host_request_inner(id, response, None)
+        self.complete_host_request_inner(id, response, None, None)
     }
     pub fn complete_host_request_with_start(
         &mut self,
@@ -1312,13 +1320,28 @@ impl Vm {
                 "BGI graph control has no native procedure class".into(),
             ));
         }
-        self.complete_host_request_inner(id, response, Some((opcode, start)))
+        self.complete_host_request_inner(id, response, Some((opcode, start)), None)
+    }
+    /// Preserve a worker-backed operation's original cooperative procedure.
+    /// The completion is installed on its owning thread, after guest writes.
+    pub fn complete_host_request_with_completion(
+        &mut self,
+        id: u64,
+        response: HostResponse,
+        opcode: NativeOpcode,
+        completion: crate::native_call::NativeProcedureCompletion,
+    ) -> VmResult<()> {
+        if completion.output_count > 2 {
+            return Err(VmError::Runtime("BGI native procedure completion output count".into()));
+        }
+        self.complete_host_request_inner(id, response, None, Some((opcode, completion)))
     }
     fn complete_host_request_inner(
         &mut self,
         id: u64,
         response: HostResponse,
         start: Option<(NativeOpcode, crate::native_call::NativeProcedureStart)>,
+        completion: Option<(NativeOpcode, crate::native_call::NativeProcedureCompletion)>,
     ) -> VmResult<()> {
         if self.halted || self.fatal_async_report.is_some() {
             return Err(VmError::Runtime("host request session has stopped".into()));
@@ -1360,6 +1383,7 @@ impl Vm {
         }
         target.ready_host_response = Some(response);
         target.ready_host_start = start;
+        target.ready_host_completion = completion;
         target.pending_host_request = None;
         Ok(())
     }
@@ -1385,6 +1409,9 @@ impl Vm {
         if let Some((opcode, start)) = self.ready_host_start.take() {
             self.install_native_host_start(opcode, start, api, false)?;
         }
+        if let Some((opcode, completion)) = self.ready_host_completion.take() {
+            self.install_host_completed_procedure(opcode, completion, false);
+        }
         Ok(())
     }
 
@@ -1396,6 +1423,13 @@ impl Vm {
         trace_events: bool,
     ) -> VmResult<()> {
         match procedure_start {
+            crate::native_call::NativeProcedureStart::GraphShake => {
+                if (opcode.group,opcode.id)!=(0xb0,0x08) {
+                    return Err(VmError::Runtime("BGI screen shake procedure selector".into()));
+                }
+                self.install_cprocedure(crate::native_thread::InstalledCProcedure::graph(
+                    self.thread.thread_id(),opcode,"CProcShakeScreen",crate::native_thread::NativeGraphProcedureMode::Shake,None,None),trace_events);
+            }
             crate::native_call::NativeProcedureStart::Message(mut config) => {
                 config.auxiliary_input_mask = self
                     .system81_shared
@@ -1479,6 +1513,7 @@ impl Vm {
     pub fn cancel_host_requests(&mut self) -> Vec<u64> {
         let mut ids = Vec::new();
         self.ready_host_start = None;
+        self.ready_host_completion = None;
         if self.ready_host_response.take().is_some() {
             self.halted = true;
             self.thread.mark_terminated();

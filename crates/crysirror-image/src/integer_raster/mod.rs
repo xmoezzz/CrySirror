@@ -7,15 +7,28 @@ pub mod graph_color;
 pub mod perspective_blit;
 
 use crate::ImageSurface;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use bitmap_kernels::TargetBitmap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum IntegerRasterOperation {
+    Mirror {
+        vertical: bool,
+    },
+    HalfBox,
+    AspectFit,
     Display {
         spec: display::DisplayRaster,
+    },
+    CrossfadeAt {
+        position: [i32; 2],
+        amount: u16,
+    },
+    StretchCopy {
+        source: [i32; 4],
+        destination: [i32; 4],
     },
     ReplaceRgb {
         color: u32,
@@ -151,6 +164,7 @@ impl IntegerRaster {
                     spec,
                     display::DisplayRaster::RotateBackdrop { .. }
                         | display::DisplayRaster::StretchBackdrop { .. }
+                        | display::DisplayRaster::HorizontalBlur { .. }
                 ) {
                     source
                 } else {
@@ -163,6 +177,104 @@ impl IntegerRaster {
                     [destination.width, destination.height],
                     check,
                 )?;
+            }
+            IntegerRasterOperation::Mirror { vertical } => {
+                ensure!(
+                    output.width == source.width && output.height == source.height,
+                    "mirror output size"
+                );
+                for y in 0..source.height {
+                    check()?;
+                    for x in 0..source.width {
+                        let sx = if *vertical { x } else { source.width - 1 - x };
+                        let sy = if *vertical { source.height - 1 - y } else { y };
+                        let si = ((sy * source.width + sx) * 4) as usize;
+                        let di = ((y * output.width + x) * 4) as usize;
+                        output.rgba[di..di + 4].copy_from_slice(&source.rgba[si..si + 4]);
+                    }
+                }
+            }
+            IntegerRasterOperation::HalfBox => {
+                ensure!(
+                    output.width == source.width.div_ceil(2)
+                        && output.height == source.height.div_ceil(2),
+                    "half-box output size"
+                );
+                for y in 0..output.height {
+                    check()?;
+                    for x in 0..output.width {
+                        let mut sum = [0u32; 4];
+                        let mut count = 0;
+                        for sy in y * 2..(y * 2 + 2).min(source.height) {
+                            for sx in x * 2..(x * 2 + 2).min(source.width) {
+                                let at = ((sy * source.width + sx) * 4) as usize;
+                                for c in 0..4 {
+                                    sum[c] += u32::from(source.rgba[at + c]);
+                                }
+                                count += 1;
+                            }
+                        }
+                        let di = ((y * output.width + x) * 4) as usize;
+                        for c in 0..4 {
+                            output.rgba[di + c] = (sum[c] / count) as u8;
+                        }
+                    }
+                }
+            }
+            IntegerRasterOperation::AspectFit => {
+                let scale = ((u64::from(output.width) << 16) / u64::from(source.width))
+                    .min((u64::from(output.height) << 16) / u64::from(source.height))
+                    .max(1);
+                let w = ((u64::from(source.width) * scale) >> 16) as u32;
+                let h = ((u64::from(source.height) * scale) >> 16) as u32;
+                if w > 0 && h > 0 {
+                    output.rgba.fill(0);
+                    let dx = (output.width - w) / 2;
+                    let dy = (output.height - h) / 2;
+                    for y in 0..h {
+                        check()?;
+                        let sy =
+                            ((u64::from(y) << 16) / scale).min(u64::from(source.height - 1)) as u32;
+                        for x in 0..w {
+                            let sx = ((u64::from(x) << 16) / scale).min(u64::from(source.width - 1))
+                                as u32;
+                            let si = ((sy * source.width + sx) * 4) as usize;
+                            let di = (((dy + y) * output.width + dx + x) * 4) as usize;
+                            output.rgba[di..di + 4].copy_from_slice(&source.rgba[si..si + 4]);
+                        }
+                    }
+                }
+            }
+            IntegerRasterOperation::CrossfadeAt { position, amount } => {
+                ensure!(*amount <= 256, "integer crossfade level");
+                for y in 0..source.height {
+                    check()?;
+                    let dy = i64::from(y) + i64::from(position[1]);
+                    if !(0..i64::from(output.height)).contains(&dy) {
+                        continue;
+                    }
+                    for x in 0..source.width {
+                        let dx = i64::from(x) + i64::from(position[0]);
+                        if !(0..i64::from(output.width)).contains(&dx) {
+                            continue;
+                        }
+                        let si = ((y * source.width + x) * 4) as usize;
+                        let di = ((dy as u32 * output.width + dx as u32) * 4) as usize;
+                        let pixel = bitmap_blend::crossfade_pixel(
+                            output.rgba[di..di + 4].try_into().unwrap(),
+                            source.rgba[si..si + 4].try_into().unwrap(),
+                            df as i32,
+                            i32::from(*amount),
+                        );
+                        output.rgba[di..di + 4].copy_from_slice(&pixel);
+                    }
+                }
+            }
+            IntegerRasterOperation::StretchCopy {
+                source: region,
+                destination: target,
+            } => {
+                region::stretch_copy(&mut output, source, *region, *target, check)?;
             }
             IntegerRasterOperation::ReplaceRgb { color } => {
                 let [r, g, b] = [(color >> 16) as u8, (color >> 8) as u8, *color as u8];

@@ -125,6 +125,109 @@ pub trait GlyphImageBatchResource: Send + Sync {
     fn client(&self) -> ClientId;
     fn images(&self) -> &[Arc<dyn ImageResource>];
 }
+/// Immutable signed field resource, separate from colour image allocations.
+#[derive(Clone, Debug)]
+pub enum VectorFieldSamples {
+    Displacement(Arc<[[i16; 2]]>),
+    DirectionDistance(Arc<[DirectionDistanceSample]>),
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DirectionDistanceSample {
+    pub x: i16,
+    pub y: i16,
+    pub phase: u16,
+}
+#[derive(Clone, Debug)]
+pub struct VectorFieldResource {
+    pub client: ClientId,
+    pub size: [u32; 2],
+    pub samples: VectorFieldSamples,
+}
+impl VectorFieldResource {
+    pub fn validate(&self, owner: ClientId) -> Result<()> {
+        if self.client != owner {
+            return Err(crate::Error::Invalid("foreign vector field resource"));
+        }
+        let n = u64::from(self.size[0]) * u64::from(self.size[1]);
+        let actual = match &self.samples {
+            VectorFieldSamples::Displacement(v) => v.len(),
+            VectorFieldSamples::DirectionDistance(v) => v.len(),
+        };
+        if n == 0 || n > 4_194_304 || self.size.iter().any(|v| *v > 16_384) || n != actual as u64 {
+            return Err(crate::Error::Limit("vector field layout"));
+        }
+        Ok(())
+    }
+    pub fn byte_len(&self) -> usize {
+        match &self.samples {
+            VectorFieldSamples::Displacement(v) => v.len() * 4,
+            VectorFieldSamples::DirectionDistance(v) => v.len() * 6,
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub enum FieldWarpSpec {
+    Displacement {
+        first: Arc<VectorFieldResource>,
+        second: Option<Arc<VectorFieldResource>>,
+        amount: u16,
+        bilinear: bool,
+    },
+    Wave {
+        field: Arc<VectorFieldResource>,
+        samples: Arc<[i16]>,
+        origin: [i32; 2],
+        wrap: bool,
+        bilinear: bool,
+    },
+}
+impl FieldWarpSpec {
+    pub fn validate(&self, owner: ClientId, size: [u32; 2]) -> Result<usize> {
+        let check = |field: &VectorFieldResource| -> Result<()> {
+            field.validate(owner)?;
+            if size[0] > field.size[0] || size[1] > field.size[1] {
+                return Err(crate::Error::Invalid("warp exceeds vector field"));
+            }
+            Ok(())
+        };
+        match self {
+            Self::Displacement {
+                first,
+                second,
+                amount,
+                ..
+            } => {
+                check(first)?;
+                if *amount > 256 || !matches!(first.samples, VectorFieldSamples::Displacement(_)) {
+                    return Err(crate::Error::Invalid("displacement field format/amount"));
+                }
+                if let Some(second) = second {
+                    check(second)?;
+                    if !matches!(second.samples, VectorFieldSamples::Displacement(_)) {
+                        return Err(crate::Error::Invalid("secondary displacement field format"));
+                    }
+                }
+                Ok(first.byte_len() + second.as_ref().map_or(0, |f| f.byte_len()))
+            }
+            Self::Wave {
+                field,
+                samples,
+                origin,
+                ..
+            } => {
+                check(field)?;
+                if !matches!(field.samples, VectorFieldSamples::DirectionDistance(_))
+                    || samples.is_empty()
+                    || samples.len() > 4_194_304
+                    || origin.iter().any(|v| v.unsigned_abs() > 1_000_000)
+                {
+                    return Err(crate::Error::Invalid("wave field format/samples/origin"));
+                }
+                Ok(field.byte_len() + samples.len() * 2)
+            }
+        }
+    }
+}
 /// Retained atomic batch completion; errors and cancellation expose no partial cells.
 #[derive(Clone)]
 pub enum GlyphImageBatchState {
@@ -284,9 +387,42 @@ pub trait ImageResource: Send + Sync + core::fmt::Debug {
     }
 }
 mod composition;
+mod pyramid;
+pub use pyramid::{ImagePyramidLevel, ImagePyramidResource};
 
+/// One retained sprite of an integer particle plane. These are engine image
+/// leases, never foreign texture pointers. Projection/simulation is separate.
+#[derive(Clone, Debug)]
+pub struct ImageParticleSprite {
+    pub primary: Arc<dyn ImageResource>,
+    pub secondary: Option<Arc<dyn ImageResource>>,
+    pub primary_format: u8,
+    pub secondary_format: u8,
+    pub shrink: u8,
+    pub mix: u16,
+    pub center: [i32; 2],
+    pub mode: i32,
+    pub parameter: i32,
+}
 #[derive(Clone, Debug)]
 pub enum ImageInput {
+    /// Bounded bulk sprite composition with shared exact fixed-point mip
+    /// sampling. Equal resource/format/shrink tuples are sampled once per job.
+    ParticlePlane {
+        size: [u32; 2],
+        sprites: Vec<ImageParticleSprite>,
+    },
+    PyramidLevel {
+        pyramid: Arc<ImagePyramidResource>,
+        level: u8,
+    },
+    /// Signed-field sampling evaluated by the shared image worker. The
+    /// immutable field leases are owner-checked and included in admission.
+    FieldWarp {
+        source: Box<ImageInput>,
+        size: [u32; 2],
+        spec: FieldWarpSpec,
+    },
     /// A bounded, immutable subgraph with its own typed effect context. The
     /// shared worker evaluates it inside the same admission and cancellation
     /// scope; no nested worker or VM state is created.
@@ -484,6 +620,8 @@ mod resident_pixel_tests {
 pub enum PackedPixelLayout {
     Bgr555,
     Bgr8,
+    /// Four-byte BGR storage with an unused high byte and opaque coverage.
+    Bgrx8,
     Bgra8,
     Red8,
 }
@@ -492,7 +630,7 @@ impl PackedPixelLayout {
         match self {
             Self::Bgr555 => 2,
             Self::Bgr8 => 3,
-            Self::Bgra8 => 4,
+            Self::Bgrx8 | Self::Bgra8 => 4,
             Self::Red8 => 1,
         }
     }

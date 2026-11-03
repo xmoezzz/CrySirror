@@ -67,6 +67,8 @@ pub fn target_default_input_classes() -> BTreeMap<i32, Vec<i32>> {
 #[derive(Debug)]
 pub struct NativeInputPolicy {
     physical: BTreeSet<i32>,
+    pub now_ms: u64,
+    hold_deadlines: BTreeMap<i32,u64>,
     pub ledger: DescriptorLedger,
     pub keyboard_scopes: PriorityScopes,
     pub pointer_scopes: PriorityScopes,
@@ -95,6 +97,8 @@ impl Default for NativeInputPolicy {
     fn default() -> Self {
         Self {
             physical: BTreeSet::new(),
+            now_ms: 0,
+            hold_deadlines: BTreeMap::new(),
             ledger: Default::default(),
             keyboard_scopes: Default::default(),
             pointer_scopes: Default::default(),
@@ -167,6 +171,7 @@ impl NativeInputPolicy {
         }
         let fresh = self.ledger.press(key, matches!(key, 1 | 2 | 4 | 5 | 6));
         if fresh {
+            self.hold_deadlines.insert(key, self.now_ms.saturating_add(500));
             self.serial = self.serial.wrapping_add(1);
             if self.system_events.len() == 256 {
                 self.system_events.pop_front();
@@ -224,6 +229,9 @@ impl NativeInputPolicy {
     pub fn pulse(&mut self, key: i32) {
         self.press(key);
         self.release(key);
+    }
+    pub fn repeat_ready(&self, descriptor: i32) -> bool {
+        self.query_held(descriptor) && self.hold_deadlines.get(&descriptor).is_some_and(|deadline| self.now_ms >= *deadline)
     }
     pub fn query_held(&self, key: i32) -> bool {
         if !self.focused && self.background_polling == 0 {

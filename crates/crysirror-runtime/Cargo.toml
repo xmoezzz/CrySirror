@@ -39,3 +39,6 @@ getrandom = "=0.3.4"
 [dev-dependencies]
 crysirror-acoustics.workspace = true
 tempfile = "3.12"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "=1.1.6", features = ["fs"] }

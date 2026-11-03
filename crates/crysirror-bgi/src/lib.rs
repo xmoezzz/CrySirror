@@ -5,18 +5,28 @@ mod audio_api;
 mod audio_cd;
 mod bitmap_api;
 mod bitmap_checks;
+mod bitmap_codec;
+mod bitmap_fields;
 mod bitmap_memory;
 mod display_tree;
+mod effect_api;
 mod file_api;
 pub mod fixture;
 mod graph_api;
+mod graph_controls;
 mod graph_state;
+mod input_api;
+mod input_policy;
+mod media_api;
+mod media_registry;
 mod message_api;
 mod native_background;
 mod native_display;
+mod platform_api;
 mod program_io;
 mod save_api;
 mod selection_api;
+mod system_api;
 mod system_files;
 mod target_checks;
 mod text_api;
@@ -135,14 +145,21 @@ pub struct BgiVm {
     audio: audio_api::AudioState,
     bitmap_work: Option<bitmap_api::BitmapWork>,
     memory_jobs: BTreeMap<u64, bitmap_memory::MemoryWork>,
+    field_memory_jobs: BTreeMap<u64, bitmap_fields::FieldMemoryWork>,
+    codec: bitmap_codec::CodecState,
     graph: graph_api::GraphState,
+    controls: graph_controls::ControlState,
+    effects: effect_api::EffectState,
     resource_fences: BTreeMap<u32, u64>,
     audio_fences: BTreeMap<u32, u64>,
     save_jobs: BTreeMap<u64, save_api::SaveWork>,
     dialog_work: Option<user_dialog_api::DialogWork>,
+    desktop_jobs: BTreeMap<u64, platform_api::PlatformWork>,
     user: user_api::UserState,
+    system: system_api::SystemState,
     windows: window_api::WindowState,
     messages: message_api::MessageState,
+    media: media_api::MediaState,
     selections: selection_api::SelectionState,
     text: text_api::TextState,
     text_jobs: BTreeMap<u64, text_api::TextWork>,
@@ -172,14 +189,21 @@ impl BgiVm {
             audio: Default::default(),
             bitmap_work: None,
             memory_jobs: BTreeMap::new(),
+            field_memory_jobs: BTreeMap::new(),
+            codec: Default::default(),
             graph: Default::default(),
+            controls: Default::default(),
+            effects: Default::default(),
             resource_fences: BTreeMap::new(),
             audio_fences: BTreeMap::new(),
             save_jobs: BTreeMap::new(),
             dialog_work: None,
+            desktop_jobs: BTreeMap::new(),
             user: Default::default(),
+            system: Default::default(),
             windows: Default::default(),
             messages: Default::default(),
+            media: Default::default(),
             selections: Default::default(),
             text: Default::default(),
             text_jobs: BTreeMap::new(),
@@ -201,12 +225,21 @@ impl BgiVm {
         let a = &call.args;
         let indices: &[usize] = match (call.group, call.id) {
             (0x90, 0x10..=0x13) | (0x92, 0x9c) | (0x91, 0x9c | 0x9d) => &[0],
-            (0x90, 0xcd) | (0x91, 0x18..=0x1f) => &[0, 1],
+            (0x90, 0xc2 | 0xc3 | 0xca | 0xcd) | (0x91, 0x18..=0x1f) => &[0, 1],
             (0x90, 0xc8) => &[0, 3],
             (0x90, 0x56 | 0x59) => &[3],
             (0x90, 0x57) => &[1],
-            (0x90, 0x04 | 0x17) => &[0],
+            (0x90, 0x04 | 0x17 | 0x83 | 0xc0 | 0xc7) => &[0],
+            (0x90, 0xce) => &[2],
+            (0x90, 0xf6) => &[0],
+            (0x91, 0xf0 | 0xf2 | 0xf3) | (0x92, 0xf2 | 0xf4 | 0xf6) => &[0],
+            (0x91, 0xf1 | 0xf7) | (0x92, 0xf5) => &[1],
+            (0x92, 0x89 | 0x8d) => &[0, 3],
             (0x90, 0x18 | 0x1e) => &[0, 3],
+            (0x90, 0x19) | (0x92, 0x1a) => &[0, 3, 4],
+            (0x90, 0x1a) => &[0, 1, 2, 3],
+            (0x90, 0x1b | 0x1d) => &[0, 1],
+            (0x90, 0x1c) => &[0, 5],
             (0x90, 0x1f) => &[0, 1],
             (0x90, 0x14) => &[0],
             (0x90, 0x15) => &[3],
@@ -312,6 +345,7 @@ impl BgiVm {
                     host.release_image_resource(self.client, old)?;
                 }
                 let generation = self.allocate_bitmap_generation()?;
+                self.release_graph_field_bitmap(id as u32);
                 self.bitmaps.insert(
                     id as u32,
                     Bitmap {
@@ -383,7 +417,9 @@ impl BgiVm {
         self.input = input;
         self.tick_user(host)?;
         self.audio.tick(host, self.client)?;
+        self.tick_media(host)?;
         self.graph_tick(host)?;
+        self.tick_window_compositions(host)?;
         if self.vm.is_none() {
             if self.load.is_none() {
                 let storage = host.storage(self.client)?;
@@ -399,9 +435,18 @@ impl BgiVm {
                     Machine::from_bp_with_profile(&bytes, profile)
                 })?);
             }
-            let Some(vm) = self.load.as_mut().unwrap().try_take()? else {
+            let Some(mut vm) = self.load.as_mut().unwrap().try_take()? else {
                 return Ok(VmYield::WaitUntil(host.now_ms().saturating_add(1)));
             };
+            let mut external = Vec::new();
+            for group in [0x80, 0x81] {
+                for id in 0..=255 {
+                    if file_api::handles(group, id) || system_api::handles(group, id) {
+                        external.push((group, id));
+                    }
+                }
+            }
+            vm.set_external_native_calls(external)?;
             self.vm = Some(vm);
             self.load = None;
         }
@@ -424,6 +469,10 @@ impl BgiVm {
             })
             .collect();
         vm.update_host(host.now_ms(), held_keys, [input.pointer_x, input.pointer_y]);
+        vm.update_window_state(
+            host.window_focused(self.client)?,
+            host.window_minimized(self.client)?,
+        );
         if input.buttons_pressed & buttons::WHEEL_UP != 0 {
             vm.pulse_input(14);
         }
@@ -444,15 +493,56 @@ impl BgiVm {
                     remaining = remaining.saturating_sub(vm.consumed_steps().max(1));
                     continue;
                 }
+                let desktop = host.display_info().map(|d| d.screen);
+                let outer = host
+                    .window_geometry(self.client)?
+                    .and_then(|g| g.outer_position)
+                    .unwrap_or([0; 2]);
+                vm.update_display_state(
+                    self.system.display_size(),
+                    self.system.effective_scale(desktop),
+                    desktop.unwrap_or([0; 2]),
+                    outer,
+                );
+                vm.update_spline_handles(self.effect_spline_handles());
                 vm.update_window_handles(self.windows.records.keys().copied().collect());
+                vm.update_graph_input_handles(self.graph_input_handles());
+                vm.update_graph_input_states(self.graph_input_states());
+                self.tick_controls(host, &mut vm)?;
+                vm.update_media_processes(
+                    self.media_process_snapshots(host)?,
+                    self.bitmaps.keys().map(|id| *id as i32).collect(),
+                );
+                self.tick_graph_inputs(host, &mut vm)?;
                 self.tick_selection(host, &mut vm)?;
                 self.tick_messages(host, &mut vm)?;
+                self.refresh_native_pointer_nodes(host, &mut vm)?;
                 let step = vm.step_with_budget(remaining)?;
+                vm.update_graph_input_handles(self.graph_input_handles());
+                vm.update_graph_input_states(self.graph_input_states());
+                self.tick_controls(host, &mut vm)?;
+                vm.update_media_processes(
+                    self.media_process_snapshots(host)?,
+                    self.bitmaps.keys().map(|id| *id as i32).collect(),
+                );
+                self.tick_graph_inputs(host, &mut vm)?;
                 self.tick_selection(host, &mut vm)?;
                 self.tick_messages(host, &mut vm)?;
+                self.refresh_native_pointer_nodes(host, &mut vm)?;
                 remaining = remaining.saturating_sub(vm.consumed_steps().max(1));
                 match step {
                     Step::Continue => {}
+                    Step::NativePlatform { request } => {
+                        let id = vm.request_id().context("BGI platform request identity")?;
+                        if !self.native_platform_call(host, &mut vm, id, &request)? {
+                            pending.insert(id);
+                            vm.postpone_request();
+                        }
+                    }
+                    Step::DisplayAction { action } => {
+                        self.display_action(host, &mut vm, action)?;
+                        vm.commit_display_action()?;
+                    }
                     Step::Halted => return Ok(VmYield::Halted),
                     Step::Yielded => {
                         return Ok(VmYield::WaitUntil(host.now_ms().saturating_add(1)));
@@ -460,6 +550,31 @@ impl BgiVm {
                     Step::Input => return Ok(VmYield::WaitForInput),
                     Step::Selection { id, request } => {
                         if !self.selection_call(host, &mut vm, id, request)? {
+                            pending.insert(id);
+                            vm.postpone_request();
+                        }
+                    }
+                    Step::GraphInput { request } => {
+                        let id = vm.request_id().context("BGI graph input identity")?;
+                        if !self.graph_input_call(host, &mut vm, id, request)? {
+                            pending.insert(id);
+                            vm.postpone_request();
+                        }
+                    }
+                    Step::NativeEnumerate {
+                        pattern,
+                        recursive,
+                        directories,
+                    } => {
+                        let id = vm.request_id().context("BGI enumeration identity")?;
+                        if !self.native_enumerate(
+                            host,
+                            &mut vm,
+                            id,
+                            &pattern,
+                            recursive,
+                            directories,
+                        )? {
                             pending.insert(id);
                             vm.postpone_request();
                         }
@@ -532,6 +647,29 @@ impl BgiVm {
                             vm.postpone_request();
                             continue;
                         }
+                        if effect_api::handles(call.group, call.id) {
+                            if !self.effect_call(host, &mut vm, &call, request)? {
+                                pending.insert(request);
+                                vm.postpone_request();
+                            }
+                            continue;
+                        }
+                        if graph_controls::handles(call.group, call.id) {
+                            self.control_call(host, &mut vm, &call)?;
+                            continue;
+                        }
+                        if media_api::handles(call.group, call.id) {
+                            for &id in &resources {
+                                self.resource_fences.insert(id, request);
+                            }
+                            if !self.media_call(host, &mut vm, &call, request)? {
+                                pending.insert(request);
+                                vm.postpone_request();
+                            } else {
+                                self.resource_fences.retain(|_, owner| *owner != request);
+                            }
+                            continue;
+                        }
                         if user_api::handles(call.group, call.id) {
                             if !self.user_call(host, &mut vm, &call, request)? {
                                 pending.insert(request);
@@ -539,10 +677,62 @@ impl BgiVm {
                             }
                             continue;
                         }
-                        if self.window_call(host, &mut vm, &call)? {
+                        if system_api::handles(call.group, call.id) {
+                            if let Some(wait) = self.system_call(host, &mut vm, &call)? {
+                                self.wait = Some(wait);
+                                return Ok(wait);
+                            }
+                            continue;
+                        }
+                        if selection_api::handles(call.group, call.id) {
+                            ensure!(
+                                self.selection_config_call(&mut vm, &call)?,
+                                "BGI selection dispatch policy"
+                            );
+                            continue;
+                        }
+                        if window_api::handles(call.group, call.id) {
+                            for &id in &resources {
+                                self.resource_fences.insert(id, request);
+                            }
+                            self.bitmap_work = self.bitmap_jobs.remove(&request);
+                            let complete = self.window_call(host, &mut vm, &call)?;
+                            if let Some(work) = self.bitmap_work.take() {
+                                self.bitmap_jobs.insert(request, work);
+                            }
+                            if !complete {
+                                pending.insert(request);
+                                vm.postpone_request();
+                            } else {
+                                self.resource_fences.retain(|_, owner| *owner != request);
+                            }
                             continue;
                         }
                         if self.message_call(host, &mut vm, &call)? {
+                            continue;
+                        }
+                        if bitmap_codec::handles(call.group, call.id) {
+                            for &id in &resources {
+                                self.resource_fences.insert(id, request);
+                            }
+                            if !self.bitmap_codec_call(host, &mut vm, &call, request)? {
+                                pending.insert(request);
+                                vm.postpone_request();
+                            } else {
+                                self.resource_fences.retain(|_, owner| *owner != request);
+                            }
+                            continue;
+                        }
+                        if self.field_bitmap_handles(&call) {
+                            for &id in &resources {
+                                self.resource_fences.insert(id, request);
+                            }
+                            if !self.field_bitmap_call(host, &mut vm, &call, request)? {
+                                pending.insert(request);
+                                vm.postpone_request();
+                            } else {
+                                self.resource_fences.retain(|_, owner| *owner != request);
+                            }
                             continue;
                         }
                         if bitmap_memory::handles(call.group, call.id) {
@@ -630,7 +820,7 @@ impl BgiVm {
                             }
                             continue;
                         }
-                        if call.group == 0x80 && matches!(call.id, 0x30..=0x35) {
+                        if file_api::handles(call.group, call.id) {
                             self.file_load = self.file_jobs.remove(&request);
                             let complete = self.file_call(host, &mut vm, &call)?;
                             if let Some(work) = self.file_load.take() {
@@ -659,14 +849,17 @@ impl BgiVm {
             self.bitmap_jobs.clear();
             self.text_jobs.clear();
             self.memory_jobs.clear();
+            self.field_memory_jobs.clear();
             self.program_jobs.clear();
             self.file_jobs.clear();
             self.resource_fences.clear();
             self.audio_fences.clear();
             self.save_jobs.clear();
+            self.desktop_jobs.clear();
         }
         let result = result.and_then(|yielded| {
             self.graph_tick(host)?;
+            self.tick_window_compositions(host)?;
             Ok(yielded)
         });
         self.vm = Some(vm);

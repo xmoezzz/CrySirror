@@ -39478,6 +39478,7 @@ pub struct NativeMessageProcedureConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeProcedureStart {
+    GraphShake,
     Message(NativeMessageProcedureConfig),
     /// Object-specific CProcCtrlDspObj installation.  The target procedure
     /// owns one CDspObj; waiting on a selector-global "any animation" flag

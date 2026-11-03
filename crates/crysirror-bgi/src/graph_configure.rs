@@ -58,7 +58,12 @@ impl BgiVm {
                 },
             )
         };
+        self.graph.projections.remove(&object);
+        self.graph.sprite_affine.remove(&object);
+        self.graph.raster_offsets.remove(&object);
         self.graph.images.remove(object);
+        self.graph.frames.remove(&object);
+        self.graph.sprite_wave_args.remove(&object);
         if mode == 3 {
             self.graph
                 .images
@@ -92,6 +97,10 @@ impl BgiVm {
             GraphPlan {
                 inputs: vec![GraphInput::Bitmap(a[3]), GraphInput::Bitmap(a[4])],
                 quad: None,
+                source_format: None,
+                warp: None,
+                compound: None,
+                projection: None,
                 operation: Some(operation),
                 format: primary.format,
                 force_opaque: mode == 1 && primary.format == 1,
@@ -122,6 +131,7 @@ impl BgiVm {
             );
             frames.push((id, info.generation));
         }
+        self.graph.filters.remove(&0);
         self.graph.images.remove(0);
         self.graph.transforms.remove(&0);
         let mut properties = Properties::default();
@@ -144,6 +154,7 @@ impl BgiVm {
     pub(super) fn configure_native_backdrop(&mut self, call: &NativeCall) -> Result<()> {
         let a = &call.args;
         self.graph.frames.remove(&0);
+        self.graph.filters.remove(&0);
         let class = BackClass::for_graph90_selector(call.id).context("BGI backdrop class")?;
         let primary = self.bitmap(a[0])?.1.clone();
         ensure!(matches!(primary.format, 1 | 2), "BGI backdrop pixel format");
@@ -177,6 +188,8 @@ impl BgiVm {
             .insert("target-object-mode".into(), class as i32);
         let alpha = match call.id {
             0x41 | 0x46 => Some(a[2]),
+            0x45 => Some(a[3]),
+            0x47 => Some(a[4]),
             0x4a => Some(a[3]),
             _ => None,
         };
@@ -185,6 +198,38 @@ impl BgiVm {
             p.set_alpha_parameter(alpha);
         }
         match call.id {
+            0x45 | 0x47 => {
+                let field_ids = if call.id == 0x45 {
+                    vec![a[1], a[2]]
+                } else {
+                    vec![a[1]]
+                };
+                let mut bindings = vec![(a[0], primary.generation)];
+                for id in field_ids.into_iter().filter(|id| *id != -1) {
+                    let b = self.bitmap(id)?.1;
+                    let expected = if call.id == 0x45 { 4 } else { 6 };
+                    ensure!(
+                        b.format == expected
+                            && b.size[0] >= self.graph.screen[0]
+                            && b.size[1] >= self.graph.screen[1],
+                        "BGI background vector field size/format"
+                    );
+                    ensure!(
+                        self.graph.fields.contains_key(&(id as u32)),
+                        "BGI background field resource missing"
+                    );
+                    bindings.push((id, b.generation));
+                }
+                if call.id == 0x47 {
+                    ensure!(a[2] > 0, "BGI invalid ripple maximum distance");
+                    self.graph
+                        .waves
+                        .get(&a[3])
+                        .context("BGI wave slot absent")?
+                        .signed_samples(a[2], 0, a[4])?;
+                }
+                self.graph.frames.insert(0, bindings);
+            }
             0x42 => {
                 let mut frames = Vec::with_capacity(4);
                 for &id in &a[..4] {
@@ -256,12 +301,29 @@ impl BgiVm {
             }
             _ => (),
         }
+        if call.id == 0x47 {
+            let p = self.graph.objects.get_mut(&0).unwrap();
+            p.named_properties
+                .insert("target-auxiliary-resource".into(), a[1]);
+            p.named_properties
+                .insert("target-record-count".into(), a[2]);
+            p.named_properties
+                .insert("target-record-pointer".into(), a[3]);
+        }
         self.graph.background_args.insert(0, (call.id, a.clone()));
         self.graph.sort(0);
         self.rebuild_backdrop_plan(0)?;
         Ok(())
     }
     pub(super) fn rebuild_backdrop_plan(&mut self, object: i32) -> Result<()> {
+        if self
+            .graph
+            .background_args
+            .get(&object)
+            .is_some_and(|(id, _)| *id == 0x43)
+        {
+            return self.rebuild_native_backf(object);
+        }
         let Some((selector, a)) = self.graph.background_args.get(&object).cloned() else {
             return Ok(());
         };
@@ -277,6 +339,10 @@ impl BgiVm {
         let pair = |operation, inputs| GraphPlan {
             inputs,
             quad: None,
+            source_format: None,
+            warp: None,
+            compound: None,
+            projection: None,
             operation: Some(operation),
             format,
             force_opaque: true,
@@ -323,6 +389,10 @@ impl BgiVm {
                     inputs: a[..4].iter().copied().map(GraphInput::Bitmap).collect(),
                     operation: None,
                     quad: Some([x as u32, y as u32, screen[0], screen[1]]),
+                    source_format: None,
+                    warp: None,
+                    compound: None,
+                    projection: None,
                     format,
                     force_opaque: format == 1,
                     filters: Vec::new(),
@@ -349,6 +419,7 @@ impl BgiVm {
                     vec![secondary, bitmap(a[0])],
                 )
             }
+            0x45 | 0x47 => self.native_background_field_plan(object, selector, &a, format)?,
             0x46 => pair(
                 Raster::Display {
                     spec: DisplayRaster::HorizontalBlur {
@@ -440,5 +511,74 @@ impl BgiVm {
         };
         self.set_graph_plan(object, plan);
         Ok(())
+    }
+    fn native_background_field_plan(
+        &self,
+        object: i32,
+        selector: u16,
+        a: &[i32],
+        format: i32,
+    ) -> Result<GraphPlan> {
+        use crysirror_core::image_processing::FieldWarpSpec;
+        let p = &self.graph.objects[&object];
+        let spec = if selector == 0x45 {
+            FieldWarpSpec::Displacement {
+                first: self
+                    .graph
+                    .fields
+                    .get(&(a[1] as u32))
+                    .cloned()
+                    .context("BGI first displacement field")?,
+                second: if a[2] == -1 {
+                    None
+                } else {
+                    Some(
+                        self.graph
+                            .fields
+                            .get(&(a[2] as u32))
+                            .cloned()
+                            .context("BGI second displacement field")?,
+                    )
+                },
+                amount: p.alpha_parameter().clamp(0, 256) as u16,
+                bilinear: a[4] != 0,
+            }
+        } else {
+            let offset = p.properties.get(&0x100).map_or(0, |v| v.1);
+            let origin = p
+                .background
+                .and_then(|b| b.integer_position())
+                .map_or([0; 2], |(x, y)| [x, y]);
+            FieldWarpSpec::Wave {
+                field: self
+                    .graph
+                    .fields
+                    .get(&(a[1] as u32))
+                    .cloned()
+                    .context("BGI ripple field")?,
+                samples: self
+                    .graph
+                    .waves
+                    .get(&a[3])
+                    .context("BGI wave slot absent")?
+                    .signed_samples(a[2], offset, p.alpha_parameter())?,
+                origin,
+                wrap: false,
+                bilinear: p.properties.get(&255).is_some_and(|v| v.0 != 0),
+            }
+        };
+        spec.validate(self.client, self.graph.screen)?;
+        Ok(GraphPlan {
+            inputs: vec![GraphInput::Bitmap(a[0])],
+            operation: None,
+            quad: None,
+            source_format: None,
+            warp: Some((self.graph.screen, spec)),
+            compound: None,
+            projection: None,
+            format,
+            force_opaque: true,
+            filters: Vec::new(),
+        })
     }
 }

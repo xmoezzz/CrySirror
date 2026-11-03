@@ -7,8 +7,9 @@ impl ImageInput {
     /// only when a full-opacity four-channel copy provably replaces every pixel.
     /// RGB/alpha-only copies, partial clips and out-of-source rectangles retain it.
     pub fn with_composite_layer(self, layer: ImageCompositeLayer) -> Self {
-        let size = extent(&self);
-        let source_size = extent(&layer.input);
+        let (Some(size), Some(source_size)) = (extent(&self), extent(&layer.input)) else {
+            return append(self, layer);
+        };
         let [sx, sy, width, height] = layer.source;
         let [dx, dy] = layer.destination;
         let full_copy = matches!(layer.math, ImageCompositeMath::Copy)
@@ -46,30 +47,38 @@ impl ImageInput {
                 layers: vec![layer],
             };
         }
-        match self {
-            Self::Composite { base, mut layers } if layers.len() < 64 => {
-                layers.push(layer);
-                Self::Composite { base, layers }
-            }
-            base => Self::Composite {
-                base: Box::new(base),
-                layers: vec![layer],
-            },
-        }
+        append(self, layer)
     }
 }
 
-fn extent(input: &ImageInput) -> [u32; 2] {
+fn append(base: ImageInput, layer: ImageCompositeLayer) -> ImageInput {
+    match base {
+        ImageInput::Composite { base, mut layers } if layers.len() < 64 => {
+            layers.push(layer);
+            ImageInput::Composite { base, layers }
+        }
+        base => ImageInput::Composite {
+            base: Box::new(base),
+            layers: vec![layer],
+        },
+    }
+}
+
+fn extent(input: &ImageInput) -> Option<[u32; 2]> {
     match input {
-        ImageInput::Encoded { size, .. }
+        ImageInput::ParticlePlane { size, .. }
+        | ImageInput::Encoded { size, .. }
         | ImageInput::Solid { size, .. }
-        | ImageInput::Asset { size, .. } => *size,
+        | ImageInput::Asset { size, .. } => Some(*size),
         ImageInput::Composite { base, .. } => extent(base),
         ImageInput::Raster { destination, .. } | ImageInput::Ternary { destination, .. } => {
             extent(destination)
         }
-        ImageInput::Resource(resource) => resource.size(),
-        ImageInput::Transition { from, .. } => from.size(),
+        ImageInput::Resource(resource) => Some(resource.size()),
+        ImageInput::Transition { from, .. } => Some(from.size()),
+        // New worker graph kinds may change dimensions. Conservatively keep
+        // their history rather than interpreting effect programs in core.
+        _ => None,
     }
 }
 
@@ -92,6 +101,25 @@ mod tests {
             math: ImageCompositeMath::Copy,
         }
     }
+    #[test]
+    fn worker_effect_graph_keeps_history_without_guessing_its_output_size() {
+        let source = ImageInput::Process {
+            input: Box::new(solid(2)),
+            effects: alloc::sync::Arc::from(&b"[]"[..]),
+        };
+        let result = solid(1).with_composite_layer(copy(source));
+        let ImageInput::Composite { base, .. } = result else {
+            panic!("lost destination history")
+        };
+        assert!(matches!(
+            *base,
+            ImageInput::Solid {
+                color: [1, 1, 1, 1],
+                ..
+            }
+        ));
+    }
+
     #[test]
     fn repeated_whole_copies_do_not_retain_overwritten_histories() {
         let (mut a, mut b) = (solid(1), solid(2));

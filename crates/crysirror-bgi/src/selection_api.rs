@@ -14,6 +14,7 @@ use crysirror_scene::ui::{
     navigation::{GridDirection, grid_neighbor},
 };
 pub(crate) struct SelectionState {
+    pub(crate) inputs: crate::input_api::InputState,
     pending: BTreeMap<u64, Pending>,
     active: BTreeMap<u64, Selection>,
     next_widget: u32,
@@ -27,6 +28,7 @@ pub(crate) struct SelectionState {
 impl Default for SelectionState {
     fn default() -> Self {
         Self {
+            inputs: Default::default(),
             pending: BTreeMap::new(),
             active: BTreeMap::new(),
             next_widget: 0,
@@ -405,7 +407,7 @@ impl BgiVm {
             &pending.request.data,
             NativeSelectionData::Items { .. } | NativeSelectionData::Icons { input_mode: 3, .. }
         );
-        let root = json!({"op":"put","widget":{"id":base,"rect":[root_position[0],root_position[1],w.size[0],w.size[1]],"kind":"panel","interaction_only":true,"keyboard_focusable":false,"modal":modal,"clip_children":true,"z":self.graph.tree.chain_position(window).unwrap_or(0)as i32+1000}});
+        let root = json!({"op":"put","widget":{"id":base,"rect":[root_position[0],root_position[1],w.size[0],w.size[1]],"kind":"panel","interaction_only":true,"keyboard_focusable":false,"modal":modal,"clip_children":false,"z":self.graph.tree.chain_position(window).unwrap_or(0)as i32+1000}});
         let mut widgets = vec![root];
         for (index, (rect, mask)) in pending.rects.iter().zip(masks).enumerate() {
             let empty = rect[2] < rect[0] || rect[3] < rect[1];
@@ -433,8 +435,31 @@ impl BgiVm {
             .tree
             .native_sort_key(window)
             .context("BGI window has no native sort key")? as i32;
-        vm.register_selection_input(id, scope, true, true);
-        let _ = vm.query_selection_input(scope, scope);
+        let (keyboard_scope, pointer_scope) = match &pending.request.data {
+            NativeSelectionData::Items { .. } => (true, true),
+            NativeSelectionData::Icons {
+                input_mode,
+                key_assignments,
+                ..
+            } => (
+                *input_mode == 3 || key_assignments.is_some(),
+                *input_mode == 3,
+            ),
+        };
+        vm.register_selection_input(id, scope, keyboard_scope, pointer_scope);
+        if let NativeSelectionData::Icons {
+            key_assignments: Some(keys),
+            ..
+        } = &pending.request.data
+        {
+            for key in keys {
+                let _ = vm.query_selection_descriptor(*key, scope);
+            }
+        }
+        let _ = vm.query_selection_input(if keyboard_scope { scope } else { 0 }, scope);
+        if matches!(&pending.request.data, NativeSelectionData::Icons { .. }) {
+            let _ = vm.query_selection_input(0, scope.wrapping_add(0x8000));
+        }
         let current = match &pending.request.data {
             NativeSelectionData::Items { initial, .. } => *initial,
             _ => -1,
@@ -476,28 +501,10 @@ impl BgiVm {
         vm.commit_selection_start(id)?;
         Ok(true)
     }
-    fn selection_window_position(&self, window: i32) -> Result<[i32; 2]> {
-        let n = self
-            .graph
-            .objects
-            .get(&window)
-            .context("BGI selection window object missing")?
-            .native;
-        let offset = if n.global_display_offset_enabled != 0 {
-            self.graph.display_offset
-        } else {
-            [0; 2]
-        };
-        Ok([
-            n.position_x
-                .wrapping_add(n.primary_offset_x)
-                .wrapping_add(n.secondary_offset_x)
-                .wrapping_add(offset[0]),
-            n.position_y
-                .wrapping_add(n.primary_offset_y)
-                .wrapping_add(n.secondary_offset_y)
-                .wrapping_add(offset[1]),
-        ])
+    pub(crate) fn selection_window_position(&self, window: i32) -> Result<[i32; 2]> {
+        self.graph
+            .draw_position(window)
+            .context("BGI selection window object missing")
     }
     fn draw_selection_text(
         &self,
@@ -673,6 +680,41 @@ impl BgiVm {
         state.visual_current = Some(state.current);
         Ok(true)
     }
+    pub(crate) fn refresh_native_pointer_nodes(
+        &self,
+        host: &mut dyn HostServices,
+        vm: &mut Machine,
+    ) -> Result<()> {
+        let mut nodes = self.graph_input_pointer_nodes(host)?;
+        for state in self.selections.active.values() {
+            let NativeSelectionData::Icons { input_mode, .. } = &state.request.data else {
+                continue;
+            };
+            let mut covers = false;
+            for index in 0..state.rects.len() {
+                let item = state.base + index as u32 + 1;
+                let interaction: Option<WidgetInteraction> = serde_json::from_slice(
+                    &host.query_engine(self.client, EngineQuery::UiInteraction(item))?,
+                )?;
+                covers |= interaction.is_some_and(|i| i.hovered);
+            }
+            nodes.push((state.scope.wrapping_add(0x8000) as u32, covers));
+            if matches!(input_mode, 1 | 2) {
+                let origin = self.selection_window_position(state.request.window)?;
+                let w = self.windows.get(state.request.window)?;
+                nodes.push((
+                    state.scope as u32,
+                    self.input.pointer_x >= origin[0]
+                        && self.input.pointer_y >= origin[1]
+                        && self.input.pointer_x < origin[0].saturating_add(w.size[0] as i32)
+                        && self.input.pointer_y < origin[1].saturating_add(w.size[1] as i32)
+                        && self.graph.tree.chain_drawable(state.request.window),
+                ));
+            }
+        }
+        vm.update_native_pointer_nodes(nodes);
+        Ok(())
+    }
     pub(crate) fn tick_selection(
         &mut self,
         host: &mut dyn HostServices,
@@ -714,7 +756,7 @@ impl BgiVm {
                 );
                 let drawable = self.graph.global_enabled != 0
                     && self.graph.tree.chain_drawable(state.request.window);
-                self.submit(host,json!({"ui":[{"op":"put","widget":{"id":state.base,"rect":[position[0],position[1],w.size[0],w.size[1]],"enabled":drawable,"kind":"panel","interaction_only":true,"keyboard_focusable":false,"modal":modal,"clip_children":true,"z":self.graph.tree.chain_position(state.request.window).unwrap_or(0)as i32+1000}}]}))?;
+                self.submit(host,json!({"ui":[{"op":"put","widget":{"id":state.base,"rect":[position[0],position[1],w.size[0],w.size[1]],"enabled":drawable,"kind":"panel","interaction_only":true,"keyboard_focusable":false,"modal":modal,"clip_children":false,"z":self.graph.tree.chain_position(state.request.window).unwrap_or(0)as i32+1000}}]}))?;
                 state.root_position = position;
                 let eligible: Option<bool> = serde_json::from_slice(
                     &host
@@ -996,7 +1038,12 @@ impl BgiVm {
                         count: if icons { 3 } else { 2 },
                     },
                 )?;
-                vm.unregister_selection_input(id, state.scope, true, true);
+                vm.unregister_selection_input(
+                    id,
+                    state.scope,
+                    state.keyboard_scope,
+                    state.pointer_scope,
+                );
                 self.submit(host, json!({"ui":[{"op":"remove","id":state.base}]}))?;
                 self.windows.input_locks.remove(&state.request.window);
             } else {
@@ -1007,7 +1054,7 @@ impl BgiVm {
     }
 }
 
-fn descriptor_bit(bits: u32, descriptor: i32) -> bool {
+pub(crate) fn descriptor_bit(bits: u32, descriptor: i32) -> bool {
     let shift = match descriptor {
         1 => 0,
         2 => 1,

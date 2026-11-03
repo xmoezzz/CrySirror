@@ -5,10 +5,10 @@
 //! the destination's pixels, so each frame is drawn over the one before it.
 
 use super::{
-    BlockDecoder, CbgV2Decoder, HuffmanTree, MsbBitStream, Reader, BLOCK_FILL_ORDER, DCT_TABLE,
+    BLOCK_FILL_ORDER, BlockDecoder, CbgV2Decoder, DCT_TABLE, HuffmanTree, MsbBitStream, Reader,
 };
-use crate::cbg::codec_error::{CodecError as EthornellError, Result};
 use crate::cbg::DecodedImage;
+use crate::cbg::codec_error::{CodecError as EthornellError, Result};
 
 const MAGIC: &[u8; 16] = b"BF_Movie_______\0";
 /// sub_49B470/sub_49B550 read the luma and chroma quantization tables after
@@ -848,12 +848,14 @@ mod tests {
     fn version_0x10000_alpha_has_no_mode_word() {
         let mut image = image(16, 8, 0);
         decode_frame(&two_frames(0x10000), 0, &mut image).unwrap();
-        assert!(image
-            .rgba
-            .iter()
-            .skip(3)
-            .step_by(4)
-            .all(|&alpha| alpha == 0x80));
+        assert!(
+            image
+                .rgba
+                .iter()
+                .skip(3)
+                .step_by(4)
+                .all(|&alpha| alpha == 0x80)
+        );
     }
 
     #[test]

@@ -74,6 +74,19 @@ pub struct Viewport {
     pub height: f32,
 }
 impl Viewport {
+    pub fn with_mode(canvas:[u32;2], output:[u32;2], mode:crysirror_core::service::PresentationScale)->Self {
+        use crysirror_core::service::PresentationScale as S;
+        match mode {
+            S::Fit => Self::fit(canvas,output),
+            S::Stretch => Self {x:0.,y:0.,width:output[0] as f32,height:output[1] as f32},
+            S::Center if canvas[0]<=output[0] && canvas[1]<=output[1] => Self {
+                x:(output[0]-canvas[0]) as f32*0.5,
+                y:(output[1]-canvas[1]) as f32*0.5,
+                width:canvas[0] as f32,height:canvas[1] as f32,
+            },
+            S::Center => Self::fit(canvas,output),
+        }
+    }
     pub fn fit(canvas: [u32; 2], output: [u32; 2]) -> Self {
         let scale = (output[0] as f32 / canvas[0] as f32).min(output[1] as f32 / canvas[1] as f32);
         let width = canvas[0] as f32 * scale;

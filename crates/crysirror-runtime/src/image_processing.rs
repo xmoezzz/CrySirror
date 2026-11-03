@@ -11,8 +11,10 @@ use std::sync::{
 };
 pub(crate) mod bitmap_text;
 pub(crate) mod encoded;
+pub(crate) mod frame_image;
 pub(crate) mod glyph;
 pub(crate) mod glyph_batch;
+pub(crate) mod vector_scene;
 
 const BUDGET: usize = 512 * 1024 * 1024;
 /// Resource decoding/composition has a separate bounded budget from expensive
@@ -154,7 +156,8 @@ pub(crate) fn begin(
     }
     let mut graph_nodes = 0;
     let mut graph_bytes = 0;
-    let size = input_size(owner, &input, 0, &mut graph_nodes, &mut graph_bytes)?;
+    let input_extent = input_size(owner, &input, 0, &mut graph_nodes, &mut graph_bytes)?;
+    let size = effect_output_size(input_extent, &effects)?;
     if !effects.is_empty()
         && u64::from(size[0]) * u64::from(size[1]) > crysirror_image::effects::MAX_EFFECT_PIXELS
     {
@@ -166,14 +169,15 @@ pub(crate) fn begin(
     let output = Charge::new(memory.clone(), bytes)?;
     // Effect jobs reserve Gaussian planes/products. Decode-only jobs reserve
     // decoded products and bounded encoded input, without nonexistent blur planes.
-    let scratch_factor = if effects.is_empty() { 3 } else { 16 };
+    let scratch_factor = effect_scratch_factor(&effects);
     let scratch = Charge::new(
         memory.clone(),
         bytes * scratch_factor
             + graph_bytes
             + if matches!(
                 input,
-                ImageInput::Process { .. }
+                ImageInput::FieldWarp { .. }
+                    | ImageInput::Process { .. }
                     | ImageInput::Raster { .. }
                     | ImageInput::Composite { .. }
                     | ImageInput::Ternary { .. }
@@ -221,6 +225,45 @@ fn parse_effect_chain(effects: &[u8]) -> Result<Vec<ImageEffect>> {
     }
     Ok(effects)
 }
+fn effect_scratch_factor(effects: &[ImageEffect]) -> usize {
+    if effects
+        .iter()
+        .any(|e| matches!(e, ImageEffect::GaussianBlur { .. }))
+    {
+        16
+    } else if effects
+        .iter()
+        .any(|e| matches!(e, ImageEffect::BoxBlur { .. }))
+    {
+        10
+    } else if effects
+        .iter()
+        .any(|e| matches!(e, ImageEffect::IntegerRaster { .. }))
+    {
+        6
+    } else {
+        3
+    }
+}
+fn effect_output_size(mut size: [u32; 2], effects: &[ImageEffect]) -> Result<[u32; 2]> {
+    for effect in effects {
+        match effect {
+            ImageEffect::Resize { width, height } => size = [*width, *height],
+            ImageEffect::RowDeform { spec } => {
+                size = spec
+                    .output_size(size)
+                    .map_err(|e| Error::Io(e.to_string()))?
+            }
+            ImageEffect::Rotate { degrees } if matches!(*degrees, 90 | 270) => size.swap(0, 1),
+            _ => (),
+        }
+        crysirror_image::rgba_len(size[0], size[1]).map_err(|e| Error::Io(e.to_string()))?;
+        if u64::from(size[0]) * u64::from(size[1]) > crysirror_image::effects::MAX_EFFECT_PIXELS {
+            return Err(Error::Limit("image effect output pixel budget"));
+        }
+    }
+    Ok(size)
+}
 fn validate_effect_context(input: &ImageInput, effects: &[ImageEffect]) -> Result<()> {
     let pair = matches!(
         input,
@@ -229,7 +272,9 @@ fn validate_effect_context(input: &ImageInput, effects: &[ImageEffect]) -> Resul
     let pair_op = |e: &ImageEffect| {
         matches!(
             e,
-            ImageEffect::Transition { .. }
+            ImageEffect::AlphaPlanePair { .. }
+                | ImageEffect::StoredMaskBlend { .. }
+                | ImageEffect::Transition { .. }
                 | ImageEffect::SineRowCopy { .. }
                 | ImageEffect::AlphaClipRect { .. }
                 | ImageEffect::MaskedPairBlend { .. }
@@ -257,7 +302,14 @@ fn validate_effect_context(input: &ImageInput, effects: &[ImageEffect]) -> Resul
         return Err(Error::Invalid("row-copy input context"));
     }
     if matches!(input, ImageInput::Ternary { .. })
-        && !matches!(effects.first(), Some(ImageEffect::MaskedPairBlend { .. }))
+        && !matches!(
+            effects.first(),
+            Some(
+                ImageEffect::MaskedPairBlend { .. }
+                    | ImageEffect::StoredMaskBlend { .. }
+                    | ImageEffect::AlphaPlanePair { .. }
+            )
+        )
     {
         return Err(Error::Invalid("ternary image input context"));
     }
@@ -307,6 +359,26 @@ fn process_input(
                     .ok_or_else(|| anyhow::anyhow!("integer raster source absent"))?,
                 &|| cancel.check(),
             )?
+        } else if let ImageEffect::AlphaPlanePair { spec } = &effect {
+            spec.apply(
+                &image,
+                other
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("first channel plane absent"))?,
+                mask.as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("second channel plane absent"))?,
+                &|| cancel.check(),
+            )?
+        } else if let ImageEffect::StoredMaskBlend { spec } = &effect {
+            spec.apply(
+                &image,
+                other
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("stored mask source absent"))?,
+                mask.as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("stored mask resource absent"))?,
+                &|| cancel.check(),
+            )?
         } else if let ImageEffect::MaskedPairBlend { spec } = &effect {
             spec.apply(
                 &image,
@@ -354,6 +426,7 @@ fn process_input(
 // use bounded streams and reserve their actual encoded length on the worker.
 fn has_encoded_dependencies(input: &ImageInput) -> bool {
     match input {
+        ImageInput::FieldWarp { source, .. } => has_encoded_dependencies(source),
         ImageInput::Process { input, .. } => has_encoded_dependencies(input),
         ImageInput::Encoded { .. } => true,
         ImageInput::Composite { base, layers } => {
@@ -390,10 +463,50 @@ pub(crate) fn input_size(
     }
 
     let size = match input {
+        ImageInput::ParticlePlane { size, sprites } => {
+            let scratch = crysirror_image::particle::working_bytes(owner, sprites)
+                .map_err(|e| Error::Io(e.to_string()))?;
+            *bytes = bytes
+                .checked_add(scratch)
+                .filter(|v| *v <= 256 * 1024 * 1024)
+                .ok_or(Error::Limit("particle image worker byte budget"))?;
+            *size
+        }
+        ImageInput::PyramidLevel { pyramid, level } => {
+            pyramid.validate(owner)?;
+            let plane = pyramid
+                .levels
+                .get(usize::from(*level))
+                .ok_or(Error::Invalid("image pyramid level"))?;
+            *bytes = bytes
+                .checked_add(pyramid.byte_len())
+                .filter(|n| *n <= 256 * 1024 * 1024)
+                .ok_or(Error::Limit("image pyramid graph byte budget"))?;
+            plane.size
+        }
+
+        ImageInput::FieldWarp { source, size, spec } => {
+            let field_bytes = spec.validate(owner, *size)?;
+            if matches!(
+                source.as_ref(),
+                ImageInput::Raster { .. }
+                    | ImageInput::Ternary { .. }
+                    | ImageInput::Transition { .. }
+            ) {
+                return Err(Error::Invalid("unprocessed vector source context"));
+            }
+            input_size(owner, source, depth + 1, nodes, bytes)?;
+            *bytes = bytes
+                .checked_add(field_bytes)
+                .filter(|n| *n <= 256 * 1024 * 1024)
+                .ok_or(Error::Limit("vector field graph byte budget"))?;
+            *size
+        }
         ImageInput::Process { input, effects } => {
             let effects = parse_effect_chain(effects)?;
             validate_effect_context(input, &effects)?;
             let size = input_size(owner, input, depth + 1, nodes, bytes)?;
+            let size = effect_output_size(size, &effects)?;
             if !effects.is_empty() {
                 if u64::from(size[0]) * u64::from(size[1])
                     > crysirror_image::effects::MAX_EFFECT_PIXELS
@@ -405,10 +518,10 @@ pub(crate) fn input_size(
                 *bytes = bytes
                     .checked_add(
                         plane
-                            .checked_mul(16)
+                            .checked_mul(effect_scratch_factor(&effects))
                             .ok_or(Error::Limit("nested image scratch"))?,
                     )
-                    .filter(|n| *n <= 128 * 1024 * 1024)
+                    .filter(|n| *n <= 256 * 1024 * 1024)
                     .ok_or(Error::Limit("nested image scratch budget"))?;
             }
             size
@@ -425,7 +538,7 @@ pub(crate) fn input_size(
             }
             *bytes = bytes
                 .checked_add(encoded.len())
-                .filter(|n| *n <= 128 * 1024 * 1024)
+                .filter(|n| *n <= 256 * 1024 * 1024)
                 .ok_or(Error::Limit("image composition byte budget"))?;
             *size
         }
@@ -570,7 +683,7 @@ pub(crate) fn input_size(
         .checked_add(
             crysirror_image::rgba_len(size[0], size[1]).map_err(|e| Error::Io(e.to_string()))?,
         )
-        .filter(|n| *n <= 128 * 1024 * 1024)
+        .filter(|n| *n <= 256 * 1024 * 1024)
         .ok_or(Error::Limit("image composition byte budget"))?;
     if u64::from(size[0]) * u64::from(size[1]) > MAX_RESOURCE_PIXELS {
         return Err(Error::Limit("image resource pixel budget"));
@@ -597,6 +710,26 @@ fn load_inner(
 ) -> anyhow::Result<ImageSurface> {
     cancel.check()?;
     match input {
+        ImageInput::ParticlePlane { size, sprites } => {
+            crysirror_image::particle::plane(owner, *size, sprites, &|| cancel.check())
+        }
+        ImageInput::PyramidLevel { pyramid, level } => {
+            pyramid.validate(owner)?;
+            let plane = pyramid
+                .levels
+                .get(usize::from(*level))
+                .ok_or_else(|| anyhow::anyhow!("image pyramid level"))?;
+            Ok(ImageSurface {
+                width: plane.size[0],
+                height: plane.size[1],
+                rgba: plane.pixels.to_vec(),
+            })
+        }
+        ImageInput::FieldWarp { source, size, spec } => {
+            spec.validate(owner, *size)?;
+            let source = load_inner(owner, source, storage, decoders, cancel, encoded_memory)?;
+            crysirror_image::vector_field::warp(&source, *size, spec, &|| cancel.check())
+        }
         ImageInput::Process { input, effects } => {
             let effects = parse_effect_chain(effects)?;
             validate_effect_context(input, &effects)?;

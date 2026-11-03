@@ -16,7 +16,7 @@ pub(crate) enum MemoryWork {
 fn layout(format: i32) -> Result<PackedPixelLayout> {
     Ok(match format {
         0 => PackedPixelLayout::Bgr555,
-        1 | 7 => PackedPixelLayout::Bgr8,
+        1 | 7 => PackedPixelLayout::Bgrx8,
         2 => PackedPixelLayout::Bgra8,
         3 => PackedPixelLayout::Red8,
         _ => bail!("BGI packed image format {format} requires its engine pixel resource"),

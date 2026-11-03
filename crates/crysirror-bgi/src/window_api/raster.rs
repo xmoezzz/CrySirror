@@ -75,6 +75,18 @@ impl BgiVm {
         operations: Vec<WindowBlit>,
     ) -> Result<bool> {
         self.windows.get(window)?;
+        if reset && operations.is_empty() && !self.windows.blends.contains_key(&window) {
+            self.submit(host,json!({"canvases":[{"op":"clear","id":NativeWindow::canvas(window,0),"color":[0,0,0,0]}]}))?;
+            if let Some(path) = self.windows.get(window)?.backing_path.clone() {
+                host.release_image_resource(self.client, &path)?;
+            }
+            let w = self.windows.get_mut(window)?;
+            w.backing_raw = None;
+            w.backing_path = None;
+            w.dirty = true;
+            self.publish_windows(host)?;
+            return Ok(true);
+        }
         if self
             .windows
             .blends
@@ -192,6 +204,7 @@ impl BgiVm {
                 self.submit(host,json!({"canvases":[{"op":"set","id":NativeWindow::canvas(window,0),"layer":{"id":0,"rect":[0,0,size[0],size[1]],"paint":{"kind":"image","asset":asset}}}]}))?;
                 let w = self.windows.get_mut(window)?;
                 w.backing_raw = Some(image);
+                w.backing_path = Some(asset.to_owned());
                 w.dirty = true;
                 self.publish_windows(host)?;
                 Ok(true)

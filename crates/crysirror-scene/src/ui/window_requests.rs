@@ -1,6 +1,6 @@
 //! One-shot platform-neutral window requests. The desktop owner consumes them;
 //! no OS window handle is retained in the engine or a VM snapshot.
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 #[derive(Clone, Debug, Default)]
 pub struct WindowRequests {
     pub size: Option<(u32, [u32; 2])>,

@@ -6,7 +6,9 @@ pub use script::{native_abi, vm_opcode};
 mod builder;
 pub use builder::Builder;
 mod machine;
-pub use machine::{Machine, MessageSignal, NativeCall, SelectionPoll, Step};
+pub mod display_policy;
+pub use display_policy::NativeDisplayAction;
+pub use machine::{Machine, MessageSignal, NativeCall, SelectionPoll, Step, GraphControlSignal};
 mod wall_clock;
 use crate::script::{
     BpInstruction, BpOpcode, BpOperand, BpProgram,
@@ -39,6 +41,8 @@ pub mod input_policy;
 pub mod native_motion;
 pub mod native_ownership;
 pub mod native_selection;
+pub mod native_graph_bridge;
+pub use native_graph_bridge::{NativeGraphRequest,NativeGraphPayload};
 mod native_strings;
 pub mod native_thread;
 mod procedure_class_map;
@@ -56,6 +60,8 @@ pub mod target_thread;
 mod time;
 mod user_data;
 mod native_storage;
+mod native_platform;
+pub use native_platform::{NativePlatformRequest,NativePlatformResponse};
 mod user_dialog;
 
 pub use host_request::{
@@ -399,6 +405,10 @@ pub struct ShortcutInstallerWorkflowRequest {
 }
 
 pub trait SysApi {
+    fn prepare_native_platform(&mut self,_request:&NativePlatformRequest)->VmResult<bool>{Ok(true)}
+    fn set_clipboard_text(&mut self,_text:&str)->bool{false}
+    /// Freeze thread-local output/procedure policy before releasing ownership.
+    fn capture_native_contract(&mut self, _opcode: NativeOpcode, _outputs: usize, _async_decode: bool) {}
     /// Snapshot only native input buffers while the issuing thread owns its
     /// memory window. The engine retains bytes, never a guest/host pointer.
     fn capture_native_inputs(
@@ -643,6 +653,7 @@ pub trait SysApi {
     /// False retains the original PC and operand ring for a later scheduler pass.
     fn prepare_file_read(&mut self,_path:&str)->VmResult<bool>{Ok(true)}
     fn prepare_file_write(&mut self,_path:&str,_bytes:&[u8])->VmResult<bool>{Ok(true)}
+    fn prepare_user_enumeration(&mut self,_pattern:&str,_recursive:bool,_directories:bool)->VmResult<bool>{Ok(true)}
     fn write_file_bytes(&mut self, _path: &str, _bytes: &[u8]) -> bool {
         false
     }
@@ -2169,6 +2180,7 @@ pub struct Vm {
     pending_host_request: Option<host_request::PendingHostRequest>,
     ready_host_response: Option<HostResponse>,
     ready_host_start:Option<(NativeOpcode,native_call::NativeProcedureStart)>,
+    ready_host_completion: Option<(NativeOpcode, native_call::NativeProcedureCompletion)>,
     prepared_native_write:std::collections::BTreeMap<u64,native_storage::PreparedNativeWrite>,
     fatal_async_report: Option<Box<VmRunReport>>,
     async_reports: Vec<VmRunReport>,
@@ -2536,6 +2548,7 @@ impl Vm {
         self.pending_host_request = None;
         self.ready_host_response = None;
         self.ready_host_start=None;
+        self.ready_host_completion=None;
         self.prepared_native_write.clear();
         self.fatal_async_report = None;
         self.async_reports.clear();
@@ -3034,10 +3047,14 @@ impl Vm {
         let code = instruction.opcode.code();
         let mut next_pc = self.pc + 1;
         let selector = instruction.raw.get(1).copied().unwrap_or_default();
-        if api.host_requests_enabled() && matches!(code, 0x7c..=0x7f) {
+        if api.host_requests_enabled() && matches!(code, 0x7c | 0x7d | 0x7f) {
             return Err(VmError::Runtime(format!(
                 "BGI opcode {code:#04x} requires a CrySirror host operation"
             )));
+        }
+        if !self.prepare_native_platform(api,code,selector)? {
+            self.scheduler_signal=Some(SchedulerSignal::Yield);
+            return Ok(());
         }
         if !self.prepare_native_storage(api,NativeOpcode{group:code,id:selector as u16})? {
             self.scheduler_signal=Some(SchedulerSignal::Yield);
@@ -3869,7 +3886,7 @@ impl Vm {
                 self.execute_resource_transform()?;
             }
             BpOpcode::Known { code: 0x7e, .. } => {
-                let result = self.execute_clipboard_set()?;
+                let result = self.execute_clipboard_set(api)?;
                 self.push_value(Value::Int(result));
             }
             BpOpcode::Known { code: 0x7f, .. } => {
@@ -11781,7 +11798,7 @@ impl Vm {
             (0xb0, 0xC1) => &[1],
             (0xb0, 0xC3) | (0xb0, 0xC6) | (0xb0, 0xC7) => &[0, 1],
             (0xb0, 0xF0) => &[2],
-            (0xc0, 0xF0) => &[1, 4],
+            (0xc0, 0xF0) => &[1, 2],
             _ => return Ok(()),
         };
         for &from_top in positions_from_top {

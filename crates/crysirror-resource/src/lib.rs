@@ -80,3 +80,5 @@ pub trait ArchiveFormat: Send + Sync {
 }
 
 pub mod dos_glob;
+
+pub mod bwef;

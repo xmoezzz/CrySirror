@@ -6,14 +6,26 @@ use crate::{
     graph_state::RuntimeGraphObjectProperties as Properties,
 };
 use crysirror_scene::layer::{Blend, SpriteTransform};
+#[path = "graph_backf.rs"]
+mod graph_backf;
+#[path = "graph_composition.rs"]
+mod graph_composition;
 #[path = "graph_configure.rs"]
 mod graph_configure;
+#[path = "graph_effector.rs"]
+mod graph_effector;
+#[path = "graph_field.rs"]
+mod graph_field;
 #[path = "graph_filter.rs"]
 mod graph_filter;
 #[path = "graph_images.rs"]
 mod graph_images;
 #[path = "graph_map.rs"]
 mod graph_map;
+#[path = "graph_mask.rs"]
+mod graph_mask;
+#[path = "graph_projection.rs"]
+mod graph_projection;
 use crate::native_background::{NativeBackgroundClass as BackClass, NativeBackgroundState};
 use crysirror_image::integer_raster::{IntegerRasterOperation as Raster, display::DisplayRaster};
 use graph_images::{GraphImages, GraphInput, GraphPlan};
@@ -23,7 +35,26 @@ pub(crate) struct GraphState {
     pub global_enabled: i32,
     pub default_priority: i32,
     images: GraphImages,
+    compositions: BTreeMap<i32, graph_composition::SpriteComposition>,
+    projections: BTreeMap<i32, graph_projection::ProjectionState>,
+    fixed_vectors: BTreeMap<i32, [[i32; 3]; 2]>,
+    sprite_relations: BTreeMap<i32, i32>,
+    sprite_mask_owners: BTreeMap<i32, i32>,
+    sprite_link_masks: std::collections::BTreeSet<i32>,
+    aux_bindings: BTreeMap<i32, (i32, u64)>,
+    mask_signatures: BTreeMap<i32, Value>,
+    mask_unready: std::collections::BTreeSet<i32>,
+    sprite_affine: BTreeMap<i32, [i32; 6]>,
+    raster_offsets: BTreeMap<i32, [i32; 2]>,
+    affine_rebuild: std::collections::BTreeSet<i32>,
+    bitmap_versions: BTreeMap<u32, u64>,
+    bitmap_clock: u64,
     filters: BTreeMap<i32, graph_filter::NativeFilter>,
+    fields: BTreeMap<u32, Arc<crysirror_core::image_processing::VectorFieldResource>>,
+    waves: BTreeMap<i32, crysirror_image::vector_field::WaveTable>,
+    field_jobs: BTreeMap<u64, graph_field::FieldWork>,
+    field_rebuild: std::collections::BTreeSet<i32>,
+    sprite_wave_args: BTreeMap<i32, Vec<i32>>,
     needs_publish: bool,
     visual_clock: u64,
     visual_versions: BTreeMap<i32, u64>,
@@ -39,6 +70,7 @@ pub(crate) struct GraphState {
     serials: BTreeMap<Kind, u32>,
     members: BTreeMap<i32, BTreeMap<i32, [i32; 2]>>,
     pub display_offset: [i32; 2],
+    pub shake_offset: [i32; 2],
     pub center: [i32; 2],
     pub transforms: BTreeMap<i32, SpriteTransform>,
 }
@@ -50,7 +82,26 @@ impl Default for GraphState {
             global_enabled: 1,
             default_priority: 0,
             images: Default::default(),
+            compositions: BTreeMap::new(),
+            projections: BTreeMap::new(),
+            fixed_vectors: BTreeMap::new(),
+            sprite_relations: BTreeMap::new(),
+            sprite_mask_owners: BTreeMap::new(),
+            sprite_link_masks: Default::default(),
+            aux_bindings: BTreeMap::new(),
+            mask_signatures: BTreeMap::new(),
+            mask_unready: Default::default(),
+            sprite_affine: BTreeMap::new(),
+            raster_offsets: BTreeMap::new(),
+            affine_rebuild: Default::default(),
+            bitmap_versions: BTreeMap::new(),
+            bitmap_clock: 0,
             filters: BTreeMap::new(),
+            fields: BTreeMap::new(),
+            waves: BTreeMap::new(),
+            field_jobs: BTreeMap::new(),
+            field_rebuild: Default::default(),
+            sprite_wave_args: BTreeMap::new(),
             needs_publish: false,
             visual_clock: 0,
             visual_versions: BTreeMap::new(),
@@ -66,64 +117,114 @@ impl Default for GraphState {
             serials: BTreeMap::new(),
             members: BTreeMap::new(),
             display_offset: [0; 2],
-            center: [0; 2],
+            shake_offset: [0; 2],
+            center: [-1; 2],
             transforms: BTreeMap::new(),
         }
     }
 }
 pub(crate) fn handles(group: u8, id: u16) -> bool {
-    matches!(
-        (group, id),
-        (
-            0x90,
-            0x60 | 0x61
-                | 0x64
-                | 0x65
-                | 0x66
-                | 0x70
-                | 0x71
-                | 0x74
-                | 0x75
-                | 0x76
-                | 0x78
-                | 0x79
-                | 0x7a
-                | 0x08
-                | 0x09
-                | 0x30
-                | 0x31
-                | 0x33
-                ..=0x3a
-                    | 0x3f
-                    | 0x44
-                    | 0x40
-                    | 0x42
-                    | 0x41
-                    | 0x46
-                    | 0x48
-                    | 0x49
-                    | 0x4a
-                    | 0x4c
-                    | 0x4d
-                    | 0x50
-                    | 0x51
-                    | 0x53
-                    | 0x54
-                    | 0x56
-                    | 0x57
-                    | 0x58
-                    | 0x59
-                    | 0x5a
-                    | 0xe0
-                    | 0xe1
-                    | 0xe4
-                    | 0xe5
-                    | 0xe8
-                    | 0xe9
-        ) | (0x91, 0x06 | 0x31 | 0x33 | 0x38 | 0x3d | 0x3e | 0x3f)
-    )
+    graph_effector::handles(group, id)
+        || graph_field::handles(group, id)
+        || matches!(
+            (group, id),
+            (
+                0x90,
+                0x60 | 0x61
+                    | 0x64
+                    | 0x65
+                    | 0x66
+                    | 0x70
+                    | 0x71
+                    | 0x74
+                    | 0x75
+                    | 0x76
+                    | 0x78
+                    | 0x79
+                    | 0x7a
+                    | 0x06
+                    | 0x08
+                    | 0x09
+                    | 0x30
+                    | 0x31
+                    | 0x33
+                    ..=0x3a
+                        | 0x3f
+                        | 0x44
+                        | 0x43
+                        | 0x45
+                        | 0x47
+                        | 0x40
+                        | 0x42
+                        | 0x41
+                        | 0x46
+                        | 0x48
+                        | 0x49
+                        | 0x4a
+                        | 0x4c
+                        | 0x4d
+                        | 0x50
+                        | 0x51
+                        | 0x53
+                        | 0x54
+                        | 0x55
+                        | 0x56
+                        | 0x57
+                        | 0x58
+                        | 0x59
+                        | 0x5a
+                        | 0x5b
+                        | 0x5c
+                        | 0x5d
+                        | 0xe0
+                        | 0xe1
+                        | 0xe4
+                        | 0xe5
+                        | 0xe8
+                        | 0xe9
+            ) | (
+                0x91,
+                0x06 | 0x31 | 0x33 | 0x36 | 0x37 | 0x38 | 0x3d | 0x3e | 0x3f | 0x55
+            )
+        )
 }
 impl GraphState {
+    pub(crate) fn draw_position(&self, object: i32) -> Option<[i32; 2]> {
+        let n = &self.objects.get(&object)?.native;
+        let raster = self.raster_offsets.get(&object).copied().unwrap_or([0; 2]);
+        let offset = if n.global_display_offset_enabled != 0 {
+            self.display_offset
+        } else {
+            [0; 2]
+        };
+        Some([
+            n.position_x
+                .wrapping_add(n.primary_offset_x)
+                .wrapping_add(n.secondary_offset_x)
+                .wrapping_add(offset[0])
+                .wrapping_add(self.shake_offset[0])
+                .wrapping_add(raster[0]),
+            n.position_y
+                .wrapping_add(n.primary_offset_y)
+                .wrapping_add(n.secondary_offset_y)
+                .wrapping_add(offset[1])
+                .wrapping_add(self.shake_offset[1])
+                .wrapping_add(raster[1]),
+        ])
+    }
+
+    pub(crate) fn visual_prefix(&self, object: i32) -> Vec<(i32, u64)> {
+        let Some(cut) = self.tree.chain_position(object) else {
+            return Vec::new();
+        };
+        self.tree
+            .chain_handles()
+            .iter()
+            .take(cut as usize)
+            .map(|id| (*id, self.visual_versions.get(id).copied().unwrap_or(0)))
+            .collect()
+    }
+
     pub(crate) fn mark_visual(&mut self, object: i32) {
         self.visual_clock = self.visual_clock.wrapping_add(1);
         self.visual_versions.insert(object, self.visual_clock);
@@ -174,7 +275,12 @@ impl GraphState {
         let low = if n.fixed_position_updates_integer_position != 0 {
             n.sort_index
         } else {
-            4095i32.wrapping_sub(n.fixed_position_z_16_16 >> 19) as u32
+            let vectors = self.fixed_vectors.get(&id).copied().unwrap_or([[0; 3]; 2]);
+            let z = n
+                .fixed_position_z_16_16
+                .wrapping_add(vectors[0][2])
+                .wrapping_add(vectors[1][2]);
+            4095i32.wrapping_sub(z >> 19) as u32
         } & 0x1fff;
         let key = n
             .sort_class
@@ -205,8 +311,12 @@ impl GraphState {
         let mut pending = vec![(id, [x, y])];
         while let Some((id, point)) = pending.pop() {
             let n = &mut self.objects.entry(id).or_default().native;
+            let changed = n.position_x != point[0] || n.position_y != point[1];
             n.position_x = point[0];
             n.position_y = point[1];
+            if changed {
+                self.mark_visual(id);
+            }
             if let Some(children) = self.members.get(&id) {
                 for (&child, &offset) in children {
                     pending.push((
@@ -222,6 +332,29 @@ impl GraphState {
     }
 }
 impl BgiVm {
+    pub(crate) fn set_screen_shake_offset(&mut self, offset: [i32; 2]) {
+        if self.graph.shake_offset != offset {
+            self.graph.shake_offset = offset;
+            let ids = self.graph.tree.chain_handles().to_vec();
+            for id in ids {
+                self.graph.mark_visual(id);
+            }
+        }
+    }
+    pub(crate) fn graph_prefix_ready(&self, object: i32) -> bool {
+        let Some(cut) = self.graph.tree.chain_position(object) else {
+            return false;
+        };
+        !self.graph.images.dirty.iter().any(|id| {
+            *id != object
+                && self
+                    .graph
+                    .tree
+                    .chain_position(*id)
+                    .is_some_and(|position| position < cut)
+        }) && self.window_prefix_ready(object)
+            && self.sprite_prefix_ready(object)
+    }
     pub(crate) fn native_graph_layer(id: i32) -> u32 {
         if (id as u32 >> 24) == 0x80 {
             (id as u32 & 0x1ff) + 1
@@ -262,6 +395,18 @@ impl BgiVm {
                 self.hide_graph_object(host, id)?;
                 continue;
             }
+            // Windows own their three-pass publication below. Bookkeeping
+            // objects have no pixels and must not churn filter signatures.
+            if self.graph.tree.kind(id) == Some(Kind::Window)
+                || (!self.graph.images.painted.contains_key(&id)
+                    && self
+                        .sprites
+                        .get(&(id as u32))
+                        .and_then(|s| s.bitmap)
+                        .is_none())
+            {
+                continue;
+            }
             let Some(p) = self.graph.objects.get(&id) else {
                 continue;
             };
@@ -278,29 +423,27 @@ impl BgiVm {
                 && n.suppress_draw == 0
                 && p.mask_alpha < 256
                 && p.alpha_multiplier != 0
-                && self.graph.tree.chain_drawable(id);
-            let offset = if n.global_display_offset_enabled != 0 {
-                self.graph.display_offset
-            } else {
+                && self.graph.tree.chain_drawable(id)
+                && !self.graph.sprite_mask_owners.contains_key(&id)
+                && !self.graph.mask_unready.contains(&id);
+            let position = if background.is_some_and(|b| b.class == BackClass::BackF) {
                 [0; 2]
+            } else {
+                self.graph
+                    .draw_position(id)
+                    .context("BGI drawable object position")?
             };
-            let position = [
-                n.position_x
-                    .wrapping_add(n.primary_offset_x)
-                    .wrapping_add(n.secondary_offset_x)
-                    .wrapping_add(offset[0]),
-                n.position_y
-                    .wrapping_add(n.primary_offset_y)
-                    .wrapping_add(n.secondary_offset_y)
-                    .wrapping_add(offset[1]),
-            ];
             let layer = if is_back {
                 1024
             } else {
                 Self::native_graph_layer(id)
             };
             let transform = self.graph.transforms.get(&id).cloned().unwrap_or_default();
-            let blend = if is_back || is_filter {
+            let is_composited_sprite =
+                matches!(self.graph.tree.kind(id), Some(Kind::Sprite | Kind::Map))
+                    && p.blend_mode != 128;
+            let native_blend = p.blend_mode;
+            let blend = if is_back || is_filter || is_composited_sprite {
                 Blend::Normal
             } else {
                 match p.blend_mode {
@@ -313,7 +456,8 @@ impl BgiVm {
                     ),
                 }
             };
-            let opacity = if is_filter
+            let opacity = if is_composited_sprite
+                || is_filter
                 || (is_back
                     && p.background
                         .is_some_and(|b| !matches!(b.class, BackClass::BackN | BackClass::BackS)))
@@ -324,7 +468,14 @@ impl BgiVm {
             };
             // Compare only reusable layer state; hit masks and VM bookkeeping
             // do not invalidate destination-reading effects.
-            self.graph.visual_descriptor(id,json!({"position":position,"visible":visible,"opacity":opacity,"blend":blend,"transform":transform,"order":[n.priority,order],"crop":self.graph.crops.get(&id)}));
+            self.graph.visual_descriptor(id,json!({"position":position,"visible":visible,"opacity":opacity,"blend":blend,"transform":transform,"order":[n.priority,order],"crop":self.graph.crops.get(&id),"native_blend":native_blend}));
+            if is_composited_sprite {
+                let (paint, size) = self.sprite_composition_paint(host, id, position, visible)?;
+                self.submit(host,json!({"canvases":[{"op":"hide","layer":layer}],"layers":[{"op":"put","layer":{"id":layer,"rect":[0,0,size[0],size[1]],"paint":paint,"order":[n.priority,order as i32],"opacity":255,"visible":visible,"blend":"normal"}}]}))?;
+                self.graph.live.insert(id, true);
+                continue;
+            }
+            self.remove_sprite_composition(host, id)?;
             if let Some(image) = self.graph.images.painted.get(&id) {
                 let size = image.image.size();
                 let crop = self
@@ -361,6 +512,9 @@ impl BgiVm {
         vm: &mut Machine,
         call: &NativeCall,
     ) -> Result<bool> {
+        if graph_field::handles(call.group, call.id) {
+            return self.native_field_call(host, vm, call);
+        }
         let request = vm.request_id().context("BGI graph continuation identity")?;
         if let Some((output, writes, objects)) = self.graph.pending.remove(&request) {
             for &object in &objects {
@@ -401,6 +555,16 @@ impl BgiVm {
         let mut output = Vec::new();
         let mut writes = Vec::new();
         match (call.group, call.id) {
+            (0x90, 0x55) | (0x91, 0x55) => {
+                if let Some(result) = self.sprite_mask_call(call)? {
+                    output.push(result);
+                }
+            }
+            (0x91, 0x60 | 0x61 | 0x64..=0x69) => {
+                if let Some(result) = self.native_effector_call(host, call)? {
+                    output.push(result);
+                }
+            }
             (0x90, 0x60 | 0x61 | 0x64 | 0x65 | 0x66) => {
                 if let Some(result) = self.native_filter_call(host, call)? {
                     output.push(result);
@@ -411,13 +575,21 @@ impl BgiVm {
                     output.push(result);
                 }
             }
+            (0x90, 0x06) => {
+                self.graph.center = [a[0], a[1]];
+                let objects = self.graph.projections.keys().copied().collect::<Vec<_>>();
+                for id in objects {
+                    self.rebuild_native_projection(id)?;
+                }
+            }
             (0x90, 0x08) => self.graph.global_enabled = a[0],
             (0x90, 0x09) => {
                 target_checks::priority(a[0])?;
                 self.graph.default_priority = a[0];
             }
+            (0x90, 0x43) => self.configure_native_backf(call)?,
             (0x90, 0x44) => self.configure_native_frame_background(vm, call)?,
-            (0x90, 0x40 | 0x41 | 0x42 | 0x46 | 0x48 | 0x49 | 0x4a) => {
+            (0x90, 0x40 | 0x41 | 0x42 | 0x45 | 0x46 | 0x47 | 0x48 | 0x49 | 0x4a) => {
                 self.configure_native_backdrop(call)?
             }
             (0x90, 0x4c) => {
@@ -445,6 +617,8 @@ impl BgiVm {
                     .unwrap_or(0),
             ),
             (0x90, 0x58 | 0x5a) => self.configure_native_sprite_pair(call)?,
+            (0x90, 0x5b) => self.configure_native_sprite_wave(call)?,
+            (0x90, 0x5c | 0x5d) => self.configure_native_projection(call)?,
             (0x90, 0x50) => {
                 let id = self.graph.allocate(0x80000000, 512, Kind::Sprite);
                 ensure!(id != 0, "BGI sprite pool exhausted");
@@ -497,7 +671,15 @@ impl BgiVm {
                     }
                 }
                 self.hide_graph_object(host, id)?;
+                self.forget_sprite_mask_links(id);
+                self.remove_sprite_composition(host, id)?;
+                self.graph.sprite_affine.remove(&id);
+                self.graph.projections.remove(&id);
+                self.graph.fixed_vectors.remove(&id);
+                self.graph.raster_offsets.remove(&id);
                 self.sprites.remove(&(id as u32));
+                self.graph.frames.remove(&id);
+                self.graph.sprite_wave_args.remove(&id);
                 self.graph.images.remove(id);
                 self.graph.tree.remove(id);
                 self.graph.objects.remove(&id);
@@ -536,7 +718,25 @@ impl BgiVm {
                     Default::default()
                 };
                 self.graph.images.remove(id);
-                self.graph.transforms.insert(id, transform);
+                self.graph.projections.remove(&id);
+                self.graph.frames.remove(&id);
+                self.graph.sprite_wave_args.remove(&id);
+                if mode == 2 {
+                    self.graph
+                        .sprite_affine
+                        .insert(id, [a[4], a[5], a[6], a[7], a[8], a[9]]);
+                } else {
+                    self.graph.sprite_affine.remove(&id);
+                }
+                self.graph.transforms.insert(
+                    id,
+                    if mode == 2 {
+                        Default::default()
+                    } else {
+                        transform
+                    },
+                );
+                self.graph.raster_offsets.remove(&id);
                 self.graph.position(id, a[1], a[2]);
                 let p = self.graph.objects.entry(id).or_default();
                 p.format_resource = Some(bitmap as i32);
@@ -551,26 +751,14 @@ impl BgiVm {
                     .context("BGI sprite slot")?;
                 sprite.bitmap = Some(bitmap);
                 self.graph.sort(id);
+                if mode == 2 {
+                    self.rebuild_native_sprite_affine(id)?;
+                }
             }
             (0x90, 0x57) => {
                 self.graph.require(a[0])?;
                 target_checks::bitmap(a[1])?;
-                let mode = self
-                    .graph
-                    .objects
-                    .get(&a[0])
-                    .and_then(|p| p.named_properties.get("target-object-mode"))
-                    .copied()
-                    .unwrap_or(0);
-                if matches!(mode, 0 | 2 | 5 | 6) {
-                    let bitmap = self.bitmap(a[1])?.0;
-                    self.sprites
-                        .get_mut(&(a[0] as u32))
-                        .context("BGI sprite slot")?
-                        .bitmap = Some(bitmap);
-                    self.graph.objects.entry(a[0]).or_default().format_resource =
-                        Some(bitmap as i32);
-                }
+                self.replace_native_sprite_source(a[0], a[1])?;
             }
             (0x90, 0x53) => {
                 self.graph.require(a[0])?;
@@ -588,10 +776,13 @@ impl BgiVm {
                 if matches!(mode, 0 | 1 | 3) {
                     ensure!(a[3] > 0 && a[4] > 0, "BGI invalid sprite update rectangle");
                 }
-                ensure!(
-                    !matches!(mode, 5 | 6),
-                    "BGI projected sprite cache invalidation requires its projection binding"
-                );
+                if matches!(mode, 5 | 6) {
+                    self.graph
+                        .projections
+                        .get_mut(&a[0])
+                        .context("BGI projected cache")?
+                        .dirty_rect = Some([a[1], a[2], a[3], a[4]]);
+                }
                 self.graph.images.dirty(a[0]);
             }
             (0x90, 0x30 | 0x54 | 0xe4) => {
@@ -664,6 +855,8 @@ impl BgiVm {
                 }
                 if call.id == 0x35 {
                     for id in self.graph.descendants(a[0]) {
+                        self.sync_native_effector(id)?;
+                        self.sync_native_projection_fixed(id, a[1].wrapping_shl(16))?;
                         if let Some(plan) = self.graph.images.plans.get_mut(&id) {
                             if let Some(Raster::Display {
                                 spec: DisplayRaster::ThresholdMask { threshold, .. },
@@ -777,6 +970,74 @@ impl BgiVm {
                         }
                         self.rebuild_backdrop_plan(a[0])?;
                     }
+                    property @ (0x10 | 0x40 | 0x41 | 0x42 | 0x43 | 0x60 | 0x80 | 0x81 | 0x82
+                    | 0x83 | 0x8f)
+                        if self.graph.tree.kind(a[0]) == Some(Kind::Sprite) =>
+                    {
+                        self.native_sprite_property(a[0], property, a[2], a[3])?
+                    }
+                    0x40000000
+                        if self
+                            .graph
+                            .objects
+                            .get(&a[0])
+                            .and_then(|p| p.background)
+                            .is_some_and(|b| b.class == BackClass::BackF) =>
+                    {
+                        let backf = self
+                            .graph
+                            .objects
+                            .get_mut(&a[0])
+                            .unwrap()
+                            .background
+                            .as_mut()
+                            .unwrap()
+                            .backf
+                            .as_mut()
+                            .unwrap();
+                        ensure!(
+                            backf.mask_control_enabled == 0 || (a[3] as u32) < 4,
+                            "BGI invalid BackF mask control mode (254)"
+                        );
+                        backf.mask_control_enabled = a[2];
+                        backf.mask_control_mode = a[3];
+                        self.rebuild_native_backf(a[0])?;
+                    }
+                    0x100 => {
+                        if self
+                            .graph
+                            .filters
+                            .get(&a[0])
+                            .is_some_and(|f| f.effector.is_some())
+                        {
+                            self.graph_effector_property(a[0], 0x100, a[2], a[3])?;
+                        } else {
+                            self.graph_wave_window(a[0], a[2], a[3])?;
+                        }
+                    }
+                    property @ (0x80 | 0x81 | 0x82 | 0x8f | 0xff)
+                        if self
+                            .graph
+                            .filters
+                            .get(&a[0])
+                            .is_some_and(|f| f.effector.is_some()) =>
+                    {
+                        self.graph_effector_property(a[0], property, a[2], a[3])?
+                    }
+                    0xff if self.graph.objects.get(&a[0]).is_some_and(|p| {
+                        p.background.is_some_and(|b| {
+                            matches!(b.class, BackClass::BackRpl | BackClass::BackDst)
+                        })
+                    }) =>
+                    {
+                        self.graph
+                            .objects
+                            .entry(a[0])
+                            .or_default()
+                            .properties
+                            .insert(255, (a[2], a[3]));
+                        self.rebuild_backdrop_plan(a[0])?;
+                    }
                     0x11 => {
                         ensure!(
                             self.graph.tree.kind(a[0]) == Some(Kind::Sprite),
@@ -850,7 +1111,12 @@ impl BgiVm {
                     match a[2] as u32 {
                         0 => vec![n.position_x, n.position_y],
                         1 => vec![n.blend_mode],
-                        2 => vec![n.alpha_parameter],
+                        2 => vec![
+                            self.graph
+                                .objects
+                                .get(&a[1])
+                                .map_or(n.alpha_parameter, |p| p.alpha_virtual()),
+                        ],
                         3 => vec![n.priority as i32],
                         32 => vec![
                             n.fixed_position_x_16_16,
@@ -875,12 +1141,34 @@ impl BgiVm {
                                 "BGI object rotation property is unsupported by this class"
                             );
                             vec![p.properties.get(&0x41).map(|p| p.0).unwrap_or_else(|| {
+                                if let Some(state) = self.graph.projections.get(&a[1]) {
+                                    return state.args[if mode == 6 { 12 } else { 10 }];
+                                }
                                 self.graph
                                     .transforms
                                     .get(&a[1])
                                     .map(|t| (t.rotate.to_degrees() * 65536.).round() as i32)
                                     .unwrap_or(0)
                             })]
+                        }
+                        0x10000000 => {
+                            let p = self
+                                .graph
+                                .objects
+                                .get(&a[1])
+                                .context("BGI projected transform")?;
+                            ensure!(
+                                self.graph.projections.contains_key(&a[1]),
+                                "BGI object does not support projected transform query"
+                            );
+                            (0..5)
+                                .map(|i| {
+                                    p.named_properties
+                                        .get(&format!("projected-transform-{i}"))
+                                        .copied()
+                                        .context("BGI projected transform state")
+                                })
+                                .collect::<Result<Vec<_>>>()?
                         }
                         0x10000100 => {
                             ensure!(
@@ -902,16 +1190,19 @@ impl BgiVm {
                                 .get("target-object-mode")
                                 .copied()
                                 .unwrap_or(0);
-                            ensure!(
-                                !matches!(mode, 5 | 6),
-                                "BGI transformed native extent requires its projected raster query"
-                            );
-                            vec![
-                                size[0] as i32,
-                                size[1] as i32,
-                                size[0] as i32,
-                                size[1] as i32,
-                            ]
+                            let extent = if matches!(mode, 5 | 6) {
+                                [
+                                    *p.named_properties
+                                        .get(&format!("mode{mode}-projected-width"))
+                                        .context("BGI projected width")?,
+                                    *p.named_properties
+                                        .get(&format!("mode{mode}-projected-height"))
+                                        .context("BGI projected height")?,
+                                ]
+                            } else {
+                                [size[0] as i32, size[1] as i32]
+                            };
+                            vec![size[0] as i32, size[1] as i32, extent[0], extent[1]]
                         }
                         _ => bail!("BGI unsupported native object query {:#x}", a[2]),
                     }
@@ -920,6 +1211,13 @@ impl BgiVm {
                     address: a[0] as u32,
                     bytes: values.into_iter().flat_map(i32::to_le_bytes).collect(),
                 });
+            }
+            (0x91, 0x36 | 0x37) => {
+                self.graph.require(a[0])?;
+                self.graph.fixed_vectors.entry(a[0]).or_insert([[0; 3]; 2])
+                    [if call.id == 0x37 { 0 } else { 1 }] = [a[1], a[2], a[3]];
+                self.rebuild_native_projection(a[0])?;
+                self.graph.sort(a[0]);
             }
             (0x91, 0x33) => {
                 self.graph.require(a[0])?;
@@ -941,6 +1239,7 @@ impl BgiVm {
                 if n.fixed_position_updates_integer_position != 0 {
                     self.graph.position(a[0], x >> 16, y >> 16);
                 }
+                self.rebuild_native_projection(a[0])?;
                 self.graph.sort(a[0]);
             }
             (0x90, 0xe5) => {
@@ -1009,6 +1308,7 @@ impl BgiVm {
                 call.id
             ),
         }
+        self.refresh_native_sprite_masks()?;
         ensure!(output.len() == call.outputs, "BGI graph result count");
         let objects = self
             .graph

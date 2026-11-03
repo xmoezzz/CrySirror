@@ -33,10 +33,40 @@ impl Vm {
         if !api.host_requests_enabled() {
             return Ok(true);
         }
+        let context = self.thread.thread_id() as u32 as u64;
+        if matches!(
+            (opcode.group, opcode.id),
+            (0x80, 0x25 | 0x26) | (0x81, 0x39)
+        ) {
+            api.begin_native_storage(context);
+            let directories = opcode.group == 0x80 && opcode.id == 0x26;
+            let tail = if directories { 1 } else { 2 };
+            let at = self.operand_from_top(tail).ok_or(VmError::StackUnderflow)?;
+            let pattern = self.value_as_string_lossy(self.operand_value(at))?;
+            let recursive = if opcode.group == 0x81 {
+                true
+            } else if directories {
+                false
+            } else {
+                let at = self.operand_from_top(1).ok_or(VmError::StackUnderflow)?;
+                self.operand_value(at).as_i32() != 0 && pattern.contains('\\')
+            };
+            return api.prepare_user_enumeration(&pattern, recursive, directories);
+        }
+        if opcode.group == 0x80 && opcode.id == 0xe9 {
+            api.begin_native_storage(context);
+            let at = self.operand_from_top(0).ok_or(VmError::StackUnderflow)?;
+            let file = self.value_as_string_lossy(self.operand_value(at))?;
+            let path = if crate::resource_io::is_absolute_resource_path(&file) {
+                file
+            } else {
+                format!("{}{file}", self.resource_primary_root(api))
+            };
+            return api.prepare_file_read(&path);
+        }
         if opcode.group != 0x80 || !matches!(opcode.id, 0x78..=0x7b | 0x80 | 0x81) {
             return Ok(true);
         }
-        let context = self.thread.thread_id() as u32 as u64;
         api.begin_native_storage(context);
         let int_at = |vm: &Self, tail| {
             vm.operand_from_top(tail)

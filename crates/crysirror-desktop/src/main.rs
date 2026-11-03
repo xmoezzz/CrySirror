@@ -5,6 +5,7 @@ mod app;
 mod audio;
 mod cursor;
 mod detect;
+mod desktop_provider;
 #[cfg(feature = "gamepad")]
 mod gamepad;
 mod input_track;
@@ -296,6 +297,7 @@ fn load_project(path: &Path) -> Result<Project> {
 fn load_runtime(path: &Path, dir: &Path) -> Result<Runtime> {
     let registry = adapter_registry()?;
     let mut rt = Runtime::with_registry(load_project(path)?, path, dir, registry)?;
+    desktop_provider::install(&mut rt,false)?;
     rt.assets
         .decoders
         .register("g00", Arc::new(crysirror_siglus::SiglusImageDecoder))?;
@@ -460,6 +462,7 @@ fn play(options: PlayOptions) -> Result<()> {
     };
     std::fs::create_dir_all(&state_dir)?;
     let mut rt = Runtime::with_asset_root(project, &dir, &state_dir, adapter_registry()?)?;
+    desktop_provider::install(&mut rt,false)?;
     rt.assets
         .decoders
         .register("g00", Arc::new(crysirror_siglus::SiglusImageDecoder))?;

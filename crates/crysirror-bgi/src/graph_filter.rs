@@ -2,11 +2,12 @@
 use super::*;
 #[derive(Default)]
 pub(super) struct NativeFilter {
-    mode: i32,
-    color: i32,
-    shift: i32,
+    pub(super) mode: i32,
+    pub(super) color: i32,
+    pub(super) shift: i32,
     pub mask: Option<(i32, u64)>,
     pub signature: Option<Value>,
+    pub effector: Option<super::graph_effector::NativeEffector>,
 }
 impl BgiVm {
     pub(super) fn native_filter_call(
@@ -43,6 +44,8 @@ impl BgiVm {
             self.graph.images.remove(object);
             self.graph.filters.remove(&object);
             self.graph.objects.remove(&object);
+            self.graph.fixed_vectors.remove(&object);
+            self.graph.raster_offsets.remove(&object);
             self.graph.tree.remove(object);
             self.graph.mark_visual(object);
             return Ok(None);
@@ -87,13 +90,14 @@ impl BgiVm {
                 shift,
                 mask,
                 signature: None,
+                effector: None,
             },
         );
         self.publish_graph(host)?;
         self.rebuild_native_filter_plan(object)?;
         Ok(None)
     }
-    fn native_filter_signature(&self, object: i32) -> Result<Value> {
+    pub(super) fn native_filter_signature(&self, object: i32) -> Result<Value> {
         let filter = self
             .graph
             .filters
@@ -129,33 +133,34 @@ impl BgiVm {
         });
         let n = p.native;
         Ok(
-            json!({"screen":self.graph.screen,"cut":[n.priority,cut],"origin":self.native_filter_origin(object)?,"mode":filter.mode,"color":filter.color,"shift":filter.shift,"level":p.transparency_parameter(),"mask":filter.mask,"mask_valid":mask_valid,"revisions":revisions}),
+            json!({"screen":self.graph.screen,"cut":[n.priority,cut],"origin":self.native_filter_origin(object)?,"mode":filter.mode,"color":filter.color,"shift":filter.shift,"level":p.transparency_parameter(),"mask":filter.mask,"mask_valid":mask_valid,"revisions":revisions,"effector":filter.effector.as_ref().map(|e|e.descriptor()),"sampler":p.properties.get(&255),"fixed":p.native.fixed_parameter_16_16,"background":p.background.map(|b|format!("{b:?}"))}),
         )
     }
-    fn native_filter_origin(&self, object: i32) -> Result<[i32; 2]> {
-        let n = &self
+    pub(super) fn native_filter_origin(&self, object: i32) -> Result<[i32; 2]> {
+        self.graph
+            .draw_position(object)
+            .context("BGI filter draw position")
+    }
+    pub(super) fn rebuild_native_filter_plan(&mut self, object: i32) -> Result<()> {
+        if self
             .graph
             .objects
             .get(&object)
-            .context("BGI filter object")?
-            .native;
-        let offset = if n.global_display_offset_enabled != 0 {
-            self.graph.display_offset
-        } else {
-            [0; 2]
-        };
-        Ok([
-            n.position_x
-                .wrapping_add(n.primary_offset_x)
-                .wrapping_add(n.secondary_offset_x)
-                .wrapping_add(offset[0]),
-            n.position_y
-                .wrapping_add(n.primary_offset_y)
-                .wrapping_add(n.secondary_offset_y)
-                .wrapping_add(offset[1]),
-        ])
-    }
-    fn rebuild_native_filter_plan(&mut self, object: i32) -> Result<()> {
+            .and_then(|p| p.background)
+            .is_some_and(|b| b.class == BackClass::BackF)
+        {
+            return self.rebuild_native_backf(object);
+        }
+
+        if self
+            .graph
+            .filters
+            .get(&object)
+            .is_some_and(|f| f.effector.is_some())
+        {
+            return self.rebuild_native_effector_plan(object);
+        }
+
         let signature = self.native_filter_signature(object)?;
         let f = self
             .graph
@@ -202,6 +207,10 @@ impl BgiVm {
                 inputs,
                 operation: Some(operation),
                 quad: None,
+                source_format: None,
+                warp: None,
+                compound: None,
+                projection: None,
                 format: 2,
                 force_opaque: false,
                 filters: Vec::new(),
@@ -220,6 +229,9 @@ impl BgiVm {
             .filter(|id| self.graph.filters.contains_key(id))
             .collect::<Vec<_>>();
         for object in objects {
+            if self.graph.images.expired.contains(&object) {
+                continue;
+            }
             // Finish the captured immutable prefix before scheduling a newer
             // one; continuously changing animation must not starve completion.
             if self.graph.images.dirty.contains(&object) {
@@ -232,6 +244,7 @@ impl BgiVm {
                 .context("BGI filter object")?;
             if self.graph.global_enabled == 0
                 || p.native.draw_enabled == 0
+                || p.background.is_some_and(|b| b.active == 0)
                 || p.native.suppress_draw != 0
                 || p.mask_alpha >= 256
                 || p.alpha_multiplier == 0
@@ -240,10 +253,22 @@ impl BgiVm {
                 continue;
             }
             let signature = self.native_filter_signature(object)?;
-            if self.graph.filters[&object].signature.as_ref() == Some(&signature) {
+            let feedback_due = self.graph.filters[&object]
+                .effector
+                .as_ref()
+                .is_some_and(|e| e.mode == 4 && e.feedback_at != Some(host.now_ms()));
+            if !feedback_due && self.graph.filters[&object].signature.as_ref() == Some(&signature) {
                 continue;
             }
             self.rebuild_native_filter_plan(object)?;
+            if let Some(e) = self
+                .graph
+                .filters
+                .get_mut(&object)
+                .and_then(|f| f.effector.as_mut())
+            {
+                e.feedback_at = Some(host.now_ms());
+            }
             if self.refresh_graph_image(host, object)? {
                 self.publish_graph(host)?;
             }

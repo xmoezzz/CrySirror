@@ -3,29 +3,9 @@
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 //! Engine vector paths over pinned tiny-skia; no GDI+, DLL, VM or device.
 use crate::ImageSurface;
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
+pub use crysirror_core::vector_scene::PathCommand;
 use serde::{Deserialize, Serialize};
-/// A geometric path command; curves use explicit control points.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum PathCommand {
-    Move {
-        to: [f32; 2],
-    },
-    Line {
-        to: [f32; 2],
-    },
-    Quad {
-        control: [f32; 2],
-        to: [f32; 2],
-    },
-    Cubic {
-        control1: [f32; 2],
-        control2: [f32; 2],
-        to: [f32; 2],
-    },
-    Close,
-}
 /// A solid-color stroke with butt caps and miter joins.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

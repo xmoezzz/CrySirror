@@ -10,6 +10,7 @@ pub(crate) struct SystemState {
     pub(crate) windowed_size: Option<[i32; 2]>,
     pub(crate) fullscreen_scale: i32,
     pub(crate) display_scaling_mode: i32,
+    pub(crate) monitor_mode: i32,
     pub(crate) close_mode: i32,
     pub(crate) minimized_latch: bool,
 }
@@ -32,6 +33,7 @@ impl Default for SystemState {
             windowed_size: None,
             fullscreen_scale: 0,
             display_scaling_mode: 0,
+            monitor_mode: 0,
             close_mode: 0,
             minimized_latch: false,
         }
@@ -48,15 +50,9 @@ impl SystemState {
         if self.fullscreen_scale != 2 {
             return self.fullscreen_scale;
         }
-        let Some([w, h]) = desktop.map(adjusted_desktop) else {
-            return 2;
-        };
+        let [w, h] = adjusted_desktop(desktop.unwrap_or([0, 0]));
         let [mw, mh] = self.display_size();
-        if mw > 0 && mh > 0 && (w < mw as u32 || h < mh as u32) {
-            0
-        } else {
-            2
-        }
+        if w < mw as u32 || h < mh as u32 { 0 } else { 2 }
     }
     pub(crate) fn aspect_mismatch(&self, desktop: Option<[u32; 2]>) -> bool {
         let Some([w, h]) = desktop.map(adjusted_desktop) else {
@@ -82,9 +78,72 @@ pub(crate) fn adjusted_desktop([mut w, mut h]: [u32; 2]) -> [u32; 2] {
     [w, h]
 }
 pub(crate) fn handles(group: u8, id: u16) -> bool {
-    group == 0x80 && matches!(id, 0x08 | 0x0e | 0x1f | 0x61 | 0x63..=0x69 | 0x6f)
+    group == 0x80 && matches!(id, 0x08 | 0x0e | 0x1f | 0x60 | 0x61 | 0x63..=0x69 | 0x6f)
 }
 impl BgiVm {
+    pub(crate) fn apply_display_scale(&self, host: &mut dyn HostServices) -> Result<()> {
+        let mode = if self.system.fullscreen {
+            self.system
+                .effective_scale(host.display_info().map(|d| d.screen))
+        } else {
+            0
+        };
+        let mode = match mode {
+            1 => "stretch",
+            2 => "center",
+            _ => "fit",
+        };
+        self.submit(
+            host,
+            json!({"ui":[{"op":"set_presentation_scale","mode":mode}]}),
+        )
+    }
+    fn apply_windowed_size(&self, host: &mut dyn HostServices) -> Result<()> {
+        if !self.system.fullscreen {
+            let [w, h] = self.system.windowed_size();
+            let size = [u32::try_from(w)?, u32::try_from(h)?];
+            self.submit(host, json!({"ui":[{"op":"set_window_size","size":size}]}))?;
+        }
+        Ok(())
+    }
+    pub(crate) fn display_action(
+        &mut self,
+        host: &mut dyn HostServices,
+        _vm: &mut Machine,
+        action: crysirror_bgi_vm::NativeDisplayAction,
+    ) -> Result<()> {
+        use crysirror_bgi_vm::NativeDisplayAction as A;
+        match action {
+            A::RegisterMode {
+                index,
+                width,
+                height,
+            } => {
+                ensure!(
+                    index < 8 && width != 0 && height != 0,
+                    "BGI invalid validated display mode"
+                );
+                self.system.mode_sizes[index] = [width, height];
+            }
+            A::WindowedSize { width, height } => {
+                self.system.windowed_size = (width != 0 && height != 0).then_some([width, height]);
+                self.apply_windowed_size(host)?;
+            }
+            A::ScaleMode { mode } => {
+                ensure!(
+                    (0..=2).contains(&mode),
+                    "BGI invalid validated scaling mode"
+                );
+                self.system.fullscreen_scale = mode;
+                self.apply_display_scale(host)?;
+            }
+            A::MonitorMode { mode } => {
+                ensure!((0..=1).contains(&mode), "BGI invalid monitor mode");
+                self.system.monitor_mode = mode;
+            }
+        }
+        Ok(())
+    }
     pub(crate) fn configure_cursor_motion(
         &self,
         host: &mut dyn HostServices,
@@ -122,6 +181,30 @@ impl BgiVm {
             )),
             0x1f => self.configure_cursor_motion(host, a[5], a[4], a[3], a[2], a[1], a[0])?,
             0x63 => self.system.display_scaling_mode = i32::from(a[0] == 0),
+            0x60 => {
+                ensure!((a[1] as u32) < 2, "BGI invalid native pixel mode {}", a[1]);
+                ensure!(
+                    (a[0] as u32) < 8,
+                    "BGI invalid native display mode {}",
+                    a[0]
+                );
+                let [w, h] = self.system.mode_sizes[a[0] as usize];
+                if w > 0 && h > 0 {
+                    let size = [w as u32, h as u32];
+                    host.request_canvas_size(self.client, size)?;
+                    self.graph.screen = size;
+                }
+                self.submit(
+                    host,
+                    json!({"ui":[{"op":"set_fullscreen","enabled":a[2]!=0}]}),
+                )?;
+                self.system.mode_index = a[0];
+                self.system.pixel_mode = a[1];
+                self.system.fullscreen = a[2] != 0;
+                self.apply_windowed_size(host)?;
+                self.apply_display_scale(host)?;
+                self.publish_graph(host)?;
+            }
             0x61 => out.push(i32::from(self.system.fullscreen)),
             0x64 => {
                 self.submit(

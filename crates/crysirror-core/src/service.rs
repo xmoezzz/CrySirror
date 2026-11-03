@@ -35,6 +35,8 @@ mod input_observation;
 pub use input_observation::*;
 mod platform;
 pub use platform::*;
+mod desktop;
+pub use desktop::*;
 
 pub const SIMPLE_TEXT_LAYOUT: &str = "simple-horizontal-v1";
 /// Shared per-client count budget for retained drawing canvases and their
@@ -437,7 +439,10 @@ pub enum AudioRequest {
     /// ramps remain intact. An empty side moves the other voice. Unpublished
     /// preparation intents, pending seeks/retirements or an active render lease
     /// reject before mutation. This is unrelated to decoded left/right exchange.
-    ExchangeChannels { left: u32, right: u32 },
+    ExchangeChannels {
+        left: u32,
+        right: u32,
+    },
     /// Set only a group's gain, creating a root with default settings if absent.
     /// Existing parent and mute controls remain host-owned.
     SetMixGroupGain {
@@ -485,7 +490,10 @@ pub enum AudioRequest {
     /// Park/re-enable input and per-voice DSP without reopening a decoder,
     /// resetting gain or cancelling a seek. Independent gain/pan clocks keep
     /// running unless fully paused. Ended sources must seek before activation.
-    SetTransportActive { channel: u32, active: bool },
+    SetTransportActive {
+        channel: u32,
+        active: bool,
+    },
     Pause {
         channel: u32,
         paused: bool,
@@ -521,7 +529,9 @@ pub enum AudioRequest {
     },
     /// Finish the current own-amplitude ramp at its retained target. A pending
     /// gain-stop retires the voice; independent transport deadlines stay intact.
-    FinishGainFade { channel: u32 },
+    FinishGainFade {
+        channel: u32,
+    },
     SetPan {
         channel: u32,
         pan: f32,
@@ -544,7 +554,10 @@ pub enum AudioRequest {
         passes: Option<u32>,
     },
     /// Exchange decoded left/right channels without restarting transport.
-    SetChannelSwap { channel: u32, swapped: bool },
+    SetChannelSwap {
+        channel: u32,
+        swapped: bool,
+    },
     /// Change loop mode at the current source position; never restart/seek.
     /// Enabling restores unbounded repeats, clearing a prior counted schedule.
     SetLooped {
@@ -634,9 +647,9 @@ pub struct DisplayInfo {
 /// Physical geometry reported by the presenting window owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WindowGeometry {
-    pub inner_size:[u32;2],
-    pub outer_size:[u32;2],
-    pub outer_position:Option<[i32;2]>,
+    pub inner_size: [u32; 2],
+    pub outer_size: [u32; 2],
+    pub outer_position: Option<[i32; 2]>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaPhase {
@@ -674,15 +687,33 @@ pub struct MediaFrame {
 }
 impl MediaFrame {
     pub fn new(size: [u32; 2], rgba: Vec<u8>, revision: u64, pts_ms: i64) -> Result<Self> {
-        let bytes=u64::from(size[0])*u64::from(size[1])*4;
-        if size.iter().any(|&n|n==0 || n>8192) || bytes>64*1024*1024 || bytes!=rgba.len() as u64 {
+        let bytes = u64::from(size[0]) * u64::from(size[1]) * 4;
+        if size.iter().any(|&n| n == 0 || n > 8192)
+            || bytes > 64 * 1024 * 1024
+            || bytes != rgba.len() as u64
+        {
             return Err(crate::Error::Invalid("media picture dimensions/bytes"));
         }
-        Ok(Self {size,rgba:rgba.into(),revision,pts_ms,storage:None})
+        Ok(Self {
+            size,
+            rgba: rgba.into(),
+            revision,
+            pts_ms,
+            storage: None,
+        })
     }
-    pub fn size(&self) -> [u32; 2] {self.size}
-    pub fn rgba(&self) -> &[u8] {&self.rgba}
-    pub fn retain_storage(&mut self, lease:Arc<dyn Send+Sync>) {self.storage=Some(lease);}
+    pub fn size(&self) -> [u32; 2] {
+        self.size
+    }
+    pub fn rgba(&self) -> &[u8] {
+        &self.rgba
+    }
+    pub fn shared_rgba(&self) -> Arc<[u8]> {
+        self.rgba.clone()
+    }
+    pub fn retain_storage(&mut self, lease: Arc<dyn Send + Sync>) {
+        self.storage = Some(lease);
+    }
 }
 #[derive(Clone, Copy, Debug)]
 pub struct FontMetrics {
@@ -703,7 +734,10 @@ pub enum EngineQuery {
     Canvas(u32),
     /// Exact stored RGBA sample of an owned canvas. Unsupported paint profiles
     /// fail explicitly; no device readback or default matte is implied.
-    CanvasPixel { id: u32, point: [u32; 2] },
+    CanvasPixel {
+        id: u32,
+        point: [u32; 2],
+    },
     UiWidget(u32),
     /// Owner-scoped retained button pointer/focus/press state.
     UiInteraction(u32),
@@ -716,7 +750,10 @@ pub enum EngineQuery {
     UiMotion(u32),
     /// Freeze this client's current engine UI into reusable logical LayerSpec
     /// records. None selects all owned UI; a root selects its widget subtree.
-    UiSnapshot { canvas: [u32; 2], root: Option<u32> },
+    UiSnapshot {
+        canvas: [u32; 2],
+        root: Option<u32>,
+    },
     /// Query completed worker state for this owner's VFX entity/revision.
     /// A declaration or admitted task is not a completion receipt. Results are
     /// pending until the requested tick and RNG exchange have completed.
@@ -762,21 +799,32 @@ pub struct StorageMetadata {
 pub trait ClientStorage: Send + Sync {
     /// Read metadata for a canonical mount-relative name; empty names denote
     /// the mount root. Queries must not open ambient paths or decode resources.
-    fn metadata(&self, _mount: crate::path::Mount, _relative: &str) -> Result<Option<StorageMetadata>> {
+    fn metadata(
+        &self,
+        _mount: crate::path::Mount,
+        _relative: &str,
+    ) -> Result<Option<StorageMetadata>> {
         Err(crate::Error::Unsupported("capability storage metadata"))
     }
 
     /// Physical read-only permission, independent of a capability's access mode.
     /// Empty canonical names refer to the selected capability root.
     fn read_only(&self, _mount: crate::path::Mount, _relative: &str) -> Result<bool> {
-        Err(crate::Error::Unsupported("storage physical read-only permission"))
+        Err(crate::Error::Unsupported(
+            "storage physical read-only permission",
+        ))
     }
 
     /// Copy a loose regular file and its permissions to an existing directory.
     /// Preserve its modification time when the filesystem permits. Providers
     /// unable to copy metadata reject rather than falling back to byte upload.
     /// Clearing an existing target's read-only permission is explicit policy.
-    fn copy_file(&self, _source: &VfsPath, _target: &VfsPath, _replace_read_only: bool) -> Result<()> {
+    fn copy_file(
+        &self,
+        _source: &VfsPath,
+        _target: &VfsPath,
+        _replace_read_only: bool,
+    ) -> Result<()> {
         Err(crate::Error::Unsupported("storage file copy with metadata"))
     }
 
@@ -809,13 +857,19 @@ pub trait ClientStorage: Send + Sync {
     }
     /// Find a previously mounted container within this client's asset namespace.
     /// This metadata query does not open files or grant additional authority.
-    fn container_mount(&self, _source:&str) -> Result<Option<String>> { Ok(None) }
+    fn container_mount(&self, _source: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
     /// True when `path` resolves to a mounted container provider (an archive
     /// whose contents cannot change while mounted), not to a plain file.
-    fn served_by_container(&self, _path: &VfsPath) -> bool { false }
+    fn served_by_container(&self, _path: &VfsPath) -> bool {
+        false
+    }
     /// The mounted container serving `path`, as `(container source, mount
     /// point)` in the client's asset namespace; `None` for plain files.
-    fn serving_container(&self, _path: &VfsPath) -> Option<(String, String)> { None }
+    fn serving_container(&self, _path: &VfsPath) -> Option<(String, String)> {
+        None
+    }
     /// Optional exclusive lease inside this client's cache namespace. Used by
     /// native save implementations that cannot merge concurrent writers.
     fn acquire_lease(&self, _name: &str) -> Result<alloc::boxed::Box<dyn StorageLease>> {
@@ -825,9 +879,24 @@ pub trait ClientStorage: Send + Sync {
     fn remove(&self, path: &VfsPath) -> Result<()>;
     /// Create exactly one directory level in a writable namespace. Existing
     /// directories fail; implicit parent creation is an atomic-write policy.
-    fn create_directory(&self,_path:&VfsPath)->Result<()>{Err(crate::Error::Unsupported("storage directory creation"))}
+    /// Move a file/directory atomically without replacing an existing target.
+    /// Both names are capability paths; unsupported hosts reject admission.
+    fn rename_no_replace(&self,_source:&VfsPath,_target:&VfsPath)->Result<()>{
+        Err(crate::Error::Unsupported("atomic no-replace rename"))
+    }
+    /// Atomic replacement which requires the destination's parent to exist.
+    fn write_atomic_existing_parent(&self, _path: &VfsPath, _data: &[u8]) -> Result<()> {
+        Err(crate::Error::Unsupported(
+            "atomic write requiring an existing parent",
+        ))
+    }
+    fn create_directory(&self, _path: &VfsPath) -> Result<()> {
+        Err(crate::Error::Unsupported("storage directory creation"))
+    }
     /// Remove an empty directory only; never a recursive deletion.
-    fn remove_directory(&self,_path:&VfsPath)->Result<()>{Err(crate::Error::Unsupported("storage empty-directory removal"))}
+    fn remove_directory(&self, _path: &VfsPath) -> Result<()> {
+        Err(crate::Error::Unsupported("storage empty-directory removal"))
+    }
 
     /// Names directly inside `dir` ("" is the mount root), sorted.
     fn list(&self, mount: crate::path::Mount, dir: &str) -> Result<Vec<String>>;
@@ -850,43 +919,92 @@ pub struct UploadedImage {
 }
 
 pub trait ImageMetadata: Send + Sync {
-    fn begin_packed_pixels(&self,_spec:crate::image_processing::PackedImageSpec)->Result<crate::image_processing::ImageJob>{Err(crate::Error::Unsupported("packed image resource preparation"))}
+    fn begin_packed_pixels(
+        &self,
+        _spec: crate::image_processing::PackedImageSpec,
+    ) -> Result<crate::image_processing::ImageJob> {
+        Err(crate::Error::Unsupported(
+            "packed image resource preparation",
+        ))
+    }
 
-    fn begin_bitmap_text(&self, _destination:crate::image_processing::ImageInput, _spec:crate::image_processing::BitmapTextSpec)->Result<crate::image_processing::ImageJob>{
+    fn begin_bitmap_text(
+        &self,
+        _destination: crate::image_processing::ImageInput,
+        _spec: crate::image_processing::BitmapTextSpec,
+    ) -> Result<crate::image_processing::ImageJob> {
         Err(crate::Error::Unsupported("integer bitmap text records"))
     }
 
     /// Decode bounded immutable encoded bytes on engine workers. Dimensions
     /// are learned by the shared registry, without an adapter-side decoder.
-    fn begin_encoded(&self, _name:&str, _bytes:Arc<[u8]>)->Result<crate::image_processing::ImageJob>{
-        Err(crate::Error::Unsupported("encoded image resource preparation"))
+    /// Rasterise reusable vector groups/brushes/masks/filters against frozen
+    /// client-owned image resources, without a compatibility VM or device.
+    fn begin_vector_scene(&self,_spec:crate::vector_scene::VectorSceneSpec)->Result<crate::image_processing::ImageJob>{
+        Err(crate::Error::Unsupported("vector scene raster job"))
+    }
+    /// Decode one encoded delta frame over a frozen client-owned image.
+    fn begin_encoded_frame(
+        &self,
+        _spec: crate::frame_image::EncodedFrameSpec,
+    ) -> Result<crate::image_processing::ImageJob> {
+        Err(crate::Error::Unsupported("encoded frame image job"))
+    }
+    fn begin_encoded(
+        &self,
+        _name: &str,
+        _bytes: Arc<[u8]>,
+    ) -> Result<crate::image_processing::ImageJob> {
+        Err(crate::Error::Unsupported(
+            "encoded image resource preparation",
+        ))
     }
     /// Freeze an authorized font and prepare regular positioned coverage using
     /// the engine text rasterizer. Polling is nonblocking; dropping the job
     /// cancels preparation. The result is not implicitly published to a catalog.
-    fn begin_glyph_image(&self, _spec: crate::image_processing::GlyphImageSpec) -> Result<crate::image_processing::ImageJob> {
+    fn begin_glyph_image(
+        &self,
+        _spec: crate::image_processing::GlyphImageSpec,
+    ) -> Result<crate::image_processing::ImageJob> {
         Err(crate::Error::Unsupported("worker glyph image preparation"))
     }
     /// Freeze the same scoped face and prepare an explicit styled/coverage
     /// pipeline. This is not an implicit claim of a native platform rasterizer.
-    fn begin_glyph_image_batch(&self, _spec:crate::image_processing::GlyphImageBatchSpec)->Result<alloc::boxed::Box<dyn crate::image_processing::GlyphImageBatchQuery>> {
+    fn begin_glyph_image_batch(
+        &self,
+        _spec: crate::image_processing::GlyphImageBatchSpec,
+    ) -> Result<alloc::boxed::Box<dyn crate::image_processing::GlyphImageBatchQuery>> {
         Err(crate::Error::Unsupported("batched glyph image preparation"))
     }
-    fn begin_styled_glyph_image(&self, _spec: crate::image_processing::StyledGlyphImageSpec) -> Result<crate::image_processing::ImageJob> {
-        Err(crate::Error::Unsupported("worker styled glyph image preparation"))
+    fn begin_styled_glyph_image(
+        &self,
+        _spec: crate::image_processing::StyledGlyphImageSpec,
+    ) -> Result<crate::image_processing::ImageJob> {
+        Err(crate::Error::Unsupported(
+            "worker styled glyph image preparation",
+        ))
     }
     /// Original encoded properties from the same shared decoder selection.
     /// Absence is Unsupported, never inferred from normalized pixel opacity.
-    fn begin_encoding_info(&self, _asset: &str) -> Result<alloc::boxed::Box<dyn crate::image_encoding::ImageEncodingInfoQuery>> {
+    fn begin_encoding_info(
+        &self,
+        _asset: &str,
+    ) -> Result<alloc::boxed::Box<dyn crate::image_encoding::ImageEncodingInfoQuery>> {
         Err(crate::Error::Unsupported("encoded image metadata"))
     }
     /// Encoded content identity observed by the metadata decode. Native retained
     /// image processing rejects a changed file rather than transforming new bytes.
-    fn fingerprint(&self,_asset:&str)->Result<[u8;32]>{Err(crate::Error::Unsupported("image content identity"))}
+    fn fingerprint(&self, _asset: &str) -> Result<[u8; 32]> {
+        Err(crate::Error::Unsupported("image content identity"))
+    }
 
     /// Shared image operations encoded as a bounded ImageEffect array. A
     /// provider reserves worker/memory capacity before accepting the input.
-    fn begin_process(&self, _source:crate::image_processing::ImageInput, _effects:Arc<[u8]>)->Result<crate::image_processing::ImageJob>{
+    fn begin_process(
+        &self,
+        _source: crate::image_processing::ImageInput,
+        _effects: Arc<[u8]>,
+    ) -> Result<crate::image_processing::ImageJob> {
         Err(crate::Error::Unsupported("worker image processing"))
     }
 
@@ -930,57 +1048,173 @@ pub trait TextMeasurement: Send + Sync {
     }
 }
 
+/// Mapping from logical canvas pixels to the host presentation surface.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresentationScale {
+    #[default]
+    Fit,
+    Stretch,
+    /// Native pixel size centered in the surface; fit if it would be cropped.
+    Center,
+}
+
 pub trait HostServices: FileSystem {
     /// Prepare bounded seed words for a client's game random streams. Sampling
     /// is an explicit worker dependency; no ambient/simulation clock fallback.
-    fn begin_session_seed(&mut self,_client:ClientId,_source:SessionSeedSource)->Result<alloc::boxed::Box<dyn SessionSeedQuery>>{
+    fn begin_session_seed(
+        &mut self,
+        _client: ClientId,
+        _source: SessionSeedSource,
+    ) -> Result<alloc::boxed::Box<dyn SessionSeedQuery>> {
         Err(crate::Error::Unsupported("session seed material"))
     }
-    fn begin_media_probe(&mut self,_client:ClientId,_asset:&VfsPath)->Result<MediaProbeJob>{Err(crate::Error::Unsupported("media decoder header probe"))}
+    fn begin_media_probe(&mut self, _client: ClientId, _asset: &VfsPath) -> Result<MediaProbeJob> {
+        Err(crate::Error::Unsupported("media decoder header probe"))
+    }
     /// Freeze a client Canvas and asynchronously prepare an immutable engine
     /// image. Requires an installed presenter; polling never waits for a GPU.
-    fn begin_canvas_image(&mut self, _client: ClientId, _canvas: u32) -> Result<crate::image_processing::ImageJob> {
+    fn begin_canvas_image(
+        &mut self,
+        _client: ClientId,
+        _canvas: u32,
+    ) -> Result<crate::image_processing::ImageJob> {
         Err(crate::Error::Unsupported("Canvas image capture presenter"))
+    }
+    /// Freeze a source-local [x,y,width,height] region of a retained Canvas.
+    /// Region extents must lie inside the source; large logical surfaces need
+    /// only admit the requested bounded pixel region to a presenter.
+    fn begin_canvas_region_image(
+        &mut self,
+        _client: ClientId,
+        _canvas: u32,
+        _region: [u32; 4],
+    ) -> Result<crate::image_processing::ImageJob> {
+        Err(crate::Error::Unsupported(
+            "Canvas region image capture presenter",
+        ))
     }
     /// Asynchronously capture the frame the presenter would show now, with every
     /// blend, movie and transition as displayed. Requires an installed presenter.
     /// Freeze only the owned Layer painter prefix below an exclusive order.
     /// The presenter rasterizes shared scene resources; no adapter pixels or
     /// later display payloads enter the result.
-    fn begin_layer_prefix_image(&mut self,_client:ClientId,_size:[u32;2],_order_exclusive:[i32;2])->Result<crate::image_processing::ImageJob>{Err(crate::Error::Unsupported("layer prefix image capture"))}
-    fn begin_layer_prefix_image_over(&mut self,client:ClientId,size:[u32;2],order_exclusive:[i32;2],clear:[u8;4])->Result<crate::image_processing::ImageJob>{if clear==[0;4]{self.begin_layer_prefix_image(client,size,order_exclusive)}else{Err(crate::Error::Unsupported("layer prefix capture clear colour"))}}
+    fn begin_layer_prefix_image(
+        &mut self,
+        _client: ClientId,
+        _size: [u32; 2],
+        _order_exclusive: [i32; 2],
+    ) -> Result<crate::image_processing::ImageJob> {
+        Err(crate::Error::Unsupported("layer prefix image capture"))
+    }
+    fn begin_layer_prefix_image_over(
+        &mut self,
+        client: ClientId,
+        size: [u32; 2],
+        order_exclusive: [i32; 2],
+        clear: [u8; 4],
+    ) -> Result<crate::image_processing::ImageJob> {
+        if clear == [0; 4] {
+            self.begin_layer_prefix_image(client, size, order_exclusive)
+        } else {
+            Err(crate::Error::Unsupported(
+                "layer prefix capture clear colour",
+            ))
+        }
+    }
 
-    fn begin_frame_capture(&mut self, _client: ClientId) -> Result<crate::image_processing::ImageJob> {
+    fn begin_frame_capture(
+        &mut self,
+        _client: ClientId,
+    ) -> Result<crate::image_processing::ImageJob> {
         Err(crate::Error::Unsupported("frame capture presenter"))
     }
-    fn begin_pattern(&mut self,_client:ClientId,_request:PatternRequest)->Result<PatternJob>{Err(crate::Error::Unsupported("persistent pattern worker"))}
+    fn begin_pattern(&mut self, _client: ClientId, _request: PatternRequest) -> Result<PatternJob> {
+        Err(crate::Error::Unsupported("persistent pattern worker"))
+    }
 
     /// Atomically upsert explicit decoded-frame metadata; duplicate batch keys fail.
-    fn publish_audio_loop_metadata(&mut self,_client:ClientId,_entries:&[AudioLoopMetadata])->Result<AudioLoopCatalogReceipt>{Err(crate::Error::Unsupported("audio loop catalog"))}
-    fn audio_loop_metadata(&self,_client:ClientId,_asset:&str)->Result<Option<AudioLoopMetadata>>{Err(crate::Error::Unsupported("audio loop catalog"))}
-    fn clear_audio_loop_metadata(&mut self,_client:ClientId)->Result<AudioLoopCatalogReceipt>{Err(crate::Error::Unsupported("audio loop catalog"))}
+    fn publish_audio_loop_metadata(
+        &mut self,
+        _client: ClientId,
+        _entries: &[AudioLoopMetadata],
+    ) -> Result<AudioLoopCatalogReceipt> {
+        Err(crate::Error::Unsupported("audio loop catalog"))
+    }
+    fn audio_loop_metadata(
+        &self,
+        _client: ClientId,
+        _asset: &str,
+    ) -> Result<Option<AudioLoopMetadata>> {
+        Err(crate::Error::Unsupported("audio loop catalog"))
+    }
+    fn clear_audio_loop_metadata(&mut self, _client: ClientId) -> Result<AudioLoopCatalogReceipt> {
+        Err(crate::Error::Unsupported("audio loop catalog"))
+    }
 
     /// Sample host local time on a worker; Ready carries its actual Unix instant
     /// and local offset. Does not substitute the deterministic engine clock.
-    fn begin_civil_time(&mut self,_client:ClientId)->Result<alloc::boxed::Box<dyn CivilTimeQuery>>{Err(crate::Error::Unsupported("host civil clock"))}
+    fn begin_civil_time(
+        &mut self,
+        _client: ClientId,
+    ) -> Result<alloc::boxed::Box<dyn CivilTimeQuery>> {
+        Err(crate::Error::Unsupported("host civil clock"))
+    }
 
     /// Append to the canonical engine log at its exclusive owner boundary.
     /// The returned receipt means committed, not just queued. No filesystem sink.
-    fn append_log(&mut self,_client:ClientId,_message:&str)->Result<LogReceipt>{Err(crate::Error::Unsupported("engine log"))}
-    fn log_snapshot(&self,_client:ClientId)->Result<LogSnapshot>{Err(crate::Error::Unsupported("engine log"))}
+    fn append_log(&mut self, _client: ClientId, _message: &str) -> Result<LogReceipt> {
+        Err(crate::Error::Unsupported("engine log"))
+    }
+    fn log_snapshot(&self, _client: ClientId) -> Result<LogSnapshot> {
+        Err(crate::Error::Unsupported("engine log"))
+    }
     /// Read client logical locks and explicit physical capability availability.
-    fn keyboard_locks(&self,_client:ClientId)->Result<KeyboardLockSnapshot>{Err(crate::Error::Unsupported("keyboard locks"))}
+    fn keyboard_locks(&self, _client: ClientId) -> Result<KeyboardLockSnapshot> {
+        Err(crate::Error::Unsupported("keyboard locks"))
+    }
     /// Commit logical state only; must not toggle an ambient OS keyboard.
-    fn set_keyboard_locks(&mut self,_client:ClientId,_state:KeyboardLockState)->Result<KeyboardLockSnapshot>{Err(crate::Error::Unsupported("keyboard locks"))}
+    fn set_keyboard_locks(
+        &mut self,
+        _client: ClientId,
+        _state: KeyboardLockState,
+    ) -> Result<KeyboardLockSnapshot> {
+        Err(crate::Error::Unsupported("keyboard locks"))
+    }
 
     /// Admit a client-owned live-voice retirement and external-clock release.
-    fn begin_audio_release(&mut self,_client:ClientId,_spec:AudioReleaseSpec)->Result<AudioReleaseHandle>{Err(crate::Error::Unsupported("audio voice release"))}
+    fn begin_audio_release(
+        &mut self,
+        _client: ClientId,
+        _spec: AudioReleaseSpec,
+    ) -> Result<AudioReleaseHandle> {
+        Err(crate::Error::Unsupported("audio voice release"))
+    }
     /// Submit a monotonic caller update; completion is observed separately.
-    fn advance_audio_release(&mut self,_client:ClientId,_handle:AudioReleaseHandle,_elapsed_updates:u64)->Result<()>{Err(crate::Error::Unsupported("audio voice release"))}
+    fn advance_audio_release(
+        &mut self,
+        _client: ClientId,
+        _handle: AudioReleaseHandle,
+        _elapsed_updates: u64,
+    ) -> Result<()> {
+        Err(crate::Error::Unsupported("audio voice release"))
+    }
     /// Poll the actual owner boundary, never infer completion from admission.
-    fn audio_release_info(&mut self,_client:ClientId,_handle:AudioReleaseHandle)->Result<AudioReleaseInfo>{Err(crate::Error::Unsupported("audio voice release"))}
+    fn audio_release_info(
+        &mut self,
+        _client: ClientId,
+        _handle: AudioReleaseHandle,
+    ) -> Result<AudioReleaseInfo> {
+        Err(crate::Error::Unsupported("audio voice release"))
+    }
     /// Release a terminal receipt. Active producer state cannot be discarded.
-    fn release_audio_release(&mut self,_client:ClientId,_handle:AudioReleaseHandle)->Result<()>{Err(crate::Error::Unsupported("audio voice release"))}
+    fn release_audio_release(
+        &mut self,
+        _client: ClientId,
+        _handle: AudioReleaseHandle,
+    ) -> Result<()> {
+        Err(crate::Error::Unsupported("audio voice release"))
+    }
 
     /// Availability of a canonical codec in the host's actual decoder registry.
     /// This does not promise support for every channel mapping or metadata mode.
@@ -1076,8 +1310,16 @@ pub trait HostServices: FileSystem {
     }
     /// Prepare a scoped immutable encoded resource from an archive member or
     /// VM memory block. Decoder work and metadata measurement stay on workers.
-    fn begin_encoded_audio_resource(&mut self, _client:ClientId, _name:&str, _encoded:EncodedAudio, _measure_frames:bool)->Result<u64> {
-        Err(crate::Error::Unsupported("encoded audio resource preparation"))
+    fn begin_encoded_audio_resource(
+        &mut self,
+        _client: ClientId,
+        _name: &str,
+        _encoded: EncodedAudio,
+        _measure_frames: bool,
+    ) -> Result<u64> {
+        Err(crate::Error::Unsupported(
+            "encoded audio resource preparation",
+        ))
     }
     /// Prepare a new immutable resource using a bounded CPU transform.
     fn begin_transformed_audio_resource(
@@ -1134,14 +1376,24 @@ pub trait HostServices: FileSystem {
     /// remains pending until the real decoder cursor and owner publication.
     /// Prepare a complete client replacement from pure play recipes. An empty
     /// list means clear that client's voices at commit; this starts no playback.
-    fn begin_audio_replacement(&mut self, _client: ClientId, _requests: Vec<AudioRequest>) -> Result<AudioReplacementJob> {
-        Err(crate::Error::Unsupported("detached client audio replacement"))
+    fn begin_audio_replacement(
+        &mut self,
+        _client: ClientId,
+        _requests: Vec<AudioRequest>,
+    ) -> Result<AudioReplacementJob> {
+        Err(crate::Error::Unsupported(
+            "detached client audio replacement",
+        ))
     }
     fn begin_audio_seek(&mut self, _client: ClientId, _channel: u32, _frame: u64) -> Result<u64> {
         Err(crate::Error::Unsupported("channel audio seek"))
     }
     /// Retained scoped seek receipt; Ready is distinct from later voice EOF.
-    fn audio_seek_preparation(&mut self, _client: ClientId, _ticket: u64) -> Result<AudioPreparation> {
+    fn audio_seek_preparation(
+        &mut self,
+        _client: ClientId,
+        _ticket: u64,
+    ) -> Result<AudioPreparation> {
         Err(crate::Error::Unsupported("channel audio seek status"))
     }
     /// Cancel a pending seek/restore the previous logical position, or release
@@ -1173,10 +1425,17 @@ pub trait HostServices: FileSystem {
     /// Current focus published by the presenting window owner. None means
     /// this host has no window focus model, rather than an inactive window.
     /// Clients decide their explicit offscreen execution policy separately.
+    /// Resize the logical render/input canvas. This is independent of physical
+    /// window dimensions. Hosts publish the accepted size at their tick boundary.
+    fn request_canvas_size(&mut self, _client: ClientId, _size: [u32; 2]) -> Result<()> {
+        Err(crate::Error::Unsupported("logical canvas resizing"))
+    }
     fn window_focused(&self, _client: ClientId) -> Result<Option<bool>> {
         Ok(None)
     }
-    fn window_geometry(&self,_client:ClientId)->Result<Option<WindowGeometry>>{Ok(None)}
+    fn window_geometry(&self, _client: ClientId) -> Result<Option<WindowGeometry>> {
+        Ok(None)
+    }
     /// Actual minimized/iconic state from the window owner. Unavailable is
     /// distinct from false; loss of keyboard focus is not minimization.
     fn window_minimized(&self, _client: ClientId) -> Result<Option<bool>> {
@@ -1207,11 +1466,28 @@ pub trait HostServices: FileSystem {
     }
     /// Availability of an explicitly installed platform backend. This is not
     /// an entitlement check and never substitutes an SDK achievement result.
-    fn platform_integration(&self, _client: ClientId, _integration: PlatformIntegration) -> Result<PlatformIntegrationInfo> {
+    /// Admit one asynchronous desktop operation against the client's roots.
+    /// Providers distinguish unavailable capability, failure and user cancel.
+    fn begin_desktop_request(&mut self,_client:ClientId,_request:DesktopRequest)->Result<alloc::boxed::Box<dyn DesktopRequestJob>>{
+        Err(crate::Error::Unsupported("desktop host provider"))
+    }
+    fn platform_integration(
+        &self,
+        _client: ClientId,
+        _integration: PlatformIntegration,
+    ) -> Result<PlatformIntegrationInfo> {
         Err(crate::Error::Unsupported("platform integration status"))
     }
     /// Last owner-published picture; None while no frame has completed. A stale
     /// or foreign media identity must not expose another client's picture.
+    /// Client-scoped zero-copy image lease over the last published picture.
+    fn media_image(
+        &self,
+        _client: ClientId,
+        _id: u32,
+    ) -> Result<Option<Arc<dyn crate::image_processing::ImageResource>>> {
+        Err(crate::Error::Unsupported("media frame image lease"))
+    }
     fn media_frame(&self, _client: ClientId, _id: u32) -> Result<Option<MediaFrame>> {
         Err(crate::Error::Unsupported("engine media picture"))
     }
@@ -1257,9 +1533,18 @@ pub trait HostServices: FileSystem {
     }
     /// Publish an already-completed immutable ImageResource on the owner.
     /// No pixel algorithm/encoding/copy; returned path is a new generation.
-    fn publish_image_resource(&mut self,_client:ClientId,_id:u32,_image:Arc<dyn crate::image_processing::ImageResource>)->Result<UploadedImage>{Err(crate::Error::Unsupported("image resource publication"))}
+    fn publish_image_resource(
+        &mut self,
+        _client: ClientId,
+        _id: u32,
+        _image: Arc<dyn crate::image_processing::ImageResource>,
+    ) -> Result<UploadedImage> {
+        Err(crate::Error::Unsupported("image resource publication"))
+    }
     /// Retire a live path. Frozen renderer frames may retain its resource lease.
-    fn release_image_resource(&mut self,_client:ClientId,_path:&str)->Result<()>{Err(crate::Error::Unsupported("image resource publication"))}
+    fn release_image_resource(&mut self, _client: ClientId, _path: &str) -> Result<()> {
+        Err(crate::Error::Unsupported("image resource publication"))
+    }
     /// Register decoded pixels under a host-minted client-scoped logical path.
     fn upload_rgba(
         &mut self,
@@ -1302,7 +1587,12 @@ pub trait HostServices: FileSystem {
     }
     /// Publish a validated JSON PuppetFrame on an existing client-owned layer.
     /// Only decoded textures and engine mesh data cross this device-free boundary.
-    fn present_puppet_frame(&mut self, _client: ClientId, _layer: u32, _frame: &[u8]) -> Result<()> {
+    fn present_puppet_frame(
+        &mut self,
+        _client: ClientId,
+        _layer: u32,
+        _frame: &[u8],
+    ) -> Result<()> {
         Err(crate::Error::Unsupported("dynamic puppet frame"))
     }
     /// Replace a client-scoped dynamic RGBA resource or engine render target.
@@ -1442,14 +1732,36 @@ pub mod buttons {
     /// are not aliased to a different physical key by this conversion.
     pub fn windows_virtual_key(code: u32) -> Option<u64> {
         Some(match code {
-            1 => MOUSE_LEFT, 2 => MOUSE_RIGHT, 4 => MOUSE_MIDDLE,
-            8 => BACKSPACE, 9 => TAB, 13 => ENTER, 16 => SHIFT, 17 => CTRL,
-            27 => ESCAPE, 32 => SPACE, 33 => PAGE_UP, 34 => PAGE_DOWN,
-            35 => END, 36 => HOME, 37 => LEFT, 38 => UP, 39 => RIGHT, 40 => DOWN,
+            1 => MOUSE_LEFT,
+            2 => MOUSE_RIGHT,
+            4 => MOUSE_MIDDLE,
+            8 => BACKSPACE,
+            9 => TAB,
+            13 => ENTER,
+            16 => SHIFT,
+            17 => CTRL,
+            27 => ESCAPE,
+            32 => SPACE,
+            33 => PAGE_UP,
+            34 => PAGE_DOWN,
+            35 => END,
+            36 => HOME,
+            37 => LEFT,
+            38 => UP,
+            39 => RIGHT,
+            40 => DOWN,
             0x30..=0x39 => KEY_0 << (code - 0x30),
-            0x41 => KEY_A, 0x43 => KEY_C, 0x44 => KEY_D, 0x45 => KEY_E,
-            0x46 => KEY_F, 0x4c => KEY_L, 0x51 => KEY_Q, 0x52 => KEY_R,
-            0x53 => KEY_S, 0x57 => KEY_W, 0x5a => KEY_Z,
+            0x41 => KEY_A,
+            0x43 => KEY_C,
+            0x44 => KEY_D,
+            0x45 => KEY_E,
+            0x46 => KEY_F,
+            0x4c => KEY_L,
+            0x51 => KEY_Q,
+            0x52 => KEY_R,
+            0x53 => KEY_S,
+            0x57 => KEY_W,
+            0x5a => KEY_Z,
             0x70..=0x7b => F1 << (code - 0x70),
             _ => return None,
         })

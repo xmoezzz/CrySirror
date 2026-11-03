@@ -2,11 +2,11 @@
 //! Presenter-independent Canvas capture admission and worker-owned readback.
 //! The VM holds only an ImageJob. GPU capabilities stay with the presenter.
 use crate::{
+    Runtime,
     assets::{Assets, Surface},
     image_processing::{self, Charge},
-    Runtime,
 };
-use crysirror_core::{image_processing::*, service::AssetReader, state::ClientId, Error, Result};
+use crysirror_core::{Error, Result, image_processing::*, service::AssetReader, state::ClientId};
 use crysirror_scene::{
     canvas::MaterializeRequest,
     layer::{LayerSpec, Paint},
@@ -15,15 +15,17 @@ use crysirror_tasks::{Task, TaskPermit, TaskPool};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Mutex, Weak,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 
 type Reply = std::result::Result<Arc<dyn AssetReader>, String>;
 type Completion = Mutex<Option<Reply>>;
 const MAX_CAPTURES: usize = 16;
-const MAX_PIXELS: u64 = 4 * 1024 * 1024;
+// The shared image byte budget still admits every output/staging allocation;
+// this geometry cap allows 4K regions without promising unbounded readbacks.
+const MAX_PIXELS: u64 = 16 * 1024 * 1024;
 fn error(e: impl std::fmt::Display) -> Error {
     Error::Io(e.to_string())
 }
@@ -170,7 +172,7 @@ impl Broker {
             return Err(Error::Unsupported("frame capture presenter"));
         }
         let pixels = u64::from(size[0]) * u64::from(size[1]);
-        if size[0] == 0 || size[1] == 0 || pixels > MAX_PIXELS * 4 {
+        if size[0] == 0 || size[1] == 0 || pixels > MAX_PIXELS {
             return Err(Error::Limit("frame capture geometry"));
         }
         let bytes = usize::try_from(pixels * 4).map_err(error)?;
@@ -178,11 +180,15 @@ impl Broker {
         let scratch = Charge::new(memory, bytes * 2)?;
         let permit = tasks.reserve().map_err(error)?;
         self.count
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < MAX_CAPTURES).then_some(n + 1))
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < MAX_CAPTURES).then_some(n + 1)
+            })
             .map_err(|_| Error::Limit("Canvas capture jobs"))?;
         let lease = Admission(self.count.clone());
         let response = Arc::new(Mutex::new(None));
-        self.frames.push(FrameCapture { response: Arc::downgrade(&response) });
+        self.frames.push(FrameCapture {
+            response: Arc::downgrade(&response),
+        });
         Ok(Box::new(Job {
             owner,
             size,
@@ -347,7 +353,10 @@ impl Runtime {
         &mut self,
         capture: impl FnOnce(&mut Self) -> anyhow::Result<Vec<u8>>,
     ) -> anyhow::Result<()> {
-        self.host.canvas_images.frames.retain(|f| f.response.strong_count() != 0);
+        self.host
+            .canvas_images
+            .frames
+            .retain(|f| f.response.strong_count() != 0);
         if self.host.canvas_images.frames.is_empty() {
             return Ok(());
         }

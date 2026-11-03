@@ -10,8 +10,8 @@ mod cbg;
 mod cbg2_encode;
 mod cbg_encode;
 pub use cbg::decode_native_buffer as decode_cbg_native_buffer;
-pub use cbg2_encode::encode_cbg_v2;
 pub use cbg_encode::encode_cbg_v1;
+pub use cbg2_encode::encode_cbg_v2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ImageFormat {
@@ -118,6 +118,16 @@ pub fn decode_image(data: &[u8]) -> Result<DecodedImage> {
 
 pub fn decode_cbg(data: &[u8]) -> Result<DecodedImage> {
     cbg::decode_cbg(data)
+}
+
+/// Raw BF_Movie display/layout/timing/frame-count header fields. Full codec
+/// validation belongs to frame decoding, preserving header-only resource use.
+pub fn bf_movie_metadata(bytes: &[u8]) -> Option<[i32; 5]> {
+    if bytes.len() < 44 || &bytes[..16] != b"BF_Movie_______\0" {
+        return None;
+    }
+    let read = |at| i32::from_le_bytes(bytes[at..at + 4].try_into().expect("checked BF header"));
+    Some([read(20), read(24), read(32), read(36), read(40)])
 }
 
 /// Decode frame `frame` of a BGI frame movie ("BF_Movie_______", drawn by
@@ -376,7 +386,9 @@ mod tests {
         assert_eq!((image.width, image.height), (2, 2));
         assert_eq!(
             image.rgba,
-            vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]
+            vec![
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255
+            ]
         );
         assert!(decode_image(&data[..54]).is_err());
     }
@@ -542,5 +554,87 @@ mod tests {
             .native_bitmap_format(),
             Some(6)
         );
+    }
+}
+
+/// Bounded encoding of a shared RGBA surface into the original CBG wire format.
+#[derive(Clone, Copy, Debug)]
+pub enum CbgEncoding {
+    LosslessV1,
+    LossyV2 { quality: u8 },
+}
+pub fn encode_surface(
+    image: &crate::ImageSurface,
+    with_alpha: bool,
+    encoding: CbgEncoding,
+    key: u32,
+    check: &dyn Fn() -> anyhow::Result<()>,
+) -> anyhow::Result<Vec<u8>> {
+    use anyhow::{Context, ensure};
+    image.validate()?;
+    ensure!(
+        u64::from(image.width) * u64::from(image.height) <= 0x400000,
+        "CBG encode pixel budget"
+    );
+    let width = u16::try_from(image.width)?;
+    let height = u16::try_from(image.height)?;
+    let mut header = [0u8; 16];
+    header[..2].copy_from_slice(&width.to_le_bytes());
+    header[2..4].copy_from_slice(&height.to_le_bytes());
+    header[4..6].copy_from_slice(&(if with_alpha { 32u16 } else { 24u16 }).to_le_bytes());
+    header[8..10].copy_from_slice(&(if with_alpha { 2u16 } else { 1u16 }).to_le_bytes());
+    let mut pixels = Vec::with_capacity(image.rgba.len());
+    for row in image.rgba.chunks(image.width as usize * 4) {
+        check()?;
+        for pixel in row.chunks_exact(4) {
+            pixels.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+            if with_alpha {
+                pixels.push(pixel[3]);
+            }
+        }
+    }
+    let encoded = match encoding {
+        CbgEncoding::LosslessV1 => encode_cbg_v1(&header, &pixels, key),
+        CbgEncoding::LossyV2 { quality } => {
+            ensure!(quality <= 100, "CBG encode quality");
+            encode_cbg_v2(&header, &pixels, u32::from(quality), key)
+                .context("CBG v2 encoding failed")?
+        }
+    };
+    check()?;
+    Ok(encoded)
+}
+
+/// Native BG/BMP allocation metadata, without decoding pixel payloads.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeImageHeader {
+    pub size: [u32; 2],
+    pub format: i32,
+    pub reference_point: [i32; 2],
+}
+pub fn native_image_header(bytes: &[u8]) -> anyhow::Result<NativeImageHeader> {
+    use anyhow::{Context, ensure};
+    if bytes.starts_with(b"CompressedBG___") {
+        let meta = parse_cbg_metadata(bytes)?;
+        ensure!(meta.embedded_point_flag <= 1, "BG header point flag");
+        Ok(NativeImageHeader {
+            size: [meta.width, meta.height],
+            format: meta
+                .native_bitmap_format()
+                .context("BG header pixel format")?,
+            reference_point: if meta.embedded_point_flag == 1 {
+                [i32::from(meta.embedded_x), i32::from(meta.embedded_y)]
+            } else {
+                [-1; 2]
+            },
+        })
+    } else {
+        ensure!(bytes.starts_with(b"BM"), "image is not a BG/BMP resource");
+        let size = crate::encoded_dimensions_hint(bytes).context("BMP header dimensions")?;
+        Ok(NativeImageHeader {
+            size,
+            format: bmp_native_bitmap_format(bytes)?,
+            reference_point: [-1; 2],
+        })
     }
 }

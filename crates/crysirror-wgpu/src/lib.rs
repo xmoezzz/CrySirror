@@ -241,6 +241,7 @@ fn filter_gpu(f: &crysirror_scene::layer::LayerFilter) -> FilterGpu {
     }
 }
 pub struct Renderer {
+    presentation_scale: crysirror_core::service::PresentationScale,
     histories: Arc<frame_history::Provider>,
     profiler: crysirror_tasks::profile::Profiler,
     profile_frame: u64,
@@ -594,6 +595,7 @@ impl Renderer {
         let puppets =
             puppet::PuppetRenderer::new(d, &texture_layout, wgpu::TextureFormat::Rgba8UnormSrgb);
         Self {
+            presentation_scale:Default::default(),
             histories: frame_history::Provider::new(gpu.clone()),
             gpu_timings: profile::GpuTimings::new(&gpu),
             profiler: Default::default(),
@@ -1472,6 +1474,9 @@ impl Renderer {
             view,
         });
     }
+    pub fn set_presentation_scale(&mut self, mode:crysirror_core::service::PresentationScale) {
+        self.presentation_scale=mode;
+    }
     pub fn render(
         &mut self,
         scene: &SceneState,
@@ -1520,7 +1525,7 @@ impl Renderer {
         let _profile_span = self
             .profiler
             .span(self.profile_frame, "renderer.prepare_encode_submit");
-        let vp = Viewport::fit(canvas, target.size);
+        let vp = Viewport::with_mode(canvas, target.size, self.presentation_scale);
         let color = geometry::tint(background);
         let mut encoder = self
             .gpu

@@ -2,7 +2,7 @@
 //! Bounded device-free progress envelopes. Native adapters map their parameter
 //! encodings to explicit knots/shapes; every other engine client can reuse the
 //! same double-precision evaluation without a VM, host clock or RNG.
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 /// One caller-clock position and normalized envelope value.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -76,6 +76,57 @@ impl ProgressCurve {
         })
     }
 }
+/// Exact fixed-point progress families with integer truncation before trig.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FixedProgressShape {
+    Linear,
+    HalfCosine,
+    SineOut,
+    SineIn,
+    PowerIn(f64),
+    PowerOut(f64),
+}
+pub fn sample_fixed_progress(shape: FixedProgressShape, progress_8_24: i32) -> Result<i32> {
+    let p = progress_8_24.clamp(0, 0x0100_0000);
+    let power = |t: f64, e: f64| {
+        if e.fract() == 0.0 {
+            t.powi(e as i32)
+        } else {
+            t.powf(e)
+        }
+    };
+    let value = match shape {
+        FixedProgressShape::Linear => return Ok(p / 256),
+        FixedProgressShape::HalfCosine => {
+            let angle = 11_796_480i64 - 180i64 * i64::from(p) / 256;
+            ((angle as i32 as f64 * std::f64::consts::PI / 11_796_480.).cos() + 1.) * 32_768.
+        }
+        FixedProgressShape::SineOut => {
+            let angle = 90i64 * i64::from(p) / 256;
+            (angle as i32 as f64 * std::f64::consts::PI / 11_796_480.).sin() * 65_536.
+        }
+        FixedProgressShape::SineIn => {
+            let angle = 5_898_240i64 - 90i64 * i64::from(p) / 256;
+            (1. - (angle as i32 as f64 * std::f64::consts::PI / 11_796_480.).sin()) * 65_536.
+        }
+        FixedProgressShape::PowerIn(exponent) => {
+            ensure!(
+                exponent.is_finite() && (1.0..=16.0).contains(&exponent),
+                "fixed progress exponent"
+            );
+            power(f64::from(p) / 16_777_216., exponent) * 65_536.
+        }
+        FixedProgressShape::PowerOut(exponent) => {
+            ensure!(
+                exponent.is_finite() && (1.0..=16.0).contains(&exponent),
+                "fixed progress exponent"
+            );
+            (1. - power(1. - f64::from(p) / 16_777_216., exponent)) * 65_536.
+        }
+    };
+    Ok(value.clamp(0., 65_536.) as i32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

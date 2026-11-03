@@ -13,15 +13,31 @@ pub(crate) fn handles(group: u8, id: u16) -> bool {
         (group, id),
         (
             0x90,
-            0x04 | 0x10 | 0x12 | 0x17 | 0x18 | 0x1e | 0x1f | 0xc8 | 0xcc | 0xcd
+            0x04 | 0x10 | 0x12 | 0x17 | 0x18..=0x1f | 0xc2 | 0xc3 | 0xc8 | 0xca | 0xcc | 0xcd
         ) | (0x91, 0x18..=0x1f)
+            | (0x92, 0x1a)
     )
 }
 enum Prepared {
     Ready(Arc<dyn ImageResource>),
     Job(ImageJob),
 }
+enum AuxiliaryOperation {
+    AlphaPlanes {
+        size: [u32; 2],
+        spec: crysirror_image::alpha_planes::AlphaPlanePair,
+    },
+    Mask(crysirror_image::stored_mask::StoredMaskBlend),
+    Warp {
+        size: [u32; 2],
+        spec: crysirror_core::image_processing::FieldWarpSpec,
+    },
+}
 enum Phase {
+    Auxiliary {
+        inputs: Vec<Prepared>,
+        operation: AuxiliaryOperation,
+    },
     Read(Task<(String, Vec<u8>)>),
     Decode(ImageJob),
     Capture {
@@ -131,6 +147,37 @@ impl BgiVm {
     ) -> Result<Option<BitmapWork>> {
         let a = &call.args;
         match (call.group, call.id) {
+            (0x90, 0xc2 | 0xc3 | 0xca) => {
+                target_checks::bitmap(a[0])?;
+                target_checks::bitmap(a[1])?;
+                let source = self.bitmap(a[1])?.1;
+                let (raster, recreate) = match call.id {
+                    0xc2 => {
+                        ensure!(a[0] != a[1], "BGI flip destination aliases source");
+                        ensure!(matches!(a[2], 0 | 1), "BGI invalid flip direction");
+                        (
+                            Raster::Mirror {
+                                vertical: a[2] == 1,
+                            },
+                            Some(source.size),
+                        )
+                    }
+                    0xc3 => {
+                        ensure!(
+                            source.size.iter().all(|v| *v >= 2),
+                            "BGI downsample source smaller than2x2"
+                        );
+                        (Raster::HalfBox, Some(source.size.map(|n| n.div_ceil(2))))
+                    }
+                    _ => {
+                        self.bitmap(a[0])?;
+                        (Raster::AspectFit, None)
+                    }
+                };
+                Ok(Some(self.raster_plan(host, a[0], a[1], raster, recreate)?))
+            }
+            (0x90, 0x19..=0x1d) => self.immediate_bitmap_plan(host, call),
+            (0x92, 0x1a) => self.alpha_plane_plan(host, call),
             (0x90, 0x04) => {
                 target_checks::bitmap(a[0])?;
                 Ok(Some(BitmapWork {
@@ -191,10 +238,10 @@ impl BgiVm {
                         sprite.visible = false;
                         self.submit(host,json!({"layers":[{"op":"set_visible","id":(id&0x1ff)+1,"visible":false}]}))?;
                     }
-                    self.submit(
-                        host,
-                        json!({"canvases":[{"op":"destroy","id":destination}]}),
-                    )?;
+                    if !matches!(self.bitmaps[&(destination as u32)].format, 4 | 6) {
+                        self.submit(host, json!({"canvases":[{"op":"retire","id":destination}]}))?;
+                    }
+                    self.release_graph_field_bitmap(destination as u32);
                     if let Some(bitmap) = self.bitmaps.remove(&(destination as u32)) {
                         if let Some(path) = bitmap.published_path {
                             host.release_image_resource(self.client, &path)?;
@@ -494,6 +541,63 @@ impl BgiVm {
                     );
                     continue;
                 }
+                Phase::Auxiliary { inputs, operation } => {
+                    for input in inputs.iter_mut() {
+                        if let Prepared::Job(job) = input {
+                            match job.poll()? {
+                                ImageProcessState::Pending => {
+                                    self.bitmap_work = Some(work);
+                                    return Ok(false);
+                                }
+                                ImageProcessState::Failed(error) => {
+                                    bail!("BGI auxiliary image capture: {error}")
+                                }
+                                ImageProcessState::Ready(image) => *input = Prepared::Ready(image),
+                            }
+                        }
+                    }
+                    let images = inputs
+                        .iter()
+                        .map(|input| match input {
+                            Prepared::Ready(image) => ImageInput::Resource(image.clone()),
+                            _ => unreachable!(),
+                        })
+                        .collect::<Vec<_>>();
+                    let (input, effects) = match operation {
+                        AuxiliaryOperation::AlphaPlanes { size, spec } => (
+                            ImageInput::Ternary {
+                                destination: Box::new(ImageInput::Solid {
+                                    size: *size,
+                                    color: [0, 0, 0, 255],
+                                }),
+                                first: Box::new(images[0].clone()),
+                                second: Box::new(images[1].clone()),
+                            },
+                            vec![ImageEffect::AlphaPlanePair { spec: spec.clone() }],
+                        ),
+                        AuxiliaryOperation::Mask(spec) => (
+                            ImageInput::Ternary {
+                                destination: Box::new(images[0].clone()),
+                                first: Box::new(images[1].clone()),
+                                second: Box::new(images[2].clone()),
+                            },
+                            vec![ImageEffect::StoredMaskBlend { spec: spec.clone() }],
+                        ),
+                        AuxiliaryOperation::Warp { size, spec } => (
+                            ImageInput::FieldWarp {
+                                source: Box::new(images[0].clone()),
+                                size: *size,
+                                spec: spec.clone(),
+                            },
+                            Vec::new(),
+                        ),
+                    };
+                    work.phase = Phase::Process(
+                        host.image_metadata(self.client)?
+                            .begin_process(input, serde_json::to_vec(&effects)?.into())?,
+                    );
+                    continue;
+                }
                 Phase::Capture {
                     inputs,
                     base,
@@ -644,6 +748,7 @@ impl BgiVm {
         let asset = uploaded.path.relative();
         let published_path = Some(asset.to_owned());
         self.submit(host,json!({"canvases":[{"op":"create","id":id,"width":size[0],"height":size[1]},{"op":"set","id":id,"layer":{"id":0,"rect":[0,0,size[0],size[1]],"paint":{"kind":"image","asset":asset}}}]}))?;
+        self.release_graph_field_bitmap(id);
         self.bitmaps.insert(
             id,
             Bitmap {
@@ -662,3 +767,6 @@ impl BgiVm {
         Ok(())
     }
 }
+
+#[path = "bitmap_immediate.rs"]
+mod bitmap_immediate;

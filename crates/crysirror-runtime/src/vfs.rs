@@ -4,6 +4,9 @@
 const MAX_DIRECTORY_ENTRIES: usize = 1 << 20;
 use crate::model::identity;
 mod fallback;
+mod no_replace;
+mod desktop_roots;
+pub use desktop_roots::DesktopStorageRoots;
 use cap_std::{
     ambient_authority,
     fs::{Dir, OpenOptions},
@@ -55,13 +58,16 @@ fn read_limited_virtual(dir:&Dir,path:impl AsRef<Path>,virtual_directory:bool)->
     Ok(bytes)
 }
 pub fn write_atomic(dir: &Dir, relative: &str, bytes: &[u8]) -> Result<()> {
+    write_atomic_with_parent_policy(dir,relative,bytes,true)
+}
+fn write_atomic_with_parent_policy(dir:&Dir,relative:&str,bytes:&[u8],create_parent:bool)->Result<()> {
     VfsPath::new(Mount::Save, relative)?;
     if bytes.len() as u64 > MAX_FILE {
         return Err(Error::Limit("file size"));
     }
     let target = Path::new(relative);
     let parent = target.parent().unwrap_or_else(|| Path::new(""));
-    if !parent.as_os_str().is_empty() {
+    if create_parent && !parent.as_os_str().is_empty() {
         dir.create_dir_all(parent).map_err(io)?;
     }
     let mut selected: Option<(PathBuf, cap_std::fs::File)> = None;
@@ -110,6 +116,9 @@ fn provider_snapshot(mounts: &ProviderMounts) -> Vec<ProviderMount> {
 }
 
 pub struct DiskVfs {
+    desktop_assets:PathBuf,
+    desktop_writable:PathBuf,
+    desktop_roots:BTreeMap<ClientId,DesktopStorageRoots>,
     writes: crysirror_tasks::TaskPool,
     pub assets: Dir,
     writable_root: Dir,
@@ -121,6 +130,9 @@ impl DiskVfs {
     pub fn new(assets: &Path, writable: &Path) -> Result<Self> {
         std::fs::create_dir_all(writable).map_err(io)?;
         Ok(Self {
+            desktop_assets:assets.canonicalize().map_err(io)?,
+            desktop_writable:writable.canonicalize().map_err(io)?,
+            desktop_roots:BTreeMap::new(),
             writes: crysirror_tasks::TaskPool::new("vfs-write", 1, 64)
                 .map_err(|e| Error::Io(e.to_string()))?,
             assets: Dir::open_ambient_dir(assets, ambient_authority()).map_err(io)?,
@@ -129,6 +141,9 @@ impl DiskVfs {
             providers: BTreeMap::new(),
         })
     }
+    /// Presenting-host-only OS roots for native choosers. VM storage remains
+    /// capability-relative and never receives these operating-system paths.
+    pub fn desktop_roots(&self,client:ClientId)->Result<DesktopStorageRoots>{self.desktop_roots.get(&client).cloned().ok_or(Error::NotFound)}
     pub fn register(&mut self, client: ClientId, engine: &str, game: &str) -> Result<()> {
         self.register_with_assets(client, engine, game, "")
     }
@@ -156,6 +171,11 @@ impl DiskVfs {
             let p = VfsPath::new(Mount::Asset, prefix)?;
             self.assets.open_dir(p.relative()).map_err(io)?
         };
+        self.desktop_roots.insert(client,DesktopStorageRoots{
+            assets:self.desktop_assets.join(prefix).canonicalize().map_err(io)?,
+            save:self.desktop_writable.join(format!("{engine}/{game}/save")).canonicalize().map_err(io)?,
+            cache:self.desktop_writable.join(format!("{engine}/{game}/cache")).canonicalize().map_err(io)?,
+        });
         self.mounts.insert(client, Mounts { asset, save, cache });
         self.providers
             .insert(client, Arc::new(RwLock::new(Vec::new())));
@@ -541,6 +561,15 @@ impl ClientStorage for CapStorage {
             return Err(Error::ReadOnly);
         }
         write_atomic(self.dir(path.mount()), path.relative(), data)
+    }
+    fn rename_no_replace(&self,source:&VfsPath,target:&VfsPath)->Result<()>{
+        if source.mount()==Mount::Asset||target.mount()==Mount::Asset{return Err(Error::ReadOnly);}
+        if source==target{self.dir(source.mount()).symlink_metadata(source.relative()).map_err(io)?;return Ok(());}
+        no_replace::rename(self.dir(source.mount()),source.relative(),self.dir(target.mount()),target.relative())
+    }
+    fn write_atomic_existing_parent(&self,path:&VfsPath,data:&[u8])->Result<()>{
+        if path.mount()==Mount::Asset{return Err(Error::ReadOnly);}
+        write_atomic_with_parent_policy(self.dir(path.mount()),path.relative(),data,false)
     }
     fn create_directory(&self,path:&VfsPath)->Result<()>{
         if path.mount()==Mount::Asset{return Err(Error::ReadOnly);}

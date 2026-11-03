@@ -36,10 +36,13 @@ impl BgiVm {
                 }
             }
             self.hide_graph_object(host, object)?;
+            self.remove_sprite_composition(host, object)?;
             self.graph.images.remove(object);
             self.graph.maps.remove(&object);
             self.graph.crops.remove(&object);
             self.graph.objects.remove(&object);
+            self.graph.fixed_vectors.remove(&object);
+            self.graph.raster_offsets.remove(&object);
             self.graph.tree.remove(object);
             return Ok(None);
         }
@@ -65,6 +68,7 @@ impl BgiVm {
             map.current = vec![u16::MAX; ((cols + 1) * (rows + 1)) as usize];
             map.desired = vec![0; map.current.len()];
             self.graph.images.remove(object);
+            self.remove_sprite_composition(host, object)?;
             self.hide_graph_object(host, object)?;
             self.graph.crops.remove(&object);
             return Ok(None);
@@ -91,6 +95,7 @@ impl BgiVm {
                 *current = !*desired;
             }
             self.graph.images.remove(object);
+            self.remove_sprite_composition(host, object)?;
             self.hide_graph_object(host, object)?;
             return Ok(None);
         }
@@ -198,6 +203,10 @@ impl BgiVm {
                         [0; 4],
                     )],
                     quad: None,
+                    source_format: None,
+                    warp: None,
+                    compound: None,
+                    projection: None,
                     operation: None,
                     format,
                     force_opaque: format == 1,
@@ -229,6 +238,10 @@ impl BgiVm {
         let plan = GraphPlan {
             inputs: vec![cache, GraphInput::Bitmap(atlas)],
             quad: None,
+            source_format: None,
+            warp: None,
+            compound: None,
+            projection: None,
             operation: Some(Raster::Display {
                 spec: DisplayRaster::TileCache {
                     columns: cols + 1,

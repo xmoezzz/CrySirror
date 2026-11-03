@@ -4,7 +4,7 @@
 //! Shared image processing for bitmap, UI, sprite and texture resources. These
 //! are destructive resource operations, separate from display-only layer filters.
 use crate::ImageSurface;
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 /// CPU pixel limit bounds scratch memory independently of the decoder budget.
 pub const MAX_EFFECT_PIXELS: u64 = 4_194_304;
@@ -13,8 +13,19 @@ pub const MAX_EFFECT_PIXELS: u64 = 4_194_304;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ImageEffect {
+    RowDeform {
+        spec: crate::pyramid::RowDeform,
+    },
+    AlphaPlanePair {
+        spec: crate::alpha_planes::AlphaPlanePair,
+    },
+    StoredMaskBlend {
+        spec: crate::stored_mask::StoredMaskBlend,
+    },
     /// Exact stored-channel bitmap kernels over two immutable resources.
-    IntegerRaster { spec: crate::integer_raster::IntegerRaster },
+    IntegerRaster {
+        spec: crate::integer_raster::IntegerRaster,
+    },
     /// Replace coverage while retaining all stored RGB bytes. Useful for
     /// opaque XRGB resources and explicitly authored mask normalisation.
     OverrideAlpha {
@@ -45,9 +56,13 @@ pub enum ImageEffect {
         spec: crate::row_copy::SineRowCopy,
     },
     /// Two-input clipped coverage multiplication with optional exterior clear.
-    AlphaClipRect { spec:crate::alpha_clip::AlphaClipRect },
+    AlphaClipRect {
+        spec: crate::alpha_clip::AlphaClipRect,
+    },
     /// Three immutable inputs, two independent masks and exact14bit products.
-    MaskedPairBlend {spec:crate::masked_pair::MaskedPairBlend},
+    MaskedPairBlend {
+        spec: crate::masked_pair::MaskedPairBlend,
+    },
     Transition {
         spec: crate::transition::ImageTransition,
     },
@@ -139,15 +154,18 @@ pub enum ImageEffect {
 impl ImageEffect {
     pub fn validate(&self) -> Result<()> {
         match self {
+            Self::RowDeform { spec } => spec.validate()?,
             Self::IntegerRaster { spec } => spec.validate()?,
+            Self::StoredMaskBlend { spec } => spec.validate()?,
+            Self::AlphaPlanePair { spec } => spec.validate()?,
             Self::RgbLookup { spec } => spec.validate()?,
             Self::FixedLuma { spec } => spec.validate()?,
             Self::PiecewiseResample { spec } => spec.validate()?,
             Self::StripeReveal { spec } => spec.validate()?,
             Self::SpriteAlpha { spec } => spec.validate()?,
             Self::SineRowCopy { .. } => (),
-            Self::AlphaClipRect {spec} => spec.validate()?,
-            Self::MaskedPairBlend {spec} => spec.validate()?,
+            Self::AlphaClipRect { spec } => spec.validate()?,
+            Self::MaskedPairBlend { spec } => spec.validate()?,
             Self::Transition { spec } => spec.validate()?,
             Self::Vector { path } => path.validate()?,
             Self::Perspective { quad } => crate::warp::validate_quad(quad)?,
@@ -196,10 +214,15 @@ impl ImageEffect {
                 ensure!(area.iter().all(|v| v.abs() <= 8192), "box blur area bounds");
             }
             Self::Resize { width, height } => ensure!(
-                *width > 0 && *height > 0 && u64::from(*width) * u64::from(*height) <= MAX_EFFECT_PIXELS,
+                *width > 0
+                    && *height > 0
+                    && u64::from(*width) * u64::from(*height) <= MAX_EFFECT_PIXELS,
                 "resize extent"
             ),
-            Self::Rotate { degrees } => ensure!(matches!(degrees, 90 | 180 | 270), "rotation must be a quarter turn"),
+            Self::Rotate { degrees } => ensure!(
+                matches!(degrees, 90 | 180 | 270),
+                "rotation must be a quarter turn"
+            ),
             Self::GaussianBlur { sigma } => ensure!(
                 sigma.is_finite() && (0.0..=16.).contains(sigma),
                 "blur sigma must be 0..16"
@@ -239,9 +262,18 @@ impl ImageSurface {
         check()?;
         if matches!(
             effect,
-            ImageEffect::Transition { .. } | ImageEffect::SineRowCopy { .. } | ImageEffect::AlphaClipRect {..} | ImageEffect::MaskedPairBlend{..} | ImageEffect::IntegerRaster {..}
+            ImageEffect::AlphaPlanePair { .. }
+                | ImageEffect::StoredMaskBlend { .. }
+                | ImageEffect::Transition { .. }
+                | ImageEffect::SineRowCopy { .. }
+                | ImageEffect::AlphaClipRect { .. }
+                | ImageEffect::MaskedPairBlend { .. }
+                | ImageEffect::IntegerRaster { .. }
         ) {
             anyhow::bail!("image effect requires its multi-image context")
+        }
+        if let ImageEffect::RowDeform { spec } = effect {
+            return crate::pyramid::row_deform(self, spec, check);
         }
         if let ImageEffect::RgbLookup { spec } = effect {
             return spec.apply(self, check);
@@ -444,7 +476,11 @@ impl ImageSurface {
                 }
             }
         }
-        Ok(Self { width, height, rgba: out })
+        Ok(Self {
+            width,
+            height,
+            rgba: out,
+        })
     }
     fn rotated(&self, degrees: u16, check: &dyn Fn() -> Result<()>) -> Result<Self> {
         let (w, h) = (self.width as usize, self.height as usize);

@@ -61,6 +61,22 @@ impl Default for RuntimeGraphObjectProperties {
 }
 
 impl RuntimeGraphObjectProperties {
+    /// CDspObjSprite's GetAlpha virtual returns the crossfade coefficient
+    /// only for mode1 selector1; base blend mode1 is unrelated.
+    pub(crate) fn alpha_virtual(&self) -> i32 {
+        if self.named_properties.get("target-object-mode") == Some(&1)
+            && self.named_properties.get("mode1-selector") == Some(&1)
+        {
+            self.named_properties
+                .get("mode1-amount")
+                .copied()
+                .unwrap_or_else(|| self.alpha_parameter())
+                .clamp(0, 256)
+        } else {
+            self.alpha_parameter()
+        }
+    }
+
     pub(crate) fn set_property(&mut self, property: u32, value: i32, extra: i32) {
         match property {
             1 => self.blend_mode = value,
