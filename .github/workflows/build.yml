@@ -37,7 +37,6 @@ jobs:
             cargo_jobs: 2
     env:
       CARGO_BUILD_JOBS: ${{ matrix.cargo_jobs }}
-      RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: 'true'
       SCCACHE_GHA_VERSION: crysirror-release-v1-${{ matrix.os }}
     defaults:
@@ -65,6 +64,7 @@ jobs:
           cargo +stable --version
 
       - name: Cache dependency sources
+        continue-on-error: true
         uses: actions/cache@v5
         with:
           path: |
@@ -78,12 +78,31 @@ jobs:
             cargo-sources-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Cache Rust compilation results
+        id: sccache
+        continue-on-error: true
         uses: mozilla-actions/sccache-action@v0.0.11
         with:
           version: v0.19.0
+          # Its post action assumes installation succeeded. Collect stats below
+          # only after the wrapper was actually enabled.
+          disable_annotations: true
+
+      - name: Enable available compiler cache
+        if: steps.sccache.outcome == 'success'
+        run: |
+          if sccache --version && sccache --start-server; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Compiler cache unavailable; building directly with rustc"
+          fi
 
       - name: Build release player
         run: cargo +stable build --release --locked --timings -p crysirror-desktop --bin crysirror
+
+      - name: Report compiler cache statistics
+        if: ${{ always() && env.RUSTC_WRAPPER == 'sccache' }}
+        continue-on-error: true
+        run: sccache --show-stats
 
       - name: Upload build timings
         if: ${{ !cancelled() }}
