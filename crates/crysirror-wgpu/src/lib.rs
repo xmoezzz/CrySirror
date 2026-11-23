@@ -318,6 +318,9 @@ fn filter_sampling(record:&mut FilterGpu,sampling:crysirror_scene::layer::ImageS
 /// format. Isolated subtree renderers share these objects with their parent.
 /// Render targets, uniforms, texture caches and temporal state stay per renderer.
 struct DrawPipelines {
+    composite: composite::CompositePipeline,
+    puppet: Arc<puppet::PuppetPipelines>,
+    transition: Arc<transition::TransitionPipelines>,
     camera_layout: wgpu::BindGroupLayout,
     quad_pipelines: Vec<wgpu::RenderPipeline>,
     filtered_pipelines: Vec<wgpu::RenderPipeline>,
@@ -735,7 +738,16 @@ impl DrawPipelines {
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
         });
+        let puppet = Arc::new(puppet::PuppetPipelines::new(
+            d,
+            &texture_layout,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            puppet::premultiplied_format(&gpu.adapter),
+        ));
         Self {
+            composite: composite::CompositePipeline::new(d, format),
+            puppet,
+            transition: Arc::new(transition::TransitionPipelines::new(d, &gpu.queue, format)),
             camera_layout, texture_layout, filter_layout, coverage_layout,
             quad_pipelines, filtered_pipelines, rgba_add_pipeline, rgba_subtract_pipeline,
             mesh_pipeline, ray_composite_pipeline, stored_pipeline, coverage_white,
@@ -772,8 +784,8 @@ impl Renderer {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let puppets =
-            puppet::PuppetRenderer::new(d, &draw_pipelines.texture_layout, wgpu::TextureFormat::Rgba8UnormSrgb, puppet::premultiplied_format(&gpu.adapter));
+        let puppets = puppet::PuppetRenderer::new(draw_pipelines.puppet.clone());
+        let transitions = transition::Transitions::new(draw_pipelines.transition.clone());
         Self {
             movie_capture: false,
             movie_warmed: false,
@@ -816,7 +828,7 @@ impl Renderer {
             ray_lite: None,
             hardware_rt: None,
             pbr: None,
-            transitions: transition::Transitions::new(&gpu.device, &gpu.queue, format),
+            transitions,
             transition: None,
             gpu,
         }

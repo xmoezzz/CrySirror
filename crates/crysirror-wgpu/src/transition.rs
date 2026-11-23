@@ -16,11 +16,11 @@ struct FrameTex {
 struct Frames {
     size: [u32; 2],
     tex: [FrameTex; 2],
-    out: FrameTex,
+    out: Option<FrameTex>,
     last: usize,
     has_last: bool,
 }
-pub(crate) struct Transitions {
+pub(super) struct TransitionPipelines {
     format: wgpu::TextureFormat,
     raw_format: wgpu::TextureFormat,
     present_layout: wgpu::BindGroupLayout,
@@ -30,9 +30,12 @@ pub(crate) struct Transitions {
     wipe_pipeline: wgpu::RenderPipeline,
     ordered_dither_pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
-    frames: Option<Frames>,
     black: wgpu::TextureView,
     white: wgpu::TextureView,
+}
+pub(crate) struct Transitions {
+    pipelines: std::sync::Arc<TransitionPipelines>,
+    frames: Option<Frames>,
     mask: Option<(String, wgpu::Texture, wgpu::TextureView)>,
 }
 /// Uniform layout of siglus_rs `WipeUniform`.
@@ -87,8 +90,8 @@ fn pixel(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> wgpu::Tex
         .create_view(&Default::default())
 }
 
-impl Transitions {
-    pub(crate) fn new(
+impl TransitionPipelines {
+    pub(super) fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -231,10 +234,8 @@ impl Transitions {
             wipe_pipeline,
             ordered_dither_pipeline,
             sampler,
-            frames: None,
             black: pixel(device, queue, [0, 0, 0, 255]),
             white: pixel(device, queue, [255; 4]),
-            mask: None,
         }
     }
     fn frame_tex(&self, device: &wgpu::Device, size: [u32; 2]) -> FrameTex {
@@ -266,13 +267,21 @@ impl Transitions {
             raw,
         }
     }
+}
+
+impl Transitions {
+    pub(super) fn new(pipelines: std::sync::Arc<TransitionPipelines>) -> Self {
+        Self { pipelines, frames: None, mask: None }
+    }
+
     /// The view this frame composes into.
     pub(crate) fn begin(&mut self, device: &wgpu::Device, size: [u32; 2]) -> &wgpu::TextureView {
         if self.frames.as_ref().map_or(true, |f| f.size != size) {
             self.frames = Some(Frames {
                 size,
-                tex: [self.frame_tex(device, size), self.frame_tex(device, size)],
-                out: self.frame_tex(device, size),
+                tex: [self.pipelines.frame_tex(device, size), self.pipelines.frame_tex(device, size)],
+                // Isolated draws and ordinary frames never need a wipe output.
+                out: None,
                 last: 1,
                 has_last: false,
             });
@@ -283,7 +292,7 @@ impl Transitions {
     /// The texture behind `begin`'s view, for `Paint::Backdrop`, with its formats.
     pub(crate) fn composing(&self) -> Option<(wgpu::Texture, wgpu::TextureFormat, wgpu::TextureFormat)> {
         let f = self.frames.as_ref()?;
-        Some((f.tex[1 - f.last].texture.clone(), self.raw_format, self.format))
+        Some((f.tex[1 - f.last].texture.clone(), self.pipelines.raw_format, self.pipelines.format))
     }
     /// Keyed mask image (gamma bytes, sampled raw like siglus_rs).
     pub(crate) fn mask_key(&self) -> Option<&str> {
@@ -335,6 +344,8 @@ impl Transitions {
         let pipeline;
         match transition {
             Some(t) => {
+                let size = f.size;
+                let out = f.out.get_or_insert_with(|| self.pipelines.frame_tex(device, size));
                 let mut options = [0f32; 16];
                 for (d, s) in options.iter_mut().zip(t.options) {
                     *d = s as f32;
@@ -356,22 +367,22 @@ impl Transitions {
                 let old = if f.has_last {
                     &f.tex[f.last].raw
                 } else {
-                    &self.black
+                    &self.pipelines.black
                 };
                 let mask = match (&t.mask, &self.mask) {
                     (Some(_), Some(m)) => &m.2,
-                    _ => &self.white,
+                    _ => &self.pipelines.white,
                 };
-                let s = wgpu::BindingResource::Sampler(&self.sampler);
+                let s = wgpu::BindingResource::Sampler(&self.pipelines.sampler);
                 let v = wgpu::BindingResource::TextureView;
                 let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("wipe"),
-                    layout: &self.wipe_layout,
+                    layout: &self.pipelines.wipe_layout,
                     entries: &[
                         // `under`: the whole frame is the wiped range, so nothing lies beneath.
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: v(&self.black),
+                            resource: v(&self.pipelines.black),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
@@ -410,7 +421,7 @@ impl Transitions {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { multiview_mask: None,
                     label: Some("engine screen transition"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment { depth_slice: None,
-                        view: &f.out.raw,
+                        view: &out.raw,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -423,25 +434,25 @@ impl Transitions {
                 });
                 pass.set_pipeline(
                     if t.code == crysirror_scene::layer::ORDERED_DITHER_TRANSITION_CODE {
-                        &self.ordered_dither_pipeline
+                        &self.pipelines.ordered_dither_pipeline
                     } else {
-                        &self.wipe_pipeline
+                        &self.pipelines.wipe_pipeline
                     },
                 );
                 pass.set_bind_group(0, &bind, &[]);
                 pass.draw(0..3, 0..1);
                 drop(pass);
-                present_src = &f.out.raw;
-                pipeline = &self.decode_pipeline;
+                present_src = &out.raw;
+                pipeline = &self.pipelines.decode_pipeline;
             }
             None => {
                 present_src = &f.tex[cur].render;
-                pipeline = &self.copy_pipeline;
+                pipeline = &self.pipelines.copy_pipeline;
             }
         }
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("present"),
-            layout: &self.present_layout,
+            layout: &self.pipelines.present_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: wgpu::BindingResource::TextureView(present_src),
@@ -475,6 +486,35 @@ impl Transitions {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires a real wgpu adapter; execute explicitly"]
+    fn direct_presentation_does_not_allocate_a_wipe_output() {
+        let gpu = pollster::block_on(crate::Gpu::request(&wgpu::Instance::default(), None)).unwrap();
+        let pipelines = std::sync::Arc::new(TransitionPipelines::new(
+            &gpu.device, &gpu.queue, wgpu::TextureFormat::Rgba8UnormSrgb,
+        ));
+        let size = [8, 8];
+        let target = pipelines.frame_tex(&gpu.device, size);
+        let mut presentation = Transitions::new(pipelines);
+        presentation.begin(&gpu.device, size);
+
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        presentation.finish(&gpu.device, &mut encoder, &target.render, None, size);
+        let frames = presentation.frames.as_ref().unwrap();
+        assert!(frames.has_last);
+        assert!(frames.out.is_none());
+
+        let wipe = TransitionFrame {
+            owner: 1, serial: 1, code: 0, options: [0; 16], progress: 0.5,
+            mask: None, generated_mask: false,
+        };
+        presentation.finish(&gpu.device, &mut encoder, &target.render, Some(&wipe), size);
+        assert!(presentation.frames.as_ref().unwrap().out.is_some());
+        gpu.queue.submit([encoder.finish()]);
+    }
+
     #[test]
     fn ordered_dither_shader_validates_without_a_gpu() {
         let source = crysirror_shaders::wgsl::ORDERED_DITHER;

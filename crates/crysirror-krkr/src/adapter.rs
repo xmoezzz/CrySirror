@@ -416,6 +416,7 @@ impl KrkrVm {
 
     /// Submit queued engine commands in the order TJS issued them.
     fn flush(&mut self, h: &mut dyn HostServices) -> Result<()> {
+        let _span = crysirror_tasks::profile::span_current("krkr.layers.commit");
         let rt = self.rt.as_mut().context("KiriKiri runtime absent")?;
         natives::native_extra::sync_attention(rt).map_err(|e|anyhow::anyhow!("{e}"))?;
         crate::native_pad::sync(rt).map_err(|e|anyhow::anyhow!("{e}"))?;
@@ -449,6 +450,7 @@ impl KrkrVm {
             return Ok(());
         }
         *self.events.entry(method).or_default() += 1;
+        let _span = crysirror_tasks::profile::span_current("krkr.script.call");
         rt.call_object_method(target, method, args)
             .map(|_| ())
             .map_err(|e| anyhow::anyhow!("{e}"))
@@ -722,6 +724,7 @@ impl KrkrVm {
             if !crate::layer_movie::drive(self.rt.as_mut().unwrap(),h,self.client)? {return Ok(false);}
             let rt = self.rt.as_mut().unwrap();
             if rt.is_suspended() {
+                let _span = crysirror_tasks::profile::span_current("krkr.script.resume");
                 rt.resume_suspended().map_err(|e| anyhow::anyhow!("{e}"))?;
             } else {
                 // A program close may have suspended in onCloseQuery's save
@@ -1032,9 +1035,16 @@ impl VmAdapter for KrkrVm {
         if b == 0 {
             return Ok(VmYield::BudgetExhausted);
         }
-        match self.execute(h, i) {
+        let executed = {
+            let _span = crysirror_tasks::profile::span_current("krkr.callbacks");
+            self.execute(h, i)
+        };
+        match executed {
             Ok(y) => {
-                self.collect_garbage();
+                {
+                    let _span = crysirror_tasks::profile::span_current("krkr.collect_garbage");
+                    self.collect_garbage();
+                }
                 // Native resource retirement is committed before this frame's
                 // renderer snapshot or a freed slot can be reused next step.
                 if self.rt.as_ref().is_some_and(|rt|!rt.host().batches.is_empty() || !rt.host().retired_images.is_empty()) {

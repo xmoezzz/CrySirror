@@ -43,18 +43,18 @@ fn prefetch_input(assets: &mut Assets, primitives: &[Primitive]) -> Result<()> {
     Ok(())
 }
 
-pub(super) struct Compositor {
-    renderer: Box<Renderer>,
+pub(super) struct CompositePipeline {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
+}
+
+pub(super) struct Compositor {
+    renderer: Box<Renderer>,
     filter: Option<filter::Filter>,
     snapshots: BTreeMap<(String, u64, [u32; 2]), Snapshot>,
 }
-impl Compositor {
-    fn new(parent: &Renderer) -> Self {
-        let gpu = &parent.gpu;
-        let format = parent.format;
-        let d = &gpu.device;
+impl CompositePipeline {
+    pub(super) fn new(d: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("subtree crossfade"),
             entries: &[
@@ -131,10 +131,16 @@ impl Compositor {
             multisample: Default::default(),
             multiview_mask: None,
         });
+        Self { layout, pipeline }
+    }
+}
+
+impl Compositor {
+    fn new(parent: &Renderer) -> Self {
         Self {
-            renderer: Box::new(Renderer::with_draw_pipelines(gpu.clone(), format, parent.draw_pipelines.clone())),
-            layout,
-            pipeline,
+            renderer: Box::new(Renderer::with_draw_pipelines(
+                parent.gpu.clone(), parent.format, parent.draw_pipelines.clone(),
+            )),
             filter: None,
             snapshots: BTreeMap::new(),
         }
@@ -603,7 +609,7 @@ impl Renderer {
                     .device
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("crossfade inputs"),
-                        layout: &c.layout,
+                        layout: &self.draw_pipelines.composite.layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -641,7 +647,7 @@ impl Renderer {
                         occlusion_query_set: None,
                         multiview_mask: None,
                     });
-                    pass.set_pipeline(&c.pipeline);
+                    pass.set_pipeline(&self.draw_pipelines.composite.pipeline);
                     pass.set_bind_group(0, &bind, &[]);
                     pass.draw(0..3, 0..1);
                 }
@@ -1010,7 +1016,7 @@ impl Renderer {
                     .device
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("snapshot isolated input"),
-                        layout: &c.layout,
+                        layout: &self.draw_pipelines.composite.layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -1049,7 +1055,7 @@ impl Renderer {
                         occlusion_query_set: None,
                         multiview_mask: None,
                     });
-                    pass.set_pipeline(&c.pipeline);
+                    pass.set_pipeline(&self.draw_pipelines.composite.pipeline);
                     pass.set_bind_group(0, &bind, &[]);
                     pass.draw(0..3, 0..1);
                 }

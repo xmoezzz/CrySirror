@@ -2317,6 +2317,23 @@ impl LayerSystem {
         result
     }
     pub fn apply_batch(&mut self, client: ClientId, commands: &[LayerCommand]) -> Result<()> {
+        self.apply_batch_inner(client, commands, true)
+    }
+
+    /// Canvas presentation roots are rebuilt as one atomic unit. A transition
+    /// can reference several of those roots, so check it after the whole rebuild.
+    pub(super) fn rebuild_presentations(&mut self, rebuild: impl FnOnce(&mut Self) -> Result<()>) -> Result<()> {
+        self.transaction(|layers| {
+            rebuild(layers)?;
+            layers.validate_crossfades()
+        })
+    }
+
+    pub(super) fn apply_presentation_batch(&mut self, client: ClientId, commands: &[LayerCommand]) -> Result<()> {
+        self.apply_batch_inner(client, commands, false)
+    }
+
+    fn apply_batch_inner(&mut self, client: ClientId, commands: &[LayerCommand], validate_crossfades: bool) -> Result<()> {
         ensure!(commands.len() <= 4096, "layer command limit");
         let side = self.side_state();
         let had_owner = self.clients.contains_key(&client.0);
@@ -2326,7 +2343,11 @@ impl LayerSystem {
             .and_then(|()| {
                 if !commands.is_empty() { self.targets.advance(); }
                 self.sync_puppets();
-                self.validate_touched(client, journal.keys().copied())
+                self.validate_touched(client, journal.keys().copied())?;
+                if validate_crossfades {
+                    self.validate_crossfades()?;
+                }
+                Ok(())
             });
         if let Err(e) = result {
             self.child_index.remove(&client.0);
@@ -3117,7 +3138,7 @@ impl LayerSystem {
         }
         self.depth_orders.validate(&self.clients)?;
         self.targets.validate(&self.clients)?;
-        self.validate_crossfades()
+        Ok(())
     }
     /// Full validation, including frozen snapshot payloads (restore paths).
     pub fn validate(&self) -> Result<()> {

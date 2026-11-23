@@ -2399,6 +2399,7 @@ dependencies = [
  "crysirror-resource",
  "crysirror-runtime",
  "crysirror-scene",
+ "crysirror-tasks",
  "crysirror-text",
  "crysirror-tjs2",
  "crysirror-video",

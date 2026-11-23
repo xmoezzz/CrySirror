@@ -191,6 +191,74 @@ fn renderer_image_and_model_import_use_background_common_cache() {
     assert!(!model.meshes.is_empty());
     assert!(a.tasks_inspect()["io"]["completed"].as_u64().unwrap() >= 2);
 }
+
+#[cfg(feature = "arc-formats")]
+#[test]
+fn tlg_metadata_prefetch_and_visible_lookup_share_prepared_pixels() {
+    use crysirror_core::service::HostServices;
+
+    struct TlgSource {
+        encoded: Vec<u8>,
+        reads: AtomicUsize,
+    }
+
+    impl ClientStorage for TlgSource {
+        fn read(&self, _: &VfsPath) -> crysirror_core::Result<Vec<u8>> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            Ok(self.encoded.clone())
+        }
+        fn list(&self, _: Mount, _: &str) -> crysirror_core::Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        fn write_atomic(&self, _: &VfsPath, _: &[u8]) -> crysirror_core::Result<()> {
+            Err(Error::ReadOnly)
+        }
+        fn remove(&self, _: &VfsPath) -> crysirror_core::Result<()> {
+            Err(Error::ReadOnly)
+        }
+    }
+
+    fn source(blue: u8, alpha: u8) -> Arc<TlgSource> {
+        let mut encoded = b"TLG5.0\0raw\x1a\x04".to_vec();
+        for value in [1u32, 1, 1, 0] {
+            encoded.extend(value.to_le_bytes());
+        }
+        for value in [blue, 2, 1, alpha] {
+            encoded.extend([1, 1, 0, 0, 0, value]);
+        }
+        Arc::new(TlgSource { encoded, reads: AtomicUsize::new(0) })
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("assets")).unwrap();
+    let project = dir.path().join("project.json");
+    std::fs::write(&project, br#"{"schema":2,"name":"tlg cache","content_revision":"1","canvas":[16,16],"assets":"assets","clients":[{"name":"a","adapter":"crysirror-script-v1","game":"a"}]}"#).unwrap();
+    let mut runtime = Runtime::load(&project, &dir.path().join("state")).unwrap();
+    let client = ClientId(1);
+    let path = "picture.TLG";
+    let meta = runtime.host.image_metadata(client).unwrap();
+    for (prefetch_first, blue, alpha) in [(false, 3, 255), (true, 6, 127)] {
+        let source = source(blue, alpha);
+        runtime.assets.refresh_storage(client, source.clone()).unwrap();
+        runtime.assets.set_nonblocking(true);
+        if prefetch_first {
+            assert!(runtime.assets.prefetch_image(client, path).unwrap());
+        }
+        let started = Instant::now();
+        while !meta.prepare_metadata(path).unwrap() {
+            assert!(started.elapsed() < Duration::from_secs(5));
+            std::thread::yield_now();
+        }
+        assert_eq!(meta.size(path).unwrap(), [1, 1]);
+        assert_eq!(meta.opaque(path).unwrap(), alpha == 255);
+        assert_eq!(meta.fingerprint(path).unwrap(), *blake3::hash(&source.encoded).as_bytes());
+        assert!(runtime.assets.prefetch_image(client, path).unwrap());
+        let image = runtime.assets.image_for(client, path).unwrap().unwrap();
+        assert_eq!(image.rgba, [3, 2, blue + 2, alpha]);
+        assert_eq!(source.reads.load(Ordering::Relaxed), 1);
+        assert_eq!(runtime.assets.tasks_inspect()["resident_bytes"], 4);
+    }
+}
 #[test]
 fn cancelling_running_asset_prevents_publication() {
     let t = tempfile::tempdir().unwrap();

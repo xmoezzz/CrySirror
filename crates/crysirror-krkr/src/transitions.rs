@@ -61,6 +61,7 @@ pub fn install(rt: &mut Rt) {
     );
 }
 fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Variant> {
+    let _span = crysirror_tasks::profile::span_current("krkr.transition.prepare");
     let dest = this_of(rt, t, "Layer.beginTransition")?;
     let name = string(&args, 0, "Layer.beginTransition")?;
     let kaicho=matches!(name.as_str(),"blur"|"dim");

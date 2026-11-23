@@ -9,6 +9,10 @@ use super::*;
 use crate::common::{EntryPlan, ParsedArchive};
 use crysirror_resource::read_all;
 use index::{hxv4_filename_hash, hxv4_path_hash};
+use std::sync::Mutex;
+
+const VERIFIED_STREAM_SLOTS: usize = 128;
+type VerifiedStream = (u32, Arc<dyn AssetReader>);
 
 pub(super) struct Descriptor {
     pub offset: u64,
@@ -202,6 +206,7 @@ pub(super) fn open(
         embedded,
         hashed_root,
         manager: recovered.native_filter,
+        verified_streams: std::array::from_fn(|_| Mutex::new(None)),
     }))
 }
 /// Engine-owned description of the validated bootstrap, consumed by native
@@ -249,6 +254,9 @@ struct HxArchive {
     filters: BTreeMap<u32, (u64, u16)>,
     lookups: BTreeMap<[u8; 8], BTreeMap<[u8; 32], u32>>,
     manager: native::Hxv4NativeFilterManager,
+    // These cache only a small number of zero-copy stream handles. A slot
+    // belongs to this authenticated catalog and its original source handle.
+    verified_streams: [Mutex<Option<VerifiedStream>>; VERIFIED_STREAM_SLOTS],
 }
 impl Archive for HxArchive {
     fn entries(&self) -> &[ArchiveEntry] {
@@ -284,18 +292,57 @@ impl Archive for HxArchive {
         None
     }
     fn open(&self, id: u32, ctx: &DecodeContext) -> Result<Arc<dyn AssetReader>> {
+        ctx.check_cancelled()?;
         if let Some(data) = self.embedded.get(&id) {
             return ctx.memory_shared(data.clone());
         }
-        let raw = self.base.open(id, ctx)?;
         if !self.protected_ids.contains(&id) {
-            return Ok(raw);
+            return self.base.open(id, ctx);
         }
         let e = self
             .base
             .entries
             .get(id as usize)
             .context("HXV4 entry id")?;
+        ensure!(e.size <= ctx.limits.max_entry_size, "archive entry decoded byte limit");
+        if let EntryPlan::Segments { segments, .. } = &self.base.plans[id as usize] {
+            if let [segment] = segments.as_slice() {
+                if self.base.source.is_immutable()
+                    && !segment.compressed
+                    && segment.stored == e.size
+                    && segment.size == e.size
+                    && ctx.pipeline(self.base.format, e)?.is_empty()
+                {
+                    return self.open_verified_stream(id, segment.offset, segment.size, ctx);
+                }
+            }
+        }
+        self.verify(id, e.size, self.base.open(id, ctx)?, ctx)
+    }
+}
+impl HxArchive {
+    fn open_verified_stream(&self, id: u32, offset: u64, size: u64, ctx: &DecodeContext) -> Result<Arc<dyn AssetReader>> {
+        let mut slot = self.verified_streams[id as usize % VERIFIED_STREAM_SLOTS]
+            .lock()
+            .map_err(|_| anyhow::anyhow!("HXV4 verified stream lock poisoned"))?;
+        ctx.check_cancelled()?;
+        if let Some((_, stream)) = slot.as_ref().filter(|(cached_id, _)| *cached_id == id) {
+            return Ok(stream.clone());
+        }
+        let raw = subrange(self.base.source.clone(), offset, size)?;
+        let verified = self.verify(id, size, raw, ctx)?;
+        ctx.check_cancelled()?;
+        *slot = Some((id, verified.clone()));
+        Ok(verified)
+    }
+
+    fn verify(
+        &self,
+        id: u32,
+        size: u64,
+        raw: Arc<dyn AssetReader>,
+        ctx: &DecodeContext,
+    ) -> Result<Arc<dyn AssetReader>> {
         let expected = self.base.xp3(id).context("HXV4 checksum absent")?.adler32;
         let state = self
             .filters
@@ -306,8 +353,9 @@ impl Archive for HxArchive {
         let (mut original, mut decoded) = (Adler::new(), Adler::new());
         let mut chunk = vec![0; 65536];
         let mut at = 0u64;
-        while at < e.size {
-            let n = (e.size - at).min(chunk.len() as u64) as usize;
+        while at < size {
+            ctx.check_cancelled()?;
+            let n = (size - at).min(chunk.len() as u64) as usize;
             crysirror_resource::read_exact_at(raw.as_ref(), at, &mut chunk[..n])?;
             original.update(&chunk[..n]);
             if let Some(state) = &state {
@@ -364,6 +412,113 @@ impl Adler {
     }
     fn finish(&self) -> u32 {
         (self.b << 16) | self.a
+    }
+}
+
+#[cfg(test)]
+mod verified_stream_tests {
+    use super::*;
+    use std::sync::{atomic::{AtomicUsize, Ordering}, Barrier};
+
+    struct Source {
+        bytes: Mutex<Vec<u8>>,
+        reads: AtomicUsize,
+        immutable: bool,
+    }
+
+    impl AssetReader for Source {
+        fn len(&self) -> crysirror_core::Result<u64> {
+            Ok(self.bytes.lock().unwrap().len() as u64)
+        }
+
+        fn read_at(&self, offset: u64, output: &mut [u8]) -> crysirror_core::Result<usize> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            let bytes = self.bytes.lock().unwrap();
+            let tail = bytes.get(offset as usize..).unwrap_or_default();
+            let len = output.len().min(tail.len());
+            output[..len].copy_from_slice(&tail[..len]);
+            Ok(len)
+        }
+
+        fn is_immutable(&self) -> bool {
+            self.immutable
+        }
+    }
+
+    fn fixture(immutable: bool) -> (HxArchive, Arc<Source>, Vec<u8>) {
+        use crate::common::{Segment, Xp3Facts};
+
+        let params = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 0, 1, 2, 0, 52, 18, 120, 86];
+        let table: Vec<_> = (0..1024u32).map(|x| x.rotate_left(7)).collect();
+        let manager = native::Hxv4NativeFilterManager::from_params_and_table(&params, &table).unwrap();
+        let plain = vec![43; 150_000];
+        let mut checksum = Adler::new();
+        checksum.update(&plain);
+        let size = plain.len() as u64;
+        let key = 0x1122_3344_5566_7788;
+        let mut stored = plain.clone();
+        manager.apply_entry(key, 1, 0, &mut stored);
+        let source = Arc::new(Source { bytes: Mutex::new(stored), reads: AtomicUsize::new(0), immutable });
+        let archive = HxArchive {
+            embedded: BTreeMap::new(),
+            hashed_root: None,
+            protected_ids: [0].into(),
+            base: ParsedArchive {
+                format: "kirikiri/xp3",
+                source: source.clone(),
+                entries: vec![ArchiveEntry { id: 0, path: "fixture.bin".into(), size, stored_size: size, metadata: serde_json::Value::Null }],
+                plans: vec![EntryPlan::Segments {
+                    segments: vec![Segment { offset: 0, stored: size, size, compressed: false }],
+                    encrypted: false,
+                    facts: Xp3Facts { adler32: checksum.finish(), ..Default::default() },
+                }],
+            },
+            filters: [(0, (key, 1))].into(),
+            lookups: BTreeMap::new(),
+            manager,
+            verified_streams: std::array::from_fn(|_| Mutex::new(None)),
+        };
+        (archive, source, plain)
+    }
+
+    #[test]
+    fn concurrent_opens_share_one_verified_stream() {
+        let (archive, source, plain) = fixture(true);
+        let ctx = DecodeContext::new(crysirror_core::state::ClientId(1));
+        let ready = Barrier::new(2);
+        let one = std::thread::scope(|threads| {
+            let other = threads.spawn(|| {
+                ready.wait();
+                archive.open(0, &ctx).unwrap()
+            });
+            ready.wait();
+            let one = archive.open(0, &ctx).unwrap();
+            assert!(Arc::ptr_eq(&one, &other.join().unwrap()));
+            one
+        });
+        assert_eq!(source.reads.load(Ordering::Relaxed), 3);
+        let mut part = [0; 32];
+        assert_eq!(one.read_at(65_531, &mut part).unwrap(), part.len());
+        assert_eq!(part, plain[65_531..65_563]);
+        let mut limited = ctx.clone();
+        limited.limits.max_entry_size = 32;
+        assert!(archive.open(0, &limited).is_err());
+        let cancelled = crysirror_tasks::Cancellation::default();
+        cancelled.cancel();
+        assert!(archive.open(0, &ctx.with_cancellation(cancelled)).is_err());
+    }
+
+    #[test]
+    fn mutable_sources_are_revalidated_and_corruption_is_rejected() {
+        let (archive, source, _) = fixture(false);
+        let ctx = DecodeContext::new(crysirror_core::state::ClientId(1));
+        assert!(archive.open(0, &ctx).is_ok());
+        source.bytes.lock().unwrap()[30] ^= 128;
+        let failure = archive.open(0, &ctx).err().expect("corruption must fail");
+        assert!(failure.to_string().contains("checksum mismatch"));
+        source.bytes.lock().unwrap()[30] ^= 128;
+        assert!(archive.open(0, &ctx).is_ok());
+        assert_eq!(source.reads.load(Ordering::Relaxed), 9);
     }
 }
 

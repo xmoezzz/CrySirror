@@ -59,6 +59,30 @@ fn setup() -> (CanvasSystem, LayerSystem) {
     .unwrap();
     (c, l)
 }
+
+#[test]
+fn rebuilding_both_crossfade_roots_validates_the_complete_canvas_batch() {
+    use crysirror_scene::layer::LayerCommand;
+
+    let client = ClientId(1);
+    let mut canvases = CanvasSystem::default();
+    let mut layers = LayerSystem::default();
+    let present = |id, layer, order| C::Present { id, layer, order, parent: None, position: [0., 0.] };
+    canvases.apply_batch(client, &[create(1), create(2), present(1, 7, 0), present(2, 8, 1)], &mut layers).unwrap();
+    layers.apply_batch(client, &[LayerCommand::BeginCrossfade {
+        id: 7, source: 8, duration_ms: 100, rule: None, external: false,
+    }]).unwrap();
+
+    let resize = |id, width| C::Resize { id, width, height: 10 };
+    canvases.apply_batch(client, &[resize(1, 12), resize(2, 12)], &mut layers).unwrap();
+    assert_eq!(layers.get(client, 7).unwrap().rect[2], 12.);
+    assert_eq!(layers.get(client, 8).unwrap().rect[2], 12.);
+
+    let before = (to_value(&canvases).unwrap(), to_value(&layers).unwrap());
+    let error = canvases.apply_batch(client, &[resize(1, 14)], &mut layers).unwrap_err();
+    assert!(error.to_string().contains("equally sized roots"));
+    assert_eq!((to_value(&canvases).unwrap(), to_value(&layers).unwrap()), before);
+}
 #[test]
 fn copies_are_independent_snapshots_and_roundtrip() {
     let (mut c, mut l) = setup();

@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 use crate::{
-    assets::Assets,
+    assets::{Assets, ImageFacts, ImagePreparation, is_tlg},
     model::{Action, ClientSpec, Project},
     script::ScriptVm,
     storage::RuntimeStorage,
@@ -145,6 +145,7 @@ pub struct SharedHost {
     image_dimensions: BTreeMap<(ClientId, String), ([u32; 2], bool)>,
     image_tasks: crysirror_tasks::TaskPool,
     image_memory: Arc<std::sync::atomic::AtomicUsize>,
+    image_preparation: ImagePreparation,
     pub(crate) pattern_owner: Arc<()>,
     pub(crate) scene_checkpoint_epochs: BTreeMap<ClientId, Arc<()>>,
     pub(crate) canvas_images: crate::canvas_images::Broker,
@@ -1700,9 +1701,11 @@ impl HostServices for SharedHost {
             decoders: self.decoders.clone(),
             sizes: std::sync::Mutex::new(BTreeMap::new()),
             pending_metadata: std::sync::Mutex::new(None),
+            synchronous_tlg: std::sync::Mutex::new(None),
             owner: client,
             tasks: self.image_tasks.clone(),
             memory: self.image_memory.clone(),
+            prepared: self.image_preparation.clone(),
         }))
     }
     fn text_measurement(
@@ -2233,7 +2236,8 @@ impl Runtime {
                 keyboard_locks: Default::default(),
                 mesh_frame_history: None,
                 image_tasks: assets.cpu_tasks(),
-                image_memory: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                image_memory: assets.image_memory(),
+                image_preparation: assets.image_preparation(),
                 pattern_owner: Arc::new(()),
                 scene_checkpoint_epochs: BTreeMap::new(),
                 canvas_images: crate::canvas_images::Broker::new(assets.store_id()),
@@ -2539,8 +2543,10 @@ impl Runtime {
                 continue;
             }
             let budget = s.vm.instruction_budget().clamp(1, 100_000);
-            s.yielded = core(s.vm.step(&mut self.host, input, budget))
-                .with_context(|| format!("VM {}", s.name))?;
+            s.yielded = self.profiler.scope(profile_frame, || {
+                core(s.vm.step(&mut self.host, input, budget))
+                    .with_context(|| format!("VM {}", s.name))
+            })?;
         }
         if let Some(size) = self.host.pending_canvas_size.take() {
             self.project.canvas = size;
@@ -3827,11 +3833,11 @@ struct SharedImageMetadata {
     memory: Arc<std::sync::atomic::AtomicUsize>,
     storage: Arc<dyn crysirror_core::service::ClientStorage>,
     decoders: crysirror_image::DecoderRegistry,
+    prepared: ImagePreparation,
     sizes: std::sync::Mutex<BTreeMap<String, ImageFacts>>,
     pending_metadata: std::sync::Mutex<Option<(String, crysirror_tasks::Task<ImageFacts>)>>,
+    synchronous_tlg: std::sync::Mutex<Option<(u64, String, ImageFacts)>>,
 }
-type ImageFacts = ([u32; 2], bool, [u8; 32]);
-
 fn read_image_facts(
     asset: &str, storage: &dyn crysirror_core::service::ClientStorage,
     decoders: &crysirror_image::DecoderRegistry, cx: Option<&crysirror_resource::DecodeContext>,
@@ -3852,6 +3858,29 @@ fn read_image_facts(
     Ok(([image.width, image.height], image.rgba.chunks_exact(4).all(|p| p[3] == 255), *blake3::hash(&bytes).as_bytes()))
 }
 impl SharedImageMetadata {
+    fn tlg_facts(&self, asset: &str) -> crysirror_core::Result<ImageFacts> {
+        match self.prepared.facts(self.owner, asset, &self.decoders, true) {
+            Ok(Some(facts)) => Ok(facts),
+            Ok(None) => Err(Error::Invalid("synchronous TLG metadata was not ready")),
+            Err(Error::Limit("TLG metadata preparation capacity")) => {
+                // Callbacks that cannot yield still need the original size
+                // lookup when the async asset queue is saturated.
+                let (revision, storage) = self.prepared.scoped_storage(self.owner).ok_or(Error::NotFound)?;
+                let mut cached = self.synchronous_tlg.lock()
+                    .map_err(|_| Error::Io("image metadata lock".into()))?;
+                if let Some((saved, path, facts)) = &*cached {
+                    if *saved == revision && path == asset {
+                        return Ok(*facts);
+                    }
+                }
+                let facts = read_image_facts(asset, &*storage, &self.decoders, None, &self.memory)?;
+                *cached = Some((revision, asset.to_owned(), facts));
+                Ok(facts)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn cache_facts(&self, name: String, facts: ImageFacts) -> crysirror_core::Result<()> {
         let mut sizes = self.sizes.lock().map_err(|_| Error::Io("image metadata lock".into()))?;
         if sizes.len() >= 4096 { sizes.clear(); }
@@ -3986,6 +4015,9 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
         )
     }
     fn fingerprint(&self, asset: &str) -> crysirror_core::Result<[u8; 32]> {
+        if is_tlg(asset) {
+            return Ok(self.tlg_facts(asset)?.2);
+        }
         self.size(asset)?;
         self.sizes
             .lock()
@@ -4012,6 +4044,9 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
     }
 
     fn opaque(&self, asset: &str) -> crysirror_core::Result<bool> {
+        if is_tlg(asset) {
+            return Ok(self.tlg_facts(asset)?.1);
+        }
         self.size(asset)?;
         self.sizes
             .lock()
@@ -4021,6 +4056,9 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
             .ok_or(Error::NotFound)
     }
     fn prepare_metadata(&self, asset: &str) -> crysirror_core::Result<bool> {
+        if is_tlg(asset) {
+            return Ok(self.prepared.facts(self.owner, asset, &self.decoders, false)?.is_some());
+        }
         if self.sizes.lock().map_err(|_| Error::Io("image metadata lock".into()))?.contains_key(asset) {
             return Ok(true);
         }
@@ -4055,6 +4093,9 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
         Ok(false)
     }
     fn size(&self, asset: &str) -> crysirror_core::Result<[u32; 2]> {
+        if is_tlg(asset) {
+            return Ok(self.tlg_facts(asset)?.0);
+        }
         if let Some(facts) = self.sizes.lock().map_err(|_| Error::Io("image metadata lock".into()))?.get(asset) {
             return Ok(facts.0);
         }

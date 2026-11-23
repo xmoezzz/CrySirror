@@ -875,6 +875,7 @@ impl KrkrHost {
     /// Emit the commands that bring engine nodes up to date: painter order
     /// from a depth-first walk, container geometry and image placement.
     pub fn sync(&mut self) -> TjsResult<()> {
+        let _span = crysirror_tasks::profile::span_current("krkr.layers.sync");
         crate::menus::sync(self)?;
         crate::tooltip::sync_liveness(self)?;
         let mut roots = Vec::new();

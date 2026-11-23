@@ -340,12 +340,16 @@ struct CapStorage {
 struct CapAssetReader {
     file: Mutex<crysirror_capfs::fs::File>,
     len: u64,
+    immutable: bool,
 }
 struct CapStorageLease {
     _file: std::fs::File,
 }
 impl StorageLease for CapStorageLease {}
 impl AssetReader for CapAssetReader {
+    fn is_immutable(&self) -> bool {
+        self.immutable
+    }
     fn len(&self) -> Result<u64> {
         Ok(self.len)
     }
@@ -363,6 +367,23 @@ impl AssetReader for CapAssetReader {
             .min((self.len - offset).min(usize::MAX as u64) as usize);
         file.read(&mut output[..count]).map_err(io)
     }
+}
+
+fn open_asset_stream(dir: &Dir, path: &str) -> std::io::Result<(crysirror_capfs::fs::File, bool)> {
+    #[cfg(target_os = "windows")]
+    if std::path::Path::new(path).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("xp3")) {
+        use crysirror_capfs::fs::{OpenOptions, OpenOptionsExt};
+        // Deny in-place writes for this handle while permitting atomic file
+        // replacement. Readers of a mounted archive keep the original handle.
+        const FILE_SHARE_READ: u32 = 1;
+        const FILE_SHARE_DELETE: u32 = 4;
+        let mut options = OpenOptions::new();
+        options.read(true).share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE);
+        if let Ok(file) = dir.open_with(path, &options) {
+            return Ok((file, true));
+        }
+    }
+    dir.open(path).map(|file| (file, false))
 }
 impl CapStorage {
     fn dir(&self, mount: Mount) -> &Dir {
@@ -586,7 +607,9 @@ impl ClientStorage for CapStorage {
         if impossible_component(path.relative()) {
             return Err(Error::NotFound);
         }
-        let file = self.asset.open(asset_spelling(&self.asset, path.relative()).as_ref()).map_err(|e|if virtual_directory&&e.kind()==std::io::ErrorKind::NotADirectory {Error::NotFound}else{io(e)})?;
+        let spelling = asset_spelling(&self.asset, path.relative());
+        let (file, immutable) = open_asset_stream(&self.asset, spelling.as_ref())
+            .map_err(|e|if virtual_directory&&e.kind()==std::io::ErrorKind::NotADirectory {Error::NotFound}else{io(e)})?;
         let metadata = file.metadata().map_err(io)?;
         if !metadata.is_file() {
             return Err(Error::Invalid("asset stream must be a file"));
@@ -594,6 +617,7 @@ impl ClientStorage for CapStorage {
         Ok(Arc::new(CapAssetReader {
             file: Mutex::new(file),
             len: metadata.len(),
+            immutable,
         }))
     }
     fn open_read(&self, path: &VfsPath) -> Result<Arc<dyn AssetReader>> {
@@ -602,7 +626,7 @@ impl ClientStorage for CapStorage {
         let file=self.dir(path.mount()).open(path.relative()).map_err(io)?;
         let metadata=file.metadata().map_err(io)?;
         if !metadata.is_file(){return Err(Error::Invalid("read stream must be a file"))}
-        Ok(Arc::new(CapAssetReader{file:Mutex::new(file),len:metadata.len()}))
+        Ok(Arc::new(CapAssetReader{file:Mutex::new(file),len:metadata.len(),immutable:false}))
     }
     fn exists(&self, path: &VfsPath) -> bool {
         if path.mount() == Mount::Asset {
@@ -778,6 +802,23 @@ impl FileSystem for DiskVfs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn xp3_streams_only_promise_immutable_bytes_when_opened_without_write_sharing() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("data.xp3");
+        std::fs::write(&path, b"contents").unwrap();
+        let root = Dir::open_ambient_dir(temp.path(), crysirror_capfs::ambient_authority()).unwrap();
+        let writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let (shared, immutable) = open_asset_stream(&root, "data.xp3").unwrap();
+        assert!(!immutable);
+        drop((shared, writer));
+        let (protected, immutable) = open_asset_stream(&root, "data.xp3").unwrap();
+        assert!(immutable);
+        assert!(std::fs::OpenOptions::new().write(true).open(&path).is_err());
+        drop(protected);
+        assert!(std::fs::OpenOptions::new().write(true).open(&path).is_ok());
+    }
     #[test]
     fn asset_lookup_folds_case_like_windows_game_data() {
         let assets = tempfile::tempdir().unwrap();
@@ -1264,10 +1305,10 @@ pub(crate) fn asset_storage_from_dir(dir: Dir) -> Arc<dyn ClientStorage> {
         }
         fn open_asset(&self, path: &VfsPath) -> Result<Arc<dyn AssetReader>> {
             if path.mount() != Mount::Asset { return Err(Error::ReadOnly); }
-            let file = self.0.open(path.relative()).map_err(io)?;
+            let (file, immutable) = open_asset_stream(&self.0, path.relative()).map_err(io)?;
             let metadata = file.metadata().map_err(io)?;
             if !metadata.is_file() { return Err(Error::Invalid("asset stream must be a file")); }
-            Ok(Arc::new(CapAssetReader { file: Mutex::new(file), len: metadata.len() }))
+            Ok(Arc::new(CapAssetReader { file: Mutex::new(file), len: metadata.len(), immutable }))
         }
         fn write_atomic(&self, _: &VfsPath, _: &[u8]) -> Result<()> { Err(Error::ReadOnly) }
         fn remove(&self, _: &VfsPath) -> Result<()> { Err(Error::ReadOnly) }

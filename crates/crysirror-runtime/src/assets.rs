@@ -6,13 +6,14 @@ use crysirror_core::{
     service::ClientStorage,
     state::ClientId,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::{Arc, Mutex}};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 #[path = "assets_async.rs"]
 mod asynchronous;
 pub use asynchronous::{AssetKind, AssetLease, AssetState, AssetStatus, AssetTicket};
+pub(crate) use asynchronous::{ImageFacts, ImagePreparation, is_tlg};
 
 /// Immutable assets with a capability root per client, not merely a string prefix.
 /// Explicit reload constructs a new store/runtime. This is not a native-code sandbox.
@@ -20,7 +21,7 @@ pub struct Assets {
     pub(crate) published_images: crate::published_images::PublishedImages,
     frame_surfaces: Option<SurfaceSnapshot>,
     pub profiler: crysirror_tasks::profile::Profiler,
-    asynchronous: asynchronous::AsyncAssets,
+    asynchronous: Arc<Mutex<asynchronous::AsyncAssets>>,
     /// CPU text resources belong to engine resources, not a GPU/device lifetime.
     pub text: crysirror_text::TextSystem,
     pub decoders: crysirror_image::DecoderRegistry,
@@ -28,7 +29,6 @@ pub struct Assets {
     #[cfg(not(target_arch = "wasm32"))]
     native_root: Option<crysirror_capfs::fs::Dir>,
     clients: BTreeMap<ClientId, Arc<dyn ClientStorage>>,
-    storage: BTreeMap<ClientId, Arc<dyn ClientStorage>>,
     bytes: BTreeMap<String, Arc<[u8]>>,
     total: usize,
     limit: usize,
@@ -90,14 +90,13 @@ impl Assets {
             published_images: Default::default(),
             frame_surfaces: None,
             profiler: Default::default(),
-            asynchronous: asynchronous::AsyncAssets::new()?,
+            asynchronous: Arc::new(Mutex::new(asynchronous::AsyncAssets::new()?)),
             text: Default::default(),
             decoders,
             root,
             #[cfg(not(target_arch = "wasm32"))]
             native_root: None,
             clients: BTreeMap::new(),
-            storage: BTreeMap::new(),
             bytes: BTreeMap::new(),
             total: 0,
             limit: 256 * 1024 * 1024,
@@ -122,9 +121,10 @@ impl Assets {
         resources: Option<&crysirror_resource::DecodeContext>,
         format: Option<&str>,
     ) -> Result<crysirror_image::ImageSurface> {
+        let storage = self.asset_storage(client);
         let source = |name: &str| -> crysirror_core::Result<Vec<u8>> {
             let logical = VfsPath::new(Mount::Asset, name)?;
-            if let Some(storage) = self.storage.get(&client) {
+            if let Some(storage) = &storage {
                 storage.read(&logical)
             } else if let Some(dir) = self.clients.get(&client) {
                 dir.read(&logical)
@@ -204,7 +204,7 @@ impl Assets {
         if let Some(bytes) = self.prepared_bytes(client, path) {
             return Ok(bytes);
         }
-        let bytes = if let Some(storage) = self.storage.get(&client) {
+        let bytes = if let Some(storage) = self.asset_storage(client) {
             let logical = VfsPath::new(Mount::Asset, path).map_err(|e| anyhow::anyhow!("{e}"))?;
             storage
                 .read(&logical)
@@ -234,8 +234,9 @@ impl Assets {
                 true
             }
         });
-        self.asynchronous.invalidate(client);
-        self.storage.insert(client, storage);
+        let mut prepared = self.prepared();
+        prepared.invalidate(client);
+        prepared.storage.insert(client, storage);
         Ok(())
     }
     pub fn register_generated(
@@ -262,7 +263,7 @@ impl Assets {
     /// Whether `path` is served by a mounted container for this client (its
     /// bytes cannot change while mounted, unlike plain project files).
     pub fn container_backed(&self, client: ClientId, path: &str) -> bool {
-        let (Some(storage), Ok(logical)) = (self.storage.get(&client), VfsPath::new(Mount::Asset, path)) else {
+        let (Some(storage), Ok(logical)) = (self.asset_storage(client), VfsPath::new(Mount::Asset, path)) else {
             return false;
         };
         storage.served_by_container(&logical)
@@ -393,8 +394,11 @@ impl Assets {
     }
     pub fn clear(&mut self) {
         let clients: Vec<_> = self.clients.keys().copied().collect();
-        for client in clients {
-            self.asynchronous.invalidate(client);
+        {
+            let mut prepared = self.prepared();
+            for client in clients {
+                prepared.invalidate(client);
+            }
         }
         self.bytes.clear();
         self.total = 0;

@@ -16,6 +16,7 @@ crysirror-image.workspace = true
 crysirror-video = { path = "../crysirror-video" }
 eluna = { package = "crysirror-codec-emote", path = "../crysirror-codec-emote" }
 crysirror-scene.workspace = true
+crysirror-tasks.workspace = true
 crysirror-puppet.workspace = true
 crysirror-puppet-eluna.workspace = true
 crysirror-tjs2.workspace = true

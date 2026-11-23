@@ -1386,6 +1386,22 @@ impl CanvasSystem {
         dirty_sources: &BTreeSet<u32>,
         dirty_presentations: &BTreeSet<u32>,
     ) -> Result<()> {
+        if dirty_sources.is_empty() && dirty_presentations.is_empty() {
+            self.prune_missing_parents(c, layers);
+            return Ok(());
+        }
+        layers.rebuild_presentations(|layers| {
+            self.rebuild_presentations(c, layers, dirty_sources, dirty_presentations)
+        })
+    }
+
+    fn rebuild_presentations(
+        &mut self,
+        c: ClientId,
+        layers: &mut LayerSystem,
+        dirty_sources: &BTreeSet<u32>,
+        dirty_presentations: &BTreeSet<u32>,
+    ) -> Result<()> {
         self.prune_missing_parents(c, layers);
         let entries: Vec<_> = self
             .presentations
@@ -1461,7 +1477,7 @@ impl CanvasSystem {
                     &mut commands,
                 )?;
                 layers
-                    .apply_batch(c, &commands)
+                    .apply_presentation_batch(c, &commands)
                     .context("paged isolated Canvas presentation")?;
                 self.presentations
                     .get_mut(&c.0)
@@ -1494,7 +1510,7 @@ impl CanvasSystem {
                     preserve_presentation_root(previous_root.as_ref(), draw, explicit_placement);
                 commands.push(LayerCommand::Put { layer: draw });
                 layers
-                    .apply_batch(c, &commands)
+                    .apply_presentation_batch(c, &commands)
                     .context("isolated canvas presentation")?;
                 self.presentations
                     .get_mut(&c.0)
@@ -1533,7 +1549,7 @@ impl CanvasSystem {
                 &mut ids,
                 &mut commands,
             )?;
-            layers.apply_batch(c, &commands).with_context(|| {
+            layers.apply_presentation_batch(c, &commands).with_context(|| {
                 fn stats(nodes: &[CanvasNode], depth: usize) -> (usize, usize) {
                     nodes.iter().fold((0, depth), |(n, d), node| match node {
                         CanvasNode::Group { nodes, .. } => {

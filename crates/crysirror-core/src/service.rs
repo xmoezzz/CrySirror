@@ -72,11 +72,19 @@ pub const UNWRAPPED_TEXT_LAYOUT: &str = "simple-horizontal-unwrapped-v1";
 pub trait AssetReader: Send + Sync {
     fn len(&self) -> Result<u64>;
     fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize>;
+    /// The bytes and length cannot change while this reader is alive.
+    /// Read-only access alone does not imply an immutable backing source.
+    fn is_immutable(&self) -> bool {
+        false
+    }
 }
 
 /// Bounded fallback for in-memory/provider assets; disk hosts can stream.
 pub struct MemoryAssetReader(pub Arc<[u8]>);
 impl AssetReader for MemoryAssetReader {
+    fn is_immutable(&self) -> bool {
+        true
+    }
     fn len(&self) -> Result<u64> {
         Ok(self.0.len() as u64)
     }

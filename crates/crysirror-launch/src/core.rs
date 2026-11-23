@@ -230,6 +230,7 @@ pub fn load_fonts(rt: &mut Runtime, override_font: Option<&Path>) -> Result<()> 
 pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result<()> {
     let profiler = rt.profiler.clone();
     let frame = profiler.frame();
+    let _span = profiler.span(frame, "canvas.materialize");
     if rt.has_pending_target_images() {
         let _span = profiler.span(frame, "canvas.target_readback");
         let canvas = rt.project.canvas;
@@ -270,7 +271,10 @@ pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result
         engine.canvases.resolve_materialized(&request, &path, &mut engine.layers)?;
         log::debug!("canvas {} materialized as {path}", request.surface);
     }
-    renderer.advance_layer_histories(&mut rt.assets, &rt.host.engine.layers, rt.project.canvas)?;
+    {
+        let _span = profiler.span(frame, "layers.transition_history");
+        renderer.advance_layer_histories(&mut rt.assets, &rt.host.engine.layers, rt.project.canvas)?;
+    }
     Ok(())
 }
 
