@@ -45,7 +45,12 @@ Pre-rendered bitmap fonts retain their stored metrics.
 An image reference of the form `psb://file/key` can open its named PSB from
 the game's search paths even when no script object has loaded it yet.
 Existence checks and image loading look up the same resource entry. The
-shared image service decodes it. For a PNG member, the game receives the
+shared image service decodes it. Small UI members and PNG overlays share the
+8 MiB, 256-entry per-session limit. The most recent PNG with 4–8 MiB of decoded
+pixels can retain them within the existing 256 MiB PSB retention budget. CPU-only
+entries receive a normal temporary Canvas publication on each use. Cache
+entries identify the loaded PSB instance and member index.
+For a PNG member, the game receives the
 signed `offs_x`, `offs_y` and `offs_unit` metadata used to position expression
 overlays. Layer slicing can read
 TLG5 and TLG6 dimensions, including TLG0-wrapped images, and copy rows to

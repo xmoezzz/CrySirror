@@ -43,20 +43,23 @@ pub struct PendingImage {
     member: Option<(Arc<Loaded>, usize)>,
 }
 
-/// Plain PSB bytes retained for the `psb://` domain after their PSBFile
-/// objects are gone (scripts load a local PSBFile, then its images later).
+/// Retained `psb://` package bytes and the most recent large PNG's CPU pixels.
+/// Scripts can load a local PSBFile, then use its images after it is gone.
 const RETAINED_BYTES: usize = 256 << 20;
 
-// Small UI members are repeatedly assigned to different buttons. Hold a
-// bounded set of caller leases independent of individual Canvas lifetimes.
+// Small UI members can reuse a Canvas publication. PNG overlays may retain
+// just their pixels under the same per-session byte and entry limits.
 const UI_MEMBER_BYTES: u64 = 256 << 10;
-const UI_CACHE_BYTES: u64 = 8 << 20;
-const UI_CACHE_COUNT: usize = 256;
+const MEMBER_CACHE_BYTES: u64 = 8 << 20;
+const MEMBER_CACHE_COUNT: usize = 256;
+// A single PNG this large can crowd out its own overlays and the gallery UI.
+const LARGE_PNG_BYTES: u64 = MEMBER_CACHE_BYTES / 2;
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 struct CachedMember {
     file: Weak<Loaded>,
     index: usize,
-    path: String,
+    path: Option<String>,
     image: Arc<dyn ImageResource>,
     bytes: u64,
 }
@@ -76,8 +79,9 @@ pub struct State {
     /// Images loaded inside a non-suspending callback, publishing next boundary.
     deferred: Vec<(ObjectHandle, crysirror_core::image_processing::ImageInput)>,
     next_slot: u32,
-    ui_members: VecDeque<CachedMember>,
-    ui_bytes: u64,
+    members: VecDeque<CachedMember>,
+    member_bytes: u64,
+    recent_large_png: Option<CachedMember>,
 }
 
 fn err(e: impl std::fmt::Display) -> TjsError {
@@ -161,10 +165,15 @@ fn remember(state: &mut State, key: String, loaded: Arc<Loaded>) {
     evict(state);
 }
 
-/// Keep the domain within RETAINED_BYTES, dropping the oldest files that no
+/// Reclaim the optional PNG lease first and then the oldest files that no
 /// live PSBFile names.
 fn evict(state: &mut State) {
-    let mut total: usize = state.files.values().map(|l| l.plain.len()).sum();
+    let mut total = state.package_bytes();
+    if state.recent_large_png.as_ref().is_some_and(|image| {
+        !state.contains_package(&image.file) || total as u64 + image.bytes > RETAINED_BYTES as u64
+    }) {
+        state.recent_large_png = None;
+    }
     let mut i = 0;
     while total > RETAINED_BYTES && i < state.order.len() {
         let key = &state.order[i];
@@ -242,18 +251,21 @@ pub fn load_image(rt: &mut Rt, layer: ObjectHandle, uri: &str) -> Result<Variant
     let bytes = loaded.psb.resource_bytes(&loaded.plain, index)
         .ok_or_else(|| err(format!("{uri}: invalid resource range")))?;
     let offset = png_offset(bytes);
-    let cache = &mut rt.host_mut().psbfile.ui_members;
-    let key = Arc::downgrade(&loaded);
-    let cached = cache.iter().position(|m| m.index == index && m.file.ptr_eq(&key)).map(|i| {
-        let member = cache.remove(i).unwrap();
-        let hit = (member.path.clone(), member.image.clone());
-        cache.push_back(member);
-        hit
-    });
-    let resident = loaded.decoded.lock().unwrap_or_else(|e| e.into_inner()).get(&index).and_then(Weak::upgrade);
-    if let Some((path, image)) = cached {
+    let can_suspend = rt.host().can_suspend;
+    let cached = rt.host_mut().psbfile.cached_member(&loaded, index, can_suspend);
+    if let Some((Some(path), image)) = cached {
         assign_member(rt, layer, image, &path)?;
-    } else if let Some(image) = resident.filter(|_| rt.host().can_suspend) {
+        return Ok(offset_metadata(rt, offset));
+    }
+    let resident = if can_suspend {
+        cached.map(|(_, image)| image).or_else(|| {
+            loaded.decoded.lock().unwrap_or_else(|e| e.into_inner())
+                .get(&index).and_then(Weak::upgrade)
+        })
+    } else {
+        None
+    };
+    if let Some(image) = resident {
         let state = &mut rt.host_mut().psbfile;
         if state.pending.is_some() || state.decoding.is_some() || state.ready.is_some() {
             return Err(err("image load already pending"));
@@ -294,7 +306,7 @@ fn assign_member(rt: &mut Rt, layer: ObjectHandle, image: Arc<dyn ImageResource>
 
 /// KiriKiri LoadPNG reads oFFs from the information preceding IDAT.
 fn png_offset(bytes: &[u8]) -> Option<(i32, i32, &'static str)> {
-    let mut chunks = bytes.strip_prefix(b"\x89PNG\r\n\x1a\n")?;
+    let mut chunks = bytes.strip_prefix(PNG_SIGNATURE)?;
     while chunks.len() >= 12 {
         let length = u32::from_be_bytes(chunks[..4].try_into().ok()?) as usize;
         let chunk = chunks.get(..length.checked_add(12)?)?;
@@ -419,29 +431,31 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                     let bytes = u64::from(w) * u64::from(h) * 4;
                     if bytes <= UI_MEMBER_BYTES {
                         let state = rt.host_mut();
-                        while state.psbfile.ui_bytes + bytes > UI_CACHE_BYTES || state.psbfile.ui_members.len() >= UI_CACHE_COUNT {
-                            let old = state.psbfile.ui_members.pop_front().expect("nonempty UI cache at limit");
-                            state.psbfile.ui_bytes -= old.bytes;
-                            state.retired_images.push(old.path);
-                        }
+                        state.psbfile.make_member_room(bytes, &mut state.retired_images);
                         let slot = state.layer(layer).map_err(err)?.slot;
                         let receipt = match host.publish_image_resource(client, slot, image.clone()) {
                             Ok(receipt) => receipt,
-                            Err(crysirror_core::Error::Limit(_)) if !state.psbfile.ui_members.is_empty() || !state.retired_images.is_empty() => {
-                                state.retired_images.extend(state.psbfile.ui_members.drain(..).map(|m| m.path));
-                                state.psbfile.ui_bytes = 0;
+                            Err(crysirror_core::Error::Limit(_)) if !state.psbfile.members.is_empty() || !state.retired_images.is_empty() => {
+                                state.psbfile.clear_members(&mut state.retired_images);
                                 state.psbfile.ready = Some((layer, image));
                                 return Ok(false);
                             }
                             Err(error) => return Err(error.into()),
                         };
                         let path = receipt.path.relative().to_owned();
-                        state.psbfile.ui_members.push_back(CachedMember {
-                            file: Arc::downgrade(&file), index, path: path.clone(), image: image.clone(), bytes,
+                        state.psbfile.retain_member(CachedMember {
+                            file: Arc::downgrade(&file), index, path: Some(path.clone()), image: image.clone(), bytes,
                         });
-                        state.psbfile.ui_bytes += bytes;
                         assign_member(rt, layer, image, &path)?;
                         return Ok(true);
+                    }
+                    if bytes <= MEMBER_CACHE_BYTES && file.psb.resource_bytes(&file.plain, index)
+                        .is_some_and(|encoded| encoded.starts_with(PNG_SIGNATURE))
+                    {
+                        let state = rt.host_mut();
+                        state.psbfile.retain_png(CachedMember {
+                            file: Arc::downgrade(&file), index, path: None, image: image.clone(), bytes,
+                        }, &mut state.retired_images);
                     }
                 }
                 rt.host_mut().psbfile.ready = Some((layer, image));
@@ -508,6 +522,65 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
 }
 
 impl State {
+    fn package_bytes(&self) -> usize {
+        self.files.values().map(|file| file.plain.len()).sum()
+    }
+
+    fn contains_package(&self, file: &Weak<Loaded>) -> bool {
+        self.files.values().any(|loaded| std::ptr::eq(Arc::as_ptr(loaded), file.as_ptr()))
+    }
+
+    fn cached_member(&mut self, file: &Arc<Loaded>, index: usize, can_suspend: bool)
+        -> Option<(Option<String>, Arc<dyn ImageResource>)>
+    {
+        let key = Arc::downgrade(file);
+        if let Some(member) = self.recent_large_png.as_ref().filter(|member| {
+            can_suspend && member.index == index && member.file.ptr_eq(&key)
+        }) {
+            return Some((None, member.image.clone()));
+        }
+        let i = self.members.iter().position(|member| {
+            member.index == index && member.file.ptr_eq(&key) && (member.path.is_some() || can_suspend)
+        })?;
+        let member = self.members.remove(i).expect("member index found above");
+        let hit = (member.path.clone(), member.image.clone());
+        self.members.push_back(member);
+        Some(hit)
+    }
+
+    fn make_member_room(&mut self, bytes: u64, retired_images: &mut Vec<String>) {
+        debug_assert!(bytes <= MEMBER_CACHE_BYTES);
+        while self.member_bytes + bytes > MEMBER_CACHE_BYTES || self.members.len() >= MEMBER_CACHE_COUNT {
+            let member = self.members.pop_front().expect("nonempty member cache at limit");
+            self.member_bytes -= member.bytes;
+            retired_images.extend(member.path);
+        }
+    }
+
+    fn retain_member(&mut self, member: CachedMember) {
+        self.member_bytes += member.bytes;
+        self.members.push_back(member);
+    }
+
+    fn retain_png(&mut self, member: CachedMember, retired_images: &mut Vec<String>) {
+        if member.bytes >= LARGE_PNG_BYTES {
+            if self.package_bytes() as u64 + member.bytes <= RETAINED_BYTES as u64
+                && self.contains_package(&member.file)
+            {
+                self.recent_large_png = Some(member);
+            }
+            return;
+        }
+        self.make_member_room(member.bytes, retired_images);
+        self.retain_member(member);
+    }
+
+    fn clear_members(&mut self, retired_images: &mut Vec<String>) {
+        retired_images.extend(self.members.drain(..).filter_map(|member| member.path));
+        self.member_bytes = 0;
+        self.recent_large_png = None;
+    }
+
     pub(crate) fn invalidate(&mut self, object: usize) {
         self.owners.remove(&object);
     }
@@ -528,6 +601,82 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crysirror_core::image_processing::RgbaImage;
+    use eluna::psb::PsbHeader;
+
+    fn loaded_file() -> Arc<Loaded> {
+        let mut header = [0; 40];
+        header[..5].copy_from_slice(b"PSB\0\x02");
+        Arc::new(Loaded {
+            mounted_path: None,
+            plain: Arc::from([]),
+            psb: Arc::new(PsbFile {
+                header: PsbHeader::read(&header).unwrap(),
+                version: 2,
+                encrypted: false,
+                checksum: None,
+                names: Vec::new(),
+                strings: Vec::new(),
+                resources: Vec::new(),
+                extra_resources: Vec::new(),
+                root: PsbValue::Null,
+            }),
+            decoded: Mutex::default(),
+        })
+    }
+
+    fn member(file: &Arc<Loaded>, size: [u32; 2], path: Option<String>) -> CachedMember {
+        let bytes = u64::from(size[0]) * u64::from(size[1]) * 4;
+        CachedMember {
+            file: Arc::downgrade(file),
+            index: 0,
+            path,
+            image: Arc::new(RgbaImage::new(ClientId(1), size, vec![0; bytes as usize].into()).unwrap()),
+            bytes,
+        }
+    }
+
+    #[test]
+    fn full_size_png_and_overlay_survive_under_existing_budgets() {
+        let mut state = State::default();
+        let mut retired = Vec::new();
+        let first = loaded_file();
+        let second = loaded_file();
+        remember(&mut state, "first".into(), first.clone());
+        remember(&mut state, "second".into(), second.clone());
+        let ui = member(&second, [160, 160], Some("button".into()));
+        state.retain_member(ui);
+
+        let cg = member(&first, [1920, 1080], None);
+        let old = Arc::downgrade(&cg.image);
+        state.retain_png(cg, &mut retired);
+        let mut overlay = member(&first, [380, 220], None);
+        overlay.index = 1;
+        state.retain_png(overlay, &mut retired);
+        assert_eq!(state.member_bytes, (160 * 160 + 380 * 220) * 4);
+        assert!(retired.is_empty());
+        assert_eq!(state.cached_member(&second, 0, true).unwrap().0.as_deref(), Some("button"));
+        let (path, image) = state.cached_member(&first, 0, true).unwrap();
+        assert!(path.is_none());
+        assert!(Weak::ptr_eq(&old, &Arc::downgrade(&image)));
+        assert!(state.cached_member(&first, 1, true).is_some());
+        assert!(state.cached_member(&second, 1, true).is_none());
+
+        let replacement = member(&second, [1920, 1080], None);
+        state.retain_png(replacement, &mut retired);
+        assert!(state.cached_member(&first, 0, true).is_none());
+        assert!(retired.is_empty());
+        drop(image);
+        assert!(old.upgrade().is_none());
+
+        remember(&mut state, "second".into(), loaded_file());
+        assert!(state.recent_large_png.is_none());
+        state.clear_members(&mut retired);
+        assert_eq!(retired, ["button"]);
+        assert_eq!(state.member_bytes, 0);
+    }
+
     #[test]
     fn png_offsets_are_signed_and_require_a_complete_chunk() {
         let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\x09oFFs".to_vec();
