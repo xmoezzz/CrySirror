@@ -240,6 +240,9 @@ impl FontLibrary for ClientFonts {
     fn line_height_for_em(&self, alias:&str,em:f32)->crysirror_core::Result<f32> {
         self.text.line_height_for_em(alias,em).map_err(err)
     }
+    fn outline_em_metrics(&self, alias: &str, em: f32) -> crysirror_core::Result<crysirror_core::service::OutlineEmMetrics> {
+        self.text.outline_em_metrics(alias, em).map_err(err)
+    }
     fn catalog(&self)->crysirror_core::Result<Vec<crysirror_core::service::FontCatalogFace>> {self.text.font_catalog().map_err(err)}
     fn aliases(&self) -> crysirror_core::Result<Vec<String>> {
         self.text.font_aliases().map_err(err)

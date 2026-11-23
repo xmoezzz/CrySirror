@@ -28,17 +28,22 @@ pub(super) fn initialize(rt: &mut Rt, font: ObjectHandle) {
             let text = string(&a, 0, "Font.getGlyphDrawRect")?;
             let size = font_metric_size(rt, font)?;
             let alias = crate::font_resources::alias(rt, font)?;
+            let raster = crate::font_resources::raster_size(rt, font, &alias, size)?;
             let mapped = crate::font_resources::is_mapped(rt, font)?;
             let bold = !mapped && rt.resolve_object_member(font, "bold")?.is_truthy();
             let underline = !mapped && rt.resolve_object_member(font, "underline")?.is_truthy();
             let strikeout = !mapped && rt.resolve_object_member(font, "strikeout")?.is_truthy();
-            let bounds = rt
+            let mut bounds = rt
                 .host()
                 .text_measurement
                 .as_ref()
                 .ok_or_else(|| TjsError::runtime("text measurement absent"))?
-                .ink_bounds_simple(&alias, size as f32, &text, bold, underline, strikeout)
+                .ink_bounds_simple(&alias, f32::from(raster.draw), &text, bold, underline, strikeout)
                 .map_err(|e| TjsError::runtime(e.to_string()))?;
+            if bounds != [0; 4] {
+                bounds[1] += raster.offset_y;
+                bounds[3] += raster.offset_y;
+            }
             let angle = rt.resolve_object_member(font, "angle")?.to_integer()?;
             let bounds = crysirror_text::decoration::rotate_bounds(
                 bounds,

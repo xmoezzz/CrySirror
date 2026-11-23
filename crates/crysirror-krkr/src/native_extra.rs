@@ -203,9 +203,7 @@ pub(crate) fn sync_attention(rt: &mut Rt) -> Result<()> {
         }
         let x = i32::try_from(point[0]).map_err(|_| TjsError::runtime("attention x"))?;
         let y = i32::try_from(point[1]).map_err(|_| TjsError::runtime("attention y"))?;
-        let height = rt
-            .resolve_object_member(h, "font")?
-            .object_handle()
+        let height = layer_font(rt, h).ok()
             .and_then(|font| rt.resolve_object_member(font, "height").ok())
             .and_then(|v| v.to_integer().ok())
             .unwrap_or(24)
@@ -411,20 +409,18 @@ pub(super) fn draw_glyph(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) 
     if opacity == 0 {
         return Ok(Variant::Void);
     }
-    let font = rt
-        .resolve_object_member(h, "font")?
-        .object_handle()
-        .ok_or_else(|| TjsError::runtime("Layer.font absent"))?;
+    let font = layer_font(rt, h)?;
     let size = font_size(rt, font)?;
     let alias = crate::font_resources::alias(rt, font)?;
+    let raster = crate::font_resources::raster_size(rt, font, &alias, size)?;
     let ascent = rt
         .host()
         .text_measurement
         .as_ref()
         .ok_or_else(|| TjsError::runtime("text measurement absent"))?
-        .measure_simple(&alias, size as f32, "")
+        .measure_simple(&alias, f32::from(raster.draw), "")
         .map_err(|e| TjsError::runtime(e.to_string()))?
-        .ascent as i64;
+        .ascent.round() as i64 + i64::from(raster.offset_y);
     let dx = x
         .checked_add(origin[0])
         .ok_or_else(|| TjsError::runtime("glyph x overflow"))?;

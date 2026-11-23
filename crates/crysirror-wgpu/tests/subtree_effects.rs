@@ -116,7 +116,7 @@ fn gpu_box_byte_quantization_dim_max_radius_and_static_live_inputs() {
         250,
     );
     // Headless logical ticks freeze effect inputs without a screenshot.
-    renderer.advance_frame_histories(&mut rt.assets,rt.host.engine.layers.frame([8,4]).unwrap(),[8,4]).unwrap();
+    renderer.advance_layer_histories(&mut rt.assets, &rt.host.engine.layers, [8,4]).unwrap();
     submit(&mut rt,json!([node(1,None,0,[0,0,8,4],[0,255,0,255],true)]));
     let frozen = capture(&mut renderer, &mut rt);
     assert!(frozen.get_pixel(2,1)[0]>0 && frozen.get_pixel(2,1)[1]==0,"headless input froze only at final capture");

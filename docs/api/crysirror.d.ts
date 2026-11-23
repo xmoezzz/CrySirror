@@ -959,9 +959,11 @@ declare class Ui {
   setTitle(text: string): void;
   /** Focus an enabled, visible text field owned by this client. */
   focusTextField(id: number): void;
-  /** Append committed Unicode up to max_length scalars. Multiline fields also accept newline and tab; single-line fields reject controls. */
+  /** Insert committed Unicode at the active selection, or append in a plain field, up to max_length scalars. */
   insertText(text: string): void;
-  /** Remove the final Unicode scalar from a client-owned text field. */
+  /** Enable caret editing and select a UTF-16 range in an owned field. End -1 extends to the end. Start -1 collapses at the caret. */
+  setTextSelection(id: number, start: number, end: number): void;
+  /** Delete the active selection or previous grapheme in a range editor, or the final scalar in a plain field. */
   backspace(id: number): void;
   /** Label/button text and optional font alias; null preserves the existing font. */
   setText(id: number, text: string, font: string | null): void;

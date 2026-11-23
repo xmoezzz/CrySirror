@@ -9,7 +9,7 @@
 //! line by line with alignment, auto-indent, kinsoku (`following`/`leading`)
 //! and per-character reveal delays. Measuring, font notifications, expression
 //! evaluation and labels are delegated to [`MarkupHost`]; nothing is drawn here.
-//! Unimplemented profiles (vertical ruby, graphical characters, word break,
+//! Unimplemented profiles (vertical ruby, graphical characters,
 //! width-time scaling, uneven ruby) return errors instead of approximations.
 use anyhow::{Context, Result, bail, ensure};
 
@@ -609,10 +609,10 @@ impl MarkupLayout {
             .transpose()?
             .unwrap_or(1)
             .max(0) as usize;
-        for name in ["word_break", "width_time_scale"] {
-            if self.option(name).is_some_and(|v| int(v).unwrap_or(1) != 0) {
-                bail!("TextRender layout option {name} is not implemented");
-            }
+        // The native word_break=1 profile allows a break inside a word. The
+        // ordinary glyph-placement path below already wraps at that boundary.
+        if self.option("width_time_scale").is_some_and(|v| int(v).unwrap_or(1) != 0) {
+            bail!("TextRender layout option width_time_scale is not implemented");
         }
         self.notify(host)?;
         let size = self.current.number("FontSize") * self.font_scale;
@@ -1046,6 +1046,18 @@ mod tests {
             Ok(0.0)
         }
     }
+    #[test]
+    fn enabled_word_break_wraps_inside_a_word_at_the_last_fitting_glyph() {
+        let mut l = MarkupLayout::default();
+        l.set_render_size(108.0, 200.0, &mut Fixed).unwrap();
+        l.set_option("word_break", Value::Int(1)).unwrap();
+        l.render(&text("xx abc"), 0, 0.0, 0.0, false, &mut Fixed).unwrap();
+        l.done(&mut Fixed).unwrap();
+        let chars = l.characters(0, 0);
+        assert_eq!((chars[3].x, chars[4].x, chars[5].x), (72.0, 0.0, 24.0));
+        assert!(chars[3].y < chars[4].y);
+    }
+
     #[test]
     fn wraps_aligns_and_reveals() {
         let mut l = MarkupLayout::default();

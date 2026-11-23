@@ -151,6 +151,8 @@ separate evidence. See [architecture](ARCHITECTURE.md) and the
 [frame/profiling guide](FRAME_PIPELINE.md).
 
 F5/F9 request framework save/restore, F12 captures, and Escape exits the host.
+In a KiriKiri session, pressing Escape sends the game's window-close request.
+The game can display its own confirmation and keep running after cancellation.
 Native adapters may reject unsupported snapshot states. These shortcuts do not
 promise original-game save compatibility; see [save boundaries](SAVE_FORMAT.md).
 

@@ -24,7 +24,11 @@ fn fixture(script: &str, motion: Option<&[u8]>) -> (tempfile::TempDir, Runtime) 
 fn motion_class_defaults_and_unsupported_profiles_are_explicit() {
     let (_d, mut r) = fixture(
         r#"
+if (!CanLoadPlugin('emoteplayer.dll')) throw new Exception('emoteplayer link unavailable');
+Plugins.link('emoteplayer.dll');
+var originalManager = Motion.ResourceManager;
 Plugins.link('motionplayer_nod3d.dll');
+if (Motion.ResourceManager !== originalManager) throw new Exception('motion class replaced');
 var rm=new Motion.ResourceManager();var p=new Motion.Player(rm);
 if(p.playing||p.motion!=''||p.speed!=1||p.opacity!=255)throw new Exception('player defaults');
 p.speed=2;p.tickCount=500;if(p.frameTickCount!=30)throw new Exception('clock unit');

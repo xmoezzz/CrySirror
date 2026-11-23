@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     sync::{
-        Arc,
+        Arc, Mutex, MutexGuard, Weak,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
@@ -52,6 +52,13 @@ pub struct AssetStatus {
     pub error: Option<String>,
     pub bytes: usize,
 }
+pub(crate) type ImageFacts = ([u32; 2], bool, [u8; 32]);
+
+pub(crate) fn is_tlg(path: &str) -> bool {
+    path.rsplit_once('.').is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("tlg"))
+}
+
+#[derive(Clone)]
 enum Prepared {
     Level(
         Arc<crysirror_asset::ImportedModel>,
@@ -60,14 +67,14 @@ enum Prepared {
     ),
     Scene(Arc<crysirror_asset::ImportedModel>, usize),
     Bytes(Arc<[u8]>),
-    Image(Arc<crysirror_image::ImageSurface>),
+    Image(Arc<crysirror_image::ImageSurface>, Option<ImageFacts>),
     Model(Arc<crysirror_asset::pbr::PbrModel>, usize),
 }
 impl Prepared {
     fn bytes(&self) -> usize {
         match self {
             Self::Bytes(b) => b.len(),
-            Self::Image(i) => i.rgba.len(),
+            Self::Image(i, _) => i.rgba.len(),
             Self::Model(_, bytes) | Self::Scene(_, bytes) | Self::Level(_, _, bytes) => *bytes,
         }
     }
@@ -93,8 +100,28 @@ struct Entry {
     leased: bool,
     touched: web_time::Instant,
     status: AssetStatus,
+    // A decoded payload that would fit once other owners release residency.
+    // Keep only its size, never the rejected allocation.
+    blocked_bytes: Option<usize>,
     job: Option<Task<Prepared>>,
     value: Option<Prepared>,
+    image_facts: Option<ImageFacts>,
+}
+impl Entry {
+    fn cache_owned(&self) -> bool {
+        self.automatic
+            && self.pins.load(Ordering::Acquire) == 0
+            && match &self.value {
+                Some(Prepared::Bytes(v)) => Arc::strong_count(v) == 1,
+                Some(Prepared::Image(v, _)) => Arc::strong_count(v) == 1,
+                Some(Prepared::Model(v, _)) => Arc::strong_count(v) == 1,
+                Some(Prepared::Scene(v, _)) => Arc::strong_count(v) == 1,
+                Some(Prepared::Level(v, m, _)) => {
+                    Arc::strong_count(v) == 1 && Arc::strong_count(m) == 1
+                }
+                None => true,
+            }
+    }
 }
 pub(super) struct AsyncAssets {
     budget: usize,
@@ -105,6 +132,8 @@ pub(super) struct AsyncAssets {
     entries: BTreeMap<u64, Entry>,
     keys: BTreeMap<(ClientId, AssetKind, String), u64>,
     epochs: BTreeMap<ClientId, u64>,
+    pub(super) storage: BTreeMap<ClientId, Arc<dyn ClientStorage>>,
+    image_memory: Arc<AtomicUsize>,
     pub nonblocking: bool,
     resident: usize,
 }
@@ -123,6 +152,8 @@ impl AsyncAssets {
             entries: BTreeMap::new(),
             keys: BTreeMap::new(),
             epochs: BTreeMap::new(),
+            storage: BTreeMap::new(),
+            image_memory: Arc::new(AtomicUsize::new(0)),
             nonblocking: false,
             resident: 0,
         })
@@ -136,21 +167,62 @@ impl AsyncAssets {
         ensure!(entry.status.ticket == t, "foreign asset ticket");
         Ok(entry)
     }
+    fn remove_entry(&mut self, id: u64) {
+        let entry = self.entries.remove(&id).expect("existing asset entry");
+        let status = entry.status;
+        self.resident -= status.bytes;
+        self.keys
+            .remove(&(ClientId(status.ticket.client), status.kind, status.path));
+    }
+
+    fn eviction_candidates(&self) -> impl Iterator<Item = (&u64, &Entry)> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.status.bytes != 0 && entry.cache_owned())
+    }
+
+    fn make_room(&mut self, bytes: usize) -> bool {
+        if bytes > self.budget {
+            return false;
+        }
+        let limit = self.budget - bytes;
+        if self.resident <= limit {
+            return true;
+        }
+        let candidates = self.eviction_candidates();
+        let mut victims: Vec<_> = candidates
+            .map(|(&id, e)| (e.touched, id, e.status.bytes))
+            .collect();
+        if victims.iter().map(|v| v.2).sum::<usize>() < self.resident - limit {
+            return false;
+        }
+        victims.sort_unstable();
+        for (_, id, _) in victims {
+            self.remove_entry(id);
+            if self.resident <= limit {
+                break;
+            }
+        }
+        true
+    }
+
     fn finish(&mut self, id: u64, result: Result<Prepared>) {
-        let e = self.entries.get_mut(&id).unwrap();
         match result {
-            Ok(value) => {
+            Ok(mut value) => {
                 let bytes = value.bytes();
-                if bytes > self.budget
-                    || self
-                        .resident
-                        .checked_add(bytes)
-                        .is_none_or(|n| n > self.budget)
-                {
+                let fits = self.make_room(bytes);
+                let e = self.entries.get_mut(&id).unwrap();
+                if let Prepared::Image(_, facts) = &mut value {
+                    e.image_facts = facts.take();
+                }
+                if !fits {
                     e.status.state = AssetState::Failed;
+                    e.blocked_bytes = (bytes <= self.budget).then_some(bytes);
                     e.status.error = Some(format!(
-                        "prepared assets exceed {} MiB budget",
-                        self.budget / (1024 * 1024)
+                        "prepared assets exceed {} MiB budget (resident={} bytes, incoming={} bytes)",
+                        self.budget / (1024 * 1024),
+                        self.resident,
+                        bytes
                     ));
                 } else {
                     self.resident += bytes;
@@ -160,21 +232,34 @@ impl AsyncAssets {
                 }
             }
             Err(error) => {
+                let e = self.entries.get_mut(&id).unwrap();
                 e.status.state = AssetState::Failed;
                 e.status.error = Some(format!("{error:#}"));
             }
         }
     }
+    // A lookup must not publish an unrelated completion that evicts the very
+    // ticket being inspected. The regular runtime poll services all workers.
+    fn poll_one(&mut self, id: u64) {
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return;
+        };
+        let Some(job) = &mut entry.job else { return };
+        let result = job.try_take();
+        if !matches!(result, Ok(None)) {
+            entry.job = None;
+            self.finish(id, result.and_then(|v| v.context("asset result absent")));
+        }
+    }
+
     fn poll(&mut self) {
-        let ids: Vec<_> = self.entries.keys().copied().collect();
+        let ids: Vec<_> = self
+            .entries
+            .iter()
+            .filter_map(|(&id, e)| e.job.as_ref().map(|_| id))
+            .collect();
         for id in ids {
-            let entry = self.entries.get_mut(&id).unwrap();
-            let Some(job) = &mut entry.job else { continue };
-            let result = job.try_take();
-            if !matches!(result, Ok(None)) {
-                entry.job = None;
-                self.finish(id, result.and_then(|v| v.context("asset result absent")));
-            }
+            self.poll_one(id);
         }
     }
     pub fn invalidate(&mut self, client: ClientId) {
@@ -195,6 +280,183 @@ impl AsyncAssets {
             }
         }
         self.keys.retain(|(c, _, _), _| *c != client);
+    }
+    fn request(
+        &mut self,
+        client: ClientId,
+        path: &str,
+        kind: AssetKind,
+        explicit: bool,
+        decoders: &crysirror_image::DecoderRegistry,
+        profiler: &crysirror_tasks::profile::Profiler,
+        source: impl FnOnce(Option<Arc<dyn ClientStorage>>) -> Result<Source>,
+    ) -> Result<AssetTicket> {
+        let path = VfsPath::new(Mount::Asset, path)?.relative().to_owned();
+        let key = (client, kind, path.clone());
+        if let Some(&id) = self.keys.get(&key) {
+            let cache = &mut *self;
+            let entry = &cache.entries[&id];
+            let retry = entry.blocked_bytes.is_some_and(|bytes| {
+                let required = bytes.saturating_sub(cache.budget - cache.resident);
+                entry.cache_owned()
+                    && bytes <= cache.budget
+                    && (required == 0
+                        || cache
+                            .eviction_candidates()
+                            .map(|(_, e)| e.status.bytes)
+                            .sum::<usize>()
+                            >= required)
+            });
+            if !retry {
+                let entry = cache.entries.get_mut(&id).unwrap();
+                entry.touched = web_time::Instant::now();
+                if explicit {
+                    entry.automatic = false;
+                }
+                return Ok(entry.status.ticket);
+            }
+            cache.remove_entry(id);
+        }
+        ensure!(
+            self.entries.len() < 4096,
+            "async asset request limit; release unused tickets"
+        );
+        if self.entries
+            .values()
+            .filter(|e| e.status.ticket.client == client.0 && e.status.state == AssetState::Loading)
+            .count()
+            >= 32
+        {
+            return Err(crysirror_tasks::CapacityExceeded.into());
+        }
+        let source = source(self.storage.get(&client).cloned())?;
+        let decoders = decoders.clone();
+        let name = path.clone();
+        let profiler = profiler.clone();
+        let image_memory = self.image_memory.clone();
+        let frame = profiler.frame();
+        let job = self.io.spawn(move |cancel| {
+            let _span = profiler.span(frame, format!("asset.{kind:?}.read_prepare"));
+            let bytes = source.read(&name, &cancel)?;
+            match kind {
+                AssetKind::Bytes => Ok(Prepared::Bytes(bytes)),
+                AssetKind::Image => {
+                    let dependencies = |uri: &str| {
+                        source
+                            .read(uri, &cancel)
+                            .map(|b| b.to_vec())
+                            .map_err(|e| {
+                                // Format decoders probe optional companions
+                                // (e.g. per-tile extensions); keep absence typed.
+                                if e.chain().any(|c| {
+                                    matches!(
+                                        c.downcast_ref::<crysirror_core::Error>(),
+                                        Some(crysirror_core::Error::NotFound)
+                                    )
+                                }) {
+                                    crysirror_core::Error::NotFound
+                                } else {
+                                    crysirror_core::Error::Io(format!("{e:#}"))
+                                }
+                            })
+                    };
+                    let tlg = is_tlg(&name);
+                    let scratch = if tlg {
+                        let size = crysirror_image::encoded_dimensions_hint(&bytes)
+                            .map(|[w, h]| crysirror_image::rgba_len(w, h))
+                            .transpose()?
+                            .unwrap_or(crysirror_image::MAX_DECODED_BYTES);
+                        Some(crate::image_processing::Charge::new(
+                            image_memory,
+                            2 * size + bytes.len(),
+                        )?)
+                    } else {
+                        None
+                    };
+                    let resources = tlg.then(|| {
+                        crysirror_resource::DecodeContext::new(client).with_cancellation(cancel.clone())
+                    });
+                    let image = decoders.decode_with(
+                        &name, &bytes, Some(&dependencies), resources.as_ref(), None,
+                    )?;
+                    cancel.check()?;
+                    let facts = tlg.then(|| (
+                        [image.width, image.height],
+                        image.rgba.chunks_exact(4).all(|pixel| pixel[3] == 255),
+                        *blake3::hash(&bytes).as_bytes(),
+                    ));
+                    drop(scratch);
+                    Ok(Prepared::Image(Arc::new(image), facts))
+                }
+                AssetKind::Scene | AssetKind::Level => {
+                    let dir = name
+                        .rsplit_once('/')
+                        .map(|(d, _)| format!("{d}/"))
+                        .unwrap_or_default();
+                    let options = crysirror_asset::ImportOptions {
+                        reference_asset: (kind == AssetKind::Level).then(|| name.clone()),
+                        ..Default::default()
+                    };
+                    let scene = crysirror_asset::import_gltf(&bytes, &options, |uri| {
+                        source
+                            .read(&format!("{dir}{uri}"), &cancel)
+                            .map(|b| b.to_vec())
+                    })?;
+                    cancel.check()?;
+                    let accounted = serde_json::to_vec(&scene.entities)?.len();
+                    if kind == AssetKind::Level {
+                        let model = load_model(&source, &name, &bytes, &cancel, &decoders)?;
+                        let size = accounted + model_bytes(&model);
+                        Ok(Prepared::Level(Arc::new(scene), Arc::new(model), size))
+                    } else {
+                        Ok(Prepared::Scene(Arc::new(scene), accounted))
+                    }
+                }
+                AssetKind::Model => {
+                    let model = load_model(&source, &name, &bytes, &cancel, &decoders)?;
+                    cancel.check()?;
+                    let accounted = model_bytes(&model);
+                    Ok(Prepared::Model(Arc::new(model), accounted))
+                }
+            }
+        })?;
+        let id = self.next;
+        self.next = id.checked_add(1).context("asset ticket overflow")?;
+        let ticket = AssetTicket {
+            store: self.store,
+            client: client.0,
+            id,
+        };
+        self.entries.insert(
+            id,
+            Entry {
+                pins: Arc::new(AtomicUsize::new(0)),
+                automatic: !explicit,
+                leased: false,
+                blocked_bytes: None,
+                touched: web_time::Instant::now(),
+                status: AssetStatus {
+                    ticket,
+                    path,
+                    kind,
+                    state: AssetState::Loading,
+                    error: None,
+                    bytes: 0,
+                },
+                job: Some(job),
+                value: None,
+                image_facts: None,
+            },
+        );
+        self.keys.insert(key, id);
+        Ok(ticket)
+    }
+    /// Only an explicitly synchronous consumer may join a worker. The worker
+    /// uses a scoped source and does not acquire the prepared cache lock.
+    fn wait_one(&mut self, id: u64) {
+        if let Some(job) = self.entries.get_mut(&id).and_then(|entry| entry.job.take()) {
+            self.finish(id, job.wait());
+        }
     }
 }
 impl Drop for AsyncAssets {
@@ -274,38 +536,122 @@ fn load_model(
     )?;
     Ok(model)
 }
+/// A metadata handle cannot keep a replaced asset store alive. TLG lookups
+/// enter the same cache and worker queue as owner-prefetch and rendering.
+#[derive(Clone)]
+pub(crate) struct ImagePreparation {
+    cache: Weak<Mutex<AsyncAssets>>,
+    profiler: crysirror_tasks::profile::Profiler,
+}
+impl ImagePreparation {
+    pub(crate) fn scoped_storage(&self, client: ClientId) -> Option<(u64, Arc<dyn ClientStorage>)> {
+        let cache = self.cache.upgrade()?;
+        let cache = cache.lock().expect("prepared asset cache poisoned");
+        let storage = cache.storage.get(&client)?.clone();
+        Some((cache.epochs.get(&client).copied().unwrap_or(0), storage))
+    }
+
+    pub(crate) fn facts(
+        &self,
+        client: ClientId,
+        path: &str,
+        decoders: &crysirror_image::DecoderRegistry,
+        wait: bool,
+    ) -> crysirror_core::Result<Option<ImageFacts>> {
+        self.read_facts(client, path, decoders, wait).map_err(|error| {
+            if error.is::<crysirror_tasks::CapacityExceeded>() {
+                crysirror_core::Error::Limit("TLG metadata preparation capacity")
+            } else {
+                crysirror_core::Error::Io(format!("{error:#}"))
+            }
+        })
+    }
+
+    fn read_facts(
+        &self,
+        client: ClientId,
+        path: &str,
+        decoders: &crysirror_image::DecoderRegistry,
+        wait: bool,
+    ) -> Result<Option<ImageFacts>> {
+        let cache = self.cache.upgrade().context("image asset store released")?;
+        let mut cache = cache.lock().expect("prepared asset cache poisoned");
+        let ticket = cache.request(client, path, AssetKind::Image, false, decoders, &self.profiler, |storage| {
+            let storage = storage.context("image metadata client storage absent")?;
+            Ok(Source { dir: storage.clone(), storage: Some(storage), cache: BTreeMap::new() })
+        });
+        let ticket = match ticket {
+            Ok(ticket) => ticket,
+            Err(error) if !wait && error.is::<crysirror_tasks::CapacityExceeded>() => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        if wait {
+            cache.wait_one(ticket.id);
+        } else {
+            cache.poll_one(ticket.id);
+        }
+        let entry = cache.entry(client, ticket)?;
+        // Metadata is still usable when the pixels cannot be retained under
+        // pressure. The normal image lookup may retry admission later.
+        if let Some(facts) = entry.image_facts {
+            return Ok(Some(facts));
+        }
+        if entry.status.state == AssetState::Loading {
+            return Ok(None);
+        }
+        anyhow::bail!("asset {}: {}", entry.status.path,
+            entry.status.error.as_deref().unwrap_or("image metadata absent"))
+    }
+}
 impl Assets {
+    pub(super) fn prepared(&self) -> MutexGuard<'_, AsyncAssets> {
+        self.asynchronous.lock().expect("prepared asset cache poisoned")
+    }
+
+    pub(super) fn asset_storage(&self, client: ClientId) -> Option<Arc<dyn ClientStorage>> {
+        self.prepared().storage.get(&client).cloned()
+    }
+
+    pub(crate) fn image_preparation(&self) -> ImagePreparation {
+        ImagePreparation { cache: Arc::downgrade(&self.asynchronous), profiler: self.profiler.clone() }
+    }
+
+    pub(crate) fn image_memory(&self) -> Arc<AtomicUsize> {
+        self.prepared().image_memory.clone()
+    }
+
     /// Desktop uses nonblocking loading; captures/offline tools explicitly wait.
     pub fn set_nonblocking(&mut self, value: bool) {
-        self.asynchronous.nonblocking = value;
+        self.prepared().nonblocking = value;
     }
     pub fn is_nonblocking(&self) -> bool {
-        self.asynchronous.nonblocking
+        self.prepared().nonblocking
     }
     /// Host policy only: bounded CPU prepared-cache budget, not total RAM/VRAM.
     pub fn set_prepared_budget(&mut self, bytes: usize) -> Result<()> {
+        let mut prepared = self.prepared();
         ensure!(
             (16 * 1024 * 1024..=4u64 * 1024 * 1024 * 1024).contains(&(bytes as u64))
-                && bytes >= self.asynchronous.resident,
+                && bytes >= prepared.resident,
             "invalid prepared asset budget or below live residency"
         );
-        self.asynchronous.budget = bytes;
+        prepared.budget = bytes;
         Ok(())
     }
     pub fn store_id(&self) -> u64 {
-        self.asynchronous.store
+        self.prepared().store
     }
     /// Bounded blocking-I/O executor; CPU continuations are polled by owners.
     pub fn io_tasks(&self) -> TaskPool {
-        self.asynchronous.io.clone()
+        self.prepared().io.clone()
     }
     pub fn cpu_tasks(&self) -> TaskPool {
-        self.asynchronous.cpu.clone()
+        self.prepared().cpu.clone()
     }
     pub fn revision(&self, client: ClientId) -> u64 {
-        self.asynchronous.epochs.get(&client).copied().unwrap_or(0)
+        self.prepared().epochs.get(&client).copied().unwrap_or(0)
     }
-    fn source(&self, client: ClientId) -> Result<Source> {
+    fn source(&self, client: ClientId, storage: Option<Arc<dyn ClientStorage>>) -> Result<Source> {
         let dir = self
             .clients
             .get(&client)
@@ -313,7 +659,7 @@ impl Assets {
             .clone();
         let prefix = format!("client:{}:", client.0);
         Ok(Source {
-            storage: self.storage.get(&client).cloned(),
+            storage,
             dir,
             cache: self
                 .bytes
@@ -326,11 +672,9 @@ impl Assets {
     }
     /// Spawn an independently awaitable capability-scoped read. No main-thread I/O.
     pub fn read_async(&self, client: ClientId, path: &str) -> Result<Task<Arc<[u8]>>> {
-        let source = self.source(client)?;
+        let source = self.source(client, self.asset_storage(client))?;
         let path = VfsPath::new(Mount::Asset, path)?.relative().to_owned();
-        self.asynchronous
-            .io
-            .spawn(move |cancel| source.read(&path, &cancel))
+        self.io_tasks().spawn(move |cancel| source.read(&path, &cancel))
     }
     /// Request deduplicated background bytes, image decoding or glTF import.
     pub fn request(
@@ -343,7 +687,8 @@ impl Assets {
     }
     pub fn lease(&mut self, client: ClientId, path: &str, kind: AssetKind) -> Result<AssetLease> {
         let ticket = self.request_inner(client, path, kind, false)?;
-        let e = self.asynchronous.entries.get_mut(&ticket.id).unwrap();
+        let mut prepared = self.prepared();
+        let e = prepared.entries.get_mut(&ticket.id).unwrap();
         e.leased = true;
         e.pins.fetch_add(1, Ordering::AcqRel);
         Ok(AssetLease {
@@ -358,219 +703,71 @@ impl Assets {
         kind: AssetKind,
         explicit: bool,
     ) -> Result<AssetTicket> {
-        let path = VfsPath::new(Mount::Asset, path)?.relative().to_owned();
-        self.key(client, &path)?;
-        let key = (client, kind, path.clone());
-        if let Some(id) = self.asynchronous.keys.get(&key) {
-            let entry = self.asynchronous.entries.get_mut(id).unwrap();
-            entry.touched = web_time::Instant::now();
-            if explicit {
-                entry.automatic = false;
-            }
-            return Ok(entry.status.ticket);
-        }
-        ensure!(
-            self.asynchronous.entries.len() < 4096,
-            "async asset request limit; release unused tickets"
-        );
-        if self
-            .asynchronous
-            .entries
-            .values()
-            .filter(|e| e.status.ticket.client == client.0 && e.status.state == AssetState::Loading)
-            .count()
-            >= 32
-        {
-            return Err(crysirror_tasks::CapacityExceeded.into());
-        }
-        let source = self.source(client)?;
-        let decoders = self.decoders.clone();
-        let name = path.clone();
-        let profiler = self.profiler.clone();
-        let frame = profiler.frame();
-        let job = self.asynchronous.io.spawn(move |cancel| {
-            let _span = profiler.span(frame, format!("asset.{kind:?}.read_prepare"));
-            let bytes = source.read(&name, &cancel)?;
-            match kind {
-                AssetKind::Bytes => Ok(Prepared::Bytes(bytes)),
-                AssetKind::Image => {
-                    let dependencies = |uri: &str| {
-                        source
-                            .read(uri, &cancel)
-                            .map(|b| b.to_vec())
-                            .map_err(|e| {
-                                // Format decoders probe optional companions
-                                // (e.g. per-tile extensions); keep absence typed.
-                                if e.chain().any(|c| {
-                                    matches!(
-                                        c.downcast_ref::<crysirror_core::Error>(),
-                                        Some(crysirror_core::Error::NotFound)
-                                    )
-                                }) {
-                                    crysirror_core::Error::NotFound
-                                } else {
-                                    crysirror_core::Error::Io(format!("{e:#}"))
-                                }
-                            })
-                    };
-                    let image =
-                        decoders.decode_with(&name, &bytes, Some(&dependencies), None, None)?;
-                    cancel.check()?;
-                    Ok(Prepared::Image(Arc::new(image)))
-                }
-                AssetKind::Scene | AssetKind::Level => {
-                    let dir = name
-                        .rsplit_once('/')
-                        .map(|(d, _)| format!("{d}/"))
-                        .unwrap_or_default();
-                    let options = crysirror_asset::ImportOptions {
-                        reference_asset: (kind == AssetKind::Level).then(|| name.clone()),
-                        ..Default::default()
-                    };
-                    let scene = crysirror_asset::import_gltf(&bytes, &options, |uri| {
-                        source
-                            .read(&format!("{dir}{uri}"), &cancel)
-                            .map(|b| b.to_vec())
-                    })?;
-                    cancel.check()?;
-                    let accounted = serde_json::to_vec(&scene.entities)?.len();
-                    if kind == AssetKind::Level {
-                        let model = load_model(&source, &name, &bytes, &cancel, &decoders)?;
-                        let size = accounted + model_bytes(&model);
-                        Ok(Prepared::Level(Arc::new(scene), Arc::new(model), size))
-                    } else {
-                        Ok(Prepared::Scene(Arc::new(scene), accounted))
-                    }
-                }
-                AssetKind::Model => {
-                    let model = load_model(&source, &name, &bytes, &cancel, &decoders)?;
-                    cancel.check()?;
-                    let accounted = model_bytes(&model);
-                    Ok(Prepared::Model(Arc::new(model), accounted))
-                }
-            }
-        })?;
-        let id = self.asynchronous.next;
-        self.asynchronous.next = id.checked_add(1).context("asset ticket overflow")?;
-        let ticket = AssetTicket {
-            store: self.asynchronous.store,
-            client: client.0,
-            id,
-        };
-        self.asynchronous.entries.insert(
-            id,
-            Entry {
-                pins: Arc::new(AtomicUsize::new(0)),
-                automatic: !explicit,
-                leased: false,
-                touched: web_time::Instant::now(),
-                status: AssetStatus {
-                    ticket,
-                    path,
-                    kind,
-                    state: AssetState::Loading,
-                    error: None,
-                    bytes: 0,
-                },
-                job: Some(job),
-                value: None,
-            },
-        );
-        self.asynchronous.keys.insert(key, id);
-        Ok(ticket)
+        self.key(client, path)?;
+        self.prepared().request(client, path, kind, explicit, &self.decoders, &self.profiler,
+                                |storage| self.source(client, storage))
     }
     pub(super) fn prepared_bytes(&self, client: ClientId, path: &str) -> Option<Arc<[u8]>> {
-        let id = self
-            .asynchronous
-            .keys
-            .get(&(client, AssetKind::Bytes, path.to_owned()))?;
-        match self.asynchronous.entries.get(id)?.value.as_ref()? {
+        let prepared = self.prepared();
+        let id = prepared.keys.get(&(client, AssetKind::Bytes, path.to_owned()))?;
+        match prepared.entries.get(id)?.value.as_ref()? {
             Prepared::Bytes(b) => Some(b.clone()),
             _ => None,
         }
     }
     pub fn poll_tasks(&mut self) {
-        self.asynchronous.poll()
+        self.prepared().poll()
     }
     /// Explicit offline readiness fence. Interactive hosts use task_status.
     pub fn wait_task(&mut self, client: ClientId, ticket: AssetTicket) -> Result<AssetStatus> {
-        self.asynchronous.entry(client, ticket)?;
-        if let Some(job) = self
-            .asynchronous
-            .entries
-            .get_mut(&ticket.id)
-            .unwrap()
-            .job
-            .take()
-        {
-            let result = job.wait();
-            self.asynchronous.finish(ticket.id, result);
-        }
-        self.task_status(client, ticket)
+        let mut prepared = self.prepared();
+        prepared.entry(client, ticket)?;
+        prepared.wait_one(ticket.id);
+        Ok(prepared.entry(client, ticket)?.status.clone())
     }
     pub fn task_status(&mut self, client: ClientId, ticket: AssetTicket) -> Result<AssetStatus> {
-        self.poll_tasks();
-        Ok(self.asynchronous.entry(client, ticket)?.status.clone())
+        let mut prepared = self.prepared();
+        prepared.entry(client, ticket)?;
+        prepared.poll_one(ticket.id);
+        Ok(prepared.entry(client, ticket)?.status.clone())
     }
     pub fn ticket(&self, client: ClientId, id: u64) -> Result<AssetTicket> {
-        let ticket = self
-            .asynchronous
-            .entries
-            .get(&id)
-            .context("unknown asset task")?
-            .status
-            .ticket;
-        self.asynchronous.entry(client, ticket)?;
+        let prepared = self.prepared();
+        let ticket = prepared.entries.get(&id).context("unknown asset task")?.status.ticket;
+        prepared.entry(client, ticket)?;
         Ok(ticket)
     }
     pub fn cancel_task(&mut self, client: ClientId, ticket: AssetTicket) -> Result<()> {
-        self.asynchronous.entry(client, ticket)?;
-        let e = self.asynchronous.entries.get_mut(&ticket.id).unwrap();
+        let mut prepared = self.prepared();
+        prepared.entry(client, ticket)?;
+        let entry = prepared.entries.get_mut(&ticket.id).unwrap();
         ensure!(
-            e.status.state == AssetState::Loading,
+            entry.status.state == AssetState::Loading,
             "only loading tasks can be cancelled"
         );
-        if let Some(job) = e.job.take() {
+        if let Some(job) = entry.job.take() {
             job.cancel();
         }
-        e.status.state = AssetState::Cancelled;
+        entry.status.state = AssetState::Cancelled;
         Ok(())
     }
     pub fn release_task(&mut self, client: ClientId, ticket: AssetTicket) -> Result<()> {
-        self.asynchronous.entry(client, ticket)?;
-        ensure!(
-            self.asynchronous.entries[&ticket.id]
-                .pins
-                .load(Ordering::Acquire)
-                == 0,
-            "asset is pinned by a streaming lease"
-        );
-        let e = self.asynchronous.entries.remove(&ticket.id).unwrap();
-        self.asynchronous.resident -= e.status.bytes;
-        self.asynchronous
-            .keys
-            .remove(&(client, e.status.kind, e.status.path));
+        let mut prepared = self.prepared();
+        let entry = prepared.entry(client, ticket)?;
+        ensure!(entry.pins.load(Ordering::Acquire) == 0, "asset is pinned by a streaming lease");
+        prepared.remove_entry(ticket.id);
         Ok(())
     }
-    fn resolve(&mut self, client: ClientId, ticket: AssetTicket) -> Result<Option<&Prepared>> {
-        self.poll_tasks();
-        self.asynchronous.entry(client, ticket)?;
-        if !self.asynchronous.nonblocking {
-            if let Some(job) = self
-                .asynchronous
-                .entries
-                .get_mut(&ticket.id)
-                .unwrap()
-                .job
-                .take()
-            {
-                let result = job.wait();
-                self.asynchronous.finish(ticket.id, result);
-            }
+    fn resolve(&mut self, client: ClientId, ticket: AssetTicket) -> Result<Option<Prepared>> {
+        let mut prepared = self.prepared();
+        prepared.entry(client, ticket)?;
+        prepared.poll_one(ticket.id);
+        if !prepared.nonblocking {
+            prepared.wait_one(ticket.id);
         }
-        let entry = self.asynchronous.entry(client, ticket)?;
+        let entry = prepared.entry(client, ticket)?;
         match entry.status.state {
-            AssetState::Ready => Ok(entry.value.as_ref()),
+            AssetState::Ready => Ok(entry.value.clone()),
             AssetState::Loading => Ok(None),
             _ => anyhow::bail!(
                 "asset {} {:?}: {}",
@@ -580,6 +777,20 @@ impl Assets {
             ),
         }
     }
+    /// Start the ordinary, evictable image decode without waiting or pinning
+    /// its result. The first visible draw uses the same client-scoped entry.
+    /// A saturated worker queue leaves the normal first-use path available.
+    pub fn prefetch_image(&mut self, client: ClientId, path: &str) -> Result<bool> {
+        if self.surface(client, path).is_some() {
+            return Ok(true);
+        }
+        match self.request_inner(client, path, AssetKind::Image, false) {
+            Ok(_) => Ok(true),
+            Err(error) if error.is::<crysirror_tasks::CapacityExceeded>() => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn image_for(
         &mut self,
         client: ClientId,
@@ -593,7 +804,7 @@ impl Assets {
             Err(e) => return Err(e),
         };
         match self.resolve(client, ticket)? {
-            Some(Prepared::Image(v)) => Ok(Some(v.clone())),
+            Some(Prepared::Image(v, _)) => Ok(Some(v)),
             None => Ok(None),
             _ => unreachable!(),
         }
@@ -604,14 +815,12 @@ impl Assets {
         path: &str,
     ) -> Result<Option<Arc<crysirror_asset::pbr::PbrModel>>> {
         self.poll_tasks();
-        if let Some(id) = self
-            .asynchronous
-            .keys
-            .get(&(client, AssetKind::Level, path.to_owned()))
         {
-            if let Some(Prepared::Level(_, model, _)) = self.asynchronous.entries[id].value.as_ref()
-            {
-                return Ok(Some(model.clone()));
+            let prepared = self.prepared();
+            if let Some(id) = prepared.keys.get(&(client, AssetKind::Level, path.to_owned())) {
+                if let Some(Prepared::Level(_, model, _)) = prepared.entries[id].value.as_ref() {
+                    return Ok(Some(model.clone()));
+                }
             }
         }
         let ticket = match self.request_inner(client, path, AssetKind::Model, false) {
@@ -622,7 +831,7 @@ impl Assets {
             Err(e) => return Err(e),
         };
         match self.resolve(client, ticket)? {
-            Some(Prepared::Model(v, _)) => Ok(Some(v.clone())),
+            Some(Prepared::Model(v, _)) => Ok(Some(v)),
             None => Ok(None),
             _ => unreachable!(),
         }
@@ -633,8 +842,10 @@ impl Assets {
         client: ClientId,
         ticket: AssetTicket,
     ) -> Result<Arc<crysirror_asset::ImportedModel>> {
-        self.poll_tasks();
-        let entry = self.asynchronous.entry(client, ticket)?;
+        let mut prepared = self.prepared();
+        prepared.entry(client, ticket)?;
+        prepared.poll_one(ticket.id);
+        let entry = prepared.entry(client, ticket)?;
         match entry.value.as_ref() {
             Some(Prepared::Scene(v, _)) | Some(Prepared::Level(v, _, _)) => Ok(v.clone()),
             _ => anyhow::bail!("scene import not ready"),
@@ -643,24 +854,11 @@ impl Assets {
     /// Evict only automatically managed, unpinned and unshared payloads.
     /// Explicit request IDs remain owned until their caller releases them.
     pub fn collect_unused(&mut self) -> usize {
-        let ids: Vec<_> = self
-            .asynchronous
-            .entries
+        let mut prepared = self.prepared();
+        let ids: Vec<_> = prepared.entries
             .iter()
             .filter(|(_, e)| {
-                let shared = match &e.value {
-                    Some(Prepared::Bytes(v)) => Arc::strong_count(v) > 1,
-                    Some(Prepared::Image(v)) => Arc::strong_count(v) > 1,
-                    Some(Prepared::Model(v, _)) => Arc::strong_count(v) > 1,
-                    Some(Prepared::Scene(v, _)) => Arc::strong_count(v) > 1,
-                    Some(Prepared::Level(v, m, _)) => {
-                        Arc::strong_count(v) > 1 || Arc::strong_count(m) > 1
-                    }
-                    None => false,
-                };
-                e.automatic
-                    && e.pins.load(Ordering::Acquire) == 0
-                    && !shared
+                e.cache_owned()
                     && (e.leased
                         || (e.status.state != AssetState::Loading
                             && e.touched.elapsed().as_secs() >= 5))
@@ -669,13 +867,15 @@ impl Assets {
             .collect();
         let count = ids.len();
         for id in ids {
-            let ticket = self.asynchronous.entries[&id].status.ticket;
-            let _ = self.release_task(ClientId(ticket.client), ticket);
+            prepared.remove_entry(id);
         }
         count
     }
     pub fn tasks_inspect(&self) -> serde_json::Value {
-        serde_json::json!({"budget_bytes":self.asynchronous.budget,"nonblocking":self.asynchronous.nonblocking,"resident_bytes":self.asynchronous.resident,"io":self.asynchronous.io.stats(),"cpu":self.asynchronous.cpu.stats(),"assets":self.asynchronous.entries.values().map(|e|&e.status).collect::<Vec<_>>()})
+        let prepared = self.prepared();
+        serde_json::json!({"budget_bytes":prepared.budget,"nonblocking":prepared.nonblocking,
+            "resident_bytes":prepared.resident,"io":prepared.io.stats(),"cpu":prepared.cpu.stats(),
+            "assets":prepared.entries.values().map(|e|&e.status).collect::<Vec<_>>()})
     }
 }
 

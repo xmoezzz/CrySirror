@@ -67,8 +67,9 @@ const FACADES: &[Facade] = &[
     facade!("fftgraph.dll", "shared spectrum graph raster over decoded source PCM", |rt, _| { crate::fftgraph::install(rt); Ok(()) }),
     facade!("textrender.dll", "shared crysirror_text::markup layout", |rt, _| { crate::text_render_plugin::install(rt); Ok(()) }),
     facade!("motionplayer.dll", "shared M2 motion workers, immutable textures and dynamic PuppetFrame"),
+    facade!("emoteplayer.dll", "shared M2 motion workers, immutable textures and dynamic PuppetFrame"),
     facade!("motionplayer_nod3d.dll", "shared M2 motion workers, immutable textures and dynamic PuppetFrame"),
-    facade!("csvparser.dll", "shared crysirror_runtime::csv reader", |rt, _| { crate::csv_plugin::install(rt); Ok(()) }),
+    facade!("csvparser.dll", "shared crysirror_runtime::csv reader", |rt, _| crate::csv_plugin::install(rt)),
     facade!("lineparser.dll", "shared crysirror_resource::text_stream::LineCursor", |rt, _| { crate::line_plugin::install(rt); Ok(()) }),
     facade!("dirlist.dll", "getDirList through shared client-scoped directory metadata/listing", |rt, _| { crate::storage_plugins::install_dirlist(rt); Ok(()) }),
     facade!("varfile.dll", "dynamic global octet namespace through portable storage media and shared image decoding", |rt, _| crate::varfile_plugin::install(rt)),
@@ -78,7 +79,7 @@ const FACADES: &[Facade] = &[
     // (`typeof Layer.makeGlyphSDF == "Object"`) and switch PreRenderFontEx
     // to the SDF glyph path when they exist.
     facade!("msdfrender.dll", "Layer glyph bitmaps from rendered layers (SDF/MSDF contrast, province glyph compositing, font ascent)", |rt, _| { crate::msdf_plugin::install(rt); Ok(()) }),
-    facade!("scriptsex.dll", "Scripts reflection/struct helpers", |rt, _| { crate::plugin_ports::scripts_ex::install_scripts_ex(rt); Ok(()) }),
+    facade!("scriptsex.dll", "Scripts reflection/struct helpers", |rt, _| crate::plugin_ports::scripts_ex::install_scripts_ex(rt)),
     facade!("addfont.dll", "System.addFont asynchronous shared client font registration, portable outline measurement and rendering", |rt, _| { crate::natives::install_add_font(rt); Ok(()) }),
     facade!("windowex.dll", "windowEx virtual-window profile", |rt, _| { crate::plugin_ports::window_ex::install(rt); Ok(()) }),
     facade!("win32dialog.dll", "WIN32Dialog template/state profile", |rt, _| { crate::plugin_ports::win32_dialog::install(rt); Ok(()) }),
@@ -98,6 +99,7 @@ const FACADES: &[Facade] = &[
     facade!("dmmcloud.dll", "DMMCloud without a DMM GAME PLAYER bridge (IPC answers false)", |rt, _| { crate::offline_plugins::install_dmmcloud(rt); Ok(()) }),
     facade!("krkrsteam.dll", "Steam static class for a game not started by Steam", |rt, _| { crate::offline_plugins::install_steam(rt); Ok(()) }),
     facade!("drawdeviced2d.dll", "DrawDeviceD2D as the shared retained-layer presentation device", |rt, _| { crate::offline_plugins::install_draw_device(rt, "DrawDeviceD2D"); Ok(()) }),
+    facade!("drawdeviced2dm.dll", "DrawDeviceD2D as the shared retained-layer presentation device", |rt, _| { crate::offline_plugins::install_draw_device(rt, "DrawDeviceD2D"); Ok(()) }),
     facade!("drawdeviced2dv2.dll", "DrawDeviceD2D as the shared retained-layer presentation device", |rt, _| { crate::offline_plugins::install_draw_device(rt, "DrawDeviceD2D"); Ok(()) }),
     facade!("steamdrawdevice.dll", "DualDrawDevice_2/_Z as the shared retained-layer presentation device", |rt, _| { crate::offline_plugins::install_draw_device(rt, "DualDrawDevice_2"); crate::offline_plugins::install_draw_device(rt, "DualDrawDevice_Z"); Ok(()) }),
     facade!("win32ole.dll", "WIN32OLE/ActiveX script plumbing; no OLE automation transport exists (objects fail like an unregistered ProgID)", |rt, _| { crate::offline_plugins::install_win32ole(rt); Ok(()) }),
@@ -108,7 +110,10 @@ const FACADES: &[Facade] = &[
     facade!("wumultitrack.dll", ".mtrk/.mchx multi-track music over the shared multi-track voice; mask, delayed mask, rebind and gain-callback members", |rt, _| crate::multitrack::install(rt)),
     facade!("glitcheffect.dll", "Layer.glitchCopy/doGlitch over the shared GlitchCopy image pair; glitch/fadeglitch/loopglitch transitions", |rt, _| { crate::layer_ex::install_glitch(rt); Ok(()) }),
     facade!("wvdecoder.dll", "WaveSoundData.F32/S16 sample buffers through the shared audio resource and source-sample services", |rt, _| { crate::wv_decoder::install(rt); Ok(()) }),
-    facade!("packinone.dll", "bundled layer/system/storage members (installed at startup) and the SliceLayer class", |rt, _| crate::system_ex::install_slice_layer(rt)),
+    facade!("packinone.dll", "bundled layer/system/storage members, fstat directory queries and the SliceLayer class", |rt, _| {
+        crate::storage_plugins::install_fstat(rt);
+        crate::system_ex::install_slice_layer(rt)
+    }),
     facade!("psd.dll", "PSD class and psd:// layer media over the shared crysirror_image::psd decoder", |rt, _| crate::psd_plugin::install(rt)),
     facade!("httprequest.dll", "HttpRequest over the engine's owner-authorized HTTP service", |rt, _| { crate::http_plugin::install(rt); Ok(()) }),
     facade!("kaichotrans.dll", "shared GPU subtree byte-domain blur and grayscale/blur/negative rule dim transitions"),
@@ -150,8 +155,8 @@ pub fn install(rt: &mut Rt, plugins: crysirror_tjs2::runtime::ObjectHandle) {
                     ));
                 }
                 let first = !rt.host().loaded_plugins.contains(&name);
-                // motionplayer.dll and motionplayer_nod3d.dll share one class set.
-                if matches!(name.as_str(), "motionplayer.dll" | "motionplayer_nod3d.dll") {
+                // The M2 Motion distributions share one global class set.
+                if matches!(name.as_str(), "motionplayer.dll" | "motionplayer_nod3d.dll" | "emoteplayer.dll") {
                     crate::motion_plugin::install(rt);
                 }
                 if first && crate::surfaces::known(&name) {

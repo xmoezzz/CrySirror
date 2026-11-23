@@ -45,12 +45,16 @@ struct Target {
     stencil: wgpu::TextureView,
 }
 
-pub struct PuppetRenderer {
+pub(super) struct PuppetPipelines {
     parts: HashMap<(PartBlend, Stencil), wgpu::RenderPipeline>,
     mask: wgpu::RenderPipeline,
     resolve: wgpu::RenderPipeline,
-    targets: HashMap<String, Target>,
     premul: wgpu::TextureFormat,
+}
+
+pub struct PuppetRenderer {
+    pipelines: std::sync::Arc<PuppetPipelines>,
+    targets: HashMap<String, Target>,
 }
 
 fn blend_state(b: PartBlend) -> wgpu::BlendState {
@@ -70,8 +74,8 @@ fn blend_state(b: PartBlend) -> wgpu::BlendState {
     }
 }
 
-impl PuppetRenderer {
-    pub fn new(d: &wgpu::Device, texture_layout: &wgpu::BindGroupLayout, output: wgpu::TextureFormat, premul: wgpu::TextureFormat) -> Self {
+impl PuppetPipelines {
+    pub(super) fn new(d: &wgpu::Device, texture_layout: &wgpu::BindGroupLayout, output: wgpu::TextureFormat, premul: wgpu::TextureFormat) -> Self {
         let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("puppet"),
             source: wgpu::ShaderSource::Wgsl(crysirror_shaders::wgsl::PUPPET.into()),
@@ -133,7 +137,13 @@ impl PuppetRenderer {
             multisample: Default::default(),
             multiview_mask: None,
         });
-        Self { parts, mask, resolve, targets: HashMap::new(), premul }
+        Self { parts, mask, resolve, premul }
+    }
+}
+
+impl PuppetRenderer {
+    pub(super) fn new(pipelines: std::sync::Arc<PuppetPipelines>) -> Self {
+        Self { pipelines, targets: HashMap::new() }
     }
 
     /// Drops targets of puppet layers that no longer exist.
@@ -156,7 +166,7 @@ impl PuppetRenderer {
         bind: &dyn Fn(u32) -> Option<&'a wgpu::BindGroup>,
         output: &wgpu::TextureView,
     ) -> anyhow::Result<()> {
-        let premul_format = self.premul;
+        let premul_format = self.pipelines.premul;
         let target = match self.targets.get(key) {
             Some(t) if t.size == size => t,
             _ => {
@@ -266,7 +276,7 @@ impl PuppetRenderer {
                     }
                     reference += 1;
                     pass.set_stencil_reference(reference);
-                    pass.set_pipeline(&self.mask);
+                    pass.set_pipeline(&self.pipelines.mask);
                     for m in &p.masks {
                         let mp = &parts[*m];
                         let Some(mt) = bind(mp.texture) else { anyhow::bail!("puppet mask texture {} not loaded", mp.texture) };
@@ -275,7 +285,7 @@ impl PuppetRenderer {
                     }
                     if p.invert_mask { Stencil::Outside } else { Stencil::Inside }
                 };
-                pass.set_pipeline(&self.parts[&(p.blend, mode)]);
+                pass.set_pipeline(&self.pipelines.parts[&(p.blend, mode)]);
                 pass.set_bind_group(0, tex, &[]);
                 pass.draw_indexed(ranges[next_part].clone(), 0, 0..1);
                 next_part += 1;
@@ -296,7 +306,7 @@ impl PuppetRenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(&self.resolve);
+            pass.set_pipeline(&self.pipelines.resolve);
             pass.set_bind_group(0, &target.premul_bind, &[]);
             pass.draw(0..3, 0..1);
         }

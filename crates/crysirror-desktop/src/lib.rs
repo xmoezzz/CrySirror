@@ -453,9 +453,13 @@ fn play(options: PlayOptions) -> Result<()> {
         .name("crysirror-detect".into())
         .spawn(move || -> Result<_> {
             let mut dir = source_path::SourcePath::from_input(&input)?;
-            if dir.metadata()?.is_file() { dir = dir.parent().context("game file without a folder")?; }
+            let entry = if dir.metadata()?.is_file() {
+                let name = dir.file_name().and_then(|s| s.to_str()).map(str::to_owned);
+                dir = dir.parent().context("game file without a folder")?;
+                name
+            } else { None };
             let dir = dir.canonicalize().context("game source directory")?;
-            let plan = detect::detect_source(&dir)?;
+            let plan = detect::detect_source_with_entry(&dir, entry.as_deref())?;
             Ok((dir, plan))
         })
         .context("spawn engine detection worker")?

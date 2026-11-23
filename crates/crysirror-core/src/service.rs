@@ -72,11 +72,19 @@ pub const UNWRAPPED_TEXT_LAYOUT: &str = "simple-horizontal-unwrapped-v1";
 pub trait AssetReader: Send + Sync {
     fn len(&self) -> Result<u64>;
     fn read_at(&self, offset: u64, output: &mut [u8]) -> Result<usize>;
+    /// The bytes and length cannot change while this reader is alive.
+    /// Read-only access alone does not imply an immutable backing source.
+    fn is_immutable(&self) -> bool {
+        false
+    }
 }
 
 /// Bounded fallback for in-memory/provider assets; disk hosts can stream.
 pub struct MemoryAssetReader(pub Arc<[u8]>);
 impl AssetReader for MemoryAssetReader {
+    fn is_immutable(&self) -> bool {
+        true
+    }
     fn len(&self) -> Result<u64> {
         Ok(self.0.len() as u64)
     }
@@ -1528,6 +1536,10 @@ pub trait ImageMetadata: Send + Sync {
         Err(crate::Error::Unsupported("worker image processing"))
     }
 
+    /// Poll bounded preparation for a resumable client. Once ready, size,
+    /// opacity and fingerprint can be read as one decoded metadata record.
+    /// Synchronous-only providers retain their normal size lookup.
+    fn prepare_metadata(&self, _asset: &str) -> Result<bool> { Ok(true) }
     fn size(&self, asset: &str) -> Result<[u32; 2]>;
     /// True only when every decoded texel has alpha 255.
     fn opaque(&self, _asset: &str) -> Result<bool> {
@@ -1950,6 +1962,12 @@ pub trait HostServices: FileSystem {
     /// Inspect original source-layout PCM on a worker, without seeking playback.
     fn begin_audio_samples(&mut self,_client:ClientId,_resource:AudioResourceHandle,_request:AudioSampleRequest)->Result<alloc::boxed::Box<dyn AudioSampleQuery>>{
         Err(crate::Error::Unsupported("source-layout audio samples"))
+    }
+    /// Read integer PCM at the play cursor for visualization. Encoded sources
+    /// can be decoded at their native rate. Source-layout inspection remains
+    /// available separately to callers that need the original PCM format.
+    fn begin_audio_visual_samples(&mut self,client:ClientId,resource:AudioResourceHandle,request:AudioSampleRequest)->Result<alloc::boxed::Box<dyn AudioSampleQuery>>{
+        self.begin_audio_samples(client,resource,request)
     }
     fn audio_resource_info(
         &self,

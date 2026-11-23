@@ -165,8 +165,7 @@ impl Broker {
         if request.client != owner.0 || width == 0 || height == 0 || pixels > MAX_PIXELS {
             return Err(Error::Limit("Canvas capture geometry"));
         }
-        let mut nodes = 0;
-        validate_layers(&request.layers, &mut nodes, 0)?;
+        validate_layers(&request.layers, &mut BTreeMap::new(), 0)?;
         let bytes = usize::try_from(pixels * 4).map_err(error)?;
         let output = Charge::new(memory.clone(), bytes)?;
         // GPU readback (including row padding), staging Vec and final Arc can
@@ -287,15 +286,15 @@ fn validate_asset(asset: &str) -> Result<()> {
     }
     Ok(())
 }
-fn validate_layers(layers: &[LayerSpec], nodes: &mut usize, depth: usize) -> Result<()> {
+fn validate_layers(layers: &[LayerSpec], pages: &mut BTreeMap<usize, usize>, depth: usize) -> Result<usize> {
     if depth > 16 {
         return Err(Error::Limit("Canvas capture nesting"));
     }
+    if layers.len() > crysirror_scene::layer::MAX_LAYERS {
+        return Err(Error::Limit("Canvas capture page nodes"));
+    }
+    let mut child_depth = 0;
     for layer in layers {
-        *nodes += 1;
-        if *nodes > 4096 {
-            return Err(Error::Limit("Canvas capture nodes"));
-        }
         if let Some(filter) = &layer.filter {
             if let Some(tone) = &filter.tone_curve {
                 validate_asset(&tone.asset)?;
@@ -304,12 +303,26 @@ fn validate_layers(layers: &[LayerSpec], nodes: &mut usize, depth: usize) -> Res
                 validate_asset(&mask.asset)?;
             }
         }
-        match &layer.paint {
-            Paint::CoverageWrite{paint}=>{let mut input=layer.clone();input.paint=(**paint).clone();validate_layers(&[input],nodes,depth+1)?;},
+        let paint=match &layer.paint { Paint::CoverageWrite{paint}=>paint.as_ref(), other=>other };
+        match paint {
+            Paint::CoverageWrite{..}=>return Err(Error::Unsupported("nested coverage write in Canvas capture")),
             Paint::GlyphView{..}=>return Err(Error::Unsupported("unresolved glyph view in Canvas capture")),
             Paint::CoverageReset{..}=>(),
             Paint::Image { asset, .. } => validate_asset(asset)?,
-            Paint::Snapshot { layers, .. } => validate_layers(layers, nodes, depth + 1)?,
+            Paint::Snapshot { layers, .. } => {
+                let id = Arc::as_ptr(layers) as usize;
+                let height = match pages.get(&id) {
+                    Some(&height) => height,
+                    None => {
+                        let height = validate_layers(layers, pages, depth + 1)?;
+                        if pages.len() >= crysirror_scene::layer::MAX_LAYERS { return Err(Error::Limit("distinct Canvas capture pages")); }
+                        pages.insert(id, height);
+                        height
+                    }
+                };
+                child_depth = child_depth.max(1 + height);
+                if depth + child_depth > 16 { return Err(Error::Limit("Canvas capture nesting")); }
+            }
             Paint::Mesh { frame, .. } => {
                 for asset in &frame.textures {
                     validate_asset(asset)?;
@@ -328,7 +341,32 @@ fn validate_layers(layers: &[LayerSpec], nodes: &mut usize, depth: usize) -> Res
             Paint::Group { .. } | Paint::OrderedState { .. } | Paint::Solid { .. } | Paint::Text { .. } | Paint::GlyphRun { .. } => (),
         }
     }
-    Ok(())
+    Ok(child_depth)
+}
+
+#[cfg(test)]
+mod capture_budget_tests {
+    use super::*;
+    #[test]
+    fn nested_canvas_pages_share_a_bounded_scene_budget() {
+        let leaf: LayerSpec = serde_json::from_value(serde_json::json!({
+            "id": 1, "rect":[0,0,1,1], "paint":{"kind":"solid","color":[0,0,0,0]}
+        })).unwrap();
+        let mut page = leaf.clone();
+        let mut children = vec![leaf.clone()];
+        children.extend((2..=2100).map(|id| {
+            let mut child = leaf.clone();
+            child.id = id;
+            child.parent = Some(1);
+            child
+        }));
+        page.paint = Paint::Snapshot { size:[1,1], layers:children.into() };
+        let mut visited = BTreeMap::new();
+        validate_layers(&vec![page.clone(); 12], &mut visited, 0).unwrap();
+        assert_eq!(visited.len(), 1);
+        assert!(validate_layers(&[page], &mut visited, 16).is_err());
+        assert!(validate_layers(&vec![leaf; crysirror_scene::layer::MAX_LAYERS+1], &mut visited, 0).is_err());
+    }
 }
 struct Admission(Arc<AtomicUsize>);
 impl Drop for Admission {

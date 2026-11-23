@@ -4,6 +4,7 @@
 //! letterbox mapping are ported from RFVP exit_confirm_ui.rs (see SOURCE_NOTES.md).
 pub mod cursor;
 pub mod dialog;
+mod edit;
 pub mod hit_mask;
 pub mod menu;
 pub mod navigation;
@@ -218,6 +219,8 @@ pub struct WidgetSpec {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Widget {
+    #[serde(skip)]
+    editor: Option<Box<edit::Editor>>,
     spec: WidgetSpec,
     value: f32,
     checked: bool,
@@ -557,6 +560,9 @@ pub enum UiCommand {
         text: String,
         font: Option<String>,
     },
+    /// Enable caret editing and set the selection in UTF-16 code units.
+    /// An end of -1 selects to the end. A start of -1 deselects.
+    SetTextSelection { id: u32, start: i64, end: i64 },
 }
 impl UiSystem {
     /// Enumerate logical font references without layout, metric lookup or
@@ -698,9 +704,18 @@ impl UiSystem {
                     ensure!(editable(owner, id.id), "focused text field is not editable");
                     let w = owner.get_mut(&id.id).unwrap();
                     ensure!(text.len()<=1024*1024&&!text.chars().any(|c|c.is_control()&&!(w.spec.multiline&&matches!(c,'\n'|'\r'|'\t'))),"invalid committed text for field mode");
+                    if let Some(editor) = &mut w.editor {
+                        editor.replace(&mut w.spec, text);
+                        continue;
+                    }
                     let available =
                         (w.spec.max_length as usize).saturating_sub(w.spec.text.chars().count());
                     w.spec.text.extend(text.chars().take(available));
+                }
+                UiCommand::SetTextSelection { id, start, end } => {
+                    ensure!(editable(owner, *id), "text field is not editable");
+                    let w = owner.get_mut(id).unwrap();
+                    w.editor.get_or_insert_with(Default::default).select(&w.spec.text, *start, *end);
                 }
                 UiCommand::Backspace { id } => {
                     let w = owner.get_mut(id).context("widget missing")?;
@@ -708,7 +723,9 @@ impl UiSystem {
                         w.spec.kind == WidgetKind::TextField&&!w.spec.read_only,
                         "widget is not a text field"
                     );
-                    w.spec.text.pop();
+                    if let Some(editor) = &mut w.editor {
+                        editor.erase(&mut w.spec, true);
+                    } else { w.spec.text.pop(); }
                 }
                 UiCommand::Focus { id } => {
                     ensure!(editable(owner, *id), "text field is not editable");
@@ -829,6 +846,7 @@ impl UiSystem {
                     owner.insert(
                         widget.id,
                         Widget {
+                            editor: None,
                             spec: widget.clone(),
                             value: widget.value,
                             checked: widget.value > 0.5,
@@ -871,7 +889,10 @@ impl UiSystem {
                     };
                     let w = owner.get_mut(id).context("widget missing")?;
                     match other {
-                        UiCommand::SetRect { rect, .. } => w.spec.rect = *rect,
+                        UiCommand::SetRect { rect, .. } => {
+                            w.spec.rect = *rect;
+                            if let Some(editor) = &mut w.editor { editor.invalidate_layout(); }
+                        }
                         UiCommand::SetVisible { visible, .. } => w.spec.visible = *visible,
                         UiCommand::SetEnabled { enabled, .. } => w.spec.enabled = *enabled,
                         UiCommand::SetValue { value, .. } => {
@@ -880,6 +901,7 @@ impl UiSystem {
                         }
                         UiCommand::SetText { text, font, .. } => {
                             w.spec.text = text.clone();
+                            if let Some(editor) = &mut w.editor { editor.reset(text); }
                             if let Some(font) = font {
                                 w.spec.font = Some(font.clone());
                             }
@@ -1083,6 +1105,7 @@ impl UiSystem {
             owner.insert(
                 spec.id,
                 Widget {
+                    editor: None,
                     spec: spec.clone(),
                     value: spec.value,
                     checked: spec.value > 0.5,
@@ -1472,10 +1495,11 @@ impl UiSystem {
             (spec.kind == WidgetKind::Slider).then_some(spec.slider_axis)
         });
         let text_field = self.focused_text_field();
+        let range_editor = self.focus.is_some_and(|id| self.clients[&id.owner][&id.id].editor.is_some());
         let forward = self.input.vk_down_stock(0x09)&&!self.focused_multiline_field()
-            || self.input.vk_down_stock(0x28) && axis != Some(SliderAxis::Vertical)
+            || !range_editor && self.input.vk_down_stock(0x28) && axis != Some(SliderAxis::Vertical)
             || self.input.vk_down_stock(0x27) && axis.is_none() && !text_field;
-        let backward = self.input.vk_down_stock(0x26) && axis != Some(SliderAxis::Vertical)
+        let backward = !range_editor && self.input.vk_down_stock(0x26) && axis != Some(SliderAxis::Vertical)
             || self.input.vk_down_stock(0x25) && axis.is_none() && !text_field;
         let navigation_owner=modal.map(|id|id.owner).or(self.pressed.map(|id|id.owner)).or(self.focus.map(|id|id.owner)).or_else(||layouts.last().map(|layout|layout.id.owner));
         let navigation_allowed=self.focus.map(|id|self.clients[&id.owner][&id.id].spec.keyboard_navigation)
@@ -1563,6 +1587,17 @@ impl UiSystem {
             })).unwrap_or(target)
         });
         let pressed_edges=frame.buttons_pressed|(frame.buttons_down&!self.key_previous_down);
+        if let Some(id) = self.pressed {
+            let w = self.clients.get_mut(&id.owner).and_then(|m| m.get_mut(&id.id));
+            if let Some(w) = w {
+                if let (Some(editor), Some(layout)) = (&mut w.editor, layouts.iter().find(|l|l.id==id)) {
+                    let extend = pressed_edges & crysirror_core::service::buttons::MOUSE_LEFT == 0
+                        || frame.buttons_down & crysirror_core::service::buttons::SHIFT != 0;
+                    editor.point(frame.pointer_x as f32-layout.rect[0]-f32::from(w.spec.text_inset[0]),
+                        frame.pointer_y as f32-layout.rect[1]-f32::from(w.spec.text_inset[1]), extend);
+                }
+            }
+        }
         self.key_previous_down=frame.buttons_down;
         let mut key_events=Vec::new();
         if let Some(id)=key_target.filter(|_|self.pointer_window_focused!=Some(false)) {
@@ -1621,11 +1656,16 @@ impl UiSystem {
                 .unwrap()
                 .get_mut(&id.id)
                 .unwrap();
-            if backspace {
-                w.spec.text.pop();
+            if let Some(editor) = &mut w.editor {
+                editor.key(&mut w.spec, frame, pressed_edges);
+                if backspace { editor.erase(&mut w.spec,true); }
+                if newline { editor.replace(&mut w.spec,"\n"); }
+                if tab { editor.replace(&mut w.spec,"\t"); }
+            } else {
+                if backspace { w.spec.text.pop(); }
+                if newline&&w.spec.text.chars().count()<(w.spec.max_length as usize){w.spec.text.push('\n');}
+                if tab&&w.spec.text.chars().count()<(w.spec.max_length as usize){w.spec.text.push('\t');}
             }
-            if newline&&w.spec.text.chars().count()<(w.spec.max_length as usize){w.spec.text.push('\n');}
-            if tab&&w.spec.text.chars().count()<(w.spec.max_length as usize){w.spec.text.push('\t');}
             if submit && !w.spec.text.is_empty() || cancel {
                 if self.events.len() == 256 {
                     self.events.remove(0);
@@ -1807,6 +1847,9 @@ impl UiSystem {
                     Some(l.clip),
                     order,
                 ));
+            }
+            if let Some(editor) = &w.editor {
+                if editor.paint(&l, s, self.focus == Some(l.id), &mut out, order) { continue; }
             }
             if !s.text.is_empty() {
                 let mut r = l.rect;

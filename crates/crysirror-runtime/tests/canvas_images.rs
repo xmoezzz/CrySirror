@@ -193,10 +193,9 @@ fn capture_pins_published_inputs_while_release_mutation_and_failed_presenter_rem
         rt.assets.surface(owner, &path).is_some(),
         "Canvas still owns the retired image path"
     );
-    assert!(
-        rt.host.release_image_resource(owner, &path).is_err(),
-        "caller ownership ended exactly once"
-    );
+    // A second alias can retire the same path while the Canvas keeps it live.
+    rt.host.release_image_resource(owner, &path).unwrap();
+    assert!(rt.assets.surface(owner, &path).is_some());
     submit(
         &mut rt,
         serde_json::json!({"canvases":[{"op":"clear","id":1,"color":[0,0,255,255]}]}),
@@ -206,6 +205,7 @@ fn capture_pins_published_inputs_while_release_mutation_and_failed_presenter_rem
         rt.assets.surface(owner, &path).is_none(),
         "unreferenced retired path collected"
     );
+    assert!(rt.host.release_image_resource(owner, &path).is_err());
     rt.prepare_canvas_images(|_, assets| {
         assert_eq!(assets.surface(owner, &path).unwrap().rgba, pixels);
         Ok(Some(Arc::new(MemoryAssetReader(pixels.clone()))))

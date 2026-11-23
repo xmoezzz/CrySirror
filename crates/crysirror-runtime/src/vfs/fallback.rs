@@ -79,7 +79,7 @@ impl VfsProvider for LooseFirst {
         if !metadata.is_file() {
             return Err(Error::Unsupported("special fallback asset"));
         }
-        let file = self.asset.open(&path).map_err(io)?;
+        let (file, immutable) = open_asset_stream(&self.asset, &path).map_err(io)?;
         let metadata = file.metadata().map_err(io)?;
         if !metadata.is_file() {
             return Err(Error::Invalid("fallback stream must be a file"));
@@ -87,6 +87,7 @@ impl VfsProvider for LooseFirst {
         Ok(Arc::new(CapAssetReader {
             file: Mutex::new(file),
             len: metadata.len(),
+            immutable,
         }))
     }
     fn exists(&self, relative: &str) -> bool {

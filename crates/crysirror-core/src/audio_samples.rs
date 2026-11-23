@@ -1,7 +1,9 @@
-//! Scoped source-layout PCM inspection, separate from stereo playback voices.
+//! Scoped PCM windows for source inspection and playback visualization.
 use crate::{Error, Result, service::AudioResourceHandle, state::ClientId};
 use alloc::{sync::Arc, vec::Vec};
-/// Layout of unconverted source PCM; unsigned8 or signed little-endian16.
+/// Layout of the returned samples, unsigned 8-bit or signed little-endian
+/// 16-bit. Source inspection preserves the input layout. A visualization
+/// query can return decoded stereo without changing the source format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AudioSampleFormat {
     pub sample_rate: u32,

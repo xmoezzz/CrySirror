@@ -12,11 +12,11 @@
 //! reference add-on constructor does.
 //!
 //! CrySirror change: the samples come from the shared source-PCM service
-//! (`HostServices::begin_audio_samples`) on a worker. Script callbacks cannot
+//! (`HostServices::begin_audio_visual_samples`) on a worker. Script callbacks cannot
 //! wait for it, so each call answers from the latest completed window for
 //! that buffer (the reference's "no samples" 0 before the first one) and
-//! schedules a read at the current cursor; a window is at most one engine
-//! step old. A stopped buffer answers 0 like the reference.
+//! schedules a read when the cursor leaves the prepared PCM range.
+//! A stopped buffer answers 0 like the reference.
 use crate::natives::{Rt, this_of};
 use crysirror_core::{
     service::{AudioResourceHandle, AudioSampleQuery, AudioSampleRequest, AudioSampleState, HostServices},
@@ -44,14 +44,50 @@ struct Window {
     ahead: i64,
     /// Requested `(resource, start frame, frames)` not yet read.
     want: Option<(AudioResourceHandle, u64, u32)>,
-    job: Option<Box<dyn AudioSampleQuery>>,
-    /// Latest completed mono window.
+    job: Option<(u32, Box<dyn AudioSampleQuery>)>,
+    resource: Option<AudioResourceHandle>,
+    first: u64,
+    eof: bool,
+    /// Contiguous mono PCM from the independent visualization decoder.
     samples: Vec<i16>,
 }
 
 impl GetSample {
     pub(crate) fn invalidate(&mut self, object: usize) {
         self.objects.remove(&object);
+    }
+}
+
+impl Window {
+    fn observe_resource(&mut self, resource: Option<AudioResourceHandle>) {
+        if self.resource != resource {
+            self.resource = resource;
+            self.want = None;
+            self.job = None;
+            self.samples.clear();
+            self.first = 0;
+            self.eof = false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replacing_voice_discards_the_pending_lip_sync_request() {
+        let old = AudioResourceHandle { client: 1, id: 1 };
+        let new = AudioResourceHandle { client: 1, id: 2 };
+        let mut window = Window {
+            resource: Some(old), want: Some((old, 16, 100)),
+            samples: vec![123], first: 16, eof: true, ..Default::default()
+        };
+        window.observe_resource(Some(new));
+        assert!(window.want.is_none());
+        assert!(window.samples.is_empty());
+        assert_eq!(window.first, 0);
+        assert!(!window.eof);
     }
 }
 
@@ -130,27 +166,42 @@ fn window(rt: &mut Rt, h: ObjectHandle, count: i64, ahead: i64) -> Result<Vec<i1
     state(rt, h);
     let source = crate::sound::sample_source(rt, h)?;
     let w = rt.host_mut().get_sample.objects.get_mut(&h.0).unwrap();
+    let resource = source.map(|(handle, _)| handle);
+    w.observe_resource(resource);
     let Some((resource, start)) = source else {
-        w.want = None;
-        w.job = None;
-        w.samples.clear();
         return Ok(Vec::new());
     };
-    w.want = Some((resource, start + ahead as u64, count as u32));
+    let start = start.saturating_add(ahead as u64);
+    let end = w.first.saturating_add(w.samples.len() as u64);
+    if start >= w.first && (w.eof || start.saturating_add(count as u64) <= end) {
+        w.want = None;
+        let offset = start.min(end) - w.first;
+        return Ok(w.samples[offset as usize..].iter().copied().take(count as usize).collect());
+    }
+    w.want = Some((resource, start, count as u32));
     Ok(w.samples.iter().copied().take(count as usize).collect())
 }
 
 /// Start and complete the scheduled reads; never blocks the VM.
 pub(crate) fn poll(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow::Result<()> {
-    for w in rt.host_mut().get_sample.objects.values_mut() {
+    let host = rt.host_mut();
+    for (id, w) in &mut host.get_sample.objects {
+        // Fast-forward can replace the voice after a lip-sync read requested
+        // samples but before this poll starts or publishes that read.
+        let active = host.sounds.buffers.get(id).and_then(|buffer| buffer.playing_resource());
+        w.observe_resource(active);
         if w.job.is_none()
             && let Some((resource, start, frames)) = w.want.take()
             && frames > 0
         {
-            w.job = Some(h.begin_audio_samples(client, resource, AudioSampleRequest { start_frame: start, max_bytes: frames * 4 })?);
+            // Lip-sync windows are short and overlap as the play cursor moves.
+            let frames = frames.max(4096);
+            w.job = Some((frames, h.begin_audio_visual_samples(client, resource, AudioSampleRequest { start_frame: start, max_bytes: frames * 4 })?));
         }
-        let Some(job) = w.job.as_mut() else { continue };
+        let Some((requested, job)) = w.job.as_mut() else { continue };
         if let AudioSampleState::Ready(receipt) = job.poll()? {
+            w.eof = receipt.frames < *requested;
+            w.first = receipt.start_frame;
             w.job = None;
             let channels = usize::from(receipt.format.channels);
             let wide = receipt.format.bits_per_sample == 16;

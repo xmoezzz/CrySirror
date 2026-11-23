@@ -110,7 +110,7 @@ impl Renderer {
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("retained image sampler alias"),
-                layout: &self.texture_layout,
+                layout: &self.draw_pipelines.texture_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,

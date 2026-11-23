@@ -40,6 +40,14 @@ formats; pending formats are never registered as working decoders.
 This ledger describes this migration only. Existing CrySirror image, audio and
 native BGI decoding capabilities remain available through their existing APIs.
 
+HXV4 verifies each protected stream before exposing it. A mounted catalog can
+reuse verified, uncompressed single-segment streams when the source promises
+immutable bytes and the caller has no extra transform pipeline. The catalog
+retains up to 128 lightweight stream handles, with no cached payload buffers.
+Fresh mounts start with an empty cache. Local Windows XP3 readers try a handle
+that allows file replacement while excluding in-place writes. A source without
+that guarantee, including ordinary remote readers, still verifies on open.
+
 Rust, JS/TS and inspection tools use the same `Resources` class:
 
 ```ts

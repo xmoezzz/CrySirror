@@ -124,9 +124,20 @@ fn native_regexp<H: TjsHost + 'static>(
     }
     runtime.register_object_native(handle, "compile", regexp_compile::<H>);
     runtime.register_object_native(handle, "_compile", regexp_compile_internal::<H>);
-    runtime.register_object_native(handle, "test", regexp_test::<H>);
+    runtime.register_object_native_property_with_access(
+        handle, "matches", super::NativePropertyAccess::ReadOnly,
+        move |rt, _| Ok(rt.object_member(handle, "__regexp_matches")),
+        |_, _, _| Err(TjsError::runtime("RegExp.matches is read-only")),
+    );
+    runtime.set_object_member(handle, "__regexp_right_context", Variant::String(String::new()));
+    runtime.register_object_native_property_with_access(
+        handle, "rightContext", super::NativePropertyAccess::ReadOnly,
+        move |rt, _| Ok(rt.object_member(handle, "__regexp_right_context")),
+        |_, _, _| Err(TjsError::runtime("RegExp.rightContext is read-only")),
+    );
+    runtime.register_object_native(handle, "test", regexp_exec::<H, false>);
     runtime.register_object_native(handle, "match", regexp_match::<H>);
-    runtime.register_object_native(handle, "exec", regexp_match::<H>);
+    runtime.register_object_native(handle, "exec", regexp_exec::<H, true>);
     install_empty_finalize(runtime, handle);
     Ok(Variant::Object(handle))
 }
@@ -2040,19 +2051,24 @@ pub(crate) fn regexp_object_handle<H: TjsHost>(
     }
 }
 
-fn regexp_test<H: TjsHost + 'static>(
+fn regexp_exec<H: TjsHost + 'static, const RETURN_ARRAY: bool>(
     runtime: &mut Runtime<H>,
     this_obj: Option<ObjectHandle>,
     args: Vec<Variant>,
 ) -> Result<Variant> {
-    let handle = require_this(this_obj, "RegExp.test")?;
-    let target = args
-        .first()
-        .map(Variant::to_tjs_string)
-        .transpose()?
-        .unwrap_or_default();
+    let handle = require_this(this_obj, if RETURN_ARRAY { "RegExp.exec" } else { "RegExp.test" })?;
+    let target = regexp_target(&args)?;
     let regex = regexp_regex(runtime, handle)?;
-    Ok(Variant::Integer(i64::from(regex.is_match(&target))))
+    let captures = regex.captures(&target);
+    let matched = captures.is_some();
+    // krkrz Exec updates RightContext on a hit. A miss keeps the last suffix.
+    if let Some(full) = captures.as_ref().and_then(|c| c.get(0)) {
+        runtime.set_object_member(handle, "__regexp_right_context", Variant::String(target[full.end()..].into()));
+    }
+    let values = regexp_capture_values(captures);
+    let array = Variant::Object(runtime.alloc_array_object(values));
+    runtime.set_object_member(handle, "__regexp_matches", array.clone());
+    Ok(if RETURN_ARRAY { array } else { Variant::Integer(i64::from(matched)) })
 }
 
 fn regexp_match<H: TjsHost + 'static>(
@@ -2061,22 +2077,24 @@ fn regexp_match<H: TjsHost + 'static>(
     args: Vec<Variant>,
 ) -> Result<Variant> {
     let handle = require_this(this_obj, "RegExp.match")?;
-    let target = args
-        .first()
-        .map(Variant::to_tjs_string)
-        .transpose()?
-        .unwrap_or_default();
-    let regex = regexp_regex(runtime, handle)?;
-    let values = regex
-        .captures(&target)
+    let target = regexp_target(&args)?;
+    let values = regexp_capture_values(regexp_regex(runtime, handle)?.captures(&target));
+    Ok(Variant::Object(runtime.alloc_array_object(values)))
+}
+
+fn regexp_target(args: &[Variant]) -> Result<String> {
+    Ok(args.first().map(Variant::to_tjs_string).transpose()?.unwrap_or_default())
+}
+
+fn regexp_capture_values(captures: Option<regex::Captures<'_>>) -> Vec<Variant> {
+    captures
         .map(|captures| {
             captures
                 .iter()
                 .map(|capture| Variant::String(capture.map(|m| m.as_str()).unwrap_or("").into()))
                 .collect::<Vec<_>>()
         })
-        .unwrap_or_default();
-    Ok(Variant::Object(runtime.alloc_array_object(values)))
+        .unwrap_or_default()
 }
 
 pub(crate) fn regexp_regex<H: TjsHost>(

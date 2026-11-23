@@ -117,6 +117,16 @@ pub trait GlyphBoundsQuery: Send {
     fn poll(&mut self) -> Result<GlyphBoundsProgress>;
     fn cancel(&mut self) -> Result<()>;
 }
+/// Outline design metrics in pixels at a requested em size.
+#[derive(Clone, Copy, Debug)]
+pub struct OutlineEmMetrics {
+    /// Scale used by the engine's line-height-based rasterizer.
+    pub line_height: f32,
+    pub ascent: f32,
+    /// OS/2 sTypoAscender, or the face ascent when absent.
+    pub typographic_ascent: f32,
+}
+
 /// Bounded font registration capability. Handles cannot cross clients.
 pub trait FontLibrary: Send + Sync {
     /// Actual metadata of the authorized, currently published font catalogue.
@@ -153,6 +163,9 @@ pub trait FontLibrary: Send + Sync {
     /// bounds/metrics. Uses an authorized immutable face, with no host I/O.
     fn line_height_for_em(&self, _alias: &str, _em: f32) -> Result<f32> {
         Err(crate::Error::Unsupported("scoped font em scale"))
+    }
+    fn outline_em_metrics(&self, _alias: &str, _em: f32) -> Result<OutlineEmMetrics> {
+        Err(crate::Error::Unsupported("scoped outline em metrics"))
     }
     fn begin_glyph_bounds(
         &self,

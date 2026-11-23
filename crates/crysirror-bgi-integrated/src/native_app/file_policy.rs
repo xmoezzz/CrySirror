@@ -1132,6 +1132,8 @@ impl FilePolicy {
     pub fn new(resource: &Path, user: &Path) -> io::Result<Self> {
         let roots = cap_io::Roots::new(resource, user)?;
         Ok(Self {
+            #[cfg(any(feature = "nfs", feature = "smb"))]
+            network: None,
             resource: resource.canonicalize()?,
             user: user.canonicalize()?,
             media_marker: None,

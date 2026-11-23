@@ -59,6 +59,30 @@ fn setup() -> (CanvasSystem, LayerSystem) {
     .unwrap();
     (c, l)
 }
+
+#[test]
+fn rebuilding_both_crossfade_roots_validates_the_complete_canvas_batch() {
+    use crysirror_scene::layer::LayerCommand;
+
+    let client = ClientId(1);
+    let mut canvases = CanvasSystem::default();
+    let mut layers = LayerSystem::default();
+    let present = |id, layer, order| C::Present { id, layer, order, parent: None, position: [0., 0.] };
+    canvases.apply_batch(client, &[create(1), create(2), present(1, 7, 0), present(2, 8, 1)], &mut layers).unwrap();
+    layers.apply_batch(client, &[LayerCommand::BeginCrossfade {
+        id: 7, source: 8, duration_ms: 100, rule: None, external: false,
+    }]).unwrap();
+
+    let resize = |id, width| C::Resize { id, width, height: 10 };
+    canvases.apply_batch(client, &[resize(1, 12), resize(2, 12)], &mut layers).unwrap();
+    assert_eq!(layers.get(client, 7).unwrap().rect[2], 12.);
+    assert_eq!(layers.get(client, 8).unwrap().rect[2], 12.);
+
+    let before = (to_value(&canvases).unwrap(), to_value(&layers).unwrap());
+    let error = canvases.apply_batch(client, &[resize(1, 14)], &mut layers).unwrap_err();
+    assert!(error.to_string().contains("equally sized roots"));
+    assert_eq!((to_value(&canvases).unwrap(), to_value(&layers).unwrap()), before);
+}
 #[test]
 fn copies_are_independent_snapshots_and_roundtrip() {
     let (mut c, mut l) = setup();
@@ -168,6 +192,26 @@ fn empty_intersections_are_true_noops_even_for_replace() {
         assert_eq!((to_value(&c).unwrap(), to_value(&l).unwrap()), before);
     }
 }
+#[test]
+fn mixed_service_batch_discards_staged_canvases_after_a_late_layer_error() {
+    use crysirror_scene::{EngineSystems, ServiceBatch};
+    let mut engine = EngineSystems::default();
+    let client = ClientId(1);
+    let initial = to_value(&engine).unwrap();
+    let invalid: ServiceBatch = serde_json::from_value(json!({
+        "canvases": [
+            {"op":"create","id":3,"width":10,"height":10},
+            {"op":"present","id":3,"layer":7,"order":0,"position":[0,0]}
+        ],
+        "layers": [{"op":"set_viewport_clip","id":7,"clip":[0,0,-1,1]}]
+    })).unwrap();
+    assert!(engine.submit(client, &invalid).is_err());
+    assert_eq!(to_value(&engine).unwrap(), initial);
+    let too_many = ServiceBatch { canvases: vec![create(3); 4097], ..Default::default() };
+    assert!(engine.submit(client, &too_many).unwrap_err().to_string().contains("canvas batch limit"));
+    assert_eq!(to_value(&engine).unwrap(), initial);
+}
+
 #[test]
 fn errors_roll_back_canvas_and_generated_layers_atomically() {
     let (mut c, mut l) = setup();

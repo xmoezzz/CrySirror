@@ -95,9 +95,24 @@ pub struct WindowState {
     pub output: bool,
     pub menu: Option<usize>,
     pub primary: Option<usize>,
+    pub(crate) views: Vec<crate::d2d_view::View>,
+    pub(crate) device_zoom: Option<f64>,
     pub inner: [i64; 2],
     pub layer_pos: [i64;2],
     pub visible: bool,
+}
+
+impl WindowState {
+    pub(crate) fn append_roots(&self, roots: &mut Vec<usize>) {
+        if self.views.is_empty() {
+            roots.extend(self.primary);
+            return;
+        }
+        let mut ordered: Vec<_> = self.primary.into_iter().map(|id| (0, id))
+            .chain(self.views.iter().map(|view| (view.order, view.layer))).collect();
+        ordered.sort_by_key(|(order, _)| *order);
+        roots.extend(ordered.into_iter().map(|(_, id)| id));
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -109,14 +124,33 @@ pub struct TimerState {
     pub next: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Batch {
     Ui(Vec<Value>),
     Layers(Vec<Value>),
     Canvases(Vec<Value>),
 }
 
+/// Let the host pump input between expensive consecutive native image calls.
+/// The interrupted instruction has not yet changed its destination.
+#[derive(Default)]
+pub(crate) struct BitmapWorkSlice {
+    started: Option<web_time::Instant>,
+    probe_started: Option<web_time::Instant>,
+    probes: u32,
+    pub parked: bool,
+}
+impl BitmapWorkSlice {
+    fn checkpoint(&mut self) -> bool {
+        let started = self.started.get_or_insert_with(web_time::Instant::now);
+        self.parked = started.elapsed() >= std::time::Duration::from_millis(6);
+        self.parked
+    }
+}
+
 pub struct KrkrHost {
+    pub(crate) bitmap_work: Option<BitmapWorkSlice>,
     pub(crate) pads:crate::native_pad::State,
     pub(crate) extra: crate::natives::native_extra::State,
     pub(crate) attention_dirty: bool,
@@ -170,12 +204,17 @@ pub struct KrkrHost {
     pub client: u32,
     pub storage: Option<Storage>,
     pub images: Option<Arc<dyn ImageMetadata>>,
+    pub(crate) pending_image_metadata: Option<String>,
+    pub(crate) image_metadata_failure: Option<(String, String)>,
     pub(crate) province_load: Option<crate::province::Pending>,
     pub text_measurement: Option<Arc<dyn TextMeasurement>>,
     pub(crate) fonts:crate::font_resources::Fonts,
     pub(crate) hint_hover: Option<usize>,
     pub(crate) mouse: crate::native_mouse::MouseState,
     pub input: crysirror_core::service::InputFrame,
+    /// Latest host key levels, independent of an older queued event callback.
+    pub(crate) held_buttons: u64,
+    pub(crate) pressed_since_query: u64,
     pub now: u64,
     /// The presenting host's display (`System.screenWidth`, windowEx monitors);
     /// `None` falls back to the canvas.
@@ -187,6 +226,8 @@ pub struct KrkrHost {
     pub log: Vec<String>,
     pub batches: Vec<Batch>,
     pub layers: BTreeMap<usize, LayerState>,
+    /// Reverse index for incoming bitmap commands, including reused native slots.
+    slot_owners: Vec<Option<usize>>,
     pub(crate) layer_instances: BTreeSet<usize>,
     pub(crate) fftgraph:crate::fftgraph::Graph,
     pub windows: BTreeMap<usize, WindowState>,
@@ -201,6 +242,8 @@ pub struct KrkrHost {
     pub menus_revision: u64,
     /// WIN32Dialog.messageBox waiting on an engine dialog: (dialog id).
     pub dialog_pending: Option<u32>,
+    pub(crate) input_prompt: Option<crate::edit_dialog::Prompt>,
+    pub(crate) prompt_release_mask: u64,
     pub dialog_serial: u32,
     pub menus_synced: Option<(u64, Vec<(usize, bool)>, [u32; 2])>,
     pub loaded_plugins: BTreeSet<String>,
@@ -233,6 +276,28 @@ pub struct KrkrHost {
 }
 
 impl KrkrHost {
+    pub(crate) fn before_image_work(&mut self) -> TjsResult<()> {
+        if self.can_suspend && self.bitmap_work.as_mut().is_some_and(BitmapWorkSlice::checkpoint) {
+            self.bitmap_redraw_pending = true;
+            return Err(TjsError::resource_pending("continue native image work on the next host tick"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn before_batch_item(&mut self) -> TjsResult<()> {
+        if self.can_suspend {
+            if let Some(work) = &mut self.bitmap_work {
+                let start = work.probe_started.get_or_insert_with(web_time::Instant::now);
+                work.probes = work.probes.saturating_add(1);
+                if work.probes % 8 == 0 && start.elapsed() >= std::time::Duration::from_millis(6) {
+                    work.parked = true;
+                    self.bitmap_redraw_pending = true;
+                    return Err(TjsError::resource_pending("continue native batch on the next host tick"));
+                }
+            }
+        }
+        Ok(())
+    }
     pub fn new(canvas: [u32; 2], font: String) -> Self {
         Self {
             extra: Default::default(),
@@ -276,12 +341,16 @@ impl KrkrHost {
             client: 1,
             storage: None,
             images: None,
+            pending_image_metadata: None,
+            image_metadata_failure: None,
             province_load: None,
             text_measurement: None,
             fonts:Default::default(),
             hint_hover: None,
             mouse: Default::default(),
             input: Default::default(),
+            held_buttons: 0,
+            pressed_since_query: 0,
             now: 0,
             display: None,
             canvas,
@@ -290,6 +359,7 @@ impl KrkrHost {
             log: Vec::new(),
             batches: Vec::new(),
             layers: BTreeMap::new(),
+            slot_owners: vec![None],
             layer_instances: BTreeSet::new(),
             fftgraph:Default::default(),
             windows: BTreeMap::new(),
@@ -302,6 +372,8 @@ impl KrkrHost {
             menu_popups: vec![],
             menus_revision: 0,
             dialog_pending: None,
+            input_prompt: None,
+            prompt_release_mask: 0,
             dialog_serial: 0,
             menus_synced: None,
             loaded_plugins: BTreeSet::new(),
@@ -315,6 +387,7 @@ impl KrkrHost {
             user_close_pending: false,
             closing_by_user: false,
             api_calls: 0,
+            bitmap_work: None,
             clock_poll_tick: 0,
             clock_poll_reads: 0,
             clock_yield_tick: None,
@@ -345,7 +418,7 @@ impl KrkrHost {
         if let Some(path) = std::env::var_os("CRYSIRROR_KRKR_LOG_FILE") {
             use std::io::Write;
             if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-                let _ = writeln!(f, "{line}");
+                let _ = writeln!(f, "[{} ms] {line}", self.now);
             }
         }
         if self.log.len() >= MAX_LOG {
@@ -359,8 +432,10 @@ impl KrkrHost {
         // that copy that hidden layer onto a visible one (AffineSourceMotion) must receive
         // the composed mesh, so such a copy goes through the shared subtree snapshot.
         if op["op"].as_str() == Some("copy") {
-            let source = op["source"].as_u64();
-            let motion_source = self.layers.iter().find(|(id, layer)| Some(u64::from(layer.slot)) == source && self.motion.has_frame(**id)).map(|(_, layer)| layer.container());
+            let motion_source = op["source"].as_u64().and_then(|n| usize::try_from(n).ok())
+                .and_then(|slot| self.slot_owners.get(slot).copied().flatten())
+                .filter(|owner| self.motion.has_frame(*owner))
+                .and_then(|owner| self.layers.get(&owner)).map(LayerState::container);
             if let Some(container) = motion_source {
                 op = serde_json::json!({"op":"copy_subtree","source":container,"destination":op["destination"],
                     "rect":op["rect"],"position":op["position"],"clip":op.get("clip").cloned().unwrap_or(Value::Null)});
@@ -375,7 +450,8 @@ impl KrkrHost {
                 .or_else(|| op.get("id"))
                 .and_then(Value::as_u64)
             {
-                if let Some(l) = self.layers.values_mut().find(|l| l.slot as u64 == id) {
+                if let Some(l) = usize::try_from(id).ok().and_then(|s| self.slot_owners.get(s).copied().flatten())
+                    .and_then(|owner| self.layers.get_mut(&owner)) {
                     l.image_modified = true;
                     l.image_source = None;
                     // Developer diagnostic (CRYSIRROR_KRKR_TRACE_SOURCE).
@@ -427,6 +503,13 @@ impl KrkrHost {
             .ok_or_else(|| TjsError::runtime("KiriKiri storage is not mounted yet"))
     }
 
+    /// Children of different primary layers belong to different KiriKiri layer managers.
+    pub(crate) fn same_manager(&self, a: usize, b: usize) -> bool {
+        let (Some(la), Some(lb)) = (self.layers.get(&a), self.layers.get(&b)) else { return false };
+        la.window == lb.window && self.windows.get(&la.window).is_some_and(|w| w.views.iter().all(|v|
+            self.is_ancestor_or_self(a, v.layer) == self.is_ancestor_or_self(b, v.layer)))
+    }
+
     /// krkrz `IsAncestorOrSelf(ancestor)`: `ancestor` is `h` or above it.
     pub fn is_ancestor_or_self(&self, h: usize, ancestor: usize) -> bool {
         let mut node = Some(h);
@@ -468,7 +551,9 @@ impl KrkrHost {
         let w=self.windows.get_mut(&window).ok_or_else(||TjsError::runtime("Window not constructed"))?;
         if w.layer_pos==position{return Ok(());}
         w.layer_pos=position;
-        if let Some(layer)=w.primary.and_then(|id|self.layers.get_mut(&id)){layer.dirty=true;}
+        for id in w.primary.into_iter().chain(w.views.iter().map(|v|v.layer)) {
+            if let Some(layer) = self.layers.get_mut(&id) { layer.dirty = true; }
+        }
         Ok(())
     }
     /// Register a layer and create its engine container, surface and
@@ -588,13 +673,16 @@ impl KrkrHost {
         );}
         let mut state = state;
         state.presented = (window!=0).then_some((0, [0, 0]));
+        if self.slot_owners.len() <= slot as usize { self.slot_owners.resize(slot as usize + 1, None); }
+        self.slot_owners[slot as usize] = Some(handle.0);
         self.layers.insert(handle.0, state);
         Ok(())
     }
 
     /// krkr image resize: contents stay anchored at the top-left.
     pub fn resize_surface(&mut self, h: ObjectHandle, w: i64, height: i64) -> TjsResult<()> {
-        if !(1..=8192).contains(&w) || !(1..=8192).contains(&height) {
+        let edges = 1..=i64::from(crysirror_image::MAX_IMAGE_DIMENSION);
+        if !edges.contains(&w) || !edges.contains(&height) {
             return Err(TjsError::runtime(format!(
                 "invalid layer image size {w}x{height}"
             )));
@@ -642,7 +730,8 @@ impl KrkrHost {
         height: i64,
         fill: [u8; 4],
     ) -> TjsResult<()> {
-        if !(1..=8192).contains(&w) || !(1..=8192).contains(&height) {
+        let edges = 1..=i64::from(crysirror_image::MAX_IMAGE_DIMENSION);
+        if !edges.contains(&w) || !edges.contains(&height) {
             return Err(TjsError::runtime(format!(
                 "invalid layer image size {w}x{height}"
             )));
@@ -741,9 +830,11 @@ impl KrkrHost {
                     child.parent = None;
                 }
             }
+            self.slot_owners[l.slot as usize] = None;
             self.free_slots.insert(l.slot);
         }
         for w in self.windows.values_mut() {
+            w.views.retain(|view| view.layer != h);
             if w.primary == Some(h) {
                 w.primary = None;
             }
@@ -784,20 +875,26 @@ impl KrkrHost {
     /// Emit the commands that bring engine nodes up to date: painter order
     /// from a depth-first walk, container geometry and image placement.
     pub fn sync(&mut self) -> TjsResult<()> {
+        let _span = crysirror_tasks::profile::span_current("krkr.layers.sync");
         crate::menus::sync(self)?;
         crate::tooltip::sync_liveness(self)?;
-        let mut roots: Vec<usize> = self.windows.iter()
-            .filter(|(id,_)|!self.modal_windows.iter().any(|m|m.window==**id))
-            .filter_map(|(_,w)| w.primary).collect();
-        roots.extend(self.modal_windows.iter().filter_map(|m|self.windows.get(&m.window).and_then(|w|w.primary)));
-        let mut order = Vec::new();
-        for root in roots {
-            let mut stack = vec![root];
-            while let Some(h) = stack.pop() {
-                order.push(h);
-                let mut children = self.sorted_children(h);
-                children.reverse();
-                stack.extend(children);
+        let mut roots = Vec::new();
+        for (_, w) in self.windows.iter().filter(|(id,_)|!self.modal_windows.iter().any(|m|m.window==**id)) {
+            w.append_roots(&mut roots);
+        }
+        for w in self.modal_windows.iter().filter_map(|m|self.windows.get(&m.window)) {
+            w.append_roots(&mut roots);
+        }
+        let mut order = Vec::with_capacity(self.layers.len());
+        roots.reverse();
+        while let Some(h) = roots.pop() {
+            order.push(h);
+            if let Some(layer) = self.layers.get(&h) {
+                if layer.absolute_order_mode {
+                    roots.extend(self.sorted_children(h).into_iter().rev());
+                } else {
+                    roots.extend(layer.children.iter().rev().copied());
+                }
             }
         }
         let mut containers = Vec::new();
@@ -830,6 +927,9 @@ impl KrkrHost {
                 if let Some(w)=self.windows.get(&window){
                     spec["rect"][0]=json!(l.left+w.layer_pos[0]);
                     spec["rect"][1]=json!(l.top+w.layer_pos[1]);
+                    if let Some(view) = w.views.iter().find(|view| view.layer == h) {
+                        view.present(&mut spec, l, w.layer_pos, w.device_zoom.unwrap_or(1.0));
+                    }
                 }
                 if let Some(modal)=self.modal_windows.iter().find(|m|m.window==window){
                     spec["rect"][0]=json!(modal.offset[0]+(l.left as f32)*modal.scale);
@@ -944,6 +1044,7 @@ impl TjsHost for KrkrHost {
         if let Some(batch) = &self.bitmap_batch { out.push(ObjectHandle(batch.target)); }
         if let Some(pair)=&self.image_pair{out.extend([ObjectHandle(pair.target),ObjectHandle(pair.source)]);}
         if let Some(save)=&self.image_save{out.push(ObjectHandle(save.layer));}
+        if let Some(prompt) = &self.input_prompt { out.push(prompt.owner); }
         out.extend(self.mouse.hover.into_iter().chain(self.mouse.capture).map(ObjectHandle));
         out.extend(self.deferred.targets(self.client).map(|t| ObjectHandle((t >> 2) as usize)));
         self.layer_movies.gc_roots(out);
@@ -1024,8 +1125,10 @@ impl TjsHost for KrkrHost {
             }
         }
         if let Some(window) = self.windows.remove(&handle.0) {
-            if let Some(primary) = window.primary {
-                self.invalidate_layer(primary);
+            let mut roots = Vec::new();
+            window.append_roots(&mut roots);
+            for root in roots {
+                self.invalidate_layer(root);
             }
         }
     }

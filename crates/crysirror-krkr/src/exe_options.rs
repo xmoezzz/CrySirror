@@ -6,8 +6,10 @@
 //! which `System.getArgument("-debugwin")` reports. The area is the marker,
 //! a 32-bit capacity, then `name=value` lines up to a NUL; values are TJS
 //! string literals. What follows the NUL (the configurable option names) is
-//! not an option and is ignored. Only data is read; the executable never runs.
+//! not an option and is ignored. KiriKiri Z stores its defaults in the PE
+//! TEXT/IDR_OPTION resource instead. Only data is read.
 use anyhow::{Context, Result, ensure};
+use crysirror_resource::pe::{PeData, PeResourceName};
 
 const MARKER: &[u8] = b"XOPT_EMBED_AREA_";
 /// The area is fixed-size in the executable; anything longer is not an area.
@@ -17,6 +19,16 @@ const MAX_OPTIONS: usize = 256;
 /// `(name, value)` pairs, names without the leading `-`.
 pub fn parse(exe: &[u8]) -> Result<Vec<(String, String)>> {
     let Some(at) = exe.windows(MARKER.len()).position(|w| w == MARKER) else {
+        // krkrz TVPGetEmbeddedOptions calls FindResource(TEXT, IDR_OPTION).
+        // Older executables may have no PE resource directory at all.
+        if let Some(options) = PeData::parse(exe).ok()
+            .and_then(|pe| pe.raw_resources(&PeResourceName::Name("TEXT".into()), &|| Ok(())).ok())
+            .and_then(|resources| resources.into_iter().find(|r| r.name == PeResourceName::Id(139)))
+        {
+            ensure!(options.bytes.len() <= MAX_AREA, "embedded option resource limit");
+            let end = options.bytes.iter().position(|b| *b == 0).unwrap_or(options.bytes.len());
+            return parse_config(&options.bytes[..end]);
+        }
         return Ok(Vec::new());
     };
     let body = exe
@@ -57,7 +69,7 @@ pub fn pe_bits(exe: &[u8]) -> Option<i64> {
 pub fn parse_config(bytes: &[u8]) -> Result<Vec<(String, String)>> {
     let text = crate::storage::decode_text(bytes)?;
     let mut out = Vec::new();
-    for line in text.lines().map(|l| l.trim_end_matches(['\r', '\n'])) {
+    for line in text.split(['\r', '\n']) {
         if line.is_empty() || line.starts_with(';') {
             continue;
         }
@@ -151,6 +163,32 @@ mod tests {
                 ("vomstyle".into(), "layer".into())
             ]
         );
+    }
+
+    #[test]
+    fn kirikiri_z_uses_named_text_resource_139_as_defaults() {
+        // One PE32 resource section with the tree TEXT / 139 / Japanese.
+        let mut exe = vec![0; 1024];
+        exe[..2].copy_from_slice(b"MZ");
+        exe[128..132].copy_from_slice(b"PE\0\0");
+        for (at, value) in [(132, 0x14cu16), (134, 1), (148, 224), (152, 0x10b),
+            (524, 1), (550, 1), (574, 1), (608, 4)] {
+            exe[at..at + 2].copy_from_slice(&value.to_le_bytes());
+        }
+        let options = b"debugwin=\"no\"\rfixlangs=\"cn\"\0ignored=yes";
+        for (at, value) in [(60, 128u32), (184, 4096), (188, 512), (208, 8192),
+            (212, 512), (244, 16), (264, 4096), (268, 512),
+            (384, 512), (388, 4096), (392, 512), (396, 512),
+            (528, 0x8000_0060), (532, 0x8000_0018), (552, 139), (556, 0x8000_0030),
+            (576, 1041), (580, 72), (584, 4096 + 128), (588, options.len() as u32)] {
+            exe[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        exe[376..381].copy_from_slice(b".rsrc");
+        exe[610..618].copy_from_slice(b"T\0E\0X\0T\0");
+        exe[640..640 + options.len()].copy_from_slice(options);
+        assert_eq!(parse(&exe).unwrap(), [("debugwin".into(), "no".into()), ("fixlangs".into(), "cn".into())]);
+        exe[552..556].copy_from_slice(&140u32.to_le_bytes());
+        assert!(parse(&exe).unwrap().is_empty());
     }
 
     #[test]

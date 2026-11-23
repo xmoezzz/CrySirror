@@ -179,6 +179,33 @@ pub(crate) fn poll(rt: &mut Rt) -> anyhow::Result<bool> {
         }
     }
 }
+pub(crate) struct RasterSize {
+    pub measure: f32,
+    pub draw: u16,
+    pub offset_y: i32,
+}
+
+/// The Windows font rasterizer requests a negative LOGFONT height (em pixels)
+/// and positions ink at GetOutlineTextMetrics.otmAscent. Precomputed fonts
+/// already carry the game's integer advances and bitmap origins.
+pub(crate) fn raster_size(rt: &mut Rt, font: ObjectHandle, alias: &str, em: u64) -> Result<RasterSize> {
+    let identity = RasterSize { measure: em as f32, draw: em as u16, offset_y: 0 };
+    if is_mapped(rt, font)? { return Ok(identity); }
+    let Some(lib) = &rt.host().fonts.library else { return Ok(identity) };
+    if !lib.is_loaded(alias).map_err(|e| TjsError::runtime(e.to_string()))? { return Ok(identity); }
+    let metric = match lib.outline_em_metrics(alias, em as f32) {
+        Ok(m) => m,
+        Err(crysirror_core::Error::Unsupported(_)) => return Ok(identity),
+        Err(e) => return Err(TjsError::runtime(e.to_string())),
+    };
+    let draw = metric.line_height.round().max(1.) as u16;
+    let draw_ascent = metric.ascent * f32::from(draw) / metric.line_height;
+    Ok(RasterSize {
+        measure: metric.line_height, draw,
+        offset_y: (metric.typographic_ascent.round() - draw_ascent).round() as i32,
+    })
+}
+
 /// KiriKiri's comma-separated family preference list. Shared registrations are
 /// consulted first; configured project font is the portable host fallback.
 pub(crate) fn alias(rt: &mut Rt, font: ObjectHandle) -> Result<String> {

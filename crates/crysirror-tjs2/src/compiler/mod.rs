@@ -815,6 +815,35 @@ mod tests {
     }
 
     #[test]
+    fn regexp_right_context_is_the_suffix_of_the_last_successful_test_or_exec() {
+        assert_eq!(execute_source("inline.tjs", r#"
+            var re = /([0-9]+)/;
+            if (re.rightContext !== "" || !re.test("房间12出口") || re.rightContext !== "出口") return 0;
+            re.match("8unchanged");
+            if (re.test("none") || re.rightContext !== "出口") return 0;
+            re.exec("door9");
+            if (re.rightContext !== "") return 0;
+            try { re.rightContext = "x"; } catch(e) { return 1; }
+            return 0;
+        "#).unwrap(), Variant::Integer(1));
+    }
+
+    #[test]
+    fn regexp_matches_tracks_test_and_exec_but_not_match() {
+        assert_eq!(execute_source("inline.tjs", r#"
+            var re = /^patch@r([0-9]+)\.xp3$/;
+            if (re.matches !== void || !re.test("patch@r1071.xp3")) return "initial";
+            var first = re.matches;
+            if (first[1] != "1071" || re.match("other").count != 0 || re.matches !== first) return "match";
+            var after = re.exec("patch@r12.xp3");
+            if (re.matches !== after || after[1] != "12" || first[1] != "1071") return "exec";
+            if (re.test("missing") || re.matches.count != 0) return "miss";
+            try { re.matches = 7; } catch (e) { return "ok"; }
+            return "writable";
+        "#).unwrap(), Variant::String("ok".into()));
+    }
+
+    #[test]
     fn regexp_match_returns_krkr2_result_array_shape() {
         assert_eq!(
             execute_source(

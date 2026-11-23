@@ -22,8 +22,8 @@ impl Renderer {
         Ok(keys)
     }
 
-    pub(super) fn frame_cache_keys(assets: &Assets, frame: &[Primitive]) -> Result<BTreeSet<String>> {
-        fn collect(assets: &Assets, frame: &[Primitive], keys: &mut BTreeSet<String>) -> Result<()> {
+    pub(super) fn frame_cache_keys(&self, assets: &Assets, frame: &[Primitive]) -> Result<BTreeSet<String>> {
+        fn collect(renderer: &Renderer, assets: &Assets, frame: &[Primitive], keys: &mut BTreeSet<String>) -> Result<()> {
             for p in frame {
                 for target in p.target.iter().chain(p.output.iter()) {
                     keys.insert(Renderer::target_key(assets,target));
@@ -47,10 +47,15 @@ impl Renderer {
                     }
                     Paint::GlyphRun { .. } => { glyph_run::cache_keys(assets, p.owner, &p.paint, keys)?; }
                     Paint::Snapshot { size, layers } => {
-                        keys.insert(Renderer::snapshot_key(assets, p.owner, *size, layers)?);
-                        let mut isolated = crysirror_scene::layer::LayerSystem::default();
-                        isolated.install(ClientId(p.owner), layers)?;
-                        collect(assets, &isolated.frame(*size)?, keys)?;
+                        // A completed snapshot owns its immutable pixels. Its
+                        // input draws are needed only while a result is missing.
+                        let key = Renderer::snapshot_key(assets, p.owner, *size, layers)?;
+                        let ready = renderer.textures.contains_key(&key);
+                        if keys.insert(key) && !ready {
+                            let mut isolated = crysirror_scene::layer::LayerSystem::default();
+                            isolated.install(ClientId(p.owner), layers)?;
+                            collect(renderer, assets, &isolated.frame(*size)?, keys)?;
+                        }
                     }
                     Paint::Puppet { .. } | Paint::Mesh { .. } => {
                         let [w,h] = Renderer::puppet_size(p);
@@ -71,6 +76,11 @@ impl Renderer {
                 }
                 }
                 if let Some(mesh) = &p.puppet {
+                    // History can attach a mesh to a solid placeholder. Keep
+                    // its actual output alive across capture/presentation or
+                    // the same declaration will sample and tint itself twice.
+                    let [w, h] = Renderer::puppet_size(p);
+                    keys.insert(format!("puppet:{}:{}:{w}x{h}", p.owner, p.id));
                     for asset in &mesh.textures {
                         keys.insert(match crysirror_core::service::frame_history_layer(asset) {
                             Some(id) => format!("history:{}:{id}", p.owner),
@@ -89,14 +99,14 @@ impl Renderer {
                     if let Some((rule,_)) = &composite.rule {
                         keys.insert(Renderer::image_key(assets, p.owner, &rule.asset)?);
                     }
-                    collect(assets, &composite.before, keys)?;
-                    collect(assets, &composite.after, keys)?;
+                    collect(renderer, assets, &composite.before, keys)?;
+                    collect(renderer, assets, &composite.after, keys)?;
                 }
             }
             Ok(())
         }
         let mut keys = BTreeSet::new();
-        collect(assets, frame, &mut keys)?;
+        collect(self, assets, frame, &mut keys)?;
         Ok(keys)
     }
 
@@ -110,7 +120,7 @@ impl Renderer {
     }
 
     pub(super) fn retire_unused_textures(&mut self, assets: &Assets) -> Result<()> {
-        let mut used = Self::frame_cache_keys(assets, &self.engine_frame)?;
+        let mut used = self.frame_cache_keys(assets, &self.engine_frame)?;
         used.extend(self.scene_texture_keys.iter().cloned());
         self.preserve_capture_textures(&mut used);
         self.textures.retain(|key,_| used.contains(key));

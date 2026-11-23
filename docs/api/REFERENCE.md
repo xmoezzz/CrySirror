@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `8693c021aef05c1f`
+API fingerprint: `1c2e078251b5e7a6`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -739,15 +739,16 @@ Script global: `ui`.
 | `setImeCursorArea(rect: number[])` | `void` | Set IME candidate geometry in logical canvas pixels. |
 | `setTitle(text: string)` | `void` | Set engine presentation title. |
 | `focusTextField(id: number)` | `void` | Focus an enabled, visible text field owned by this client. |
-| `insertText(text: string)` | `void` | Append committed Unicode up to max_length scalars. Multiline fields also accept newline and tab; single-line fields reject controls. |
-| `backspace(id: number)` | `void` | Remove the final Unicode scalar from a client-owned text field. |
+| `insertText(text: string)` | `void` | Insert committed Unicode at the active selection, or append in a plain field, up to max_length scalars. |
+| `setTextSelection(id: number, start: number, end: number)` | `void` | Enable caret editing and select a UTF-16 range in an owned field. End -1 extends to the end. Start -1 collapses at the caret. |
+| `backspace(id: number)` | `void` | Delete the active selection or previous grapheme in a range editor, or the final scalar in a plain field. |
 | `setText(id: number, text: string, font: string \| null)` | `void` | Label/button text and optional font alias; null preserves the existing font. |
 | `beginMotion(id: number, track: Record<string, any>)` | `void` | Animate widget x/y using a shared MotionTrackSpec; engine duration uses milliseconds, external duration uses caller units. |
 | `setMotionElapsed(id: number, property: string, elapsed: number)` | `void` | Sample an external widget motion before engine hit testing. |
 | `endMotion(id: number, property: string \| null, finish: boolean)` | `void` | Cancel one or all widget motion tracks, optionally applying their targets. |
 | `motionStatus(id: number)` | `Record<string, any>` | Current owned widget motion tracks and completion; a missing target fails. |
 
-Commands issued: `setMenu` → `ui.set_menu`, `removeMenu` → `ui.remove_menu`, `openMenu` → `ui.open_menu`, `openDialog` → `ui.open_dialog`, `closeDialog` → `ui.close_dialog`, `warpPointer` → `ui.warp_pointer`, `movePointerStepped` → `ui.move_pointer_stepped`, `advancePointerMotion` → `ui.advance_pointer_motion`, `closeMenu` → `ui.close_menu`, `setMenuChecked` → `ui.set_menu_checked`, `setMenuEnabled` → `ui.set_menu_enabled`, `putTooltip` → `ui.put_tooltip`, `removeTooltip` → `ui.remove_tooltip`, `showTooltip` → `ui.show_tooltip`, `hideTooltip` → `ui.hide_tooltip`, `put` → `ui.put`, `remove` → `ui.remove`, `setRect` → `ui.set_rect`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setHitMask` → `ui.set_hit_mask`, `setHitMaskGeometry` → `ui.set_hit_mask_geometry`, `setText` → `ui.set_text`, `setTitle` → `ui.set_title`, `setWindowPolicy` → `ui.set_window_policy`, `beginWindowDrag` → `ui.begin_window_drag`, `resetWindowShape` → `ui.reset_window_shape`, `setImeCursorArea` → `ui.set_ime_cursor_area`, `setFullscreen` → `ui.set_fullscreen`, `setCursorVisible` → `ui.set_cursor_visible`, `defineCursor` → `ui.define_cursor`, `setCursor` → `ui.set_cursor`, `insertText` → `ui.insert_text`, `backspace` → `ui.backspace`, `focusTextField` → `ui.focus`, `beginMotion` → `ui.begin_motion`, `setMotionElapsed` → `ui.set_motion_elapsed`, `endMotion` → `ui.end_motion`.
+Commands issued: `setMenu` → `ui.set_menu`, `removeMenu` → `ui.remove_menu`, `openMenu` → `ui.open_menu`, `openDialog` → `ui.open_dialog`, `closeDialog` → `ui.close_dialog`, `warpPointer` → `ui.warp_pointer`, `movePointerStepped` → `ui.move_pointer_stepped`, `advancePointerMotion` → `ui.advance_pointer_motion`, `closeMenu` → `ui.close_menu`, `setMenuChecked` → `ui.set_menu_checked`, `setMenuEnabled` → `ui.set_menu_enabled`, `putTooltip` → `ui.put_tooltip`, `removeTooltip` → `ui.remove_tooltip`, `showTooltip` → `ui.show_tooltip`, `hideTooltip` → `ui.hide_tooltip`, `put` → `ui.put`, `remove` → `ui.remove`, `setRect` → `ui.set_rect`, `setVisible` → `ui.set_visible`, `setEnabled` → `ui.set_enabled`, `setValue` → `ui.set_value`, `setHitMask` → `ui.set_hit_mask`, `setHitMaskGeometry` → `ui.set_hit_mask_geometry`, `setText` → `ui.set_text`, `setTitle` → `ui.set_title`, `setWindowPolicy` → `ui.set_window_policy`, `beginWindowDrag` → `ui.begin_window_drag`, `resetWindowShape` → `ui.reset_window_shape`, `setImeCursorArea` → `ui.set_ime_cursor_area`, `setFullscreen` → `ui.set_fullscreen`, `setCursorVisible` → `ui.set_cursor_visible`, `defineCursor` → `ui.define_cursor`, `setCursor` → `ui.set_cursor`, `insertText` → `ui.insert_text`, `setTextSelection` → `ui.set_text_selection`, `backspace` → `ui.backspace`, `focusTextField` → `ui.focus`, `beginMotion` → `ui.begin_motion`, `setMotionElapsed` → `ui.set_motion_elapsed`, `endMotion` → `ui.end_motion`.
 
 ## Class Vfx
 
@@ -946,6 +947,7 @@ Every typed engine command and the API member that issues it. `tests/api_coverag
 | ui | `define_cursor` | `Ui.defineCursor` |
 | ui | `set_cursor` | `Ui.setCursor` |
 | ui | `insert_text` | `Ui.insertText` |
+| ui | `set_text_selection` | `Ui.setTextSelection` |
 | ui | `backspace` | `Ui.backspace` |
 | ui | `focus` | `Ui.focusTextField` |
 | ui | `begin_motion` | `Ui.beginMotion` |
@@ -7993,6 +7995,7 @@ Variants are tagged by `"op"`.
 | `set_enabled` | `id: u32, enabled: bool` | Issued by `Ui.setEnabled`. |
 | `set_value` | `id: u32, value: f32` | Issued by `Ui.setValue`. |
 | `set_text` | `id: u32, text: String, font: Option<String>` | Issued by `Ui.setText`. |
+| `set_text_selection` | `id: u32, start: i64, end: i64` | Enable caret editing and set the selection in UTF-16 code units. An end of -1 selects to the end. A start of -1 deselects. |
 
 ### MenuSpec
 
@@ -8405,6 +8408,7 @@ Used by: UiEvent.widget client/local identity.
 | `canvas` | `[u32; 2]` | Logical canvas size; must equal the project canvas. |
 | `plugin_shells` | `Vec<String>` | Explicit registration-only native modules, with no callable exports. Loading a shell does not establish implementation of that plugin. |
 | `executable` | `Option<String>` | Companion executable basename reported by `System.exeName`. |
+| `launcher_overlay` | `Option<LauncherOverlay>` | Ordered, session-local overrides from a selected KiriKiri launcher. |
 | `bootstrap_profile` | `Option<String>` | Engine-published protected-bootstrap profile (`hxv4_bootstrap_profile` for `Plugins.linkZ`, or `cxdec_bootstrap_profile` for the startup `Storages.setupArchiveData` facade) the natives must match. |
 | `arguments` | `BTreeMap<String, String>` | Native command-line values exposed by System.getArgument. Explicit player values override executable-embedded defaults before startup. |
 | `locale` | `Option<String>` | User locale reported by getLangName.dll (`ja-JP`, `en-US`). Absent, the process locale environment is used, then `en-US`. |

@@ -115,12 +115,13 @@ pub(crate) fn install(rt: &mut Rt) {
             }),
             ("getAscentHeight", |rt, t, _| {
                 let h = this_of(rt, t, "Layer.getAscentHeight")?;
-                let Some(font) = rt.resolve_object_member(h, "font")?.object_handle() else { return Ok(Variant::Void) };
+                let font = crate::natives::layer_font(rt, h)?;
                 let size = crate::natives::font_size(rt, font)?;
                 let alias = crate::font_resources::alias(rt, font)?;
+                let raster = crate::font_resources::raster_size(rt, font, &alias, size)?;
                 let Some(measure) = rt.host().text_measurement.as_ref() else { return Ok(Variant::Void) };
-                Ok(match measure.measure_simple(&alias, size as f32, "") {
-                    Ok(m) => Variant::Integer(m.ascent as i64),
+                Ok(match measure.measure_simple(&alias, f32::from(raster.draw), "") {
+                    Ok(m) => Variant::Integer((m.ascent + raster.offset_y as f32).round() as i64),
                     Err(_) => Variant::Void,
                 })
             }),

@@ -203,6 +203,18 @@ fn launcher_draw_device_and_compat_plugins_report_their_profiles() {
             if (Steam.getAchievement("A").achieved !== 0) throw "achievement record";
             var refused = false; try { new Steam(); } catch(e) { refused = true; }
             if (!refused) throw "steam instance";
+            Plugins.link("DrawDeviceD2Dm.dll");
+            w.drawDevice = new DrawDeviceD2D();
+            var main = new Layer(w, null);
+            var view = new Layer(w, null);
+            view.viewState.setRect(4, 2, 28, 26, 0);
+            view.viewState.visible = 0;
+            view.viewState.opacity = 128;
+            view.viewState.order = -1;
+            if (w.primaryLayer !== main || view.viewState.visible || view.viewState.opacity != 128
+                || view.viewState.order != -1) throw "secondary view replaced the primary or lost its state";
+            invalidate view;
+            if (w.primaryLayer !== main) throw "removing a secondary view detached the primary";
             Plugins.link("DrawDeviceD2D.dll");
             Plugins.link("SteamDrawDevice.dll");
             w.drawDevice = new DrawDeviceD2D();
@@ -707,6 +719,8 @@ fn slice_layer_color_tables_and_wave_data_extras() {
                 "startup.tjs",
                 br#"
                 Plugins.link("PackinOne.dll");
+                var entries = Storages.dirlist("file://./");
+                if (entries.find("pic.tlg") < 0) throw "PackinOne directory listing";
                 Plugins.link("msdfrender.dll");
                 Plugins.link("wvdecoder.dll");
                 Plugins.link("win32dialog.dll");
@@ -725,6 +739,16 @@ fn slice_layer_color_tables_and_wave_data_extras() {
                 var third;
                 sl.foreachSlice(function(lay) { global.__last = lay; });
                 if (((__last.getMainPixel(0, 0) >> 16) & 0xff) != 40) throw "slice rows " + __last.getMainPixel(0, 0);
+                var standalone = new Layer(w, base);
+                standalone.setImageSize(2, 5);
+                var copySlices = SliceLayer.SliceLoader.loadSlicedImage incontextof global;
+                copySlices("pic.tlg", 5, [standalone]);
+                if (((standalone.getMainPixel(0, 4) >> 16) & 0xff) != 40) throw "standalone slice rows";
+                var assembled = new Layer(w, base);
+                assembled.setImageSize(2, 5);
+                assembled.holdAlpha = true;
+                assembled.operateRect(0, 0, standalone, 0, 0, 2, 5, omAuto);
+                if (assembled.getMaskPixel(0, 4) != 255) throw "alpha part over an empty pixel";
                 sl.setSliceProp("opacity", 128);
                 if (__last.opacity != 128) throw "setSliceProp";
                 var table = [];

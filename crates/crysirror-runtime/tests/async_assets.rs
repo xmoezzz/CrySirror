@@ -181,6 +181,8 @@ fn renderer_image_and_model_import_use_background_common_cache() {
     a.decoders
         .register("fake", Arc::new(Decoder(count.clone())))
         .unwrap();
+    assert!(a.prefetch_image(ClientId(1), "pixel.fake").unwrap());
+    assert!(a.prefetch_image(ClientId(1), "pixel.fake").unwrap());
     let image = a.image_for(ClientId(1), "pixel.fake").unwrap().unwrap();
     assert_eq!(image.rgba, [10, 20, 30, 255]);
     a.image_for(ClientId(1), "pixel.fake").unwrap();
@@ -188,6 +190,74 @@ fn renderer_image_and_model_import_use_background_common_cache() {
     let model = a.model_for(ClientId(1), "model.glb").unwrap().unwrap();
     assert!(!model.meshes.is_empty());
     assert!(a.tasks_inspect()["io"]["completed"].as_u64().unwrap() >= 2);
+}
+
+#[cfg(feature = "arc-formats")]
+#[test]
+fn tlg_metadata_prefetch_and_visible_lookup_share_prepared_pixels() {
+    use crysirror_core::service::HostServices;
+
+    struct TlgSource {
+        encoded: Vec<u8>,
+        reads: AtomicUsize,
+    }
+
+    impl ClientStorage for TlgSource {
+        fn read(&self, _: &VfsPath) -> crysirror_core::Result<Vec<u8>> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            Ok(self.encoded.clone())
+        }
+        fn list(&self, _: Mount, _: &str) -> crysirror_core::Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        fn write_atomic(&self, _: &VfsPath, _: &[u8]) -> crysirror_core::Result<()> {
+            Err(Error::ReadOnly)
+        }
+        fn remove(&self, _: &VfsPath) -> crysirror_core::Result<()> {
+            Err(Error::ReadOnly)
+        }
+    }
+
+    fn source(blue: u8, alpha: u8) -> Arc<TlgSource> {
+        let mut encoded = b"TLG5.0\0raw\x1a\x04".to_vec();
+        for value in [1u32, 1, 1, 0] {
+            encoded.extend(value.to_le_bytes());
+        }
+        for value in [blue, 2, 1, alpha] {
+            encoded.extend([1, 1, 0, 0, 0, value]);
+        }
+        Arc::new(TlgSource { encoded, reads: AtomicUsize::new(0) })
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("assets")).unwrap();
+    let project = dir.path().join("project.json");
+    std::fs::write(&project, br#"{"schema":2,"name":"tlg cache","content_revision":"1","canvas":[16,16],"assets":"assets","clients":[{"name":"a","adapter":"crysirror-script-v1","game":"a"}]}"#).unwrap();
+    let mut runtime = Runtime::load(&project, &dir.path().join("state")).unwrap();
+    let client = ClientId(1);
+    let path = "picture.TLG";
+    let meta = runtime.host.image_metadata(client).unwrap();
+    for (prefetch_first, blue, alpha) in [(false, 3, 255), (true, 6, 127)] {
+        let source = source(blue, alpha);
+        runtime.assets.refresh_storage(client, source.clone()).unwrap();
+        runtime.assets.set_nonblocking(true);
+        if prefetch_first {
+            assert!(runtime.assets.prefetch_image(client, path).unwrap());
+        }
+        let started = Instant::now();
+        while !meta.prepare_metadata(path).unwrap() {
+            assert!(started.elapsed() < Duration::from_secs(5));
+            std::thread::yield_now();
+        }
+        assert_eq!(meta.size(path).unwrap(), [1, 1]);
+        assert_eq!(meta.opaque(path).unwrap(), alpha == 255);
+        assert_eq!(meta.fingerprint(path).unwrap(), *blake3::hash(&source.encoded).as_bytes());
+        assert!(runtime.assets.prefetch_image(client, path).unwrap());
+        let image = runtime.assets.image_for(client, path).unwrap().unwrap();
+        assert_eq!(image.rgba, [3, 2, blue + 2, alpha]);
+        assert_eq!(source.reads.load(Ordering::Relaxed), 1);
+        assert_eq!(runtime.assets.tasks_inspect()["resident_bytes"], 4);
+    }
 }
 #[test]
 fn cancelling_running_asset_prevents_publication() {
@@ -339,4 +409,135 @@ fn host_asset_budget_is_bounded_and_cannot_drop_below_live_residency() {
     assert!(a.set_prepared_budget(16 * 1024 * 1024).is_err());
     a.release_task(ClientId(1), t).unwrap();
     a.set_prepared_budget(16 * 1024 * 1024).unwrap();
+}
+
+#[test]
+fn image_admission_reclaims_only_the_needed_unowned_cache_entries() {
+    struct SizedImage;
+    impl crysirror_image::ImageDecoder for SizedImage {
+        fn decode(&self, data: &[u8]) -> anyhow::Result<crysirror_image::ImageSurface> {
+            let height = u32::from(data[0]) * 256;
+            Ok(crysirror_image::ImageSurface {
+                width: 1024,
+                height,
+                rgba: vec![0; height as usize * 4096],
+            })
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut assets = Assets::new(dir.path()).unwrap();
+    let client = ClientId(1);
+    assets.register(client, "").unwrap();
+    assets.set_prepared_budget(16 << 20).unwrap();
+    assets
+        .decoders
+        .register("sized", Arc::new(SizedImage))
+        .unwrap();
+    for (name, mib) in [
+        ("held", 4),
+        ("pinned", 4),
+        ("explicit", 2),
+        ("cold", 3),
+        ("warm", 3),
+        ("next", 3),
+        ("too-large", 17),
+        ("blocked", 8),
+    ] {
+        std::fs::write(dir.path().join(format!("{name}.sized")), [mib]).unwrap();
+    }
+    let held = assets.image_for(client, "held.sized").unwrap().unwrap();
+    let lease = assets
+        .lease(client, "pinned.sized", AssetKind::Image)
+        .unwrap();
+    assets.wait_task(client, lease.ticket()).unwrap();
+    let explicit = assets
+        .request(client, "explicit.sized", AssetKind::Image)
+        .unwrap();
+    assets.wait_task(client, explicit).unwrap();
+    for name in ["cold.sized", "warm.sized"] {
+        drop(assets.image_for(client, name).unwrap().unwrap());
+    }
+    let paths = |a: &Assets| -> Vec<String> {
+        a.tasks_inspect()["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["state"] == "ready")
+            .map(|s| s["path"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let before = paths(&assets);
+    assert!(assets.image_for(client, "too-large.sized").is_err());
+    assert!(assets.image_for(client, "blocked.sized").is_err());
+    assert_eq!(
+        paths(&assets),
+        before,
+        "unfulfillable requests preserve cached work"
+    );
+    assert!(assets.prefetch_image(client, "next.sized").unwrap());
+    assets.image_for(client, "next.sized").unwrap().unwrap();
+    assert_eq!(
+        paths(&assets),
+        [
+            "held.sized",
+            "pinned.sized",
+            "explicit.sized",
+            "warm.sized",
+            "next.sized"
+        ]
+    );
+    assert_eq!(assets.tasks_inspect()["resident_bytes"], 16 << 20);
+    assert!(Arc::ptr_eq(
+        &held,
+        &assets.image_for(client, "held.sized").unwrap().unwrap()
+    ));
+    assert_eq!(
+        assets.task_status(client, lease.ticket()).unwrap().state,
+        AssetState::Ready
+    );
+    assert_eq!(
+        assets.task_status(client, explicit).unwrap().state,
+        AssetState::Ready
+    );
+    drop(held);
+    // A transient admission failure from a prefetch/renderer request must
+    // recover when enough residency becomes reclaimable.
+    assets.image_for(client, "blocked.sized").unwrap().unwrap();
+    assert!(assets.tasks_inspect()["resident_bytes"].as_u64().unwrap() <= 16 << 20);
+}
+
+#[test]
+fn querying_an_unpinned_ticket_does_not_fail_an_unrelated_completion() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut assets = Assets::new(dir.path()).unwrap();
+    let client = ClientId(1);
+    assets.register(client, "").unwrap();
+    assets.set_prepared_budget(16 << 20).unwrap();
+    for path in ["first.bin", "second.bin"] {
+        std::fs::write(dir.path().join(path), vec![0; 9 << 20]).unwrap();
+    }
+    let lease = assets.lease(client, "first.bin", AssetKind::Bytes).unwrap();
+    let first = lease.ticket();
+    assert_eq!(
+        assets.wait_task(client, first).unwrap().state,
+        AssetState::Ready
+    );
+    drop(lease);
+    let second = assets
+        .request(client, "second.bin", AssetKind::Bytes)
+        .unwrap();
+    let start = Instant::now();
+    while assets.io_tasks().stats().completed < 2 {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        assets.task_status(client, first).unwrap().state,
+        AssetState::Ready
+    );
+    assert_eq!(
+        assets.wait_task(client, second).unwrap().state,
+        AssetState::Ready
+    );
+    assert!(assets.task_status(client, first).is_err());
 }

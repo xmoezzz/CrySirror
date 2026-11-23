@@ -17,6 +17,33 @@ fn setup()->Runtime<KrkrHost> {
 }
 
 #[test]
+fn scripted_font_wrapper_preserves_the_layers_native_font() {
+    let mut rt = setup();
+    script(&mut rt, r#"
+        var physical = root.font;
+        physical.height = 31;
+        var wrapper = %["face"=>"logical alias", "height"=>9999];
+        &root.font = wrapper;
+        if (root.font !== wrapper) throw "lost script wrapper";
+        if ((Layer incontextof root).font !== physical) throw "lost native font";
+        root.drawText(0,0,"test",0xffffff);
+    "#);
+}
+
+#[test]
+fn allocating_an_image_after_resizing_a_layer_uses_the_current_rectangle() {
+    let mut rt = setup();
+    script(&mut rt, r#"
+        var portrait = new Layer(w, root);
+        portrait.hasImage = false;
+        portrait.setSize(886, 960);
+        portrait.hasImage = true;
+        if (portrait.imageWidth != 886 || portrait.imageHeight != 960) throw "portrait allocation";
+        if (portrait.imageLeft != 0 || portrait.imageTop != 0) throw "portrait image origin";
+    "#);
+}
+
+#[test]
 fn renderer_tree_does_not_permanently_root_unreferenced_native_layer() {
     let mut rt=setup();
     let h=rt.global_member("temporary").object_handle().unwrap();

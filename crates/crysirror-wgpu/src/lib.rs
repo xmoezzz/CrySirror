@@ -179,6 +179,7 @@ impl Gpu {
 
 /// The single readback texture of `Paint::Backdrop`.
 const BACKDROP_KEY: &str = "backdrop:frame";
+#[derive(Clone)]
 struct Texture {
     bind: wgpu::BindGroup,
     view: wgpu::TextureView,
@@ -313,15 +314,34 @@ fn filter_sampling(record:&mut FilterGpu,sampling:crysirror_scene::layer::ImageS
     }
     record.c[3]=flags as f32;
 }
+/// Immutable pipeline handles and compatible layouts for one device and output
+/// format. Isolated subtree renderers share these objects with their parent.
+/// Render targets, uniforms, texture caches and temporal state stay per renderer.
+struct DrawPipelines {
+    composite: composite::CompositePipeline,
+    puppet: Arc<puppet::PuppetPipelines>,
+    transition: Arc<transition::TransitionPipelines>,
+    camera_layout: wgpu::BindGroupLayout,
+    quad_pipelines: Vec<wgpu::RenderPipeline>,
+    filtered_pipelines: Vec<wgpu::RenderPipeline>,
+    rgba_add_pipeline: wgpu::RenderPipeline,
+    rgba_subtract_pipeline: wgpu::RenderPipeline,
+    stored_pipeline: wgpu::RenderPipeline,
+    mesh_pipeline: wgpu::RenderPipeline,
+    ray_composite_pipeline: wgpu::RenderPipeline,
+    coverage_layout: wgpu::BindGroupLayout,
+    filter_layout: wgpu::BindGroupLayout,
+    texture_layout: wgpu::BindGroupLayout,
+    coverage_white: wgpu::BindGroup,
+    _coverage_white_texture: wgpu::Texture,
+}
 pub struct Renderer {
+    draw_pipelines: Arc<DrawPipelines>,
     /// Consecutive-frame capture (movies): temporal history carries over from
     /// the previous capture, so only the first capture accumulates warm-up passes.
     movie_capture: bool,
     movie_warmed: bool,
-    coverage_layout:wgpu::BindGroupLayout,
     coverage_planes:BTreeMap<u32,coverage::Plane>,
-    coverage_white:wgpu::BindGroup,
-    _coverage_white_texture:wgpu::Texture,
     blend_origin: [f32;2],
     presentation_scale: crysirror_core::service::PresentationScale,
     histories: Arc<frame_history::Provider>,
@@ -334,20 +354,11 @@ pub struct Renderer {
     /// Content hashes of plain project images pinned by their first snapshot.
     snapshot_plain_images: std::collections::HashMap<(u32, String), blake3::Hash>,
     snapshot_rasterizations: u64,
-    quad_pipelines: Vec<wgpu::RenderPipeline>,
-    filtered_pipelines: Vec<wgpu::RenderPipeline>,
-    rgba_add_pipeline: wgpu::RenderPipeline,
-    rgba_subtract_pipeline: wgpu::RenderPipeline,
-    stored_pipeline: wgpu::RenderPipeline,
-    filter_layout: wgpu::BindGroupLayout,
     filter_buffer: Option<wgpu::Buffer>,
     mask_viewport:[f32;4],
     /// (mask key, curve key) → bind group over this frame's filter buffer.
     filter_binds: std::collections::HashMap<(String, String), wgpu::BindGroup>,
     engine_frame: Vec<Primitive>,
-    ray_composite_pipeline: wgpu::RenderPipeline,
-    mesh_pipeline: wgpu::RenderPipeline,
-    texture_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     textures: BTreeMap<String, Texture>,
     /// Explicit capture-only generations are bounded even in a headless host
@@ -387,7 +398,10 @@ impl Renderer {
         self.movie_capture = enabled;
         self.movie_warmed = false;
     }
-    pub fn new(gpu: Arc<Gpu>, format: wgpu::TextureFormat) -> Self {
+}
+
+impl DrawPipelines {
+    fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
         let d = &gpu.device;
         let texture_layout = d.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("image layout"),
@@ -724,6 +738,32 @@ impl Renderer {
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
         });
+        let puppet = Arc::new(puppet::PuppetPipelines::new(
+            d,
+            &texture_layout,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            puppet::premultiplied_format(&gpu.adapter),
+        ));
+        Self {
+            composite: composite::CompositePipeline::new(d, format),
+            puppet,
+            transition: Arc::new(transition::TransitionPipelines::new(d, &gpu.queue, format)),
+            camera_layout, texture_layout, filter_layout, coverage_layout,
+            quad_pipelines, filtered_pipelines, rgba_add_pipeline, rgba_subtract_pipeline,
+            mesh_pipeline, ray_composite_pipeline, stored_pipeline, coverage_white,
+            _coverage_white_texture: coverage_white_texture,
+        }
+    }
+}
+
+impl Renderer {
+    pub fn new(gpu: Arc<Gpu>, format: wgpu::TextureFormat) -> Self {
+        let draw_pipelines = Arc::new(DrawPipelines::new(&gpu, format));
+        Self::with_draw_pipelines(gpu, format, draw_pipelines)
+    }
+
+    fn with_draw_pipelines(gpu: Arc<Gpu>, format: wgpu::TextureFormat, draw_pipelines: Arc<DrawPipelines>) -> Self {
+        let d = &gpu.device;
         let camera_buffer = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera"),
             size: 64,
@@ -732,7 +772,7 @@ impl Renderer {
         });
         let camera_bind = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera"),
-            layout: &camera_layout,
+            layout: &draw_pipelines.camera_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera_buffer.as_entire_binding(),
@@ -744,8 +784,8 @@ impl Renderer {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let puppets =
-            puppet::PuppetRenderer::new(d, &texture_layout, wgpu::TextureFormat::Rgba8UnormSrgb, puppet::premultiplied_format(&gpu.adapter));
+        let puppets = puppet::PuppetRenderer::new(draw_pipelines.puppet.clone());
+        let transitions = transition::Transitions::new(draw_pipelines.transition.clone());
         Self {
             movie_capture: false,
             movie_warmed: false,
@@ -760,20 +800,12 @@ impl Renderer {
             compositor: None,
             snapshot_plain_images: std::collections::HashMap::new(),
             snapshot_rasterizations: 0,
-            quad_pipelines,
-            filtered_pipelines,
-            rgba_add_pipeline,
-            rgba_subtract_pipeline,
+            draw_pipelines,
             mask_viewport:[1.,1.,0.,0.],
-            stored_pipeline,
-            coverage_layout,coverage_planes:BTreeMap::new(),coverage_white,_coverage_white_texture:coverage_white_texture,
-            filter_layout,
+            coverage_planes: BTreeMap::new(),
             filter_buffer: None,
             filter_binds: std::collections::HashMap::new(),
             engine_frame: Vec::new(),
-            ray_composite_pipeline,
-            mesh_pipeline,
-            texture_layout,
             sampler,
             textures: BTreeMap::new(),
             snapshot_readbacks: Default::default(),
@@ -796,7 +828,7 @@ impl Renderer {
             ray_lite: None,
             hardware_rt: None,
             pbr: None,
-            transitions: transition::Transitions::new(&gpu.device, &gpu.queue, format),
+            transitions,
             transition: None,
             gpu,
         }
@@ -1064,7 +1096,7 @@ impl Renderer {
         let view = texture.create_view(&wgpu::TextureViewDescriptor { format: Some(format), ..Default::default() });
         let bind = self.gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(BACKDROP_KEY),
-            layout: &self.texture_layout,
+            layout: &self.draw_pipelines.texture_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
@@ -1125,7 +1157,7 @@ impl Renderer {
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&key),
-                layout: &self.texture_layout,
+                layout: &self.draw_pipelines.texture_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -1183,7 +1215,7 @@ impl Renderer {
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(&key),
-                layout: &self.texture_layout,
+                layout: &self.draw_pipelines.texture_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -1601,7 +1633,7 @@ impl Renderer {
                                         .device
                                         .create_bind_group(&wgpu::BindGroupDescriptor {
                                             label: Some("frame history binding"),
-                                            layout: &self.texture_layout,
+                                            layout: &self.draw_pipelines.texture_layout,
                                             entries: &[
                                                 wgpu::BindGroupEntry {
                                                     binding: 0,
@@ -1639,7 +1671,7 @@ impl Renderer {
                         self.puppets.render(
                             &self.gpu.device,
                             &self.gpu.queue,
-                            &self.texture_layout,
+                            &self.draw_pipelines.texture_layout,
                             &self.sampler,
                             &key,
                             size,
@@ -1779,7 +1811,7 @@ impl Renderer {
                     .device
                     .create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("layer filter"),
-                        layout: &self.filter_layout,
+                        layout: &self.draw_pipelines.filter_layout,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -2016,7 +2048,7 @@ impl Renderer {
                 .filter(|_| !self.flushing_target_writes && self.path == RenderingPath::Raster && !pbr_active)
             {
                 pass.set_viewport(vp.x, vp.y, vp.width, vp.height, 0., 1.);
-                pass.set_pipeline(&self.mesh_pipeline);
+                pass.set_pipeline(&self.draw_pipelines.mesh_pipeline);
                 pass.set_bind_group(0, &self.camera_bind, &[]);
                 pass.set_vertex_buffer(0, buffer.slice(..));
                 pass.draw(0..self.mesh_count, 0..1);
@@ -2038,7 +2070,7 @@ impl Renderer {
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("raytrace composite"),
-                    layout: &self.texture_layout,
+                    layout: &self.draw_pipelines.texture_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -2085,7 +2117,7 @@ impl Renderer {
                 occlusion_query_set: None,
             });
             pass.set_viewport(vp.x, vp.y, vp.width, vp.height, 0., 1.);
-            pass.set_pipeline(&self.ray_composite_pipeline);
+            pass.set_pipeline(&self.draw_pipelines.ray_composite_pipeline);
             pass.set_bind_group(0, &bind, &[]);
             pass.set_vertex_buffer(0, buffer.slice(..));
             pass.draw(0..6, 0..1);
@@ -2190,23 +2222,23 @@ impl Renderer {
                     Blend::StoredByte { .. } => 0,
                 };
                 if draw.rgba_contribution {
-                    pass.set_pipeline(if draw.blend==Blend::Subtract {&self.rgba_subtract_pipeline}else{&self.rgba_add_pipeline});
+                    pass.set_pipeline(if draw.blend==Blend::Subtract {&self.draw_pipelines.rgba_subtract_pipeline}else{&self.draw_pipelines.rgba_add_pipeline});
                     pass.set_bind_group(1,self.filter_binds.get(draw.filter.as_ref().context("component matte filter record")?).context("component matte filter binding")?,&[]);
                 } else if matches!(draw.blend,Blend::StoredByte{..}) {
-                    pass.set_pipeline(&self.stored_pipeline);
+                    pass.set_pipeline(&self.draw_pipelines.stored_pipeline);
                     pass.set_bind_group(1,self.filter_binds.get(draw.filter.as_ref()
                         .context("stored blend filter record missing")?)
                         .context("stored blend destination binding missing")?,&[]);
                 } else { match &draw.filter {
                     Some(k) => {
-                        pass.set_pipeline(&self.filtered_pipelines[blend_index]);
+                        pass.set_pipeline(&self.draw_pipelines.filtered_pipelines[blend_index]);
                         pass.set_bind_group(
                             1,
                             self.filter_binds.get(k).context("filter bind group")?,
                             &[],
                         );
                     }
-                    None => pass.set_pipeline(&self.quad_pipelines[blend_index]),
+                    None => pass.set_pipeline(&self.draw_pipelines.quad_pipelines[blend_index]),
                 } }
                 pass.set_bind_group(
                     0,
@@ -2218,7 +2250,7 @@ impl Renderer {
                     &[],
                 );
                 if draw.filter.is_some() || matches!(draw.blend,Blend::StoredByte{..}) {
-                    let coverage=if !writing&&active.contains(&draw.owner){&self.coverage_planes[&draw.owner].bind}else{&self.coverage_white};
+                    let coverage=if !writing&&active.contains(&draw.owner){&self.coverage_planes[&draw.owner].bind}else{&self.draw_pipelines.coverage_white};
                     pass.set_bind_group(2,coverage,&[]);
                 }
                 pass.draw(draw.range.clone(), 0..1);

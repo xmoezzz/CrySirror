@@ -78,13 +78,15 @@ impl PublishedImages {
             .len()
             .checked_add(state.reserved_count)
             .is_none_or(|n| n >= 4096)
-            || state
-                .bytes
-                .checked_add(state.reserved_bytes)
-                .and_then(|n| n.checked_add(pixels.len()))
-                .is_none_or(|n| n > MAX_PUBLISHED_BYTES)
         {
-            return Err(Error::Limit("uploaded resource leases"));
+            return Err(Error::Limit("uploaded resource leases (count)"));
+        }
+        if state.bytes
+            .checked_add(state.reserved_bytes)
+            .and_then(|n| n.checked_add(pixels.len()))
+            .is_none_or(|n| n > MAX_PUBLISHED_BYTES)
+        {
+            return Err(Error::Limit("uploaded resource leases (bytes)"));
         }
         state.bytes += pixels.len();
         state.entries.insert(

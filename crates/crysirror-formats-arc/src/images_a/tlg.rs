@@ -31,7 +31,18 @@ impl Lz {
                     if len == 18 {
                         len += c.u8()? as usize;
                     }
-                    for _ in 0..len.min(n - o.len()) {
+                    let count = len.min(n - o.len());
+                    // Non-overlapping runs within the dictionary can be copied
+                    // together. Wrapped or self-repeating runs read as written.
+                    if at + count <= 4096 && self.pos + count <= 4096
+                        && (at + count <= self.pos || self.pos + count <= at)
+                    {
+                        o.extend_from_slice(&self.dict[at..at + count]);
+                        self.dict.copy_within(at..at + count, self.pos);
+                        self.pos = (self.pos + count) & 4095;
+                        continue;
+                    }
+                    for _ in 0..count {
                         let v = self.dict[at];
                         at = (at + 1) & 4095;
                         o.push(v);
@@ -84,45 +95,46 @@ fn v5(c: &mut C<'_>) -> Result<ImageSurface> {
     let mut lz = Lz::new();
     for y in (0..h).step_by(bh) {
         let rows = bh.min(h - y);
-        let mut planes = Vec::new();
-        for _ in 0..channels {
+        let mut planes: [std::borrow::Cow<'_, [u8]>; 4] = Default::default();
+        for plane in &mut planes[..channels] {
             let flag = c.u8()?;
             let n = c.u32()? as usize;
             let packed = c.take(n)?;
-            let p = if flag == 0 {
-                lz.decode(packed, w * rows)?
+            *plane = if flag == 0 {
+                std::borrow::Cow::Owned(lz.decode(packed, w * rows)?)
             } else {
-                packed.to_vec()
+                std::borrow::Cow::Borrowed(packed)
             };
-            ensure!(p.len() >= w * rows, "TLG5 short plane");
-            planes.push(p);
+            ensure!(plane.len() >= w * rows, "TLG5 short plane");
         }
         for yy in 0..rows {
-            let mut prev = [0u8; 4];
-            for x in 0..w {
-                let at = yy * w + x;
-                let g = planes[1][at];
-                let res = [
-                    planes[0][at].wrapping_add(g),
-                    g,
-                    planes[2][at].wrapping_add(g),
-                    if channels == 4 { planes[3][at] } else { 0 },
-                ];
-                for k in 0..channels {
-                    prev[k] = prev[k].wrapping_add(res[k]);
+            let row = yy * w..(yy + 1) * w;
+            let (upper, rest) = out.rgba.split_at_mut((y + yy) * w * 4);
+            let dest = &mut rest[..w * 4];
+            let (mut red, mut green, mut blue) = (0u8, 0u8, 0u8);
+            for (((pixel, &dr), &dg), &db) in dest.chunks_exact_mut(4)
+                .zip(&planes[2][row.clone()]).zip(&planes[1][row.clone()]).zip(&planes[0][row.clone()])
+            {
+                red = red.wrapping_add(dr).wrapping_add(dg);
+                green = green.wrapping_add(dg);
+                blue = blue.wrapping_add(db).wrapping_add(dg);
+                pixel.copy_from_slice(&[red, green, blue, 0]);
+            }
+            if channels == 4 {
+                let mut alpha = 0u8;
+                for (pixel, &delta) in dest.chunks_exact_mut(4).zip(&planes[3][row]) {
+                    alpha = alpha.wrapping_add(delta);
+                    pixel[3] = alpha;
                 }
-                let i = ((y + yy) * w + x) * 4;
-                for (k, ch) in [2, 1, 0, 3].into_iter().enumerate() {
-                    out.rgba[i + ch] = if k == 3 && channels == 3 {
-                        255
-                    } else {
-                        prev[k].wrapping_add(if y + yy == 0 {
-                            0
-                        } else {
-                            out.rgba[i - w * 4 + ch]
-                        })
-                    };
+            }
+            // Adding the previous scanline is an independent bytewise pass.
+            if !upper.is_empty() {
+                for (byte, above) in dest.iter_mut().zip(&upper[upper.len() - w * 4..]) {
+                    *byte = byte.wrapping_add(*above);
                 }
+            }
+            if channels == 3 && upper.is_empty() {
+                for pixel in dest.chunks_exact_mut(4) { pixel[3] = 255; }
             }
         }
     }
@@ -134,6 +146,24 @@ const TABLE: [[usize; 9]; 4] = [
     [2, 5, 12, 21, 39, 86, 155, 320, 384],
     [2, 3, 9, 18, 33, 61, 129, 258, 511],
 ];
+
+#[cfg(test)]
+mod lz_tests {
+    use super::Lz;
+
+    #[test]
+    fn copied_planes_remain_available_to_overlapping_and_wrapped_runs() {
+        let mut decoder = Lz::new();
+        decoder.pos = 4092;
+        assert_eq!(decoder.decode(&[0, 1, 2, 3, 4], 4).unwrap(), [1, 2, 3, 4]);
+        // Copy the four literals to the head, then repeat across our own writes.
+        assert_eq!(decoder.decode(&[1, 0xfc, 0x1f], 4).unwrap(), [1, 2, 3, 4]);
+        assert_eq!(decoder.decode(&[1, 0, 0x50], 8).unwrap(), [1, 2, 3, 4, 1, 2, 3, 4]);
+        // A subsequent plane can refer across the dictionary boundary.
+        assert_eq!(decoder.decode(&[1, 0xfe, 0x1f], 4).unwrap(), [3, 4, 1, 2]);
+    }
+}
+
 fn unary(b: &mut Bits<'_>) -> Result<usize> {
     let mut z = 0;
     while b.get(1)? == 0 {

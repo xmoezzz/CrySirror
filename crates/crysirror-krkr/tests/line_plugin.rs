@@ -93,7 +93,25 @@ fn var_media_references_live_octets_and_decodes_images_with_shared_engine_servic
         Scripts.execStorage('var://./files/script');
         if(global.mediaScript!=7)throw new Exception('media script');
         var window=new Window();var root=new Layer(window,null);var picture=new Layer(window,root);
-        picture.loadImages('var://./files/image');
+        Plugins.link('scriptsex.dll');
+        var count=0;
+        var stop=Scripts.foreach([0,1,2,3,4,5,6,7,8,9,10,11,12],function(i,v,extra) {
+            if(i!=count || v!=i || extra!=37) throw new Exception('foreach continuation');
+            picture.loadImages('var://./files/image');
+            ++count;
+            if(count==12) return 51;
+        },37);
+        if(count!=12 || stop!=51) throw new Exception('lost foreach callback or result');
+        Plugins.link('csvparser.dll');
+        var csvTarget=%[pic:picture,rows:0,doLine:function(fields,n) {
+            if(n!=this.rows+1) throw new Exception('CSV callback advanced before the previous row finished');
+            this.pic.loadImages('var://./files/image');
+            if(int(fields[0])!=n) throw new Exception('CSV row changed during wait');
+            ++this.rows;
+        }];
+        var csv=new CSVParser(csvTarget);
+        csv.parse("1\r\n2\r\n3");
+        if(csvTarget.rows!=3) throw new Exception('lost CSV row callback');
         if(picture.imageWidth!=2||picture.imageHeight!=1)throw new Exception('shared image decode');
         picture.visible=true;window.visible=true;
         Debug.message('var-media-complete');
@@ -116,6 +134,8 @@ fn var_media_references_live_octets_and_decodes_images_with_shared_engine_servic
         );
         std::thread::yield_now();
     }
+    let publications = &runtime.inspect()["published_images"];
+    assert_eq!(publications["resources"], 1, "replaced native images still held: {publications}");
     assert!(
         serde_json::to_string(&runtime.inspect())
             .unwrap()
@@ -889,7 +909,7 @@ fn native_application_focus_defaults_are_null_and_edges_use_shared_host_focus() 
             function onActivate(){global.windowEvents++;Debug.message('window-focus',global.windowEvents);}
             function onDeactivate(){global.windowEvents++;Debug.message('window-focus',global.windowEvents);}
         }
-        var window=new W();Debug.message('focus-ready');
+        var window=new W();window.visible=true;Debug.message('focus-ready');
     "#,
     );
     runtime.host.window_focused = Some(true);
@@ -924,6 +944,8 @@ fn monitor_info_preserves_original_hresult_truthiness_and_null_handle_policy() {
         var bad=false;try{System.getMonitorInfo(true,42);}catch(e){bad=true;}if(!bad)throw new Exception('primitive monitor argument');
         bad=false;try{System.getMonitorInfo(true,%[HWND:42]);}catch(e){bad=true;}if(!bad)throw new Exception('foreign window capability');
         var window=new Window();if(System.getMonitorInfo(false,window).primary!=1)throw new Exception('owned window display');
+        if(window.HWND !== 0)throw new Exception('unexpected native plug-in handle');
+        bad=false;try{window.HWND=42;}catch(e){bad=true;}if(!bad)throw new Exception('writable HWND');
         Debug.message('monitor-reference-quirk-complete');
     "#,
     );
@@ -959,8 +981,9 @@ fn native_addfont_registers_engine_resource_before_continuation_and_uses_shared_
         if log.contains("dynamic-native-font-complete:") {
             let lib=runtime.host.font_library(ClientId(1)).unwrap();
             let info=lib.resolve("runtime.ttf").unwrap().unwrap();
-            let metric=runtime.host.text_measurement(ClientId(1)).unwrap().measure_simple(&info.alias,20.,"ABC").unwrap();
-            assert!(log.contains(&format!("dynamic-native-font-complete:{}",metric.advance.ceil() as i64)),"{log}");
+            let scale=lib.line_height_for_em(&info.alias, 20.).unwrap();
+            let metric=runtime.host.text_measurement(ClientId(1)).unwrap().measure_simple(&info.alias,scale,"ABC").unwrap();
+            assert!(log.contains(&format!("dynamic-native-font-complete:{}",metric.advance.round() as i64)),"{log}");
             assert_eq!(runtime.assets.text.for_client(ClientId(1)).font_digest(&info.alias).unwrap(),info.digest);
             return;
         }
@@ -1314,6 +1337,25 @@ fn layer_movie_real_eof_sends_one_stop_after_the_last_picture() {
 }
 
 #[test]
+fn accepted_menu_hit_does_not_read_back_the_portrait_behind_it() {
+    let (_dir, mut runtime) = fixture(r#"
+        var w = new Window(); w.visible = true;
+        var root = new Layer(w, null);
+        var part = new Layer(w,root); part.setSize(8,8);
+        part.fillRect(0,0,4,8,0xff808080);
+        var portrait = new Layer(w,root); portrait.setSize(8,8); portrait.visible=true;
+        portrait.piledCopy(0,0,part,0,0,8,8); portrait.hitThreshold=128;
+        var menu = new Layer(w,root); menu.setSize(8,8); menu.visible=true;
+        menu.hitThreshold=0;
+        menu.onMouseEnter=function(){Debug.message("menu-entered");};
+    "#);
+    // This fixture has no Canvas readback presenter. Only the menu is needed
+    // to decide the hit, even if the underlying bitmap needs preparation.
+    runtime.tick(16, InputFrame { pointer_x: 2, pointer_y: 2, ..Default::default() }).unwrap();
+    assert!(runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("menu-entered"));
+}
+
+#[test]
 fn composite_alpha_hits_wait_for_shared_workers_and_refresh_after_copy() {
     use crysirror_core::{service::buttons, state::ClientId};
     let (dir, mut runtime)=fixture(r#"
@@ -1349,7 +1391,14 @@ fn composite_alpha_hits_wait_for_shared_workers_and_refresh_after_copy() {
         runtime.tick(1,InputFrame{buttons_down:down,buttons_pressed:0,pointer_x:x,pointer_y:0}).unwrap();
         // Input remains queued while coverage is pending; stable samples may
         // coalesce but their press/release edges must be consumed exactly once.
-        for _ in 0..200 {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let state = runtime.inspect();
+            let native = &state["sessions"][0]["native"];
+            if native["queued_input"] == 0 && native["input_delivery_pending"] == false {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "input delivery did not finish");
             runtime.tick(1,InputFrame{buttons_down:down,buttons_pressed:0,pointer_x:x,pointer_y:0}).unwrap();
             std::thread::yield_now();
         }
@@ -1445,6 +1494,47 @@ fn find_file(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
         }
     }
     None
+}
+
+#[test]
+fn bookmark_thumbnail_round_trip_preserves_picture_and_slot_data() {
+    let (dir, mut runtime) = fixture(r#"
+        var w = new Window(), root = new Layer(w, null);
+        var layer = new Layer(w, root);
+        layer.setImageSize(16, 8);
+        layer.fillRect(0, 0, 16, 8, 0xffff0000);
+        layer.fillRect(8, 0, 8, 8, 0xff00ff00);
+        if (Scripts.makeDataPackThumb(layer, "kdt", 90, 3) !== void) throw "kdt";
+        var body = %["slot" => 17];
+        for (var i = 0; i < 2; i++) {
+            var ext = i == 0 ? "jpg" : "png";
+            var name = "savedata/bookmark." + ext;
+            var thumb = Scripts.makeDataPackThumb(layer, ext, 92, 3);
+            Scripts.saveDataPack(name, body, void, thumb);
+            if (Scripts.loadDataPack(name).slot != 17) throw "slot data";
+            var preview = new Layer(w, root);
+            preview.loadImages(name);
+            if (preview.imageWidth != 16 || preview.imageHeight != 8) throw "preview size";
+        }
+        Debug.message("bookmark-preview-complete");
+    "#);
+    runtime.set_canvas_image_presenter(true);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        runtime.tick(1, InputFrame::default()).unwrap();
+        let native = &runtime.inspect()["sessions"][0]["native"];
+        if native["log_tail"].to_string().contains("bookmark-preview-complete") { break; }
+        assert!(std::time::Instant::now() < deadline, "{native}");
+        std::thread::yield_now();
+    }
+    for ext in ["png", "jpg"] {
+        let path = find_file(&dir.path().join("state"), &format!("bookmark.{ext}")).unwrap();
+        let image = image::load_from_memory(&std::fs::read(path).unwrap()).unwrap().to_rgb8();
+        assert_eq!(image.dimensions(), (16, 8));
+        let red = image.get_pixel(2, 4);
+        let green = image.get_pixel(13, 4);
+        assert!(red[0] > 220 && red[1] < 30 && green[0] < 30 && green[1] > 220);
+    }
 }
 
 #[test]

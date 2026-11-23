@@ -114,6 +114,35 @@ pub struct RunOptions {
 fn window_decorations(requested: bool, fullscreen: bool, allow_borderless: bool) -> bool {
     requested || (!fullscreen && !allow_borderless)
 }
+#[cfg(windows)]
+#[allow(unsafe_code)] // Win32 takes a virtual key by value and returns a bit mask; no handle or pointer is passed.
+fn physical_ctrl_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
+    // The high bit is the current physical level. The low bit is process-shared
+    // press history and must not create fresh input edges.
+    (unsafe { GetAsyncKeyState(i32::from(VK_CONTROL)) }) < 0
+}
+
+#[cfg(any(windows, test))]
+fn reconcile_ctrl_release(input: &mut InputFrame, sides: &mut u8, physically_down: bool) {
+    if !physically_down {
+        *sides = 0;
+        input.buttons_down &= !buttons::CTRL;
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn a_long_ctrl_hold_ends_even_without_a_window_key_up() {
+    let mut input = InputFrame { buttons_down: buttons::CTRL | buttons::SHIFT, ..Default::default() };
+    let mut sides = 3;
+    for _ in 0..10_000 { reconcile_ctrl_release(&mut input, &mut sides, true); }
+    assert_eq!(sides, 3);
+    reconcile_ctrl_release(&mut input, &mut sides, false);
+    assert_eq!(input.buttons_down, buttons::SHIFT);
+    assert_eq!(sides, 0);
+    assert_eq!(input.buttons_pressed, 0);
+}
 struct WindowState {
     pending_snapshot: Option<crysirror_runtime::frame::PendingFrame>,
     render_snapshot: Option<crysirror_runtime::frame::RenderSnapshot>,
@@ -135,6 +164,7 @@ pub struct App {
     #[cfg(feature = "gamepad")]
     gamepad: Option<crate::gamepad::Backend>,
     input: InputFrame,
+    ctrl_sides: u8,
     focused: bool,
     ime_composing: bool,
     text_input: crate::text_input::Presenter,
@@ -345,6 +375,7 @@ impl App {
             #[cfg(feature = "gamepad")]
             gamepad,
             input: InputFrame::default(),
+            ctrl_sides: 0,
             focused: true,
             ime_composing: false,
             text_input: Default::default(),
@@ -639,6 +670,10 @@ impl App {
                     return Ok(());
                 }
             }
+            #[cfg(windows)]
+            if self.focused && self.input.buttons_down & buttons::CTRL != 0 {
+                reconcile_ctrl_release(&mut self.input, &mut self.ctrl_sides, physical_ctrl_down());
+            }
             #[allow(unused_mut)]
             let mut frame_input = self.input;
             #[cfg(feature = "gamepad")]
@@ -771,18 +806,18 @@ impl App {
             w.snapshot_store = rt.assets.store_id();
             w.snapshot_restored = rt.restored;
         }
-        // Always submit the first picture: startup time must not depend on a
-        // bitmap callback finishing before the window has ever presented.
-        if w.pending_snapshot.is_none()
-            && (w.render_snapshot.is_none() || !rt.presentation_pending())
-        {
-            w.pending_snapshot = Some(rt.schedule_render_snapshot()?);
-        }
         if let Some(pending) = &mut w.pending_snapshot {
             if let Some(snapshot) = pending.poll(rt)? {
                 w.render_snapshot = Some(snapshot);
                 w.pending_snapshot = None;
             }
+        }
+        // Start the successor as soon as the previous extraction is consumed.
+        // Workers can extract it while the completed picture is presented.
+        if w.pending_snapshot.is_none()
+            && (w.render_snapshot.is_none() || !rt.presentation_pending())
+        {
+            w.pending_snapshot = Some(rt.schedule_render_snapshot()?);
         }
         let Some(snapshot) = &w.render_snapshot else {
             return Ok(());
@@ -913,6 +948,7 @@ impl App {
                 self.core.rt().host.window_focused = Some(focused);
                 if let Some(w)=self.window.as_ref(){self.core.rt().host.window_minimized=w.window.is_minimized();}
                 self.input = InputFrame::default();
+                self.ctrl_sides = 0;
                 #[cfg(feature = "gamepad")]
                 if let Some(backend) = &mut self.gamepad {
                     backend.reset_navigation();
@@ -922,6 +958,15 @@ impl App {
                     actions.reset_devices();
                     actions.cancel_rebind();
                 }
+            }
+            WindowEvent::ModifiersChanged(modifiers) if self.focused => {
+                // A native menu can consume the physical key-up. Reconcile
+                // the logical Ctrl level with the window's modifier state.
+                let down = modifiers.state().control_key();
+                #[cfg(windows)]
+                let down = down && physical_ctrl_down();
+                if !down { self.ctrl_sides = 0; }
+                self.button(buttons::CTRL, down);
             }
             WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
                 self.ime_composing = !text.is_empty();
@@ -945,6 +990,35 @@ impl App {
                     return Ok(());
                 }
                 let pressed = event.state == ElementState::Pressed;
+                if pressed && !self.ime_composing {
+                    let edit_key = match event.physical_key {
+                        PhysicalKey::Code(KeyCode::ArrowLeft) => buttons::LEFT,
+                        PhysicalKey::Code(KeyCode::ArrowRight) => buttons::RIGHT,
+                        PhysicalKey::Code(KeyCode::ArrowUp) => buttons::UP,
+                        PhysicalKey::Code(KeyCode::ArrowDown) => buttons::DOWN,
+                        PhysicalKey::Code(KeyCode::Home) => buttons::HOME,
+                        PhysicalKey::Code(KeyCode::End) => buttons::END,
+                        PhysicalKey::Code(KeyCode::Delete) => buttons::DELETE,
+                        PhysicalKey::Code(KeyCode::Backspace) => buttons::BACKSPACE,
+                        PhysicalKey::Code(KeyCode::KeyA) => buttons::KEY_A,
+                        _ => 0,
+                    };
+                    let modifiers = self.input.buttons_down & (buttons::SHIFT | buttons::CTRL);
+                    if edit_key != 0 && self.core.rt().focused_editor_key(edit_key, modifiers)? {
+                        return Ok(());
+                    }
+                }
+                // KiriKiri owns the close decision. Consume this shortcut so
+                // the same Escape cannot also dismiss the game's new dialog.
+                if event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                    && self.core.rt().project.clients.iter().any(|c| c.adapter == "krkr")
+                    && !self.core.rt().host.engine.ui.focused_text_field()
+                {
+                    if pressed && !event.repeat && !self.ime_composing {
+                        self.core.rt().request_close();
+                    }
+                    return Ok(());
+                }
                 if pressed && !self.ime_composing {
                     if let Some(text) = event.text.as_ref() {
                         Self::committed_text(self.core.rt(), text.as_str())?;
@@ -994,7 +1068,14 @@ impl App {
                         KeyCode::KeyS => Some(1 << 9),
                         KeyCode::KeyD => Some(1 << 10),
                         KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(1 << 11),
-                        KeyCode::ControlLeft | KeyCode::ControlRight => Some(1 << 12),
+                        KeyCode::ControlLeft | KeyCode::ControlRight => {
+                            if !event.repeat {
+                                let side = if code == KeyCode::ControlLeft { 1 } else { 2 };
+                                if pressed { self.ctrl_sides |= side; } else { self.ctrl_sides &= !side; }
+                                self.button(buttons::CTRL, self.ctrl_sides != 0);
+                            }
+                            None
+                        }
                         KeyCode::AltLeft | KeyCode::AltRight => Some(buttons::ALT),
                         KeyCode::KeyE => Some(1 << 13),
                         KeyCode::KeyQ => Some(1 << 14),

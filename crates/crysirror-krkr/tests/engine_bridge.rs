@@ -55,6 +55,51 @@ fn fixture(startup: &str, extra: &[(&str, &str)]) -> (tempfile::TempDir, Runtime
     (t, r)
 }
 
+fn wait_for_startup_log(rt: &mut Runtime, pointer: InputFrame, marker: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        rt.tick(0, pointer).unwrap();
+        let diag = &rt.inspect()["sessions"][0]["native"];
+        if diag["log_tail"].to_string().contains(marker) {
+            return;
+        }
+        assert!(std::time::Instant::now() < deadline, "startup did not reach {marker}: {diag}");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn reparenting_precedes_same_tick_subtree_invalidation() {
+    let (_dir, mut rt) = fixture(r#"
+        var w = new Window(), root = new Layer(w, null);
+        var oldParent = new Layer(w, root), nextParent = new Layer(w, root);
+        var child = new Layer(w, oldParent);
+        child.parent = nextParent;
+        invalidate oldParent;
+        invalidate child;
+    "#, &[]);
+    rt.tick(16, InputFrame::default()).unwrap();
+}
+
+#[test]
+fn d2dm_destination_edges_are_scaled_once_in_canvas_coordinates() {
+    let (_dir, mut rt) = fixture(r#"
+        var w = new Window(); w.visible = true;
+        Plugins.link("DrawDeviceD2Dm.dll"); w.drawDevice = new DrawDeviceD2D();
+        var primary = new Layer(w, null), view = new Layer(w, null);
+        w.setZoom(3, 4); view.setSize(32, 16);
+        view.viewState.setRect(3, 6, 51, 30, 0);
+        view.viewState.order = -1; view.viewState.opacity = 128;
+    "#, &[]);
+    rt.tick(16, InputFrame::default()).unwrap();
+    let main = rt.host.engine.layers.get(ClientId(1), 2).unwrap();
+    let view = rt.host.engine.layers.get(ClientId(1), 4).unwrap();
+    assert_eq!(view.rect, [4.0, 8.0, 32.0, 16.0]);
+    assert_eq!((view.transform.scale_x, view.transform.scale_y), (2.0, 2.0));
+    assert_eq!(view.opacity, 128);
+    assert!(view.visible && view.order < main.order);
+}
+
 const SCENE: &str = r#"
 Debug.message("boot", System.getTickCount());
 Storages.addAutoPath("image/");
@@ -93,7 +138,7 @@ fn tjs_layers_timers_and_clicks_drive_engine_owned_nodes() {
         SCENE,
         &[("system/lib.tjs", "function helper(x) { return x * 21; }")],
     );
-    r.tick(0, InputFrame::default()).unwrap();
+    wait_for_startup_log(&mut r, InputFrame::default(), "ready 42");
     let diag = r.inspect()["sessions"][0]["native"].clone();
     let log = diag["log_tail"].to_string();
     assert!(log.contains("ready 42"), "{diag}");
@@ -141,6 +186,34 @@ fn tjs_layers_timers_and_clicks_drive_engine_owned_nodes() {
         fill.iter()
             .any(|p| matches!(p.paint, Paint::Solid { color } if color == [0, 255, 0, 128]))
     );
+}
+
+#[test]
+fn bad_async_image_remains_a_catchable_script_error() {
+    let (_dir, mut rt) = fixture(r#"
+        var w = new Window(), root = new Layer(w, null), layer = new Layer(w, root);
+        try { layer.loadImages("broken.png"); } catch (e) { Debug.message("caught-bad-image"); }
+    "#, &[("broken.png", "invalid image")]);
+    wait_for_startup_log(&mut rt, InputFrame::default(), "caught-bad-image");
+}
+
+#[test]
+fn wide_button_strip_can_be_resized_and_copied_from_its_last_cell() {
+    let (_dir, mut rt) = fixture(r#"
+        var w = new Window(), root = new Layer(w, null);
+        var strip = new Layer(w, root), button = new Layer(w, root);
+        strip.setImageSize(1664, 100);
+        strip.imageWidth = 9984;
+        strip.fillRect(8320, 0, 1664, 100, 0xff403020);
+        button.setImageSize(1664, 100);
+        button.copyRect(0, 0, strip, 8320, 0, 1664, 100);
+        Debug.message("last-button-cell-copied");
+    "#, &[]);
+    rt.tick(16, InputFrame::default()).unwrap();
+    let state = rt.inspect();
+    assert!(state["sessions"][0]["native"]["log_tail"].to_string().contains("last-button-cell-copied"));
+    let strip = rt.host.engine.canvases.surface(ClientId(1), 2).unwrap();
+    assert_eq!([strip.width, strip.height], [9984, 100]);
 }
 
 #[test]
@@ -307,13 +380,14 @@ fn font_width_and_canvas_text_share_engine_font_resources() {
     let bytes = std::fs::read(std::env::var_os("CRYSIRROR_TEST_FONT").unwrap()).unwrap();
     r.host.text.add_font("default", bytes.clone()).unwrap();
     r.assets.text.add_font("default", bytes).unwrap();
+    let raster = r.assets.text.outline_em_metrics("default", 24.).unwrap();
     let expected = r
         .assets
         .text
-        .measure_simple("default", 24., "AVATAR")
+        .measure_simple("default", raster.line_height, "AVATAR")
         .unwrap()
         .advance
-        .ceil() as i64;
+        .round() as i64;
     r.tick(0, InputFrame::default()).unwrap();
     let log = r.inspect()["sessions"][0]["native"]["log_tail"].to_string();
     assert!(log.contains(&format!("width {expected} 0")), "{log}");
@@ -496,12 +570,36 @@ fn authored_wave() -> Vec<u8> {
     b
 }
 #[test]
+fn discarded_scripts_eval_runs_the_whole_voice_replay_command() {
+    let (dir, mut runtime) = fixture(r#"
+        var steps = []; var w = new Window(); var voice = new WaveSoundBuffer(w);
+        function mark(n) { steps.add(n); }
+        Scripts.eval("mark(1);voice.open('line.wav');voice.play() if true;mark(2);");
+        Scripts.evalStorage("actions.tjs");
+        Scripts.eval("mark(5) // no final semicolon");
+        if (steps.join(",") != "1,2,3,4,5") throw new Exception("truncated replay: " + steps.join(","));
+        if (Scripts.eval("20+22") != 42) throw new Exception("expression result missing");
+        Debug.message("replay-complete");
+    "#, &[]);
+    std::fs::write(dir.path().join("assets/game/line.wav"), authored_wave()).unwrap();
+    std::fs::write(dir.path().join("assets/game/actions.tjs"), "mark(3);mark(4);").unwrap();
+    for _ in 0..240 {
+        runtime.tick(16, InputFrame::default()).unwrap();
+        if runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string().contains("replay-complete") { return; }
+    }
+    panic!("voice replay did not complete");
+}
+
+#[test]
 fn native_sound_parks_the_original_caller_until_shared_resources_and_voice_are_ready() {
     let (d, mut r) = fixture(
         r#"
  var w=new Window();
  class Sound extends WaveSoundBuffer {function Sound(w){super.WaveSoundBuffer(w);}function onStatusChanged(){Debug.message('status',status);}}
+ if(!System.getKeyState(17))throw new Exception('initial Ctrl press missing');
  var sound=new Sound(w);sound.open('tone.wav');
+ if(System.getKeyState(17))throw new Exception('Ctrl release lost while sound was opening');
+ if(!System.getKeyState(17,false) || System.getKeyState(17,false))throw new Exception('Ctrl press history');
  if(sound.totalSamples!=64||sound.frequency!=8000||sound.status!='stop')throw new Exception('open metadata');
  Debug.message('opened');sound.looping=true;sound.volume=50000;sound.play();
  if(sound.status!='play')throw new Exception('voice published early');
@@ -515,7 +613,7 @@ fn native_sound_parks_the_original_caller_until_shared_resources_and_voice_are_r
     let permits = (0..pool.stats().capacity)
         .map(|_| pool.reserve().unwrap())
         .collect::<Vec<_>>();
-    r.tick(0, InputFrame::default()).unwrap();
+    r.tick(0, InputFrame { buttons_down: buttons::CTRL, ..Default::default() }).unwrap();
     let before = r.inspect();
     assert_eq!(before["sessions"][0]["native"]["suspended"], true);
     assert!(
@@ -722,10 +820,11 @@ fn transparent_assets_stay_lazy_in_hidden_layers_and_prepare_before_real_alpha_h
     "#,&[]);
     image::RgbaImage::from_raw(2,1,vec![255,0,0,255,0,0,0,0]).unwrap()
         .save(d.path().join("assets/game/image/mask.png")).unwrap();
-    r.tick(0,InputFrame{pointer_x:20,pointer_y:20,..Default::default()}).unwrap();
+    wait_for_startup_log(&mut r, InputFrame{pointer_x:20,pointer_y:20,..Default::default()}, "hidden-cache-ready");
     let inspect=r.inspect();
     let native=&inspect["sessions"][0]["native"];
-    assert!(native["log_tail"].to_string().contains("hidden-cache-ready"),"hidden assets must not park their native loader to retain duplicate RGBA");
+    let waits = native["log_tail"].to_string().matches("TJS VM resource pending").count();
+    assert!(waits <= 1, "the 32 hidden copies should share the first metadata preparation");
     assert_eq!(native["suspended"],false);
     r.tick(1,InputFrame{pointer_x:0,pointer_y:0,buttons_pressed:buttons::MOUSE_LEFT,..Default::default()}).unwrap();
     let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);

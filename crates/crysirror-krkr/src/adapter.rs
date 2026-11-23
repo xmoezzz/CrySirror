@@ -3,9 +3,9 @@
 //! `krkr` VmAdapter: runs original TJS2 scripts through `crysirror-tjs2`
 //! and translates KiriKiri native objects onto engine Layer/Canvas services.
 use crate::{
-    host::{Batch, KrkrHost},
+    host::KrkrHost,
     natives::{self, Rt, has_member},
-    storage::Storage,
+    storage::{LauncherOverlay, Storage},
 };
 use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
@@ -41,6 +41,9 @@ pub struct Config {
     /// Companion executable basename reported by `System.exeName`.
     #[serde(default)]
     pub executable: Option<String>,
+    /// Ordered, session-local overrides from a selected KiriKiri launcher.
+    #[serde(default)]
+    pub launcher_overlay: Option<LauncherOverlay>,
     /// Engine-published protected-bootstrap profile (`hxv4_bootstrap_profile`
     /// for `Plugins.linkZ`, or `cxdec_bootstrap_profile` for the startup
     /// `Storages.setupArchiveData` facade) the natives must match.
@@ -97,6 +100,9 @@ impl Config {
                 !exe.is_empty() && exe.len() <= 255 && !exe.contains(['/', '\\', ':', '\0']) && exe != "." && exe != "..",
                 "KiriKiri executable must be a basename"
             );
+        }
+        if let Some(overlay) = &self.launcher_overlay {
+            overlay.validate()?;
         }
         if let Some(locale) = &self.locale {
             ensure!(
@@ -172,7 +178,7 @@ impl KrkrVm {
                 extra.extend(paints.iter().skip(pass.paint).map(|id| Variant::Object(ObjectHandle(*id))));
             }
         }
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let freed = rt.collect_garbage(&extra);
         let live = rt.live_object_count();
         self.gc_threshold = live + (live / 2).max(50_000);
@@ -207,17 +213,14 @@ impl KrkrVm {
         let files = h.storage(self.client).map_err(err)?;
         let mut storage = Storage::new(files, &self.config.root)?;
         storage.media = Some(h.mounted_media(self.client).map_err(err)?);
-        ensure!(
-            storage.resolve(&self.config.startup).is_some(),
-            "KiriKiri startup script `{}` absent",
-            self.config.startup
-        );
         let mut host = KrkrHost::new(self.config.canvas, self.config.font_alias.clone());
         host.client = self.client.0;
         for codec in ["opus","vorbis","ms-adpcm"] {
             if h.audio_codec_supported(self.client,codec).map_err(err)? { host.audio_codecs.insert(codec.into()); }
         }
         host.input = input;
+        host.held_buttons = input.buttons_down;
+        host.pressed_since_query = input.buttons_down | input.buttons_pressed;
         host.locale = self.config.locale.clone();
         host.plugin_shells = self
             .config
@@ -288,6 +291,15 @@ impl KrkrVm {
             }
             rt.set_global_member("__crysirror_arguments", Variant::Object(table));
         }
+        let storage = rt.host_mut().storage.as_mut().context("KiriKiri storage unavailable")?;
+        if let Some(overlay) = &self.config.launcher_overlay {
+            storage.install_launcher_overlay(overlay)?;
+        }
+        ensure!(
+            storage.resolve(&self.config.startup).is_some(),
+            "KiriKiri startup script `{}` absent",
+            self.config.startup
+        );
         crate::plugins::autoload(&mut rt)?;
         // Developer diagnostic: on the first runtime exception, log the paused
         // frame's registers and evaluate `;;`-separated expressions in it.
@@ -404,22 +416,23 @@ impl KrkrVm {
 
     /// Submit queued engine commands in the order TJS issued them.
     fn flush(&mut self, h: &mut dyn HostServices) -> Result<()> {
+        let _span = crysirror_tasks::profile::span_current("krkr.layers.commit");
         let rt = self.rt.as_mut().context("KiriKiri runtime absent")?;
         natives::native_extra::sync_attention(rt).map_err(|e|anyhow::anyhow!("{e}"))?;
         crate::native_pad::sync(rt).map_err(|e|anyhow::anyhow!("{e}"))?;
         rt.host_mut().sync().map_err(|e| anyhow::anyhow!("{e}"))?;
         let batches = std::mem::take(&mut rt.host_mut().batches);
+        let mut encoded = Vec::new();
         for batch in batches {
-            let payload = match batch {
-                Batch::Layers(ops) => json!({"layers": ops}),
-                Batch::Canvases(ops) => json!({"canvases": ops}),
-                Batch::Ui(ops) => json!({"ui":ops}),
-            };
-            h.submit_engine(self.client, 1, &serde_json::to_vec(&payload)?)
+            encoded.clear();
+            serde_json::to_writer(&mut encoded, &batch)?;
+            h.submit_engine(self.client, 1, &encoded)
                 .map_err(err)
-                .with_context(|| format!("engine batch {}", truncate(&payload.to_string())))?;
+                .with_context(|| format!("engine batch {}", truncate(&String::from_utf8_lossy(&encoded))))?;
         }
-        for path in std::mem::take(&mut rt.host_mut().retired_images) {
+        let mut retired = std::mem::take(&mut rt.host_mut().retired_images);
+        retired.extend(rt.host().motion.take_retired_textures());
+        for path in retired {
             h.release_image_resource(self.client,&path).map_err(err)
                 .context("retire native image publication after Canvas commit")?;
         }
@@ -437,6 +450,7 @@ impl KrkrVm {
             return Ok(());
         }
         *self.events.entry(method).or_default() += 1;
+        let _span = crysirror_tasks::profile::span_current("krkr.script.call");
         rt.call_object_method(target, method, args)
             .map(|_| ())
             .map_err(|e| anyhow::anyhow!("{e}"))
@@ -486,111 +500,103 @@ impl KrkrVm {
         Ok(())
     }
 
-    /// Existing native hit policy over engine Layer/Canvas resources.
-    fn pointer_hit(&mut self, x:i64, y:i64) -> Result<Option<(usize,i64,i64)>> {
-        let rt=self.rt.as_mut().context("KiriKiri runtime absent")?;
-        let candidates=rt.host().hits(x,y);
-        let mut hit = None;
-        for (id, lx, ly) in candidates {
-            let target = ObjectHandle(id);
-            // Outside the current modal layer counts as disabled (krkrz
-            // GetMostFrontChildAt: `IsDisabledByMode` blocks the hit).
-            let mut enabled = !rt.host().disabled_by_mode(id);
-            let mut node = Some(id);
-            let mut depth = 0;
-            while let Some(id) = node {
-                if !rt.object_member(ObjectHandle(id), "__lp_enabled").is_truthy() {
-                    enabled = false;
-                    break;
-                }
-                node = rt.host().layer(ObjectHandle(id))?.parent;
-                depth += 1;
-                ensure!(depth <= 64, "native enabled ancestry limit");
+    /// An accepted disabled hit blocks the layers behind it.
+    fn hit_candidate(&mut self, id: usize, lx: i64, ly: i64) -> Result<Option<bool>> {
+        let rt = self.rt.as_mut().context("KiriKiri runtime absent")?;
+        let target = ObjectHandle(id);
+        // Outside the current modal layer counts as disabled (krkrz
+        // GetMostFrontChildAt: `IsDisabledByMode` blocks the hit).
+        let mut enabled = !rt.host().disabled_by_mode(id);
+        let mut node = Some(id);
+        let mut depth = 0;
+        while let Some(id) = node {
+            if !rt.object_member(ObjectHandle(id), "__lp_enabled").is_truthy() {
+                enabled = false;
+                break;
             }
-            let layer = rt.host().layer(target)?;
-            let kind = rt
-                .object_member(target, "__lp_hitType")
-                .to_integer()
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let threshold = rt
-                .object_member(target, "__lp_hitThreshold")
-                .to_integer()
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let yes = if kind == 1 {
-                layer
-                    .regions
-                    .get(self.client.0, [lx - layer.image_left, ly - layer.image_top])?
-                    != 0
-            } else if kind == 0 {
-                let px = lx - layer.image_left;
-                let py = ly - layer.image_top;
-                if layer.has_image
-                    && (px < 0 || py < 0 || px >= layer.image_width || py >= layer.image_height)
-                {
-                    false
-                } else if threshold <= 0 {
-                    true
-                } else if threshold >= 256 || !layer.has_image {
-                    false
-                } else if layer.kind
-                    == 1
-                {
-                    true
-                } else {
-                    let alpha=if let Some(alpha)=layer.full_alpha {alpha}
-                    else if let Some(crysirror_core::image_processing::ImageInput::Resource(image))=&layer.image_source {
-                        ensure!(image.client()==self.client,"foreign native hit image resource");
-                        image.alpha_at([px as u32,py as u32]).context("native hit point outside shared image resource")?
-                    } else {
-                        let source=match &layer.image_source {
-                            Some(crysirror_core::image_processing::ImageInput::Asset{path,..})=>format!("asset {path}"),
-                            Some(crysirror_core::image_processing::ImageInput::Encoded{name,..})=>format!("encoded {name}"),
-                            Some(crysirror_core::image_processing::ImageInput::Solid{..})=>"solid".into(),
-                            Some(crysirror_core::image_processing::ImageInput::Composite{..})=>"composite".into(),
-                            Some(crysirror_core::image_processing::ImageInput::Raster{..})=>"raster".into(),
-                            Some(crysirror_core::image_processing::ImageInput::Ternary{..})=>"three-input image".into(),
-                            Some(crysirror_core::image_processing::ImageInput::Transition{..})=>"transition".into(),
-                            Some(crysirror_core::image_processing::ImageInput::Resource(_))=>"resource".into(),
-                            Some(_)=>"shared image operation graph".into(),
-                            None=>"composed canvas".into(),
-                        };
-                        bail!("alpha-mask hit for native layer {id} canvas {} at {px},{py} requires a prepared shared image or composed-canvas query; source={source}",layer.slot);
-                    };
-                    i64::from(alpha)>=threshold
-                }
+            node = rt.host().layer(ObjectHandle(id))?.parent;
+            depth += 1;
+            ensure!(depth <= 64, "native enabled ancestry limit");
+        }
+        let layer = rt.host().layer(target)?;
+        let kind = rt
+            .object_member(target, "__lp_hitType")
+            .to_integer()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let threshold = rt
+            .object_member(target, "__lp_hitThreshold")
+            .to_integer()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let yes = if kind == 1 {
+            layer
+                .regions
+                .get(self.client.0, [lx - layer.image_left, ly - layer.image_top])?
+                != 0
+        } else if kind == 0 {
+            let px = lx - layer.image_left;
+            let py = ly - layer.image_top;
+            if layer.has_image
+                && (px < 0 || py < 0 || px >= layer.image_width || py >= layer.image_height)
+            {
+                false
+            } else if threshold <= 0 {
+                true
+            } else if threshold >= 256 || !layer.has_image {
+                false
+            } else if layer.kind
+                == 1
+            {
+                true
             } else {
-                bail!("unknown native hitType")
-            };
-            if yes {
-                // Native onHitTest changes a work flag through super.onHitTest;
-                // its TJS return value is not the native hit result.
-                rt.set_object_member(target, "__hit_test_work", Variant::Integer(1));
-                *self.events.entry("onHitTest").or_default() += 1;
-                rt.call_object_method(
-                    target,
-                    "onHitTest",
-                    vec![
-                        Variant::Integer(lx),
-                        Variant::Integer(ly),
-                        Variant::Integer(1),
-                    ],
-                )
-                .map_err(|e| anyhow::anyhow!("TJS onHitTest: {e}"))?;
-                if rt.object_member(target, "__hit_test_work").is_truthy() {
-                    // A hit disabled layer blocks layers behind it; it does
-                    // not make the pointer fall through the disabled subtree.
-                    if !enabled {
-                        break;
-                    }
-                    hit = Some((id, lx, ly));
-                    break;
-                }
+                let alpha=if let Some(alpha)=layer.full_alpha {alpha}
+                else if let Some(crysirror_core::image_processing::ImageInput::Resource(image))=&layer.image_source {
+                    ensure!(image.client()==self.client,"foreign native hit image resource");
+                    image.alpha_at([px as u32,py as u32]).context("native hit point outside shared image resource")?
+                } else {
+                    let source=match &layer.image_source {
+                        Some(crysirror_core::image_processing::ImageInput::Asset{path,..})=>format!("asset {path}"),
+                        Some(crysirror_core::image_processing::ImageInput::Encoded{name,..})=>format!("encoded {name}"),
+                        Some(crysirror_core::image_processing::ImageInput::Solid{..})=>"solid".into(),
+                        Some(crysirror_core::image_processing::ImageInput::Composite{..})=>"composite".into(),
+                        Some(crysirror_core::image_processing::ImageInput::Raster{..})=>"raster".into(),
+                        Some(crysirror_core::image_processing::ImageInput::Ternary{..})=>"three-input image".into(),
+                        Some(crysirror_core::image_processing::ImageInput::Transition{..})=>"transition".into(),
+                        Some(crysirror_core::image_processing::ImageInput::Resource(_))=>"resource".into(),
+                        Some(_)=>"shared image operation graph".into(),
+                        None=>"composed canvas".into(),
+                    };
+                    bail!("alpha-mask hit for native layer {id} canvas {} at {px},{py} requires a prepared shared image or composed-canvas query; source={source}",layer.slot);
+                };
+                i64::from(alpha)>=threshold
+            }
+        } else {
+            bail!("unknown native hitType")
+        };
+        if yes {
+            // Native onHitTest changes a work flag through super.onHitTest;
+            // its TJS return value is not the native hit result.
+            rt.set_object_member(target, "__hit_test_work", Variant::Integer(1));
+            *self.events.entry("onHitTest").or_default() += 1;
+            rt.call_object_method(
+                target,
+                "onHitTest",
+                vec![
+                    Variant::Integer(lx),
+                    Variant::Integer(ly),
+                    Variant::Integer(1),
+                ],
+            )
+            .map_err(|e| anyhow::anyhow!("TJS onHitTest: {e}"))?;
+            if rt.object_member(target, "__hit_test_work").is_truthy() {
+                // A hit disabled layer blocks layers behind it; it does
+                // not make the pointer fall through the disabled subtree.
+                return Ok(Some(enabled));
             }
         }
-        Ok(hit)
+        Ok(None)
     }
 
-    fn mouse_target(&mut self, x:i64, y:i64) -> Result<Option<(usize,i64,i64)>> {
+    fn captured_mouse_target(&mut self, x:i64, y:i64) -> Result<Option<(usize,i64,i64)>> {
         let capture=self.rt.as_ref().unwrap().host().mouse.capture;
         if let Some(id)=capture {
             let rt=self.rt.as_ref().unwrap();
@@ -607,7 +613,7 @@ impl KrkrVm {
             }
             crate::native_mouse::release(self.rt.as_mut().unwrap());
         }
-        self.pointer_hit(x,y)
+        Ok(None)
     }
 
     fn enqueue_timers(&mut self, now: u64) -> Result<()> {
@@ -654,6 +660,23 @@ impl KrkrVm {
     }
     fn drive_sound(&mut self, h: &mut dyn HostServices) -> Result<bool> {
         for _ in 0..128 {
+            let rt = self.rt.as_mut().unwrap();
+            if let Some(path) = rt.host().pending_image_metadata.as_ref() {
+                match rt.host().images.as_ref().context("image metadata unavailable")?.prepare_metadata(path) {
+                    Ok(false) => return Ok(false),
+                    Ok(true) => {}
+                    Err(error) => {
+                        // Let the retried native instruction raise an ordinary,
+                        // catchable TJS exception at the original call site.
+                        let failure = (path.clone(), error.to_string());
+                        rt.host_mut().image_metadata_failure = Some(failure);
+                    }
+                }
+                rt.host_mut().pending_image_metadata = None;
+            }
+            if self.rt.as_ref().unwrap().host().bitmap_work.as_ref().is_some_and(|s| s.parked) {
+                return Ok(false);
+            }
             self.flush(h)?;
             if self.modal_boundary()? {return Ok(false);}
             {
@@ -687,6 +710,9 @@ impl KrkrVm {
             if !crate::plugin_ports::win32_dialog::poll(self.rt.as_mut().unwrap(), h, self.client)? {
                 return Ok(false);
             }
+            if !crate::edit_dialog::poll(self.rt.as_mut().unwrap(), h, self.client)? {
+                return Ok(false);
+            }
             if !crate::save_struct::poll(self.rt.as_mut().unwrap())? {
                 return Ok(false);
             }
@@ -698,6 +724,7 @@ impl KrkrVm {
             if !crate::layer_movie::drive(self.rt.as_mut().unwrap(),h,self.client)? {return Ok(false);}
             let rt = self.rt.as_mut().unwrap();
             if rt.is_suspended() {
+                let _span = crysirror_tasks::profile::span_current("krkr.script.resume");
                 rt.resume_suspended().map_err(|e| anyhow::anyhow!("{e}"))?;
             } else {
                 // A program close may have suspended in onCloseQuery's save
@@ -728,7 +755,8 @@ impl KrkrVm {
             return Ok(VmYield::Halted);
         }
         let now = h.now_ms();
-        if self.rt.is_none() {
+        let booting = self.rt.is_none();
+        if booting {
             self.boot(h, input)?;
         }
         if let Some(rt) = self.rt.as_mut() {
@@ -737,8 +765,27 @@ impl KrkrVm {
         self.rt.as_mut().unwrap().host_mut().now = now;
         self.rt.as_mut().unwrap().host_mut().display = h.display_info();
         let input=self.modal_input(h,input)?;
-        let input=crate::native_pad::filter_input(self.rt.as_ref().unwrap(),input);
-        self.inbox.push(self.client.0,now,input)?;
+        let mut input=crate::native_pad::filter_input(self.rt.as_ref().unwrap(),input);
+        let host = self.rt.as_mut().unwrap().host_mut();
+        host.bitmap_work = Some(crate::host::BitmapWorkSlice::default());
+        // Startup scripts already observed the first input before boot returned.
+        host.prompt_release_mask &= input.buttons_down & !input.buttons_pressed;
+        if host.input_prompt.is_none() {
+            input.buttons_down &= !host.prompt_release_mask;
+            input.buttons_pressed &= !host.prompt_release_mask;
+            host.pressed_since_query |= input.buttons_down & !host.held_buttons;
+            if !booting { host.pressed_since_query |= input.buttons_pressed; }
+            host.held_buttons = input.buttons_down;
+            self.inbox.push(self.client.0,now,input)?;
+        } else {
+            host.prompt_release_mask |= input.buttons_down;
+            // The dialog can finish during this same tick. deliver_input
+            // also uses this sample directly when the game inbox is empty.
+            input.buttons_down = 0;
+            input.buttons_pressed = 0;
+            host.held_buttons = 0;
+            host.pressed_since_query = 0;
+        }
         if !self.drive_sound(h)? {
             return Ok(VmYield::BudgetExhausted);
         }
@@ -961,7 +1008,7 @@ impl VmAdapter for KrkrVm {
             // Only a batched bitmap redraw retains the previous picture.
             // Ordinary resource waits and the rest of a VM frame do not block
             // startup/animation presentation. Native modals must remain visible.
-            rt.host().dialog_pending.is_none() && rt.host().bitmap_redraw_pending
+            rt.host().dialog_pending.is_none() && rt.host().input_prompt.is_none() && rt.host().bitmap_redraw_pending
         })
     }
     fn engine_id(&self) -> &'static str {
@@ -988,12 +1035,19 @@ impl VmAdapter for KrkrVm {
         if b == 0 {
             return Ok(VmYield::BudgetExhausted);
         }
-        match self.execute(h, i) {
+        let executed = {
+            let _span = crysirror_tasks::profile::span_current("krkr.callbacks");
+            self.execute(h, i)
+        };
+        match executed {
             Ok(y) => {
-                self.collect_garbage();
+                {
+                    let _span = crysirror_tasks::profile::span_current("krkr.collect_garbage");
+                    self.collect_garbage();
+                }
                 // Native resource retirement is committed before this frame's
                 // renderer snapshot or a freed slot can be reused next step.
-                if self.rt.as_ref().is_some_and(|rt|!rt.host().batches.is_empty()) {
+                if self.rt.as_ref().is_some_and(|rt|!rt.host().batches.is_empty() || !rt.host().retired_images.is_empty()) {
                     self.flush(h).map_err(|e|Error::Io(format!("native retirement: {e:#}")))?;
                 }
                 Ok(y)

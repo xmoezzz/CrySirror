@@ -126,12 +126,8 @@ impl CodeObject {
         decode_instructions(&self.code_words)
     }
 
-    pub(crate) fn effective_max_frame_count(&self) -> Result<u32> {
-        let instructions = self.decode_instructions()?;
-        Ok(max_positive_register(
-            instructions.iter(),
-            self.max_frame_count,
-        ))
+    pub(crate) fn effective_max_frame_count(&self, instructions: &[Instruction]) -> u32 {
+        max_positive_register(instructions.iter(), self.max_frame_count)
     }
 
     pub fn name<'a>(&self, file: &'a BytecodeFile) -> Option<&'a str> {
@@ -453,7 +449,7 @@ mod tests {
 
         assert_eq!(file.objects[0].max_frame_count, 1);
         assert_eq!(
-            file.objects[0].effective_max_frame_count().expect("scan"),
+            file.objects[0].effective_max_frame_count(&file.objects[0].decode_instructions().unwrap()),
             2
         );
     }
