@@ -206,3 +206,8 @@ existing note so the next text commit replaces it. Clicking places the
 caret, dragging selects a range, and Shift with the arrow keys extends
 the selection. Confirm passes the edited string back to the game.
 Cancel discards the edit.
+
+`System.confirm` presents a shared modal dialog with Yes and No and resumes
+the running script with the chosen result. No is initially focused and
+Escape selects No. KiriKiri Z `Rect` supplies signed edges, sizing, offsets,
+clipping, union and containment for game scripts and font ink bounds.

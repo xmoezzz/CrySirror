@@ -26,6 +26,34 @@ fn press(r: &mut Runtime, key: u64) {
 }
 
 #[test]
+fn system_confirm_waits_inside_nested_startup_and_resumes_with_the_answer() {
+    let (dir, mut r) = fixture(r#"
+Scripts.execStorage("first-run.tjs");
+Debug.message("startup finished");
+"#);
+    std::fs::write(dir.path().join("assets/first-run.tjs"), r#"
+var declined = System.confirm("First question", "Startup");
+var accepted = System.confirm("Second question");
+if (declined !== 0 || accepted !== 1) throw "wrong confirmation result";
+Debug.message("answers verified");
+"#).unwrap();
+    r.tick(0, InputFrame::default()).unwrap();
+    let dialog = r.host.engine.ui.dialogs.get(1).expect("startup dialog");
+    assert_eq!(dialog.title, "Startup");
+    assert_eq!(dialog.message, "First question");
+    assert_eq!(dialog.default, 0);
+    assert!(!r.presentation_pending());
+    assert!(!log(&r).contains("startup finished"));
+    press(&mut r, buttons::ESCAPE);
+    assert_eq!(r.host.engine.ui.dialogs.get(1).unwrap().message, "Second question");
+    press(&mut r, buttons::LEFT);
+    press(&mut r, buttons::ENTER);
+    assert!(r.host.engine.ui.dialogs.is_empty());
+    assert!(log(&r).contains("answers verified"), "{}", log(&r));
+    assert!(log(&r).contains("startup finished"), "{}", log(&r));
+}
+
+#[test]
 fn edit_template_dispatches_script_overrides_and_returns_text_only_on_ok() {
     let (_dir, mut r) = fixture(r#"
         Plugins.link("win32dialog.dll");

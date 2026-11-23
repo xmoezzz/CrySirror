@@ -349,7 +349,7 @@ pub(super) fn nine_patch(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) 
         input,
         vec![json!({"kind":"nine_patch","width":output[0],"height":output[1]})],
     )?;
-    Ok(rect(rt, layout.margins))
+    crate::native_rect::from_bounds(rt, layout.margins)
 }
 pub(super) fn draw_glyph(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
     let h = this_of(rt, t, "Layer.drawGlyph")?;
@@ -491,37 +491,6 @@ pub(super) fn draw_glyph(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) 
         math,
     });
     crate::image_api::queue_chain(rt, h, input, vec![])
-}
-pub(super) fn rect(rt: &mut Rt, bounds: [i32; 4]) -> Variant {
-    let h = rt.alloc_ordinary_object();
-    rt.add_object_class_info(h, "Rect");
-    for (key, value) in ["left", "top", "right", "bottom"].into_iter().zip(bounds) {
-        rt.set_object_member(h, key, Variant::Integer(value as i64));
-    }
-    for (name, a, b) in [("width", "left", "right"), ("height", "top", "bottom")] {
-        rt.register_object_native_property(
-            h,
-            name,
-            move |rt: &mut Rt, t| {
-                let h = this_of(rt, t, "Rect extent")?;
-                Ok(Variant::Integer(
-                    rt.resolve_object_member(h, b)?.to_integer()?
-                        - rt.resolve_object_member(h, a)?.to_integer()?,
-                ))
-            },
-            move |rt: &mut Rt, t, v| {
-                let h = this_of(rt, t, "Rect extent")?;
-                let end = rt
-                    .resolve_object_member(h, a)?
-                    .to_integer()?
-                    .checked_add(v.to_integer()?)
-                    .ok_or_else(|| TjsError::runtime("Rect extent overflow"))?;
-                rt.set_object_member(h, b, Variant::Integer(end));
-                Ok(())
-            },
-        );
-    }
-    Variant::self_bound(h)
 }
 pub(super) fn install_window(rt: &mut Rt, h: ObjectHandle) {
     methods(

@@ -49,7 +49,7 @@ pub(super) fn initialize(rt: &mut Rt, font: ObjectHandle) {
                 bounds,
                 -(angle.rem_euclid(3600) as f64) / 10.,
             );
-            Ok(native_extra::rect(rt, bounds))
+            crate::native_rect::from_bounds(rt, bounds)
         },
     );
     rt.register_object_native_with_arg_count(

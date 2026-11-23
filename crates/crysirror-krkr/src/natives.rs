@@ -32,6 +32,7 @@ pub fn install(rt: &mut Rt) {
     crate::async_trigger::install(rt);
     crate::menus::install(rt);
     install_window(rt);
+    crate::native_rect::install(rt);
     font_class::install(rt);
     install_layer(rt);
     if let Some(layer)=rt.global_member("Layer").object_handle(){native_extra::install_layer(rt,layer);}
@@ -520,19 +521,7 @@ fn install_system(rt: &mut Rt) {
                 Ok(Variant::Void)
             }),
             ("createAppLock", |_, _, _| Ok(Variant::Integer(1))),
-            // A modal native dialog has no engine service yet; keep the prompt
-            // in the error so the condition that raised it stays visible.
-            ("confirm", |_, _, a| {
-                let text = a
-                    .first()
-                    .map(Variant::to_tjs_string)
-                    .transpose()?
-                    .unwrap_or_default();
-                Err(unsupported(
-                    &format!("System.confirm({text:?})"),
-                    "a modal dialog service",
-                ))
-            }),
+            ("confirm", crate::message_dialog::confirm),
             // A game script does not launch host processes or browsers from this
             // player; the native result for a failed launch is false.
             ("shellExecute", |rt, _, a| {

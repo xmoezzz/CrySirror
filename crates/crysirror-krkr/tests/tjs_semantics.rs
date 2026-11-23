@@ -2,6 +2,42 @@
 fn run(src: &str) -> crysirror_tjs2::runtime::Variant {
     crysirror_tjs2::execute_source("semantics.tjs", src).unwrap()
 }
+
+#[test]
+fn krkrz_rect_constructs_copies_and_applies_signed_edge_operations() {
+    use crysirror_krkr::{host::KrkrHost, natives};
+    use crysirror_tjs2::runtime::{Runtime, Variant};
+
+    let mut rt = Runtime::with_host(KrkrHost::new([640, 480], "ui".into()));
+    natives::install(&mut rt);
+    let file = rt.compile_source("rect.tjs", r#"
+var r = new Rect(-4, 3, 16, 13);
+var copy = new Rect(r);
+if (!(r instanceof "Rect") || r.width != 20 || r.height != 10 || !copy.equal(r))
+    throw "construction: " + (r instanceof "Rect") + ", " + r.width + ", " + r.height + ", " + copy.equal(r);
+r.setSize(2, 4);
+r.setOffset(11, -2);
+r.addOffset(1, 2);
+if (r.left != 12 || r.top != 0 || r.right != 14 || r.bottom != 4 || copy.left != -4) throw "offset";
+if (!r.includedPos(12, 0) || r.includedPos(14, 4)) throw "half-open edges";
+var other = new Rect(13, 1, 17, 5);
+if (!r.intersects(other) || !r.clip(other) || !r.included(other)) throw "clip";
+if (r.clip(new Rect(0, 0, 1, 1)) || r.left != 13 || r.right != 14) throw "unchanged on empty clip";
+if (!r.union(copy) || !copy.included(r) || r.bottom != 13) throw "union";
+r.clear();
+if (!r.isEmpty() || r.left != 0 || r.top != 0) throw "clear";
+r.set(5, 6, 12, 10);
+r.width = -2;
+r.height = 3;
+if (r.right != 3 || r.bottom != 9 || !r.isEmpty() || r.included(copy)) throw "signed extents";
+if (r.clip(null) !== void || (new Rect(1, 2)).isEmpty() !== 1) throw "native edge cases";
+var invalid = false;
+try { var bad = new Rect(%[]); } catch (e) { invalid = true; }
+if (!invalid) throw "non-Rect copy";
+return 1;
+"#).unwrap();
+    assert_eq!(rt.execute_file(&file).unwrap(), Variant::Integer(1));
+}
 #[test]
 fn ignore_prop_reaches_incontextof_left_operand() {
     let v = run(r#"

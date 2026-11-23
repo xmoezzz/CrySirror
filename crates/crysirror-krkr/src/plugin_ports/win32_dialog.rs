@@ -430,7 +430,7 @@ fn message_box(
         (1, "OK"), (2, "キャンセル"), (3, "中止"), (4, "再試行"), (5, "無視"),
         (6, "はい"), (7, "いいえ"), (10, "再実行"), (11, "続行"),
     );
-    let (buttons, escape): (Vec<(i64, &str)>, Option<i64>) = match kind & 0xF {
+    let (buttons, escape): (Vec<(u32, &str)>, Option<u32>) = match kind & 0xF {
         0 => (vec![ok], Some(1)),
         1 => (vec![ok, cancel], Some(2)),
         2 => (vec![abort, retry, ignore], None),
@@ -450,47 +450,18 @@ fn message_box(
     }
     // MB_DEFBUTTON1..4; an index past the last button selects the first.
     let default = buttons.get(((kind >> 8) & 0xF) as usize).unwrap_or(&buttons[0]).0;
-    if !rt.host().can_suspend {
-        return Err(crate::natives::unsupported(&format!("{M} in this callback"), "a resumable TJS boundary"));
-    }
-    let host = rt.host_mut();
-    if host.dialog_pending.is_some() {
-        return Err(TjsError::runtime(format!("{M}: a message box is already open")));
-    }
-    host.dialog_serial = host.dialog_serial % 65535 + 1;
-    let id = host.dialog_serial;
-    let spec = serde_json::json!({
-        "id": id, "title": caption, "message": message, "default": default, "cancel": escape,
-        "buttons": buttons.iter().map(|(id, label)| serde_json::json!({"id": id, "label": label})).collect::<Vec<_>>(),
-        "font": host.font,
-    });
-    host.ui_op(serde_json::json!({"op": "open_dialog", "dialog": spec}));
-    host.dialog_pending = Some(id);
-    rt.request_suspend();
-    // Replaced by the chosen button's id when the caller resumes.
-    Ok(Variant::Integer(0))
-}
-
-/// Resume a caller waiting in `messageBox` once its dialog has a result.
-/// `Ok(false)` while it is still open.
-pub fn poll(
-    rt: &mut Runtime<KrkrHost>,
-    host: &mut dyn crysirror_core::service::HostServices,
-    client: crysirror_core::state::ClientId,
-) -> anyhow::Result<bool> {
-    let Some(id) = rt.host().dialog_pending else {
-        return Ok(true);
+    use crysirror_scene::ui::dialog::{DialogButton, DialogSpec};
+    let dialog = DialogSpec {
+        id: 0,
+        title: caption,
+        message,
+        default,
+        cancel: escape,
+        buttons: buttons.into_iter().map(|(id, label)| DialogButton { id, label: label.into() }).collect(),
+        font: rt.host().font.clone(),
+        text_size: 24,
     };
-    let bytes = host
-        .query_engine(client, crysirror_core::service::EngineQuery::DialogEvents)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let events: Vec<crysirror_scene::ui::UiEvent> = serde_json::from_slice(&bytes)?;
-    let Some(event) = events.iter().find(|e| e.widget.id == id) else {
-        return Ok(false);
-    };
-    rt.host_mut().dialog_pending = None;
-    rt.set_resume_value(Variant::Integer(event.value as i64));
-    Ok(true)
+    crate::message_dialog::open(rt, M, dialog)
 }
 
 // -------------------------------------------------------------
