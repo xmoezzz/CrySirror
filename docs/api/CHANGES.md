@@ -1,5 +1,11 @@
 # API change log
 
+## `dee14378e9a0505e` (2026-11-24) · Clipped HSL modulation
+
+`ImageEffect.hsl_modulate` accepts an optional `rect` in image pixels
+`[x, y, width, height]`. Existing JSON that omits it still modulates the
+whole image. Rust constructors can supply `rect: None` for that behavior.
+
 ## `1c2e078251b5e7a6` (2026-11-22) · Text field selection
 
 `Ui.setTextSelection(id, start, end)` enables caret editing for an owned

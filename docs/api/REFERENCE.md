@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `1c2e078251b5e7a6`
+API fingerprint: `dee14378e9a0505e`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -1232,7 +1232,7 @@ Reusable image operations. All channels are straight RGBA bytes; RGB-only transf
 | `grayscale` | — | Integer luminance: (54R+183G+19B)/256, truncated. |
 | `brightness_contrast` | `brightness: i32, contrast: i32` | CxImage brightness/contrast LUT (brightness -255..255, contrast -100..100). |
 | `colorize` | `hue: u8, saturation: u8, blend: f64` | CxImage HSL colorize: replace hue/saturation (0..255), keep lightness. |
-| `hsl_modulate` | `hue: i32, saturation: i32, luminance: i32` | HSL modulate: hue degrees, saturation/luminance percent (-100..100). |
+| `hsl_modulate` | `hue: i32, saturation: i32, luminance: i32, rect: Option<[u32; 4]>` | HSL modulate: hue degrees, saturation/luminance percent (-100..100). |
 | `white_noise` | `seed: u32` | Grey white noise replacing RGB; alpha is unchanged. |
 | `invert` | — | — |
 | `channel_scale` | `factors: [u8; 4]` | Every stored byte, alpha included, becomes floor(byte * factor / 255), factors in RGBA order (CatSystem2 68BEC0 multiplies a bitmap by ARGB). |

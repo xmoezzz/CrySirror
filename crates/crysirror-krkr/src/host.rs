@@ -77,6 +77,7 @@ pub struct LayerState {
     pub major: i32,
     pub dirty: bool,
     pub presented: Option<(i32, [i64; 2])>,
+    ps_screen_presented: bool,
 }
 
 impl LayerState {
@@ -177,6 +178,7 @@ pub struct KrkrHost {
     pub image_job: Option<(usize, crysirror_core::image_processing::ImageJob, [bool; 2], bool)>,
     pub composite_pending: Vec<crate::image_api::PendingComposite>,
     pub(crate) bitmap_batch: Option<crate::image_api::BitmapBatch>,
+    pub(crate) piled_copy_completion: Option<[ObjectHandle; 4]>,
     pub(crate) bitmap_redraw_pending: bool,
     pub(crate) image_pair:Option<crate::image_api::PairPreparation>,
     pub(crate) image_save:Option<crate::image_api::LayerImageSave>,
@@ -320,6 +322,7 @@ impl KrkrHost {
             image_job: None,
             composite_pending: Vec::new(),
             bitmap_batch: None,
+            piled_copy_completion: None,
             bitmap_redraw_pending: false,
             image_pair:None,
             image_save:None,
@@ -648,6 +651,7 @@ impl KrkrHost {
             major: 0,
             dirty: true,
             presented: None,
+            ps_screen_presented: false,
             draw_clip: None,
         };
         let mut parent_container = None;
@@ -900,6 +904,7 @@ impl KrkrHost {
         }
         let mut containers = Vec::new();
         let mut presentations = Vec::new();
+        let mut blends = Vec::new();
         for (index, h) in order.into_iter().enumerate() {
             let major = index as i32 * 2;
             let Some(l) = self.layers.get_mut(&h) else {
@@ -945,11 +950,22 @@ impl KrkrHost {
             // `case ltBinder: // no action`). Hiding is idempotent.
             let present = if l.kind == 0 {
                 l.presented = None;
+                l.ps_screen_presented = false;
                 Some(json!({"op":"hide","layer":l.presentation()}))
             } else {
                 (l.presented != Some(placement)).then(|| {
                     l.presented = Some(placement);
-                    json!({"op":"present","id":l.slot,"layer":l.presentation(),"order":placement.0,
+                    // Photoshop display modes keep the underlying layer's alpha
+                    // (krkrz LayerIntf.cpp:5243). Blend the completed bitmap as a
+                    // unit against that backdrop, also inside a frozen subtree.
+                    let screen = l.kind == 17;
+                    if screen || l.ps_screen_presented {
+                        let blend = if screen { "atop_screen" } else { "normal" };
+                        blends.push(json!({"op":"set_blend","id":l.presentation(),"blend":blend}));
+                        l.ps_screen_presented = screen;
+                    }
+                    let op = if screen { "present_target" } else { "present" };
+                    json!({"op":op,"id":l.slot,"layer":l.presentation(),"order":placement.0,
                         "parent":l.container(),"position":placement.1})
                 })
             };
@@ -964,6 +980,7 @@ impl KrkrHost {
         // canvas batches exposes an invalid half-updated pair to validation.
         for op in containers { self.layer_op(op); }
         for op in presentations { self.canvas_op(op); }
+        for op in blends { self.layer_op(op); }
         Ok(())
     }
 
@@ -1059,6 +1076,7 @@ impl TjsHost for KrkrHost {
             }
         }
         self.csv.gc_roots(out);
+        out.extend(self.piled_copy_completion.into_iter().flatten());
         self.line_parser.gc_roots(out);
         self.text_render.gc_roots(out);
         self.psbfile.gc_roots(out);
@@ -1073,6 +1091,7 @@ impl TjsHost for KrkrHost {
         if self.layers.contains_key(&handle.0) {
             self.invalidate_layer(handle.0);
         }
+        self.alpha_movies.retire(handle.0, &mut self.retired_images);
         self.psbfile.invalidate(handle.0);
         self.psd.invalidate(handle.0, self.storage.as_ref());
         self.csv.invalidate(handle.0);

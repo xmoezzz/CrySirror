@@ -736,7 +736,12 @@ impl KrkrVm {
                 {
                     rt.host_mut().exit_requested = true;
                 }
-                rt.host_mut().bitmap_redraw_pending = false;
+                // Paints in this pass can redraw the cut-in frame and its
+                // clipped portrait separately. Keep the hold across their
+                // resource waits, through the end of the paint pass.
+                if !self.pass.as_ref().is_some_and(|pass| pass.paints.is_some()) {
+                    rt.host_mut().bitmap_redraw_pending = false;
+                }
                 self.flush(h)?;
                 return Ok(true);
             }
@@ -975,6 +980,7 @@ impl KrkrVm {
                 continue;
             }
             self.pass = None;
+            self.rt.as_mut().unwrap().host_mut().bitmap_redraw_pending = false;
             self.frames += 1;
             if self.rt.as_ref().unwrap().host().exit_requested {
                 self.halted = true;
@@ -1140,6 +1146,7 @@ impl VmAdapter for KrkrVm {
             "log_tail": host.map(|h| h.log.iter().rev().take(std::env::var("CRYSIRROR_KRKR_LOG_TAIL").ok().and_then(|n| n.parse().ok()).unwrap_or(16)).cloned().collect::<Vec<_>>()),
             "error": self.last_error,
             "rendering": "engine retained Layer/Canvas",
+            "presentation_pending": self.presentation_pending(),
             "owns_framebuffer": false,
         }))
         .unwrap_or_default()

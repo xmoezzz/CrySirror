@@ -198,10 +198,17 @@ impl LayerSystem {
                     *id == fade.source || !bb.contains(id),
                     "crossfade source contains destination"
                 );
+                ensure!(
+                    a.blend == Blend::Normal && b.blend == Blend::Normal,
+                    "crossfade root blend"
+                );
+                // Each endpoint composites into its own transparent target.
+                // A screen child can read that endpoint's backdrop and keep
+                // its alpha before the two completed inputs are interpolated.
                 for child in aa.union(&bb) {
                     ensure!(
-                        owner[child].blend == Blend::Normal,
-                        "isolated crossfade requires normal subtree blends"
+                        matches!(owner[child].blend, Blend::Normal | Blend::AtopScreen),
+                        "unsupported blend in isolated crossfade subtree"
                     );
                 }
                 for (&other, f) in fades {

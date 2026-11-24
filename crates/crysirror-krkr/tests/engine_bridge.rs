@@ -69,6 +69,27 @@ fn wait_for_startup_log(rt: &mut Runtime, pointer: InputFrame, marker: &str) {
 }
 
 #[test]
+fn layer_modulate_keeps_pixels_outside_the_drawing_clip() {
+    let (_dir, mut rt) = fixture(r#"
+        Plugins.link("layerExImage.dll");
+        var w = new Window(), root = new Layer(w, null);
+        var original = new Layer(w, root), sprite = new Layer(w, root);
+        original.loadImages("image/Chara.png");
+        sprite.assignImages(original);
+        sprite.setClip(4, 5, 2, 2);
+        sprite.modulate(0, -100, 0);
+        if (sprite.getMainPixel(4, 5) != 0x737373) throw "clipped pixel was not modulated";
+        if (sprite.getMainPixel(4, 4) != 0xc81e1e) throw "modulate changed the row above the clip";
+        if (sprite.getMainPixel(6, 5) != 0xc81e1e) throw "modulate changed a pixel beside the clip";
+        sprite.setClip();
+        sprite.modulate(0, -100, 0);
+        if (sprite.getMainPixel(6, 5) != 0x737373) throw "reset clip did not cover the whole image";
+        Debug.message("modulate clip complete");
+    "#, &[]);
+    wait_for_startup_log(&mut rt, InputFrame::default(), "modulate clip complete");
+}
+
+#[test]
 fn reparenting_precedes_same_tick_subtree_invalidation() {
     let (_dir, mut rt) = fixture(r#"
         var w = new Window(), root = new Layer(w, null);
@@ -957,6 +978,56 @@ fn native_image_filters_resume_original_tjs_and_publish_shared_resource_pixels()
     assert_eq!(frozen.surface(ClientId(1),&asset).unwrap().rgba,surface.rgba,
         "already-admitted immutable view owns its old generation");
     drop(jobs);
+}
+
+#[test]
+fn piled_copy_waits_for_on_paint_and_keeps_screen_layers_in_the_snapshot() {
+    use crysirror_scene::layer::{Blend, Paint};
+    let (_dir, mut runtime) = fixture(
+        r#"
+        Plugins.link('layerExBTOA.dll');
+        var w=new Window(), root=new Layer(w,null);
+        var source=new Layer(w,root), child=new Layer(w,source);
+        var mask=new Layer(w,root), screen=new Layer(w,source), dest=new Layer(w,root);
+        w.visible=true;
+        source.setSize(4,4);source.fillRect(0,0,4,4,0xff203040);
+        child.setSize(4,4);child.fillRect(0,0,4,4,0xff123456);child.visible=true;
+        mask.setSize(4,4);mask.fillRect(0,0,4,4,0x40ffffff);
+        screen.setSize(4,4);screen.fillRect(0,0,4,4,0x80706050);
+        screen.type=ltPsScreen;screen.visible=true;
+        dest.setSize(4,4);dest.visible=true;dest.hitType=htProvince;
+        global.paintSteps='';
+        child.onPaint=function() {
+            global.paintSteps+='before,';
+            this.clipAlphaRect(0,0,mask,0,0,4,4,0);
+            global.paintSteps+='after';
+        };
+        child.callOnPaint=true;
+        dest.piledCopy(0,0,source,0,0,4,4);
+        if(global.paintSteps!='before,after')throw new Exception('snapshot before paint completion or callback replay');
+        Debug.message('painted-snapshot-complete');
+        "#,
+        &[],
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        runtime.tick(1, InputFrame::default()).unwrap();
+        if runtime.inspect()["sessions"][0]["native"]["log_tail"]
+            .to_string()
+            .contains("painted-snapshot-complete")
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "snapshot did not complete");
+        std::thread::yield_now();
+    }
+    let asset = canvas_image_asset(&runtime, 3);
+    let clipped = runtime.assets.surface(ClientId(1), &asset).unwrap();
+    assert_eq!(&clipped.rgba[..4], &[0x12, 0x34, 0x56, 64]);
+    assert!(runtime.host.engine.layers.frame([32, 32]).unwrap().iter().any(|primitive| {
+        matches!(&primitive.paint, Paint::Snapshot { layers, .. }
+            if layers.iter().any(|layer| layer.blend == Blend::AtopScreen))
+    }), "frozen scene lost its screen layer");
 }
 
 #[test]

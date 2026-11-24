@@ -3915,11 +3915,12 @@ fn clip_set(rt: &mut Rt, t: Option<ObjectHandle>, i: usize, v: Variant) -> Resul
     Ok(())
 }
 /// Intersect a draw rect with the layer's clip; `None` when nothing remains.
-fn clip_rect(l: &LayerState, r: [i64; 4]) -> Option<[i64; 4]> {
+pub(crate) fn clip_rect(l: &LayerState, r: [i64; 4]) -> Option<[i64; 4]> {
     let c = clip_of(l);
     let (x0, y0) = (r[0].max(c[0]), r[1].max(c[1]));
-    let (x1, y1) = ((r[0] + r[2]).min(c[0] + c[2]), (r[1] + r[3]).min(c[1] + c[3]));
-    (x1 > x0 && y1 > y0).then(|| [x0, y0, x1 - x0, y1 - y0])
+    let x1 = r[0].saturating_add(r[2]).min(c[0].saturating_add(c[2]));
+    let y1 = r[1].saturating_add(r[3]).min(c[1].saturating_add(c[3]));
+    (x1 > x0 && y1 > y0).then(|| [x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0)])
 }
 
 /// krkrz `ImageLayerSizeChanged`: a layer larger than its main image grows the

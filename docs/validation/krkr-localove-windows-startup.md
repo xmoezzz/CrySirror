@@ -52,3 +52,35 @@ Load kept the advanced line. Confirming Quick Load restored the saved
 dialogue pixels, and the next click reproduced the advanced line.
 A separate 16,300-frame Shrine replay loaded No.003 and held Ctrl past the
 previous TextRender color error. It completed without a VM or asset error.
+
+## Windows library and movie audio follow-up
+
+The desktop library passed a named entry's executable to the player and
+opened the Sickly Days introduction in a real window. Directory discovery
+picked a different executable for that installation. The Shrine replay
+used the matching Nana companion files in an isolated installation copy.
+A scripted mouse press on Play wrote the selected entry ID to the launcher
+receipt. The developer library root also contained a directory without a
+supported game, which the explicit acceptance list omits.
+
+The original Commuting opening movie reproduced the player exit in a
+bounded Windows window run with audio enabled. Its ASF audio uses format
+tag 0x0163. VideoOverlay selected the game's matching MPEG companion with
+MP2 audio. The updated player presented a movie frame and completed the
+same windowed check. The runtime trace records the selected storage,
+decoder working state and 1024 × 576 sequence dimensions. The fallback
+does not change playback of a WMV with a supported audio track.
+Two VideoOverlay and three incremental ASF tests passed in Release.
+One owner-media test remains opt-in.
+
+The updated player also replayed fresh starts to dialogue in Commuting and
+Roommate, loaded Shrine No.003 with Chinese primary and English secondary
+text, and reached the Sickly Days title using the explicit executable.
+These game replays used isolated saves without an audio device.
+
+After Episode 2 restored the No.001 save and reached its dialogue wait.
+
+AMBITIOUS MISSION main still reaches the image composition byte limit
+during the long Ctrl route. After Episode 1 fails when its save page
+requests a snapshot of an active composite. These failures block acceptance
+of the broader KiriKiri batch.

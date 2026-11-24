@@ -327,6 +327,9 @@ pub enum ImageEffect {
         hue: i32,
         saturation: i32,
         luminance: i32,
+        /// Pixel rectangle [x, y, width, height]. Omit it for the whole image.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rect: Option<[u32; 4]>,
     },
     /// Grey white noise replacing RGB; alpha is unchanged.
     WhiteNoise {
@@ -524,6 +527,7 @@ impl ImageEffect {
                 hue,
                 saturation,
                 luminance,
+                ..
             } => ensure!(
                 [hue, saturation, luminance]
                     .iter()
@@ -876,9 +880,18 @@ impl ImageSurface {
                 }
             }
         }
-        for y in 0..h {
+        let [x0, y0, x1, y1] = match effect {
+            ImageEffect::HslModulate { rect: Some([x, y, width, height]), .. } => [
+                (*x as usize).min(w),
+                (*y as usize).min(h),
+                (x.saturating_add(*width) as usize).min(w),
+                (y.saturating_add(*height) as usize).min(h),
+            ],
+            _ => [0, 0, w, h],
+        };
+        for y in y0..y1 {
             check()?;
-            for x in 0..w {
+            for x in x0..x1 {
                 let at = (y * w + x) * 4;
                 let p = &self.rgba[at..at + 4];
                 match effect {
@@ -909,6 +922,7 @@ impl ImageSurface {
                         hue,
                         saturation,
                         luminance,
+                        ..
                     } => {
                         let v = crate::cximage::modulate(
                             [p[0], p[1], p[2]],

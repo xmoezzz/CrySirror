@@ -8929,7 +8929,7 @@
           "default": null,
           "doc": "HSL modulate: hue degrees, saturation/luminance percent (-100..100).",
           "name": "hsl_modulate",
-          "rust_type": "hue: i32, saturation: i32, luminance: i32"
+          "rust_type": "hue: i32, saturation: i32, luminance: i32, rect: Option<[u32; 4]>"
         },
         {
           "default": null,
@@ -29785,7 +29785,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "1c2e078251b5e7a6",
+  "fingerprint": "dee14378e9a0505e",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

@@ -59,3 +59,44 @@ v.stop();
         at = found;
     }
 }
+
+#[test]
+fn overlay_uses_the_games_mpeg_copy_only_for_unsupported_asf_audio() {
+    let project = tempfile::tempdir().unwrap();
+    let assets = project.path().join("assets");
+    std::fs::create_dir(&assets).unwrap();
+    let wmv = include_bytes!("../../crysirror-video/tests/fixtures/wmv_wma.asf");
+    let mpeg = include_bytes!("../../crysirror-video/tests/fixtures/red_blue.mpg");
+    let mut unsupported = wmv.to_vec();
+    // WAVEFORMATEX starts 54 bytes after the ASF audio stream type GUID.
+    let audio_guid = [0x40, 0x9e, 0x69, 0xf8, 0x4d, 0x5b, 0xcf, 0x11,
+                      0xa8, 0xfd, 0x00, 0x80, 0x5f, 0x5c, 0x44, 0x2b];
+    let at = unsupported.windows(audio_guid.len()).position(|w| w == audio_guid).unwrap() + 54;
+    assert_eq!(&unsupported[at..at + 2], &[0x61, 0x01]);
+    unsupported[at..at + 2].copy_from_slice(&[0x63, 0x01]);
+    std::fs::write(assets.join("high.wmv"), &unsupported).unwrap();
+    std::fs::write(assets.join("high_sd.mpg"), mpeg).unwrap();
+    std::fs::write(assets.join("supported.wmv"), wmv).unwrap();
+    std::fs::write(assets.join("supported_sd.mpg"), mpeg).unwrap();
+    std::fs::write(assets.join("startup.tjs"), r#"
+var w = new Window();
+var v = new VideoOverlay(w);
+v.open("high.wmv");
+v.prepare();
+v.open("supported.wmv");
+v.prepare();
+"#).unwrap();
+    let spec = serde_json::from_value(json!({
+        "schema":2,"name":"video","content_revision":"1","canvas":[32,32],"assets":"assets",
+        "clients":[{"name":"native","adapter":"krkr","game":"synthetic-video","config":{"canvas":[32,32]}}]
+    })).unwrap();
+    let path = project.path().join("project.json");
+    std::fs::write(&path, serde_json::to_vec(&spec).unwrap()).unwrap();
+    let mut adapters = AdapterRegistry::default();
+    crysirror_krkr::register(&mut adapters).unwrap();
+    let mut runtime = Runtime::with_registry(spec, &path, &project.path().join("state"), adapters).unwrap();
+    runtime.tick(16, InputFrame::default()).unwrap();
+    let log = runtime.inspect()["sessions"][0]["native"]["log_tail"].to_string();
+    assert!(log.contains("VideoOverlay.prepare high_sd.mpg"), "{log}");
+    assert!(log.contains("VideoOverlay.prepare supported.wmv"), "{log}");
+}

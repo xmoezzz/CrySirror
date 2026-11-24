@@ -2116,6 +2116,7 @@ name = "crysirror-codec-amv"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "serde",
  "serde_json",
 ]

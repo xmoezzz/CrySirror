@@ -227,3 +227,73 @@ if({callback}) {{
         }
     }
 }
+
+#[test]
+fn masked_paint_keeps_the_previous_frame_until_the_whole_paint_pass_finishes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("assets")).unwrap();
+    let project = serde_json::from_value(json!({
+        "schema": 2, "name": "cut-in", "content_revision": "1", "canvas": [8, 8],
+        "assets": "assets", "clients": [{"name": "game", "adapter": "krkr", "game": "synthetic",
+            "config": {"canvas": [8, 8]}}]
+    })).unwrap();
+    let path = dir.path().join("project.json");
+    std::fs::write(&path, serde_json::to_vec(&project).unwrap()).unwrap();
+    let mut registry = crysirror_runtime::AdapterRegistry::default();
+    crate::register(&mut registry).unwrap();
+    let mut owner = crysirror_runtime::Runtime::with_registry(
+        project, &path, &dir.path().join("state"), registry,
+    ).unwrap();
+
+    let client = ClientId(1);
+    let mut host = KrkrHost::new([8, 8], "default".into());
+    host.client = client.0;
+    host.images = Some(owner.host.image_metadata(client).unwrap());
+    let mut rt = Runtime::with_host(host);
+    natives::install(&mut rt);
+    rt.register_global_native("waitForFrameArt", |rt: &mut Rt, _, _| {
+        if !rt.global_member("frameArtReady").is_truthy() {
+            return Err(crysirror_tjs2::TjsError::resource_pending("cut-in frame art"));
+        }
+        Ok(Variant::Void)
+    });
+    natives::run_source(&mut rt, "cut-in.tjs", r#"
+        Plugins.link('layerExBTOA.dll');
+        var w=new Window(),root=new Layer(w,null);
+        var head=new Layer(w,root),mask=new Layer(w,root),frame=new Layer(w,root);
+        mask.setImageSize(4,1);mask.fillRect(0,0,4,1,0x80ffffff);
+        head.setImageSize(4,1);
+        head.onPaint=function() {
+            this.fillRect(0,0,4,1,0xff405060);
+            this.clipAlphaRect(0,0,mask,0,0,4,1,0);
+            global.headClipped=true;
+        };
+        head.update();
+        frame.onPaint=function() {
+            global.frameStarted=true;
+            waitForFrameArt();
+            global.framePainted=true;
+        };
+        frame.update();
+    "#, None).unwrap();
+    let mut vm = KrkrVm::new(client, serde_json::from_value(json!({"canvas": [8, 8]})).unwrap()).unwrap();
+    vm.rt = Some(rt);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        vm.execute(&mut owner.host, InputFrame::default()).unwrap();
+        let rt = vm.rt.as_ref().unwrap();
+        if rt.global_member("frameStarted").is_truthy() {
+            assert!(rt.global_member("headClipped").is_truthy());
+            assert!(!rt.global_member("framePainted").is_truthy());
+            assert!(vm.presentation_pending(), "the frame art is still waiting");
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+
+    vm.rt.as_mut().unwrap().set_global_member("frameArtReady", Variant::Integer(1));
+    vm.execute(&mut owner.host, InputFrame::default()).unwrap();
+    assert!(vm.rt.as_ref().unwrap().global_member("framePainted").is_truthy());
+    assert!(!vm.presentation_pending(), "both parts of the redraw are ready");
+}

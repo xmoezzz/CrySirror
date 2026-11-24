@@ -420,7 +420,12 @@ pub fn clip_alpha(rt:&mut Rt,t:Option<ObjectHandle>,args:Vec<Variant>)->Result<V
     let clear=match args.get(7){None|Some(Variant::Void)=>None,Some(v)=>{let n=v.to_integer()? as i32;(0..=255).contains(&n).then_some(n as u8)}};
     let spec=crysirror_image::alpha_clip::AlphaClipRect{destination,source:source_rect,clip,clear,multiply_rgb:d.kind==12,self_source:target==source,clear_empty_alpha_only:true};
     let effects=serde_json::to_vec(&[crysirror_image::effects::ImageEffect::AlphaClipRect{spec}]).map_err(|e|TjsError::runtime(e.to_string()))?;
-    rt.host_mut().image_pair=Some(PairPreparation{target:target.0,source:source.0,inputs:[d.image_source,s.image_source],captures:[None,None],effects:effects.into()});
+    let host = rt.host_mut();
+    host.image_pair=Some(PairPreparation{target:target.0,source:source.0,inputs:[d.image_source,s.image_source],captures:[None,None],effects:effects.into()});
+    // onPaint often draws the unmasked source into the destination first.
+    // The Canvas worker needs to see those writes, but the presenter must
+    // keep the previous finished picture until this redraw returns.
+    host.bitmap_redraw_pending = true;
     rt.request_suspend();Ok(Variant::Void)
 }
 
@@ -557,8 +562,6 @@ pub(crate) fn queue_chain(
 }
 
 /// layerExImage (wamsoft 3aff625): six Layer methods onto shared ImageEffects.
-/// The adapter has no partial clip model, so effects cover the whole image as
-/// the native does with a full clip rectangle.
 pub fn install_ex_image(rt: &mut Rt) {
     let Some(class) = rt.global_member("Layer").object_handle() else {
         return;
@@ -583,7 +586,16 @@ pub fn install_ex_image(rt: &mut Rt) {
                 let hue = need_int(&a, 0, "Layer.modulate")? as i32;
                 let saturation = need_int(&a, 1, "Layer.modulate")? as i32;
                 let luminance = need_int(&a, 2, "Layer.modulate")? as i32;
-                begin(rt, t, json!({"kind":"hsl_modulate","hue":hue,"saturation":saturation,"luminance":luminance}))
+                let h = this_of(rt, t, "Layer.modulate")?;
+                let layer = rt.host().layer(h)?;
+                // layerExImage::reset offsets the buffer by the drawing clip.
+                // Expression redraws can reuse the already modulated body.
+                let size = [0, 0, layer.image_width, layer.image_height];
+                let Some(rect) = clip_rect(layer, size) else {
+                    return Ok(Variant::Void);
+                };
+                let rect = (rect != size).then_some(rect.map(|part| part as u32));
+                begin(rt, Some(h), json!({"kind":"hsl_modulate","hue":hue,"saturation":saturation,"luminance":luminance,"rect":rect}))
             }),
             ("noise", |rt, t, a| {
                 // Native: per channel (rand/RAND_MAX - 0.5) * level.

@@ -21,6 +21,15 @@ than a finite builtin syscall catalogue.
 | Font, text, ruby and message UI | Shared Text and retained UI | KAG/native class layout policy stays separate from generic layout. |
 | `System.confirm(message, caption?)` | Shared modal message dialog | Suspends the calling TJS frame. Yes returns `1`. No or Escape returns `0`. The initial focus is No. |
 | `Rect()` / `Rect(existing)` / `Rect(left, top, right, bottom)` | TJS-owned signed edge value | `width` and `height` derive from edges. The right and bottom edges are exclusive for point tests. `clip` and `union` change the receiver only when the resulting area is positive. `nativeArray` requires native pointer interop. |
+| `Layer.piledCopy` | Shared Canvas subtree capture | A composed copy runs pending paint callbacks in tree order and waits for their image jobs before freezing the scene. `ltPsScreen` uses the retained renderer's alpha-preserving screen blend. |
+| `Layer.modulate(hue, saturation, luminance)` (`layerExImage.dll`) | Shared byte-domain HSL image effect | The effect updates RGB in the current drawing clip in main-image coordinates and preserves alpha. With a full drawing clip it affects the whole image. The TJS call resumes after the shared image result is available. |
+| `Layer.clipAlphaRect` | Shared image processing / Canvas | The operation can suspend its paint callback. The presenter keeps the previous complete picture through the current paint pass, including later callbacks that prepare related layers. |
+| `AlphaMovie.showNextImage` | Shared immutable media frame / Canvas | A layer or snapshot retains the selected picture after the movie advances or releases its decoder. |
+
+The `layerExImage` clip contract follows [LayerExImage.cpp at 3aff625](https://github.com/wamsoft/layerExImage/blob/3aff625dba5c545ba722bb43b0a5ca1ad4f4336d/LayerExImage.cpp#L20-L28).
+
+AJPM Mode A movie frames carry color and a separate compressed alpha plane.
+The shared codec combines them before the retained Canvas receives the frame.
 | Sound buffers / movie layers | Shared Audio/Media | Native buffer/layer state, callbacks and waits. |
 | XP3, plug-in facades and structured saves | Scoped resources, Storage and Documents | Declared native facades; original DLL code is not executed. |
 
@@ -78,12 +87,12 @@ Native API names use the Rust registration receiver when the native class is sel
 
 | ID / API | Purpose | Status | Gap / condition | Source |
 | --- | --- | --- | --- | --- |
-| `c.FPSRate` | FPSRate | Handled | — | [alpha_movie.rs:224](../../crates/crysirror-krkr/src/alpha_movie.rs#L224) |
-| `c.FPSScale` | FPSScale | Handled | — | [alpha_movie.rs:224](../../crates/crysirror-krkr/src/alpha_movie.rs#L224) |
-| `c.frame` | frame | Handled | — | [alpha_movie.rs:196](../../crates/crysirror-krkr/src/alpha_movie.rs#L196) |
-| `c.numOfFrame` | numOfFrame | Handled | — | [alpha_movie.rs:224](../../crates/crysirror-krkr/src/alpha_movie.rs#L224) |
-| `c.screenHeight` | screenHeight | Handled | — | [alpha_movie.rs:224](../../crates/crysirror-krkr/src/alpha_movie.rs#L224) |
-| `c.screenWidth` | screenWidth | Handled | — | [alpha_movie.rs:224](../../crates/crysirror-krkr/src/alpha_movie.rs#L224) |
+| `c.FPSRate` | FPSRate | Handled | — | [alpha_movie.rs:242](../../crates/crysirror-krkr/src/alpha_movie.rs#L242) |
+| `c.FPSScale` | FPSScale | Handled | — | [alpha_movie.rs:242](../../crates/crysirror-krkr/src/alpha_movie.rs#L242) |
+| `c.frame` | frame | Handled | — | [alpha_movie.rs:214](../../crates/crysirror-krkr/src/alpha_movie.rs#L214) |
+| `c.numOfFrame` | numOfFrame | Handled | — | [alpha_movie.rs:242](../../crates/crysirror-krkr/src/alpha_movie.rs#L242) |
+| `c.screenHeight` | screenHeight | Handled | — | [alpha_movie.rs:242](../../crates/crysirror-krkr/src/alpha_movie.rs#L242) |
+| `c.screenWidth` | screenWidth | Handled | — | [alpha_movie.rs:242](../../crates/crysirror-krkr/src/alpha_movie.rs#L242) |
 
 ## Registered TJS native APIs / builtins / install
 
@@ -1629,9 +1638,9 @@ fn drive(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyhow::
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `host.media_request(client, MediaRequest::Stop { id: media }); under request=Request::Stop(id)` | `Ok(_) \| Err(crysirror_core::Error::NotFound)` | Local state/value operations | Empty handler: Original no-op status not established | [262](../../crates/crysirror-krkr/src/alpha_movie.rs#L262) |
-| `host.media_request(client, MediaRequest::Stop { id: media }); under request=Request::Stop(id)` | `Err(e) if e.to_string().contains("media handle not found")` | Local state/value operations | Empty handler: Original no-op status not established | [263](../../crates/crysirror-krkr/src/alpha_movie.rs#L263) |
-| `host.media_request(client, MediaRequest::Stop { id: media }); under request=Request::Stop(id)` | `Err(e)` | Local state/value operations | Unsupported: Unconditional rejection | [264](../../crates/crysirror-krkr/src/alpha_movie.rs#L264) |
+| `host.media_request(client, MediaRequest::Stop { id: media }); under request=Request::Stop(id)` | `Ok(_) \| Err(crysirror_core::Error::NotFound)` | Local state/value operations | Empty handler: Original no-op status not established | [280](../../crates/crysirror-krkr/src/alpha_movie.rs#L280) |
+| `host.media_request(client, MediaRequest::Stop { id: media }); under request=Request::Stop(id)` | `Err(e) if e.to_string().contains("media handle not found")` | Local state/value operations | Empty handler: Original no-op status not established | [281](../../crates/crysirror-krkr/src/alpha_movie.rs#L281) |
+| `host.media_request(client, MediaRequest::Stop { id: media }); under request=Request::Stop(id)` | `Err(e)` | Local state/value operations | Unsupported: Unconditional rejection | [282](../../crates/crysirror-krkr/src/alpha_movie.rs#L282) |
 
 ### async_trigger.rs / install
 
@@ -1793,11 +1802,11 @@ fn encode_native_text(text:&str,mode:&str) -> TjsResult<Vec<u8>>
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `mode` | `""` | Local state/value operations | Handled | [1232](../../crates/crysirror-krkr/src/host.rs#L1232) |
-| `mode` | `"c"\|"c1"` | Local state/value operations | Handled | [1233](../../crates/crysirror-krkr/src/host.rs#L1233) |
-| `mode` | `"c2"\|"z"` | Local state/value operations | Handled | [1234](../../crates/crysirror-krkr/src/host.rs#L1234) |
-| `mode` | `mode if mode.len()==2&&mode.starts_with('z')&&mode.as_bytes()[1].is_ascii_digit()` | Local state/value operations | Handled | [1235](../../crates/crysirror-krkr/src/host.rs#L1235) |
-| `mode` | `_` | TjsError::runtime | Unsupported: native text offset/unknown compression mode is unsupported | [1236](../../crates/crysirror-krkr/src/host.rs#L1236) |
+| `mode` | `""` | Local state/value operations | Handled | [1251](../../crates/crysirror-krkr/src/host.rs#L1251) |
+| `mode` | `"c"\|"c1"` | Local state/value operations | Handled | [1252](../../crates/crysirror-krkr/src/host.rs#L1252) |
+| `mode` | `"c2"\|"z"` | Local state/value operations | Handled | [1253](../../crates/crysirror-krkr/src/host.rs#L1253) |
+| `mode` | `mode if mode.len()==2&&mode.starts_with('z')&&mode.as_bytes()[1].is_ascii_digit()` | Local state/value operations | Handled | [1254](../../crates/crysirror-krkr/src/host.rs#L1254) |
+| `mode` | `_` | TjsError::runtime | Unsupported: native text offset/unknown compression mode is unsupported | [1255](../../crates/crysirror-krkr/src/host.rs#L1255) |
 
 ### host.rs / KrkrHost::bind_reserved_layer
 
@@ -1807,7 +1816,7 @@ fn bind_reserved_layer(&mut self, handle: ObjectHandle, window: usize, parent: O
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `id==handle.0` | TjsError::runtime | Unsupported: native parent cycle | [583](../../crates/crysirror-krkr/src/host.rs#L583) |
+| `condition` | `id==handle.0` | TjsError::runtime | Unsupported: native parent cycle | [586](../../crates/crysirror-krkr/src/host.rs#L586) |
 
 ### host.rs / KrkrHost::canvas_op
 
@@ -1817,13 +1826,13 @@ fn canvas_op(&mut self, mut op: Value) -> ()
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `op["op"].as_str() == Some("copy")` | usize::try_from, self.slot_owners.get, self.motion.has_frame, self.layers.get | Handled | [435](../../crates/crysirror-krkr/src/host.rs#L435) |
-| `condition` | `matches!( op["op"].as_str(), Some("clear" \| "set" \| "draw" \| "copy" \| "create") )` | usize::try_from, self.slot_owners.get, self.layers.get_mut, u8::try_from | Handled | [445](../../crates/crysirror-krkr/src/host.rs#L445) |
-| `condition` | `let Some(id) = op .get("destination") .or_else(\|\| op.get("id")) .and_then(Value::as_u64)` | usize::try_from, self.slot_owners.get, self.layers.get_mut, u8::try_from | Handled | [449](../../crates/crysirror-krkr/src/host.rs#L449) |
-| `condition; under op["op"].as_str()=Some("clear")` | `let Ok(color)=serde_json::from_value::<[u8;4]>(op["color"].clone())` | Local state/value operations | Handled | [464](../../crates/crysirror-krkr/src/host.rs#L464) |
-| `op["op"].as_str()` | `Some("clear")` | u8::try_from | Handled | [463](../../crates/crysirror-krkr/src/host.rs#L463) |
-| `op["op"].as_str()` | `Some("draw") if l.full_alpha == Some(255)` | Local state/value operations | Handled | [470](../../crates/crysirror-krkr/src/host.rs#L470) |
-| `op["op"].as_str()` | `_` | Local state/value operations | Handled | [471](../../crates/crysirror-krkr/src/host.rs#L471) |
+| `condition` | `op["op"].as_str() == Some("copy")` | usize::try_from, self.slot_owners.get, self.motion.has_frame, self.layers.get | Handled | [438](../../crates/crysirror-krkr/src/host.rs#L438) |
+| `condition` | `matches!( op["op"].as_str(), Some("clear" \| "set" \| "draw" \| "copy" \| "create") )` | usize::try_from, self.slot_owners.get, self.layers.get_mut, u8::try_from | Handled | [448](../../crates/crysirror-krkr/src/host.rs#L448) |
+| `condition` | `let Some(id) = op .get("destination") .or_else(\|\| op.get("id")) .and_then(Value::as_u64)` | usize::try_from, self.slot_owners.get, self.layers.get_mut, u8::try_from | Handled | [452](../../crates/crysirror-krkr/src/host.rs#L452) |
+| `condition; under op["op"].as_str()=Some("clear")` | `let Ok(color)=serde_json::from_value::<[u8;4]>(op["color"].clone())` | Local state/value operations | Handled | [467](../../crates/crysirror-krkr/src/host.rs#L467) |
+| `op["op"].as_str()` | `Some("clear")` | u8::try_from | Handled | [466](../../crates/crysirror-krkr/src/host.rs#L466) |
+| `op["op"].as_str()` | `Some("draw") if l.full_alpha == Some(255)` | Local state/value operations | Handled | [473](../../crates/crysirror-krkr/src/host.rs#L473) |
+| `op["op"].as_str()` | `_` | Local state/value operations | Handled | [474](../../crates/crysirror-krkr/src/host.rs#L474) |
 
 ### host.rs / KrkrHost::sync
 
@@ -1833,7 +1842,7 @@ fn sync(&mut self) -> TjsResult<()>
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `l.kind == 0` | Local state/value operations | Handled | [946](../../crates/crysirror-krkr/src/host.rs#L946) |
+| `condition` | `l.kind == 0` | Local state/value operations | Handled | [951](../../crates/crysirror-krkr/src/host.rs#L951) |
 
 ### host.rs / KrkrHost::write_binary
 
@@ -1843,7 +1852,7 @@ fn write_binary(&mut self, name: &str, mode: &str, bytes: &[u8]) -> TjsResult<()
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `mode != "b"` | TjsError::runtime | Unsupported: native binary stream mode is unsupported | [1177](../../crates/crysirror-krkr/src/host.rs#L1177) |
+| `condition` | `mode != "b"` | TjsError::runtime | Unsupported: native binary stream mode is unsupported | [1196](../../crates/crysirror-krkr/src/host.rs#L1196) |
 
 ### http_plugin.rs / members
 
@@ -2388,15 +2397,21 @@ fn ps_blend(mode: i64) -> Option<crysirror_core::image_processing::PsBlend>
 | `mode` | `28` | Local state/value operations | Handled | [3424](../../crates/crysirror-krkr/src/natives.rs#L3424) |
 | `mode` | `_` | Local state/value operations | Return only: Boolean/optional result interpreted by the caller | [3425](../../crates/crysirror-krkr/src/natives.rs#L3425) |
 
-### piled_copy.rs / copy
+### piled_copy.rs / finish_copy
 
 ```rust
-fn copy(rt: &mut Rt, this: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Variant>
+fn finish_copy(
+    rt: &mut Rt,
+    destination: ObjectHandle,
+    source: ObjectHandle,
+    values: [i64; 6],
+    raw_image: bool,
+) -> Result<Variant>
 ```
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `!raw_image && rt.host().layer(source)?.kind == 1` | Local state/value operations | Handled | [82](../../crates/crysirror-krkr/src/piled_copy.rs#L82) |
+| `condition` | `!raw_image && rt.host().layer(source)?.kind == 1` | Local state/value operations | Handled | [98](../../crates/crysirror-krkr/src/piled_copy.rs#L98) |
 
 ### piled_copy.rs / validate_visible_profile
 
@@ -2411,11 +2426,11 @@ fn validate_visible_profile(
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `kind` | `2 \| 12` | Local state/value operations | Empty handler: Original no-op status not established | [261](../../crates/crysirror-krkr/src/piled_copy.rs#L261) |
-| `kind` | `1 if root` | Local state/value operations | Empty handler: Original no-op status not established | [262](../../crates/crysirror-krkr/src/piled_copy.rs#L262) |
-| `kind` | `1 if layer.full_alpha == Some(255) && layer.image_left <= 0 && layer.image_top <= 0 && layer .image_left .checked_add(layer.image_width) .is_some_and(\|r\| r >= layer.width) && layer .image_top .checked_add(layer.image_height) .is_some_and(\|b\| b >= layer.height)` | Local state/value operations | Empty handler: Original no-op status not established | [263](../../crates/crysirror-krkr/src/piled_copy.rs#L263) |
-| `kind` | `0 if !root && (layer.blank \|\| !layer.has_image)` | Local state/value operations | Empty handler: Original no-op status not established | [274](../../crates/crysirror-krkr/src/piled_copy.rs#L274) |
-| `kind` | `_` | Local state/value operations | Unsupported: Layer.piledCopy source type={kind} / normal-alpha or proven opaque source content | [275](../../crates/crysirror-krkr/src/piled_copy.rs#L275) |
+| `kind` | `2 \| 12 \| 17` | Local state/value operations | Empty handler: Original no-op status not established | [323](../../crates/crysirror-krkr/src/piled_copy.rs#L323) |
+| `kind` | `1 if root` | Local state/value operations | Empty handler: Original no-op status not established | [324](../../crates/crysirror-krkr/src/piled_copy.rs#L324) |
+| `kind` | `1 if layer.full_alpha == Some(255) && layer.image_left <= 0 && layer.image_top <= 0 && layer .image_left .checked_add(layer.image_width) .is_some_and(\|r\| r >= layer.width) && layer .image_top .checked_add(layer.image_height) .is_some_and(\|b\| b >= layer.height)` | Local state/value operations | Empty handler: Original no-op status not established | [325](../../crates/crysirror-krkr/src/piled_copy.rs#L325) |
+| `kind` | `0 if !root && (layer.blank \|\| !layer.has_image)` | Local state/value operations | Empty handler: Original no-op status not established | [336](../../crates/crysirror-krkr/src/piled_copy.rs#L336) |
+| `kind` | `_` | Local state/value operations | Unsupported: Layer.piledCopy source type={kind} / normal-alpha, Photoshop screen or proven opaque source content | [337](../../crates/crysirror-krkr/src/piled_copy.rs#L337) |
 
 ### plugin_ports/packinone.rs / data_pack_storage_name
 

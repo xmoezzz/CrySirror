@@ -15,10 +15,11 @@
 //! picture into `layer` at the movie size and returns its index, or -1 when
 //! none is decoded yet. `loop` is an ordinary member read at `play()`.
 //! Pictures keep the movie's straight alpha, the adapter's canonical layer
-//! representation for ltAlpha and ltAddAlpha.
+//! representation for ltAlpha and ltAddAlpha. Canvas draws retain the selected
+//! picture after the movie advances, closes or reuses its media ID.
 use crate::natives::*;
 use crysirror_core::{
-    service::{HostServices, MediaPhase, MediaRequest},
+    service::{HostServices, MediaPhase, MediaRequest, UploadedImage},
     state::ClientId,
 };
 use crysirror_tjs2::{
@@ -39,7 +40,9 @@ struct Movie {
     media: u32,
     asset: Option<String>,
     info: Option<crysirror_video::amv::AmvInfo>,
-    texture: Option<String>,
+    image: Option<UploadedImage>,
+    published_frames: u64,
+    started: bool,
     playing: bool,
     /// Picture index published by the media clock, -1 before the first.
     presented: i64,
@@ -49,6 +52,7 @@ struct Movie {
 enum Request {
     Play(usize),
     Stop(usize),
+    Remove(u32),
     Seek(usize, i64),
 }
 
@@ -56,6 +60,15 @@ enum Request {
 pub struct AlphaMovies {
     movies: BTreeMap<usize, Movie>,
     requests: VecDeque<Request>,
+}
+
+impl AlphaMovies {
+    pub(crate) fn retire(&mut self, id: usize, retired_images: &mut Vec<String>) {
+        if let Some(movie) = self.movies.remove(&id) {
+            self.requests.push_back(Request::Remove(movie.media));
+            retired_images.extend(movie.image.map(|image| image.path.relative().to_owned()));
+        }
+    }
 }
 
 fn movie<'a>(rt: &'a mut Rt, h: ObjectHandle, what: &str) -> Result<&'a mut Movie> {
@@ -140,10 +153,12 @@ fn show_next_image(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
         .ok_or_else(|| TjsError::runtime(format!("{M}: target must be a Layer")))?;
     let info = info(rt, h, M)?;
     let m = movie(rt, h, M)?;
-    let (Some(texture), true) = (m.texture.clone(), m.presented >= 0) else {
+    let (Some(image), true) = (m.image.as_ref(), m.presented >= 0) else {
         return Ok(Variant::Integer(-1));
     };
     let presented = m.presented;
+    let asset = image.path.relative().to_owned();
+    let opaque = image.opaque;
     let (w, ht) = (i64::from(info.width), i64::from(info.height));
     let l = rt.host().layer(layer)?.clone();
     if [l.image_width, l.image_height] != [w, ht] {
@@ -151,11 +166,11 @@ fn show_next_image(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     }
     let host = rt.host_mut();
     let slot = host.layer(layer)?.slot;
-    host.canvas_op(json!({"op":"set","id":slot,"layer":{"id":0,"rect":[0,0,w,ht],"paint":{"kind":"image","asset":texture}}}));
+    host.canvas_op(json!({"op":"set","id":slot,"layer":{"id":0,"rect":[0,0,w,ht],"paint":{"kind":"image","asset":asset}}}));
     let l = host.layer_mut(layer)?;
     (l.width, l.height) = (w, ht);
     l.blank = false;
-    l.full_alpha = None;
+    l.full_alpha = opaque.then_some(255);
     l.dirty = true;
     host.api_calls += 1;
     Ok(Variant::Integer(presented))
@@ -177,7 +192,10 @@ pub fn install(rt: &mut Rt) {
                 .expect("bounded above");
             movies.insert(
                 h.0,
-                Movie { media, asset: None, info: None, texture: None, playing: false, presented: -1 },
+                Movie {
+                    media, asset: None, info: None, image: None, published_frames: 0,
+                    started: false, playing: false, presented: -1,
+                },
             );
         }
         Ok(Variant::Void)
@@ -242,12 +260,12 @@ pub fn drive(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyh
                 let Some(m) = rt.host().alpha_movies.movies.get(&id) else { continue };
                 let (media, Some(asset)) = (m.media, m.asset.clone()) else { continue };
                 let looping = rt.object_member(h, "loop").is_truthy();
-                let texture = host.media_request(
+                host.media_request(
                     client,
                     MediaRequest::Play { id: media, asset, looping, audio: false, gain: 1. },
                 )?;
                 if let Some(m) = rt.host_mut().alpha_movies.movies.get_mut(&id) {
-                    m.texture = Some(texture.relative().to_owned());
+                    m.started = true;
                 }
                 let start = rt.object_member(h, "__frame").to_integer().unwrap_or(0);
                 if start > 0 {
@@ -264,8 +282,16 @@ pub fn drive(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyh
                     Err(e) => return Err(e.into()),
                 }
                 if let Some(m) = rt.host_mut().alpha_movies.movies.get_mut(&id) {
-                    m.texture = None;
+                    let image = m.image.take();
+                    m.published_frames = 0;
+                    m.started = false;
                     m.presented = -1;
+                    rt.host_mut().retired_images.extend(image.map(|v| v.path.relative().to_owned()));
+                }
+            }
+            Request::Remove(media) => {
+                if host.media_info(client, media).is_ok() {
+                    host.media_request(client, MediaRequest::Remove { id: media })?;
                 }
             }
             Request::Seek(id, frame) => {
@@ -280,22 +306,32 @@ pub fn drive(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyh
 }
 
 /// Once per frame: the presented picture index follows the media clock.
-pub fn observe(rt: &mut Rt, host: &dyn HostServices, client: ClientId) -> anyhow::Result<()> {
-    let active: Vec<(usize, u32, f64)> = rt
+pub fn observe(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyhow::Result<()> {
+    let active: Vec<_> = rt
         .host()
         .alpha_movies
         .movies
         .iter()
-        .filter(|(_, m)| m.playing && m.texture.is_some())
-        .filter_map(|(id, m)| Some((*id, m.media, m.info?.frame_ms)))
+        .filter(|(_, m)| m.playing && m.started)
+        .filter_map(|(id, m)| Some((*id, m.media, m.info?.frame_ms, m.published_frames)))
         .collect();
-    for (id, media, frame_ms) in active {
+    for (id, media, frame_ms, published_frames) in active {
         let Ok(info) = host.media_info(client, media) else { continue };
         if info.phase == MediaPhase::Failed {
             anyhow::bail!("AlphaMovie: shared media decoding failed");
         }
         if info.published_frames == 0 {
             continue;
+        }
+        if published_frames != info.published_frames {
+            let Some(frame) = host.media_image(client, media)? else { continue };
+            let image = host.publish_image_resource(client, media, frame)?;
+            let state = rt.host_mut();
+            let movie = state.alpha_movies.movies.get_mut(&id).expect("active movie");
+            if let Some(previous) = movie.image.replace(image) {
+                state.retired_images.push(previous.path.relative().to_owned());
+            }
+            movie.published_frames = info.published_frames;
         }
         let frame = (info.position_ms as f64 / frame_ms) as i64;
         let frames = rt.host().alpha_movies.movies.get(&id).and_then(|m| m.info).map_or(1, |i| i64::from(i.frames).max(1));

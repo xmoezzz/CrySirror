@@ -1,4 +1,5 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
+use std::io::Read;
 
 use crate::amv::{AmvFile, AmvHeader, AmvMode, FramePacket, QuantTables};
 use crate::bit::BitReader;
@@ -44,12 +45,13 @@ pub struct AmvDecoder {
     q: QuantTables,
     huf: HuffmanSet,
     prev_rgba: Option<Vec<u8>>,
+    mode_a_has_mask: bool,
 }
 
 impl AmvDecoder {
     pub fn new(header: AmvHeader, mode: AmvMode, q: QuantTables) -> Result<Self> {
         let huf = HuffmanSet::jpeg_default()?;
-        Ok(Self { header, mode, q, huf, prev_rgba: None })
+        Ok(Self { header, mode, q, huf, prev_rgba: None, mode_a_has_mask: false })
     }
 
     pub fn header(&self) -> &AmvHeader {
@@ -108,8 +110,9 @@ impl AmvDecoder {
         })
     }
 
-    fn decode_packet_mode_a(&self, pkt: &FramePacket, rgba: &mut [u8]) -> Result<()> {
+    fn decode_packet_mode_a(&mut self, pkt: &FramePacket, rgba: &mut [u8]) -> Result<()> {
         let ah = pkt.header_a().context("mode A header missing")?;
+        let mask = pkt.seg0.as_deref().context("mode A seg0 missing")?;
         let payload = pkt.seg1.as_deref().context("mode A seg1 missing")?;
 
         // Rectangle in pixels; sizes are 16-aligned.
@@ -118,6 +121,11 @@ impl AmvDecoder {
         let rw = ah.w as i32;
         let rh = ah.h as i32;
 
+        // A split-alpha packet describes the complete visible rectangle for
+        // this frame. Pixels that belonged to an earlier rectangle are clear.
+        if !mask.is_empty() || (self.mode_a_has_mask && rw == 0 && rh == 0 && payload.is_empty()) {
+            rgba.fill(0);
+        }
         self.decode_rect_dct(
             payload,
             x0,
@@ -129,7 +137,18 @@ impl AmvDecoder {
             /*q_luma=*/ &self.q.q0,
             /*q_alpha=*/ None,
             rgba,
-        )
+        )?;
+        if !mask.is_empty() {
+            apply_mode_a_mask(
+                mask,
+                rgba,
+                [usize::from(self.header.width), usize::from(self.header.height)],
+                [x0, y0],
+                [usize::from(ah.w), usize::from(ah.h)],
+            )?;
+            self.mode_a_has_mask = true;
+        }
+        Ok(())
     }
 
     fn decode_packet_mode_b(&self, pkt: &FramePacket, rgba: &mut [u8]) -> Result<()> {
@@ -395,6 +414,113 @@ impl AmvDecoder {
         }
 
         Ok(())
+    }
+}
+
+/// Mode A segment 0 is a zlib stream of one alpha byte per rectangle pixel.
+/// Read just one row at a time, including pixels clipped by the canvas.
+fn apply_mode_a_mask(
+    compressed: &[u8],
+    rgba: &mut [u8],
+    [canvas_w, canvas_h]: [usize; 2],
+    [left, top]: [i32; 2],
+    [width, height]: [usize; 2],
+) -> Result<()> {
+    ensure!(
+        width > 0 && height > 0 && width <= canvas_w + 16 && height <= canvas_h + 16
+            && width.checked_mul(height).is_some_and(|bytes| bytes <= 64 * 1024 * 1024),
+        "mode A alpha rectangle exceeds the frame bounds"
+    );
+    let mut mask = flate2::bufread::ZlibDecoder::new(compressed);
+    let mut row = vec![0; width];
+    for y in 0..height {
+        mask.read_exact(&mut row).context("mode A alpha row")?;
+        let dest_y = top + y as i32;
+        if !(0..canvas_h as i32).contains(&dest_y) {
+            continue;
+        }
+        let start = 0.max(-left) as usize;
+        let end = width.min((canvas_w as i32 - left).max(0) as usize);
+        if start >= end {
+            continue;
+        }
+        let start_pixel = dest_y as usize * canvas_w + (left + start as i32) as usize;
+        let destination = &mut rgba[start_pixel * 4..(start_pixel + end - start) * 4];
+        for (pixel, alpha) in destination.chunks_exact_mut(4).zip(&row[start..end]) {
+            pixel[3] = *alpha;
+        }
+    }
+    ensure!(
+        mask.read(&mut [0]).context("mode A alpha end")? == 0
+            && mask.total_in() == compressed.len() as u64,
+        "mode A alpha byte count does not match the rectangle"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod mode_a_tests {
+    use super::*;
+    use crate::amv::{FrameAHeader, FramePacketKind, MAGIC_AJPM};
+    use flate2::{Compression, write::ZlibEncoder};
+    use std::io::Write;
+
+    fn compress(alpha: &[u8]) -> Vec<u8> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(alpha).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn packet(x: i16, alpha: &[u8]) -> FramePacket {
+        let size = if alpha.is_empty() { 0 } else { 16 };
+        let mask = if alpha.is_empty() { Vec::new() } else { compress(alpha) };
+        // Six zero-coefficient blocks produce a single gray color macroblock.
+        let color = if alpha.is_empty() { Vec::new() } else { vec![0, 0x28, 0xa2, 0x8a] };
+        FramePacket {
+            index: 0,
+            file_offset: 0,
+            tag: u32::from_le_bytes(*b"FRAM"),
+            chunk_size: 16 + mask.len() as u32 + color.len() as u32,
+            raw_packet: Vec::new(),
+            kind: FramePacketKind::A {
+                header: FrameAHeader { frame_id: 0, x, y: 0, w: size, h: size },
+                seg0_len: mask.len() as u32,
+                seg1_len: color.len() as u32,
+            },
+            seg0: Some(mask),
+            seg1: Some(color),
+        }
+    }
+
+    #[test]
+    fn mode_a_uses_straight_alpha_and_clears_old_rectangles() {
+        let header = AmvHeader {
+            magic: MAGIC_AJPM, unk04: 0, revision: 0, header_size: 168, unk10: 0,
+            frame_count: 3, fps_num: 1, fps_den: 30, width: 32, height: 16,
+            attr: 2, reserved: [0; 3],
+        };
+        let quant = QuantTables::from_bytes(AmvMode::A, &[1; 128]).unwrap();
+        let mut decoder = AmvDecoder::new(header, AmvMode::A, quant).unwrap();
+        let mut mask = [255; 256];
+        mask[..2].copy_from_slice(&[0, 64]);
+        let first = decoder.decode_packet(&packet(0, &mask)).unwrap();
+        assert_eq!(&first.rgba[..12], &[128, 128, 128, 0, 128, 128, 128, 64, 128, 128, 128, 255]);
+        assert_eq!(&first.rgba[64..68], &[0, 0, 0, 0]);
+        let second = decoder.decode_packet(&packet(16, &mask)).unwrap();
+        assert_eq!(&second.rgba[8..12], &[0, 0, 0, 0]);
+        assert_eq!(&second.rgba[68..72], &[128, 128, 128, 64]);
+        let empty = decoder.decode_packet(&packet(0, &[])).unwrap();
+        assert!(empty.rgba.iter().all(|&byte| byte == 0));
+    }
+
+    #[test]
+    fn mode_a_mask_length_is_exact_and_clipped_to_the_canvas() {
+        let mut canvas = [0; 16];
+        apply_mode_a_mask(&compress(&[1, 2, 3, 4, 5, 6]), &mut canvas, [2, 2], [-1, 0], [3, 2]).unwrap();
+        assert_eq!([canvas[3], canvas[7], canvas[11], canvas[15]], [2, 3, 5, 6]);
+        for bytes in [5, 7] {
+            assert!(apply_mode_a_mask(&compress(&vec![0; bytes]), &mut canvas, [2, 2], [-1, 0], [3, 2]).is_err());
+        }
     }
 }
 

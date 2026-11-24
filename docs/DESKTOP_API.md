@@ -207,3 +207,12 @@ with default audio/gamepad features. It does not run tests, games or demos.
 CI disables LTO and uses 16 codegen units to limit build memory; dependency
 sources are cached, while `target/` and game data are not cached or uploaded.
 Compilation does not establish device, rendering, audio or game compatibility.
+
+## Desktop game library
+
+The library scans game directories under its root when no entries are
+specified. Repeat `--entry NAME=PATH` to show a curated list of installations.
+Each path can name a directory or an explicit executable. Relative paths
+resolve from the library root. Explicit executable paths are passed directly
+to `play`, preserving executable-specific detection and archive configuration.
+Press Enter, click the selected card, or click Play to start the selected game.
