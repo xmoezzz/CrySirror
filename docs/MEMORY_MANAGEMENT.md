@@ -70,6 +70,12 @@ operations to conceal allocation pressure. Declared 3D tier reductions are
 documented in [render tiers](../crates/crysirror-render-tier/README.md); they do
 not authorize degrading visual-novel composition.
 
+The wgpu renderer may retain up to 128 small immutable snapshot textures and
+2 MiB of their payload per renderer for recent reuse. Entries move out of the
+active map and use the existing texture budget. Combined renderer and
+compositor admission drops optional entries before rejecting work at that
+budget. Explicit readback and active presentation retain their own leases.
+
 ## Diagnostics and allocation failure
 
 Record what the source can actually expose: allocation purpose/format, requested
@@ -90,6 +96,44 @@ reports its live/retired objects and free memory domains. These are specific
 diagnostics, not complete engine-wide accounting. Switch's shared backend
 tracks submission retirement; inspect its actual allocator/driver diagnostics
 before claiming process-wide memory measurements.
+
+### Prepared CPU asset cache
+
+On publication, the runtime compares the decoded payload size and current
+residency against the prepared-cache budget. Under pressure it can reclaim
+recent automatic entries before the idle timer expires. It first checks that
+enough bytes are reclaimable, then removes the least recently used entries
+until the incoming payload fits. Explicit tickets, active streaming leases
+and payloads shared with consumers retain their ownership.
+
+If current owners prevent admission, the error reports the resident and
+incoming byte counts. An automatic request denied for this reason can decode
+again on a subsequent lookup once sufficient space is available. Oversized
+payloads and decoder errors retain their failure status.
+
+For ordinary TLG assets, metadata queries, prefetch and visible image lookups
+share the prepared image entry for the client and resolved path. The worker
+derives dimensions, verified opacity and the encoded content fingerprint from
+the same decode. The RGBA surface uses the existing prepared cache budget, and
+the worker uses the shared image scratch budget. A mount refresh invalidates
+the ticket and its metadata together.
+
+### Dynamic font sources
+
+Outline and shaping consumers share immutable encoded font bytes. The interner
+keeps weak references, so the source survives only while a consumer owns it.
+For a storage load, the runtime reserves both buffers during conversion from
+the I/O vector to shared storage and returns the temporary charge immediately.
+The remaining reservation follows the source through rendering and shaping.
+Bitmap faces also retain their separate decoded coverage reservation.
+
+### wgpu subtree rendering
+
+Subtree renderers share their parent's immutable pipelines and bind group
+layouts for the same device and output format. Each renderer retains its own
+targets, output history and texture cache. The full-screen wipe output is
+allocated on the first active screen wipe at the current size. Ordinary
+subtree captures present from the compositing history textures.
 
 ## Platform review and validation
 

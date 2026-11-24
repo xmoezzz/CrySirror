@@ -50,6 +50,26 @@ fn failure(source: &str) -> TjsError {
     }
 }
 
+#[test]
+fn inherited_method_extracted_by_an_unrelated_object_keeps_its_stored_receiver() {
+    assert_eq!(ok(r#"
+        class Base { function where() { return this.tag; } }
+        class Empty {}
+        class Single extends Base {}
+        class Multi extends Empty, Base {}
+        class Helper {
+            var tag = "helper";
+            function extract(cls) { return cls.where; }
+        }
+        class Caller {
+            var tag = "caller";
+            function invoke(method) { return method(); }
+        }
+        var helper = new Helper(), caller = new Caller();
+        return caller.invoke(helper.extract(Single)) + ":" + caller.invoke(helper.extract(Multi));
+    "#), Variant::String("caller:caller".into()));
+}
+
 /// `function outer() { var q = 5; return function() { return q; }; }` cannot
 /// see `q`: the inner function compiles it as `%-2.q`, and neither the
 /// enclosing frame's registers nor the global object carry it.

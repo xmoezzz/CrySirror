@@ -36,7 +36,7 @@ impl Renderer {
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
-        let protected = Self::frame_cache_keys(assets, &self.engine_frame)?;
+        let protected = self.frame_cache_keys(assets, &self.engine_frame)?;
         let retained = std::mem::take(&mut self.engine_frame);
         let previous_keys = self.capture_texture_keys.clone();
         let previous_scene_keys = self.scene_texture_keys.clone();
@@ -175,7 +175,7 @@ impl Renderer {
             .device
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("persistent destination sampling"),
-                layout: &self.texture_layout,
+                layout: &self.draw_pipelines.texture_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -270,7 +270,7 @@ impl Renderer {
                     occlusion_query_set: None,
                 });
                 if let Some(seed) = &seed {
-                    pass.set_pipeline(&self.ray_composite_pipeline);
+                    pass.set_pipeline(&self.draw_pipelines.ray_composite_pipeline);
                     pass.set_bind_group(0, &self.textures[seed].bind, &[]);
                     pass.set_vertex_buffer(0, buffer.slice(..));
                     pass.draw(0..6, 0..1);

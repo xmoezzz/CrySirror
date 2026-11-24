@@ -1147,7 +1147,7 @@ impl Paint {
                     reveal.validate(glyphs.len())?;
                 }
             }
-            Self::Snapshot { size, layers } => validate_snapshot(*size, layers)?,
+            Self::Snapshot { size, layers } => validate_immutable_snapshot(*size, layers)?,
             Self::Solid { .. } => {}
         }
         Ok(())
@@ -1184,6 +1184,29 @@ pub fn snapshot_nesting(layers: &[LayerSpec]) -> usize {
         .max()
         .unwrap_or(0)
 }
+fn validate_immutable_snapshot(size: [u32; 2], layers: &Arc<Vec<LayerSpec>>) -> Result<()> {
+    // Installation and nested frame extraction can validate the same frozen
+    // page many times. A weak reference keeps allocation identity unique,
+    // without retaining the page or accepting a later copy-on-write mutation.
+    type ValidatedPages = BTreeMap<usize, ([u32; 2], std::sync::Weak<Vec<LayerSpec>>)>;
+    thread_local! {
+        static VALID: std::cell::RefCell<ValidatedPages> = std::cell::RefCell::new(BTreeMap::new());
+    }
+    let key = Arc::as_ptr(layers) as usize;
+    if VALID.with(|cache| cache.borrow().get(&key).is_some_and(|(checked, _)| *checked == size)) {
+        return Ok(());
+    }
+    validate_snapshot(size, layers)?;
+    VALID.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= 2048 {
+            cache.retain(|_, (_, weak)| weak.strong_count() != 0);
+        }
+        if cache.len() < 2048 { cache.insert(key, (size, Arc::downgrade(layers))); }
+    });
+    Ok(())
+}
+
 fn validate_snapshot(size: [u32; 2], layers: &[LayerSpec]) -> Result<()> {
     ensure!(
         size.iter().all(|v| (1..=8192).contains(v)),
@@ -1242,7 +1265,7 @@ fn validate_snapshot(size: [u32; 2], layers: &[LayerSpec]) -> Result<()> {
         let mut depth = 0;
         while let Some(id) = parent {
             depth += 1;
-            ensure!(depth < 30, "snapshot depth/cycle budget");
+            ensure!(depth < 30, "snapshot depth/cycle budget (layer {}, parent {}, {} layers)", layer.id, id, layers.len());
             parent = by_id
                 .get(&id)
                 .context("snapshot parent outside frozen tree")?
@@ -2214,6 +2237,17 @@ impl LayerSystem {
             .get(&client.0)
             .context("snapshot client missing")?;
         ensure!(owner.contains_key(&root), "snapshot layer {root} missing");
+        // Native save UI may capture the foreground page while its back page
+        // is the hidden input of a transition. The snapshot owns one endpoint
+        // in the requested page's local coordinates, including when it is the
+        // destination root itself.
+        let root_fade = self.crossfade(client, root);
+        let capture_root = root_fade
+            .filter(|fade| fade.elapsed_ms * 2 >= fade.duration_ms)
+            .map_or(root, |fade| fade.source);
+        let excluded = root_fade
+            .filter(|fade| capture_root == root && fade.source != root)
+            .map(|fade| fade.source);
         let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for (&id, layer) in owner {
             if let Some(parent) = layer.parent {
@@ -2222,11 +2256,11 @@ impl LayerSystem {
         }
         let suppressed=self.sequences.suppressed_layers(client.0);
         let mut selected = BTreeSet::new();
-        let mut stack = vec![(root, 0usize)];
+        let mut stack = vec![(capture_root, 0usize)];
         let mut out = Vec::new();
         while let Some((id, depth)) = stack.pop() {
             let original = &owner[&id];
-            if id != root && (!original.visible ||suppressed.contains(&id)) {
+            if id != capture_root && (Some(id) == excluded || !original.visible || suppressed.contains(&id)) {
                 continue;
             }
             ensure!(depth < 30, "snapshot subtree depth budget");
@@ -2239,7 +2273,7 @@ impl LayerSystem {
                 coverage::Operation::Write=>Paint::CoverageWrite{paint:Box::new(paint)},
                 coverage::Operation::Reset{value}=>Paint::CoverageReset{value},
             };
-            if id == root {
+            if id == capture_root {
                 layer.parent = None;
                 layer.rect[0] = 0.;
                 layer.rect[1] = 0.;
@@ -2270,11 +2304,13 @@ impl LayerSystem {
                     "snapshot puppet frame has not completed owner publication"
                 );
             }
-            if let Paint::Snapshot { layers, .. } = &layer.paint {
-                ensure!(
-                    1 + snapshot_nesting(layers) < MAX_SNAPSHOT_NESTING,
-                    "snapshot nesting budget"
-                );
+            if matches!(&layer.paint, Paint::Snapshot { layers, .. }
+                if 1 + snapshot_nesting(layers) >= MAX_SNAPSHOT_NESTING) {
+                // Capturing the subtree adds another isolated render target.
+                // Compact an already-full bitmap before wrapping it, retaining
+                // the original live layer and the normal snapshot budget.
+                layer.paint = crate::canvas::flatten_snapshot(&layer.paint)
+                    .context("snapshot nesting budget")?;
             }
             ensure!(
                 layer.paint.glyph_reveal_status().is_none_or(|r| r.complete),
@@ -2289,14 +2325,15 @@ impl LayerSystem {
         }
         if out.iter().any(|layer| layer.viewport_clip.is_some()) {
             let by_id = owner.iter().map(|(id, layer)| (*id, layer)).collect();
-            let inverse = viewport_clip::inverse_to_root(root, &by_id)?;
+            let inverse = viewport_clip::inverse_to_root(capture_root, &by_id)?;
             viewport_clip::rebase(&mut out, inverse)?;
         }
         // An active isolated composition wholly inside the captured subtree is
         // frozen at its nearest endpoint (before below half progress, else the
         // source in the destination's place). One crossing the root fails.
         for (id, fade) in self.crossfades.get(&client.0).into_iter().flatten() {
-            let inside = |n: u32| selected.contains(&n) && n != root;
+            if *id == root { continue; }
+            let inside = |n: u32| selected.contains(&n) && n != capture_root;
             if inside(*id) && inside(fade.source) {
                 let before = fade.elapsed_ms * 2 < fade.duration_ms;
                 let drop = descendants_of(&out, if before { fade.source } else { *id });
@@ -2316,12 +2353,23 @@ impl LayerSystem {
             // later, so it cannot change the captured subtree's own pixels.
             ensure!(
                 !selected.contains(id) && !selected.contains(&fade.source),
-                "snapshot of active composite is unsupported"
+                "snapshot of active composite is unsupported (root {root}, destination {id}, source {})",
+                fade.source
             );
         }
         self.depth_orders
             .freeze(client.0, &self.clients, &mut out)?;
         snapshot_opacity::isolate(&mut out)?;
+        if capture_root != root {
+            for layer in &mut out {
+                if layer.id == capture_root {
+                    layer.id = root;
+                }
+                if layer.parent == Some(capture_root) {
+                    layer.parent = Some(root);
+                }
+            }
+        }
         out.sort_by_key(|layer| (layer.order, layer.id));
         Ok(out)
     }
@@ -2389,6 +2437,23 @@ impl LayerSystem {
         result
     }
     pub fn apply_batch(&mut self, client: ClientId, commands: &[LayerCommand]) -> Result<()> {
+        self.apply_batch_inner(client, commands, true)
+    }
+
+    /// Canvas presentation roots are rebuilt as one atomic unit. A transition
+    /// can reference several of those roots, so check it after the whole rebuild.
+    pub(super) fn rebuild_presentations(&mut self, rebuild: impl FnOnce(&mut Self) -> Result<()>) -> Result<()> {
+        self.transaction(|layers| {
+            rebuild(layers)?;
+            layers.validate_crossfades()
+        })
+    }
+
+    pub(super) fn apply_presentation_batch(&mut self, client: ClientId, commands: &[LayerCommand]) -> Result<()> {
+        self.apply_batch_inner(client, commands, false)
+    }
+
+    fn apply_batch_inner(&mut self, client: ClientId, commands: &[LayerCommand], validate_crossfades: bool) -> Result<()> {
         ensure!(commands.len() <= 4096, "layer command limit");
         let side = self.side_state();
         let had_owner = self.clients.contains_key(&client.0);
@@ -2398,7 +2463,11 @@ impl LayerSystem {
             .and_then(|()| {
                 if !commands.is_empty() { self.targets.advance(); }
                 self.sync_puppets();
-                self.validate_touched(client, journal.keys().copied())
+                self.validate_touched(client, journal.keys().copied())?;
+                if validate_crossfades {
+                    self.validate_crossfades()?;
+                }
+                Ok(())
             });
         if let Err(e) = result {
             self.child_index.remove(&client.0);
@@ -3193,7 +3262,7 @@ impl LayerSystem {
         }
         self.depth_orders.validate(&self.clients)?;
         self.targets.validate(&self.clients)?;
-        self.validate_crossfades()
+        Ok(())
     }
     /// Full validation, including frozen snapshot payloads (restore paths).
     pub fn validate(&self) -> Result<()> {

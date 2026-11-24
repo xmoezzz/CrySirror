@@ -160,6 +160,11 @@ function onUpdate() {
     const hit = cardAt(x, y);
     if (hit >= 0) {
       if (hit === selected) launch(); else select(hit);
+    } else {
+      const s = library.scale;
+      const top = px(H - 58 * s);
+      if (x >= px(W - 330 * s) && x < px(W - 206 * s) &&
+          y >= top && y < top + px(38 * s)) launch();
     }
   }
   if (n > 0) layout(1 - Math.pow(0.0005, dt / 1000));

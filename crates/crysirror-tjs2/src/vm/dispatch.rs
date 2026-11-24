@@ -11,7 +11,7 @@ use crate::runtime::{
 };
 
 use super::opcode::{OpcodeForm, binary_family, execute_binary_value, opcode_form};
-use super::{CallOutcome, Continuation, DispatchFlags, Frame, Vm};
+use super::{CallOutcome, Continuation, DispatchFlags, Frame, Step, Vm};
 
 /// Labels `error` with the member access or call that was in flight, unless
 /// the error already describes a failure of its own.
@@ -140,12 +140,11 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         flags: DispatchFlags,
         caller_this: Option<ObjectHandle>,
     ) -> Result<Variant> {
-        let kind = self.runtime.heap[handle.0].kind.clone();
         if let ObjectKind::Proxy {
             primary,
             fallback,
             bind_this,
-        } = kind
+        } = self.runtime.heap[handle.0].kind
         {
             if let Some(primary) = primary {
                 // `tTJSObjectProxy::PropGet` (`tjsInterCodeExec.cpp:284`) tries
@@ -247,7 +246,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
             {
                 let receiver = self.inherited_member_this(handle, caller_this);
                 match self.prop_get_handle(owner, name, flags.without_probe(), receiver) {
-                    Ok(value) => return Ok(self.bind_proxy_value(value, receiver)),
+                    Ok(value) => return Ok(self.bind_proxy_value(value, bind_this.or(Some(handle)))),
                     Err(error) if error.is_member_not_found() => {}
                     Err(error) => return Err(error),
                 }
@@ -258,7 +257,10 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 // walks on only for TJS_E_MEMBERNOTFOUND, so a super class
                 // member that exists with a void value is the answer.
                 match self.prop_get_handle(class_handle, name, flags.without_probe(), receiver) {
-                    Ok(value) => return Ok(self.bind_proxy_value(value, receiver)),
+                    // PropGet forwards ObjThis to accessors. The returned method
+                    // still has its stored binding when read through a class by
+                    // an unrelated caller (krkrz tjsInterCodeExec.cpp, PropGet).
+                    Ok(value) => return Ok(self.bind_proxy_value(value, bind_this.or(Some(handle)))),
                     Err(error) if error.is_member_not_found() => {}
                     Err(error) => return Err(error),
                 }
@@ -491,12 +493,11 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         flags: DispatchFlags,
         caller_this: Option<ObjectHandle>,
     ) -> Result<()> {
-        let kind = self.runtime.heap[handle.0].kind.clone();
         if let ObjectKind::Proxy {
             primary,
             fallback,
             bind_this,
-        } = kind
+        } = self.runtime.heap[handle.0].kind
         {
             if let Some(primary) = primary {
                 let primary_value = self.member_in_super_chain(primary, name)?;
@@ -782,12 +783,11 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         caller_this: Option<ObjectHandle>,
     ) -> Result<Variant> {
         let (handle, closure_this) = self.closure_parts(&target)?;
-        let kind = self.runtime.heap[handle.0].kind.clone();
         if let ObjectKind::InterCode {
             file_id,
             object_index,
             context: BytecodeContextType::Property,
-        } = kind
+        } = self.runtime.heap[handle.0].kind
         {
             let file = self.runtime.script_file(file_id)?;
             let getter = file.objects[object_index].prop_getter;
@@ -805,7 +805,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
             // when `PropGetter` is null (`tjsInterCodeExec.cpp:3138`).
             return Err(TjsError::access_denied());
         }
-        if let ObjectKind::NativeProperty { id, access } = kind {
+        if let ObjectKind::NativeProperty { id, access } = self.runtime.heap[handle.0].kind {
             if !access.allows_get() {
                 // An official read-only or write-only property answers
                 // `TJS_E_ACCESSDENYED` without running the accessor
@@ -832,12 +832,11 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         caller_this: Option<ObjectHandle>,
     ) -> Result<()> {
         let (handle, closure_this) = self.closure_parts(&target)?;
-        let kind = self.runtime.heap[handle.0].kind.clone();
         if let ObjectKind::InterCode {
             file_id,
             object_index,
             context: BytecodeContextType::Property,
-        } = kind
+        } = self.runtime.heap[handle.0].kind
         {
             let file = self.runtime.script_file(file_id)?;
             let setter = file.objects[object_index].prop_setter;
@@ -850,7 +849,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
             // when `PropSetter` is null (`tjsInterCodeExec.cpp:3172`).
             return Err(TjsError::access_denied());
         }
-        if let ObjectKind::NativeProperty { id, access } = kind {
+        if let ObjectKind::NativeProperty { id, access } = self.runtime.heap[handle.0].kind {
             if !access.allows_set() {
                 return Err(TjsError::access_denied());
             }
@@ -2210,117 +2209,83 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         }
     }
 
-    pub(super) fn invalidate_object(&mut self, handle: ObjectHandle) -> Result<bool> {
-        if !self.runtime.heap[handle.0].valid {
-            return Ok(false);
-        }
-        if self.runtime.heap[handle.0].invalidating {
-            return Ok(false);
-        }
+    /// Execute INV in native order, preserving progress if a script or native
+    /// finalizer parks on a resource. Only retire storage after finalization
+    /// and all registered window items have actually completed.
+    pub(super) fn invalidate_instruction(
+        &mut self, frame: &mut Frame, reg: i16, pc: usize, next: usize,
+    ) -> Result<super::Step> {
+        use super::frame::{InvalidationPhase as Phase, PendingInvalidation};
+        use super::Step;
 
-        self.runtime.heap[handle.0].invalidating = true;
-        let receiver_type = self.object_debug_type(handle, "object");
-        let result = (|| {
-            // `tTJSCustomObject::Finalize` (`tjsObject.cpp:451`) dispatches
-            // `finalize` through `FuncCall` and *ignores its return value*, so
-            // an object that does not carry the member -- an Array, a
-            // Dictionary, a plain data object -- finalizes silently.  Only a
-            // member that exists and throws propagates.
-            let finalize = match self.prop_get_handle(
-                handle,
-                "finalize",
-                DispatchFlags::default(),
-                Some(handle),
-            ) {
-                Ok(value) => value,
-                Err(error) if error.is_member_not_found() => Variant::Void,
-                Err(error) => return Err(error),
+        if frame.invalidations.is_empty() {
+            let object = self.resolve_object(frame.get(reg)?).ok().filter(|h| {
+                let o = &self.runtime.heap[h.0];
+                o.valid && !o.invalidating
+            });
+            let Some(object) = object else {
+                frame.set(reg, Variant::Integer(0))?;
+                return Ok(Step::Next(next));
             };
-            if !matches!(finalize, Variant::Void) {
-                let base_depth = self.runtime.call_depth;
-                let outcome = self
-                    .call_value(
-                        finalize,
-                        Some(handle),
-                        Vec::new(),
-                        false,
-                        Continuation::Root,
-                    )
-                    .map_err(|error| {
-                        label_in_flight_call(
-                            error,
-                            TjsMemberAccess {
-                                operation: TjsMemberOperation::Calling,
-                                receiver_type: receiver_type.clone(),
-                                member_name: Some("finalize".to_string()),
-                                callee_type: None,
-                            },
-                        )
-                    })?;
-                match outcome {
-                    CallOutcome::Immediate(_, Continuation::Root) => {}
-                    CallOutcome::Immediate(_, continuation) => {
-                        return Err(TjsError::runtime(format!(
-                            "unexpected finalize continuation {continuation:?}"
-                        )));
+            self.runtime.heap[object.0].invalidating = true;
+            frame.invalidations.push(PendingInvalidation { object, phase: Phase::CallFinalizer });
+        }
+        while let Some(current) = frame.invalidations.last_mut() {
+            let object = current.object;
+            match &mut current.phase {
+                Phase::CallFinalizer => {
+                    let finalize = match self.prop_get_handle(object, "finalize", DispatchFlags::default(), Some(object)) {
+                        Ok(value) => value,
+                        Err(error) if error.is_member_not_found() => Variant::Void,
+                        Err(error) => return Err(error),
+                    };
+                    if self.runtime.suspended_call.is_some() {
+                        return Ok(Step::Next(pc));
                     }
-                    CallOutcome::Frame(frame) => {
-                        self.run_call_stack(vec![*frame], base_depth)
-                            .map_err(|error| {
-                                label_in_flight_call(
-                                    error,
-                                    TjsMemberAccess {
-                                        operation: TjsMemberOperation::Calling,
-                                        receiver_type: receiver_type.clone(),
-                                        member_name: Some("finalize".to_string()),
-                                        callee_type: None,
-                                    },
-                                )
-                            })?;
+                    if !matches!(finalize, Variant::Void) {
+                        let outcome = self.call_value(finalize, Some(object), Vec::new(), false,
+                            Continuation::CallerRegister { dest: None })
+                            .map_err(|error| label_in_flight_call(error, TjsMemberAccess {
+                                operation: TjsMemberOperation::Calling,
+                                receiver_type: self.object_debug_type(object, "object"),
+                                member_name: Some("finalize".into()), callee_type: None,
+                            }))?;
+                        current.phase = Phase::TakeRegistered;
+                        if let CallOutcome::Frame(callee) = outcome {
+                            return Ok(Step::Call { frame: callee, resume_pc: pc });
+                        }
+                        if std::mem::take(&mut self.runtime.suspend_requested) {
+                            return Ok(Step::Suspend { resume_pc: pc, dest: None });
+                        }
+                        if self.runtime.suspended_call.is_some() {
+                            return Ok(Step::Next(pc));
+                        }
+                    } else {
+                        current.phase = Phase::TakeRegistered;
+                    }
+                }
+                Phase::TakeRegistered => {
+                    current.phase = Phase::Children(self.runtime.host_mut().take_registered_objects(object).into_iter());
+                }
+                Phase::Children(children) => {
+                    if let Some(child) = children.next() {
+                        let item = &mut self.runtime.heap[child.0];
+                        if item.valid && !item.invalidating {
+                            item.invalidating = true;
+                            frame.invalidations.push(PendingInvalidation { object: child, phase: Phase::CallFinalizer });
+                        }
+                    } else {
+                        self.runtime.heap[object.0].valid = false;
+                        self.runtime.heap[object.0].invalidating = false;
+                        self.runtime.host_mut().invalidate_object(object);
+                        self.runtime.heap[object.0].members.clear();
+                        frame.invalidations.pop();
                     }
                 }
             }
-            Ok(())
-        })();
-
-        if let Err(error) = result {
-            self.runtime.heap[handle.0].invalidating = false;
-            return Err(error);
         }
-
-        // `Window::Invalidate` finalizes every object the window registered
-        // through `Window.add` inside its native invalidation
-        // (`WindowIntf.cpp:222-243`) -- after the window's own `finalize`
-        // member and before `DeleteAllMembers` (`tjsObject.cpp:451-469`).
-        // Only the VM can dispatch an item's `finalize` member, so the host
-        // hands the drained registration list over and the VM runs each
-        // item's `_Finalize`; an item that throws is logged and the loop goes
-        // on with the next one, exactly like the reference's catch arm
-        // (`:236-240`).  The window is still valid while the loop runs --
-        // `IsInvalidated` is set only after `Finalize` returns
-        // (`tjsObject.cpp:430-440`).
-        let registered = self.runtime.host_mut().take_registered_objects(handle);
-        for item in registered {
-            if let Err(error) = self.invalidate_object(item) {
-                let message = error.message.clone();
-                self.runtime.host_mut().log(&message);
-            }
-        }
-
-        self.runtime.heap[handle.0].valid = false;
-        self.runtime.heap[handle.0].invalidating = false;
-        self.runtime.host_mut().invalidate_object(handle);
-        // `Finalize` ends with `DeleteAllMembers` (`tjsObject.cpp:467`), which
-        // empties the symbol table the way `Clear()` (`tjsObject.h:566`) does:
-        // `Count` drops to zero and every member a script kept -- the class
-        // functions `regmember` copied onto the instance, the native class's
-        // accessor members, this engine's layer bookkeeping members -- is gone.
-        // The object itself stays allocated, so `NativeInstanceSupport` in the
-        // reference keeps answering for it and a native wrapper that receives
-        // it as an argument still resolves a Layer; what died is every script
-        // member protocol (`GetValidity()`, `tjsObject.cpp:493`).
-        self.runtime.heap[handle.0].members.clear();
-        Ok(true)
+        frame.set(reg, Variant::Integer(1))?;
+        Ok(Step::Next(next))
     }
 
     pub(super) fn call_value(
@@ -2497,7 +2462,11 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 if let Some(name) = self.runtime.native_call_name(id, false).map(str::to_string) {
                     self.runtime.trace_native_call(&name, native_this, &args);
                 }
-                let value = function.call(self.runtime, native_this, args)?;
+                let needed = !matches!(continuation, Continuation::CallerRegister { dest: None });
+                let prior = self.runtime.set_native_result_needed(needed);
+                let result = function.call(self.runtime, native_this, args);
+                self.runtime.set_native_result_needed(prior);
+                let value = result?;
                 if let Some(instance) = native_class_body {
                     for (name, value) in self.runtime.object_members(handle) {
                         let value = match value {
@@ -2546,10 +2515,11 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 if let Some(name) = self.runtime.native_call_name(id, true).map(str::to_string) {
                     self.runtime.trace_native_call(&name, this_obj, &args);
                 }
-                Ok(CallOutcome::Immediate(
-                    function.call(self, this_obj, args)?,
-                    continuation,
-                ))
+                let needed = !matches!(continuation, Continuation::CallerRegister { dest: None });
+                let prior = self.runtime.set_native_result_needed(needed);
+                let result = function.call(self, this_obj, args);
+                self.runtime.set_native_result_needed(prior);
+                Ok(CallOutcome::Immediate(result?, continuation))
             }
             ObjectKind::Proxy {
                 primary,
@@ -3277,13 +3247,14 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         frame: &mut Frame,
         reg: i16,
         result_needed: bool,
-    ) -> Result<()> {
+        next_pc: usize,
+    ) -> Result<Step> {
         let source = frame.get(reg)?.to_tjs_string()?;
         if source.is_empty() {
             if result_needed {
                 frame.set(reg, Variant::Void)?;
             }
-            return Ok(());
+            return Ok(Step::Next(next_pc));
         }
 
         let source = if result_needed {
@@ -3296,12 +3267,21 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
             .top_level
             .ok_or_else(|| TjsError::runtime("eval bytecode has no top-level object"))?;
         let file_id = self.runtime.install_script_file(Arc::new(file));
-        let value =
-            self.execute_file_object_with_this(file_id, top_level, Vec::new(), frame.this_obj)?;
-        if result_needed {
-            frame.set(reg, value)?;
-        }
-        Ok(())
+        // Keep the evaluated code on the caller's stack so its result reaches
+        // the operand register even when a host resource lookup suspends it.
+        let evaluated = self.create_call_frame(
+            file_id,
+            top_level,
+            Vec::new(),
+            frame.this_obj,
+            Continuation::CallerRegister {
+                dest: result_needed.then_some(reg),
+            },
+        )?;
+        Ok(Step::Call {
+            frame: Box::new(evaluated),
+            resume_pc: next_pc,
+        })
     }
 
     pub(super) fn instance_of(&mut self, value: &Variant, class_name: &str) -> Result<bool> {

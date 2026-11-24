@@ -37,6 +37,20 @@ fn encoded_bytes_use_shared_decoder_then_exact_pair_worker() {
     std::fs::write(&file,br#"{"schema":2,"name":"encoded","content_revision":"1","canvas":[8,8],"assets":"assets","clients":[{"name":"one","adapter":"crysirror-script-v1","game":"authored"}]}"#).unwrap();
     let mut runtime = Runtime::load(&file, &dir.path().join("state")).unwrap();
     let images = runtime.host.image_metadata(ClientId(1)).unwrap();
+    let png = crysirror_image::encode_png(&ImageSurface {
+        width: 2, height: 1, rgba: vec![20, 30, 40, 255, 50, 60, 70, 0],
+    }).unwrap();
+    std::fs::write(dir.path().join("assets/metadata.png"), &png).unwrap();
+    assert!(!images.prepare_metadata("metadata.png").unwrap());
+    let until = Instant::now() + Duration::from_secs(5);
+    while !images.prepare_metadata("metadata.png").unwrap() {
+        assert!(Instant::now() < until);
+        std::thread::yield_now();
+    }
+    assert_eq!(images.size("metadata.png").unwrap(), [2, 1]);
+    assert!(!images.opaque("metadata.png").unwrap());
+    assert_eq!(images.fingerprint("metadata.png").unwrap(), *blake3::hash(&png).as_bytes());
+    assert!(images.prepare_metadata("metadata.png").unwrap());
     let bytes: Arc<[u8]> =
         crysirror_image::encode_png(&ImageSurface::filled(1, 1, [255, 1, 100, 0]).unwrap())
             .unwrap()

@@ -16,6 +16,7 @@ crysirror-image.workspace = true
 crysirror-video = { path = "../crysirror-video" }
 eluna = { package = "crysirror-codec-emote", path = "../crysirror-codec-emote" }
 crysirror-scene.workspace = true
+crysirror-tasks.workspace = true
 crysirror-puppet.workspace = true
 crysirror-puppet-eluna.workspace = true
 crysirror-tjs2.workspace = true
@@ -26,6 +27,8 @@ serde_json.workspace = true
 lz4_flex = { version = "=0.11.6", default-features = false, features = ["safe-encode", "safe-decode"] }
 encoding_rs = "0.8"
 base64 = "0.22"
+crc32fast = "1.5"
+web-time = "1"
 
 [dev-dependencies]
 lz4_flex = { version = "=0.11.6", default-features = false, features = ["safe-encode", "safe-decode", "frame"] }

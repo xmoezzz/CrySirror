@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 pub struct State {
     readers: BTreeMap<usize, (CsvReader, Option<ObjectHandle>)>,
+    next_callback_row: Option<ObjectHandle>,
 }
 fn err(e: impl std::fmt::Display) -> TjsError {
     TjsError::runtime(format!("CSVParser: {e:#}"))
@@ -53,28 +54,29 @@ fn init(rt: &mut Rt, h: ObjectHandle, a: &[Variant], storage: bool) -> Result<()
         reader(rt, h)?.0.init_text(input.encode_utf16().collect()).map_err(err)
     }
 }
-fn parse(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>, storage: bool) -> Result<Variant> {
+fn parse(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>, storage: bool, iterator: &Variant) -> Result<Variant> {
     let h = this_of(rt, t, "CSVParser.parse")?;
     init(rt, h, &a, storage)?;
     let target = reader(rt, h)?.1.unwrap_or(h);
     if !crate::natives::has_member(rt, target, "doLine") {
         return Ok(Variant::Void);
     }
-    // A callback may invalidate the parser; no further row is delivered then.
-    loop {
-        let Some(r) = rt.host_mut().csv.readers.get_mut(&h.0) else {
-            break;
-        };
-        let Some(fields) = r.0.next_record().map_err(err)? else {
-            break;
-        };
-        let line = Variant::Integer(r.0.line_number);
-        let fields = row(rt, fields);
-        rt.call_variant_method(Variant::Object(target), "doLine", vec![fields, line])?;
-    }
-    Ok(Variant::Void)
+    let next = rt.host().csv.next_callback_row.ok_or_else(|| err("callback reader absent"))?;
+    rt.tail_call_function(iterator.clone(), vec![Variant::Object(next), Variant::Object(h), Variant::Object(target)])
 }
-pub fn install(rt: &mut Rt) {
+
+fn next_callback_row(rt: &mut Rt, _: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Variant> {
+    rt.host_mut().before_batch_item()?;
+    let parser = args.first().and_then(object_arg).ok_or_else(|| err("callback parser absent"))?;
+    // doLine may invalidate or reinitialize its parser.
+    let Some(reader) = rt.host_mut().csv.readers.get_mut(&parser.0) else { return Ok(Variant::Void) };
+    let Some(fields) = reader.0.next_record().map_err(err)? else { return Ok(Variant::Void) };
+    let line = Variant::Integer(reader.0.line_number);
+    let fields = row(rt, fields);
+    Ok(Variant::Object(rt.alloc_array_object(vec![fields, line])))
+}
+
+pub fn install(rt: &mut Rt) -> Result<()> {
     let c = crate::natives::native_class(rt, "CSVParser", |rt, t, a| {
         let h = this_of(rt, t, "CSVParser")?;
         let mut r = CsvReader::default();
@@ -122,10 +124,23 @@ pub fn install(rt: &mut Rt) {
                     None => Ok(Variant::Void),
                 }
             }),
-            ("parse", |rt, t, a| parse(rt, t, a, false)),
-            ("parseStorage", |rt, t, a| parse(rt, t, a, true)),
         ],
     );
+    let file = rt.compile_source("CSVParser row callbacks", r#"
+        return function(next, parser, target) {
+            var record;
+            while ((record = next(parser)) !== void) target.doLine(record[0], record[1]);
+        };
+    "#)?;
+    let iterator = rt.execute_file(&file)?;
+    let next = rt.alloc_native_function(next_callback_row);
+    rt.host_mut().csv.next_callback_row = Some(next);
+    for (name, storage) in [("parse", false), ("parseStorage", true)] {
+        let iterator = iterator.clone();
+        rt.register_object_native(c, name, move |rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>| {
+            parse(rt, t, args, storage, &iterator)
+        });
+    }
     rt.register_object_native_property(
         c,
         "currentLineNumber",
@@ -135,6 +150,7 @@ pub fn install(rt: &mut Rt) {
         },
         read_only,
     );
+    Ok(())
 }
 
 impl State {
@@ -143,6 +159,7 @@ impl State {
     }
 
     pub(crate) fn gc_roots(&self, out: &mut Vec<ObjectHandle>) {
+        out.extend(self.next_callback_row);
         // Readers are owned by scripts (a collected one drops its entry via
         // `invalidate`); a live reader keeps its callback target.
         out.extend(self.readers.values().filter_map(|(_, target)| *target));

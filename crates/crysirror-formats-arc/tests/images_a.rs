@@ -301,6 +301,38 @@ fn tlg5_literal_planes() {
     assert_eq!(decode("kirikiri/tlg", &b).unwrap().rgba, [3, 2, 5, 255]);
 }
 #[test]
+fn tlg5_rgba_predictor_crosses_rows_and_blocks() {
+    for channels in [3, 4] {
+        let mut bytes = b"TLG5.0\0raw\x1a".to_vec();
+        bytes.push(channels);
+        for value in [2u32, 3, 2, 0, 0] {
+            bytes.extend(value.to_le_bytes());
+        }
+        let planes = [
+            [250u8, 2, 3, 4, 5, 6],
+            [8, 9, 10, 11, 12, 13],
+            [25, 26, 27, 28, 29, 30],
+            [128, 129, 1, 2, 3, 4],
+        ];
+        for block in [0..4, 4..6] {
+            for plane in &planes[..channels as usize] {
+                bytes.push(1);
+                bytes.extend((block.len() as u32).to_le_bytes());
+                bytes.extend(&plane[block.clone()]);
+            }
+        }
+        let mut expected = [
+            [33, 8, 2, 128], [68, 17, 13, 1],
+            [70, 18, 15, 129], [144, 38, 41, 4],
+            [111, 30, 32, 132], [228, 63, 77, 11],
+        ];
+        if channels == 3 {
+            for pixel in &mut expected { pixel[3] = 255; }
+        }
+        assert_eq!(decode("kirikiri/tlg", &bytes).unwrap().rgba, expected.concat());
+    }
+}
+#[test]
 fn malformed_and_unknown_are_errors() {
     for id in images_a::FORMATS {
         assert!(decode(id, &[]).is_err(), "{id}");

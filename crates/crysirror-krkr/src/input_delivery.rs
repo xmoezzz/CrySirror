@@ -15,6 +15,7 @@ pub(super) struct Delivery {
     pointer_active: bool,
     hit: Hit,
     actions: VecDeque<Action>,
+    hit_candidates: Option<VecDeque<(usize, i64, i64)>>,
 }
 #[derive(Clone)]
 enum Action {
@@ -80,6 +81,7 @@ impl Delivery {
             previous_hover: None,
             pointer_active: false,
             hit: None,
+            hit_candidates: None,
             actions: VecDeque::from([
                 Action::Call(window, method, args),
                 Action::LayerKey(method, key),
@@ -89,6 +91,9 @@ impl Delivery {
     }
     pub(super) fn roots(&self, out: &mut Vec<Variant>) {
         out.push(Variant::Object(self.window));
+        if let Some(candidates) = &self.hit_candidates {
+            out.extend(candidates.iter().map(|(id, _, _)| Variant::Object(ObjectHandle(*id))));
+        }
         for action in &self.actions {
             match action {
                 Action::Call(h, _, args) => {
@@ -234,6 +239,7 @@ impl KrkrVm {
                 previous_hover: rt.host().mouse.hover,
                 pointer_active: active,
                 hit: None,
+                hit_candidates: None,
                 actions,
             });
         }
@@ -269,7 +275,7 @@ impl KrkrVm {
                     selected,
                     moved,
                 } => {
-                    if let Some(hit) = self.prepared_mouse_target(host, x, y, true)? {
+                    if let Some(hit) = self.prepared_mouse_target(&mut delivery, host, x, y, true)? {
                         match stage {
                             0 => {
                                 let previous = self.rt.as_ref().unwrap().host().mouse.hover;
@@ -328,7 +334,7 @@ impl KrkrVm {
                     }
                 }
                 Action::ResolveOnly => {
-                    if let Some(hit) = self.prepared_mouse_target(host, x, y, true)? {
+                    if let Some(hit) = self.prepared_mouse_target(&mut delivery, host, x, y, true)? {
                         delivery.hit = hit;
                     } else {
                         pending = true;
@@ -365,7 +371,7 @@ impl KrkrVm {
                     delivery.call(delivery.window, "onMouseDown", args);
                 }
                 Action::DownTarget(button) => {
-                    if let Some(hit) = self.prepared_mouse_target(host, x, y, true)? {
+                    if let Some(hit) = self.prepared_mouse_target(&mut delivery, host, x, y, true)? {
                         if let Some((id, lx, ly)) = hit {
                             self.rt.as_mut().unwrap().host_mut().mouse.release_called = false;
                             delivery.actions.push_front(Action::CaptureAfter(id));
@@ -409,7 +415,7 @@ impl KrkrVm {
                     );
                 }
                 Action::ClickTarget(cx, cy) => {
-                    if let Some(hit) = self.prepared_mouse_target(host, cx, cy, false)? {
+                    if let Some(hit) = self.prepared_mouse_target(&mut delivery, host, cx, cy, false)? {
                         if let Some((id, lx, ly)) = hit {
                             if self.rt.as_ref().unwrap().host().mouse.capture == Some(id) {
                                 delivery.call(
@@ -424,7 +430,7 @@ impl KrkrVm {
                     }
                 }
                 Action::UpTarget(button) => {
-                    if let Some(hit) = self.prepared_mouse_target(host, x, y, true)? {
+                    if let Some(hit) = self.prepared_mouse_target(&mut delivery, host, x, y, true)? {
                         if let Some((id, lx, ly)) = hit {
                             if delivery.frame.buttons_down
                                 & (buttons::MOUSE_LEFT | buttons::MOUSE_RIGHT)
@@ -489,32 +495,35 @@ impl KrkrVm {
         anyhow::bail!("native input callback budget")
     }
     fn prepared_mouse_target(
-        &mut self,
-        host: &mut dyn HostServices,
-        x: i64,
-        y: i64,
-        capture: bool,
+        &mut self, delivery: &mut Delivery, host: &mut dyn HostServices,
+        x: i64, y: i64, capture: bool,
     ) -> Result<Option<Hit>> {
-        if capture && self.rt.as_ref().unwrap().host().mouse.capture.is_some() {
-            return self.mouse_target(x, y).map(Some);
+        if capture && let Some(hit) = self.captured_mouse_target(x, y)? {
+            delivery.hit_candidates = None;
+            return Ok(Some(Some(hit)));
         }
-        let frame = InputFrame {
-            pointer_x: i32::try_from(x)?,
-            pointer_y: i32::try_from(y)?,
-            ..Default::default()
-        };
-        if !crate::image_api::prepare_hit_images(
-            self.rt.as_mut().unwrap(),
-            host,
-            self.client,
-            frame,
-        )? {
-            return Ok(None);
+        let candidates = delivery.hit_candidates.get_or_insert_with(|| {
+            self.rt.as_ref().unwrap().host().hits(x, y).into()
+        });
+        while let Some(&(id, lx, ly)) = candidates.front() {
+            let rt = self.rt.as_mut().unwrap();
+            if !rt.object_valid(ObjectHandle(id)) {
+                candidates.pop_front();
+                continue;
+            }
+            if !crate::image_api::prepare_hit_image(rt, host, self.client, id, lx, ly)? {
+                return Ok(None);
+            }
+            candidates.pop_front();
+            let old = std::mem::replace(&mut rt.host_mut().can_suspend, false);
+            let result = self.hit_candidate(id, lx, ly);
+            self.rt.as_mut().unwrap().host_mut().can_suspend = old;
+            if let Some(enabled) = result? {
+                delivery.hit_candidates = None;
+                return Ok(Some(enabled.then_some((id, lx, ly))));
+            }
         }
-        let old = self.rt.as_ref().unwrap().host().can_suspend;
-        self.rt.as_mut().unwrap().host_mut().can_suspend = false;
-        let result = self.pointer_hit(x, y).map(Some);
-        self.rt.as_mut().unwrap().host_mut().can_suspend = old;
-        result
+        delivery.hit_candidates = None;
+        Ok(Some(None))
     }
 }

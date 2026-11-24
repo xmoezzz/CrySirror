@@ -72,9 +72,9 @@ impl ArchiveFormat for Xp3 {
         } else {
             adler_xor::open_auto(index.archive, context)?
         };
-        // CXDEC filename recovery renumbers entries; rebuild the table from
-        // the published view in that (rare) case.
-        let info_names = if renumbered && !info_names.is_empty() {
+        // Indirect recovery can assign aliases even when the raw index has no
+        // inline names. It can also renumber entries, so use the decoded view.
+        let info_names = if renumbered {
             archive
                 .entries()
                 .iter()
@@ -212,7 +212,7 @@ pub(super) fn parse_index(source: Arc<dyn AssetReader>, context: &DecodeContext)
     };
     let table = read_index_chain(source.clone(), table_offset, base, context)?;
     let mut c = Cursor::new(&table);
-    let mut names = BTreeMap::new();
+    let mut names: BTreeMap<u32, BTreeMap<String, String>> = BTreeMap::new();
     let mut entries = Vec::new();
     let mut plans = Vec::new();
     let mut hxv4 = None;
@@ -237,7 +237,11 @@ pub(super) fn parse_index(source: Arc<dyn AssetReader>, context: &DecodeContext)
             let mut b = Cursor::new(body);
             let hash = b.le32()?;
             let chars = usize::from(b.le16()?);
-            names.insert(hash, utf16(b.take(chars * 2)?)?);
+            let name = utf16(b.take(chars * 2)?)?;
+            let token = cxdec::filename_token(&name);
+            if let Some(old) = names.entry(hash).or_default().insert(token, name.clone()) {
+                ensure!(old == name, "conflicting XP3 legacy filename token");
+            }
         } else if tag == b"File" {
             limits(context, entries.len() + 1)?;
             let (entry, plan) = file_entry(
@@ -312,7 +316,7 @@ fn file_entry(
     data: &[u8],
     id: u32,
     version: u32,
-    names: &BTreeMap<u32, String>,
+    names: &BTreeMap<u32, BTreeMap<String, String>>,
     inline_name: Option<InlineName>,
     source_size: u64,
     base: u64,
@@ -409,16 +413,25 @@ fn file_entry(
             "XP3 inline filename hash does not match File adlr"
         );
         let direct = name == inline.name;
-        let token = name.len() == 32
-            && name.bytes().all(|b| b.is_ascii_hexdigit())
+        let token = is_filename_token(&name)
             && name.eq_ignore_ascii_case(&cxdec::filename_token(&inline.name));
         ensure!(
             direct || token,
             "XP3 inline filename does not match original info name/token"
         );
         (inline.name.replace('\\', "/"), Some(name.into_boxed_str()))
+    } else if let Some(aliases) = names.get(&hash) {
+        // hnfn/eliF keys are the content Adler value, so two different names
+        // can share a bucket. Match the info filename token before publishing
+        // either logical path. Keep the native token usable for explicit reads.
+        if let Some(proven) = aliases.get(&name.to_ascii_lowercase()) {
+            (proven.replace('\\', "/"), Some(name.into_boxed_str()))
+        } else {
+            ensure!(aliases.len() == 1, "ambiguous XP3 legacy name table for {name}");
+            (aliases.values().next().unwrap().clone(), None)
+        }
     } else {
-        (names.get(&hash).cloned().unwrap_or(name), None)
+        (name, None)
     };
     let entry = ArchiveEntry {
         id,
@@ -445,4 +458,8 @@ fn file_entry(
             },
         },
     ))
+}
+
+fn is_filename_token(name: &str) -> bool {
+    name.len() == 32 && name.bytes().all(|b| b.is_ascii_hexdigit())
 }

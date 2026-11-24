@@ -123,6 +123,61 @@ mod imp {
     pub(crate) static HACCEL: std::sync::atomic::AtomicIsize =
         std::sync::atomic::AtomicIsize::new(0);
 
+    #[cfg(target_os = "windows")]
+    fn native_item(item: &muda::MenuItemKind) -> &dyn muda::IsMenuItem {
+        use muda::MenuItemKind::*;
+        match item { MenuItem(i) => i, Submenu(i) => i, Predefined(i) => i, Check(i) => i, Icon(i) => i }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn roots(bars: &[(u32, MenuSpec)]) -> Vec<(u32, u32, &MenuItemSpec)> {
+        bars.iter().flat_map(|(owner, bar)| bar.items.iter()
+            .filter(|item| item.visible && !item.separator && !item.label.is_empty())
+            .map(move |item| (*owner, bar.id, item))).collect()
+    }
+
+    /// A menu state update must not detach the bar: on Windows that changes
+    /// the client origin and resizes the rendering surface.
+    #[cfg(target_os = "windows")]
+    fn update_attached_bar(live: &Menu, prepared: &Menu, before: &[(u32, MenuSpec)], after: &[(u32, MenuSpec)]) -> Result<()> {
+        let old_specs = roots(before);
+        let next_specs = roots(after);
+        let old = live.items();
+        let next = prepared.items();
+        for (i, item) in next.iter().enumerate() {
+            let Some(previous) = old.get(i) else {
+                live.append(native_item(item))?;
+                continue;
+            };
+            if old_specs.get(i) == next_specs.get(i) { continue; }
+            if let (Some(a), Some(b)) = (previous.as_submenu(), item.as_submenu()) {
+                if a.id() == b.id() {
+                    if a.text() != b.text() { a.set_text(b.text()); }
+                    if a.is_enabled() != b.is_enabled() { a.set_enabled(b.is_enabled()); }
+                    for child in a.items() { a.remove(native_item(&child))?; }
+                    for child in b.items() {
+                        // DestroyMenu also destroys attached submenus. Transfer
+                        // each child out of the staging tree before it drops.
+                        b.remove(native_item(&child))?;
+                        a.append(native_item(&child))?;
+                    }
+                    continue;
+                }
+            }
+            // Preserve at least one entry while replacing a command whose
+            // kind or accelerator has changed.
+            if old.len() == 1 {
+                live.insert(native_item(item), i)?;
+                live.remove(native_item(previous))?;
+            } else {
+                live.remove(native_item(previous))?;
+                live.insert(native_item(item), i)?;
+            }
+        }
+        for previous in old.iter().skip(next.len()) { live.remove(native_item(previous))?; }
+        Ok(())
+    }
+
     impl NativeMenu {
         pub fn new(app_name: &str, window: &Window) -> Result<Self> {
             let _ = window;
@@ -197,27 +252,31 @@ mod imp {
                 }
             }
             #[cfg(target_os = "macos")]
-            menu.init_for_nsapp();
+            {
+                menu.init_for_nsapp();
+                self.menu = menu;
+            }
             #[cfg(target_os = "windows")]
             // SAFETY: `hwnd` is the live top-level window this host owns; the
-            // previous bar is detached from it before the new one attaches.
+            // bar stays attached until the actual menu becomes empty.
             unsafe {
-                if self.attached {
-                    self.menu.remove_for_hwnd(self.hwnd).ok();
+                let visible = !menu.items().is_empty();
+                if self.attached && visible {
+                    update_attached_bar(&self.menu, &menu, self.shown.as_deref().unwrap_or(&[]), &bars)?;
+                } else {
+                    if self.attached { self.menu.remove_for_hwnd(self.hwnd)?; }
+                    if visible { menu.init_for_hwnd(self.hwnd)?; }
+                    self.menu = menu;
                 }
-                if !bars.is_empty() {
-                    menu.init_for_hwnd(self.hwnd)?;
-                }
-                self.attached = !bars.is_empty();
-                HACCEL.store(menu.haccel(), std::sync::atomic::Ordering::Release);
+                self.attached = visible;
+                HACCEL.store(self.menu.haccel(), std::sync::atomic::Ordering::Release);
             }
-            let titles: Vec<String> = menu
+            let titles: Vec<String> = self.menu
                 .items()
                 .iter()
                 .filter_map(|i| i.as_submenu().map(|s| s.text()))
                 .collect();
             log::info!("native menu bar installed: {titles:?}");
-            self.menu = menu;
             self.shown = Some(bars);
             Ok(())
         }
@@ -278,6 +337,49 @@ mod imp {
                 ]}]
             }))
             .unwrap()
+        }
+
+        #[test]
+        #[cfg(target_os = "windows")]
+        #[allow(unsafe_code)]
+        fn state_updates_keep_the_window_menu_attached() {
+            use windows_sys::Win32::Foundation::RECT;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                CreateWindowExW, DestroyWindow, GetClientRect, GetMenu, WS_OVERLAPPEDWINDOW,
+            };
+            // A hidden system window exercises the same non-client sizing as
+            // the real host, without starting a GPU or displaying a test UI.
+            unsafe {
+                let class = "STATIC\0".encode_utf16().collect::<Vec<_>>();
+                let hwnd = CreateWindowExW(0, class.as_ptr(), class.as_ptr(), WS_OVERLAPPEDWINDOW,
+                    0, 0, 640, 480, std::ptr::null_mut(), std::ptr::null_mut(),
+                    std::ptr::null_mut(), std::ptr::null());
+                assert!(!hwnd.is_null());
+                let mut menu = NativeMenu { menu: Menu::new(), app_name: String::new(), shown: None,
+                    hwnd: hwnd as isize, attached: false };
+                let mut ui = UiSystem::default();
+                ui.menus.put(1, bar()).unwrap();
+                menu.sync(&mut ui).unwrap();
+                let original = GetMenu(hwnd);
+                assert!(!original.is_null());
+                let mut before: RECT = std::mem::zeroed();
+                assert_ne!(GetClientRect(hwnd, &mut before), 0);
+                let mut changed = bar();
+                changed.items[0].children[2].enabled = true;
+                ui.menus.put(1, changed).unwrap();
+                menu.sync(&mut ui).unwrap();
+                assert_eq!(GetMenu(hwnd), original);
+                assert!(menu.menu.items()[0].as_submenu().unwrap().items()[2]
+                    .as_menuitem().unwrap().is_enabled());
+                let mut after: RECT = std::mem::zeroed();
+                assert_ne!(GetClientRect(hwnd, &mut after), 0);
+                assert_eq!((before.right, before.bottom), (after.right, after.bottom));
+                ui.menus.remove(1, 7).unwrap();
+                menu.sync(&mut ui).unwrap();
+                assert!(GetMenu(hwnd).is_null());
+                drop(menu);
+                DestroyWindow(hwnd);
+            }
         }
 
         #[test]

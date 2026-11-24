@@ -2,7 +2,7 @@
 use crysirror_core::state::ClientId;
 use crysirror_scene::{
     canvas::{CanvasCommand as C, CanvasSystem},
-    layer::{Blend, LayerCommand as L, LayerSpec, LayerSystem, Paint, Primitive},
+    layer::{LayerCommand as L, LayerSpec, LayerSystem, Paint, Primitive},
 };
 use serde_json::json;
 const CLIENT: ClientId = ClientId(1);
@@ -331,39 +331,49 @@ fn clipped_replace_copies_transparency_instead_of_blending_over_old_pixels() {
 }
 
 #[test]
-fn unsupported_blend_group_opacity_and_active_composite_fail_explicitly() {
-    for mode in [0, 1, 2] {
-        let mut root = solid(100, None, [0., 0., 16., 16.], [255; 4], 0);
-        let mut parent = solid(101, Some(100), [0., 0., 8., 8.], [255; 4], 1);
-        let child = solid(102, Some(101), [0., 0., 4., 4.], [255; 4], 2);
-        if mode == 0 {
-            root.blend = Blend::Add;
-        }
-        if mode == 1 {
-            parent.opacity = 128;
-        }
-        let sibling = solid(200, None, [0., 0., 16., 16.], [255; 4], 0);
+fn snapshot_of_a_transition_destination_freezes_the_nearest_page() {
+    for elapsed_ms in [0, 250] {
+        let front = solid(100, None, [1., 2., 16., 16.], [255, 0, 0, 255], 0);
+        let mut back = solid(200, Some(100), [3., 4., 16., 16.], [0, 0, 255, 255], 1);
+        back.visible = false;
+        let child = solid(201, Some(200), [2., 3., 4., 4.], [0, 255, 0, 255], 2);
         let mut layers = LayerSystem::default();
-        layers
-            .install(CLIENT, &[root, parent, child, sibling])
-            .unwrap();
-        if mode == 2 {
-            layers
-                .apply_batch(
-                    CLIENT,
-                    &[L::BeginCrossfade {
-                        id: 100,
-                        source: 200,
-                        duration_ms: 500,
-                        rule: None,
-                        external: false,
-                    }],
-                )
-                .unwrap();
-        }
+        layers.install(CLIENT, &[front, back, child]).unwrap();
+        layers.apply_batch(CLIENT, &[
+            L::BeginCrossfade { id: 100, source: 200, duration_ms: 500, rule: None, external: true },
+            L::SetCrossfadeElapsed { id: 100, elapsed_ms },
+        ]).unwrap();
         let mut c = destination(&mut layers);
-        assert!(c.apply_batch(CLIENT, &[copy(100)], &mut layers).is_err());
+        c.apply_batch(CLIENT, &[copy(100)], &mut layers).unwrap();
+        let (background, detail) = if elapsed_ms == 0 {
+            ([1., 0., 0., 1.], [1., 0., 0., 1.])
+        } else {
+            ([0., 0., 1., 1.], [0., 1., 0., 1.])
+        };
+        let Paint::Snapshot { layers: specs, .. } = snapshot_primitive(&layers).paint else {
+            unreachable!()
+        };
+        let mut frozen = LayerSystem::default();
+        frozen.install(CLIENT, &specs).unwrap();
+        assert_eq!(sample(&frozen, 0.5, 0.5), background);
+        assert_eq!(sample(&frozen, 2.5, 3.5), detail);
+        assert_eq!(layers.crossfade(CLIENT, 100).unwrap().elapsed_ms, elapsed_ms);
     }
+}
+
+#[test]
+fn snapshot_rejects_a_crossfade_on_a_child_with_an_external_source() {
+    let root = solid(100, None, [0., 0., 16., 16.], [255; 4], 0);
+    let child = solid(101, Some(100), [0., 0., 16., 16.], [255; 4], 1);
+    let external = solid(200, None, [0., 0., 16., 16.], [255; 4], 2);
+    let mut layers = LayerSystem::default();
+    layers.install(CLIENT, &[root, child, external]).unwrap();
+    layers.apply_batch(CLIENT, &[L::BeginCrossfade {
+        id: 101, source: 200, duration_ms: 500, rule: None, external: false,
+    }]).unwrap();
+    let mut c = destination(&mut layers);
+    let error = c.apply_batch(CLIENT, &[copy(100)], &mut layers).unwrap_err();
+    assert!(error.to_string().contains("snapshot of active composite is unsupported"));
 }
 
 #[test]

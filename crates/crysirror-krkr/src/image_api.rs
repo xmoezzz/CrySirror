@@ -237,15 +237,18 @@ pub(crate) fn commit_result(rt:&mut Rt,host:&mut dyn HostServices,client:ClientI
 /// and the atomic write then use shared image and storage services.
 pub(crate) struct LayerImageSave{
     pub layer:usize,
-    name:String,
+    // A bookmark encoder returns its octet to the suspended script. A
+    // saveLayerImage call writes it atomically through the Save capability.
+    destination:LayerImageDestination,
     format:SaveFormat,
     input:Option<ImageInput>,
     job:Option<crysirror_core::image_processing::ImageJob>,
 }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
-enum SaveFormat{Bmp(crysirror_image::bmp_encode::BmpDepth),Png}
-/// The save handlers' mode acceptance (GraphicsLoaderIntf.cpp TVPSaveAsBMP):
-/// "bmp" and "bmp32" are 32-bit. TLG and JPEG need encoders the engine lacks.
+enum SaveFormat{Bmp(crysirror_image::bmp_encode::BmpDepth),Png,Jpeg(u8)}
+enum LayerImageDestination { File(String), Bookmark }
+/// Layer.saveLayerImage handler modes. The PackinOne bookmark encoder selects
+/// its JPEG quality separately from this mode string.
 fn save_format(mode:&str)->Option<SaveFormat>{
     use crysirror_image::bmp_encode::BmpDepth as D;
     match mode.to_ascii_lowercase().trim_start_matches('.'){
@@ -266,7 +269,7 @@ pub(crate) fn save_layer_image(rt:&mut Rt,t:Option<ObjectHandle>,args:Vec<Varian
     let mode=if matches!(args.get(1),None|Some(Variant::Void)){"bmp".to_owned()}else{crate::natives::string(&args,1,M)?};
     let Some(format)=save_format(&mode) else{
         return Err(if matches!(mode.to_ascii_lowercase().trim_start_matches('.'),"jpg"|"jpeg"|"tlg"|"tlg5"|"tlg6"){
-            unsupported(&format!("{M} type {mode:?}"),"a shared encoder for this format")
+            unsupported(&format!("{M} type {mode:?}"),"a registered layer-save handler for this mode")
         }else{
             TjsError::runtime(format!("unknown graphic format {mode:?}"))
         });
@@ -276,8 +279,53 @@ pub(crate) fn save_layer_image(rt:&mut Rt,t:Option<ObjectHandle>,args:Vec<Varian
     if crate::storage::save_path(&name).map_err(|e|TjsError::runtime(e.to_string()))?.is_none(){
         return Err(TjsError::runtime(format!("{M}: {name:?} is outside the save capability root")));
     }
-    rt.host_mut().image_save=Some(LayerImageSave{layer:h.0,name,format,input:layer.image_source,job:None});
+    rt.host_mut().image_save=Some(LayerImageSave{layer:h.0,destination:LayerImageDestination::File(name),format,input:layer.image_source,job:None});
     rt.request_suspend();Ok(Variant::Void)
+}
+
+/// Legacy bookmarks append the saved variables after a BMP. PackinOne
+/// bookmarks use their own JPEG or PNG boundary.
+pub(crate) fn load_save_thumbnail(
+    rt: &mut Rt,
+    layer: ObjectHandle,
+    name: &str,
+    mut bytes: Vec<u8>,
+) -> Result<Variant> {
+    let end = if bytes.starts_with(b"BM") {
+        let field = |at: usize| {
+            let value = bytes.get(at..at + 4)?.try_into().ok()?;
+            usize::try_from(u32::from_le_bytes(value)).ok()
+        };
+        field(2).zip(field(10)).and_then(|(size, pixels)| {
+            (pixels >= 14 && pixels < size && size <= bytes.len()).then_some(size)
+        })
+    } else {
+        crate::plugin_ports::packinone::image_end(&bytes)
+    };
+    let end = end.ok_or_else(|| TjsError::runtime(format!("no valid BMP, JPEG or PNG thumbnail in `{name}`")))?;
+    bytes.truncate(end);
+    crate::psbfile_plugin::load_encoded_image(rt, layer, name, bytes)
+}
+
+pub(crate) fn capture_bookmark_thumbnail(rt: &mut Rt, layer: ObjectHandle, jpeg: bool, quality: u8) -> Result<Variant> {
+    before_bitmap_call(rt)?;
+    if !rt.host().can_suspend {
+        return Err(unsupported("makeDataPackThumb", "a resumable image capture"));
+    }
+    if rt.host().image_save.is_some() {
+        return Err(TjsError::runtime("native layer image save already pending"));
+    }
+    let source = rt.host().layer(layer)?;
+    if !source.has_image { return Ok(Variant::Void); }
+    let input = source.image_source.clone();
+    rt.host_mut().image_save = Some(LayerImageSave {
+        layer: layer.0,
+        destination: LayerImageDestination::Bookmark,
+        format: if jpeg { SaveFormat::Jpeg(quality) } else { SaveFormat::Png },
+        input, job: None,
+    });
+    rt.request_suspend();
+    Ok(Variant::Void)
 }
 fn poll_save(rt:&mut Rt,host:&mut dyn HostServices,client:ClientId)->anyhow::Result<bool>{
     let Some(mut save)=rt.host_mut().image_save.take() else{return Ok(true)};
@@ -298,9 +346,15 @@ fn poll_save(rt:&mut Rt,host:&mut dyn HostServices,client:ClientId)->anyhow::Res
             let bytes=match save.format{
                 SaveFormat::Bmp(depth)=>crysirror_image::bmp_encode::encode_bmp(width,height,&image.rgba(),depth)?,
                 SaveFormat::Png=>crysirror_image::encode_png(&crysirror_image::ImageSurface{width,height,rgba:image.rgba().to_vec()})?,
+                SaveFormat::Jpeg(quality)=>crysirror_image::encode_jpeg(&crysirror_image::ImageSurface{width,height,rgba:image.rgba().to_vec()},quality)?,
             };
-            let job=rt.host().storage().map_err(|e|anyhow::anyhow!("{e}"))?.begin_write(&save.name,bytes.into()).map_err(|e|anyhow::anyhow!("{e}"))?;
-            rt.host_mut().writes.push_back(job);
+            match save.destination {
+                LayerImageDestination::File(name) => {
+                    let job=rt.host().storage().map_err(|e|anyhow::anyhow!("{e}"))?.begin_write(&name,bytes.into()).map_err(|e|anyhow::anyhow!("{e}"))?;
+                    rt.host_mut().writes.push_back(job);
+                }
+                LayerImageDestination::Bookmark => rt.set_resume_value(Variant::Octet(bytes)),
+            }
             Ok(true)
         }
     }
@@ -366,7 +420,12 @@ pub fn clip_alpha(rt:&mut Rt,t:Option<ObjectHandle>,args:Vec<Variant>)->Result<V
     let clear=match args.get(7){None|Some(Variant::Void)=>None,Some(v)=>{let n=v.to_integer()? as i32;(0..=255).contains(&n).then_some(n as u8)}};
     let spec=crysirror_image::alpha_clip::AlphaClipRect{destination,source:source_rect,clip,clear,multiply_rgb:d.kind==12,self_source:target==source,clear_empty_alpha_only:true};
     let effects=serde_json::to_vec(&[crysirror_image::effects::ImageEffect::AlphaClipRect{spec}]).map_err(|e|TjsError::runtime(e.to_string()))?;
-    rt.host_mut().image_pair=Some(PairPreparation{target:target.0,source:source.0,inputs:[d.image_source,s.image_source],captures:[None,None],effects:effects.into()});
+    let host = rt.host_mut();
+    host.image_pair=Some(PairPreparation{target:target.0,source:source.0,inputs:[d.image_source,s.image_source],captures:[None,None],effects:effects.into()});
+    // onPaint often draws the unmasked source into the destination first.
+    // The Canvas worker needs to see those writes, but the presenter must
+    // keep the previous finished picture until this redraw returns.
+    host.bitmap_redraw_pending = true;
     rt.request_suspend();Ok(Variant::Void)
 }
 
@@ -385,39 +444,37 @@ pub(crate) fn begin_pair(rt:&mut Rt,target:ObjectHandle,source:ObjectHandle,effe
 /// Prepare native mask coverage before consuming an input receipt. The same
 /// shared ImageJob evaluates immutable copy/fill/resize graphs; no Canvas paint
 /// is retargeted, and no pointer callback or TJS continuation is replayed.
-pub(crate) fn prepare_hit_images(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId, frame: crysirror_core::service::InputFrame) -> anyhow::Result<bool> {
+pub(crate) fn prepare_hit_image(
+    rt: &mut Rt, host: &mut dyn HostServices, client: ClientId, id: usize, x: i64, y: i64,
+) -> anyhow::Result<bool> {
     anyhow::ensure!(rt.host().image_job.is_none(), "hit preparation overlaps native image job");
-    let candidates = rt.host().hits(frame.pointer_x.into(), frame.pointer_y.into());
-    for (id, x, y) in candidates {
-        let h = ObjectHandle(id);
-        let kind = rt.object_member(h, "__lp_hitType").to_integer().map_err(|e|anyhow::anyhow!("{e}"))?;
-        let threshold = rt.object_member(h, "__lp_hitThreshold").to_integer().map_err(|e|anyhow::anyhow!("{e}"))?;
-        let layer = rt.host().layer(h).map_err(|e|anyhow::anyhow!("{e}"))?;
-        let px=x-layer.image_left; let py=y-layer.image_top;
-        if kind!=0 || !(1..256).contains(&threshold) || !layer.has_image
-            || layer.kind==1 || layer.full_alpha.is_some()
-            || px<0 || py<0 || px>=layer.image_width || py>=layer.image_height {
-            continue;
-        }
-        // A layer composed by retained canvas drawing has no CPU source: its
-        // coverage comes from the same shared capture Layer.saveLayerImage uses.
-        let Some(source)=layer.image_source.as_ref() else {
-            let slot=layer.slot;
-            let job=host.begin_canvas_image(client,slot)?;
-            rt.host_mut().image_job=Some((id,job,[false;2],false));
-            return Ok(false);
-        };
-        if matches!(source,ImageInput::Resource(_)) { continue; }
-        let source=source.clone();
-        let job=rt.host().images.as_ref().ok_or_else(||anyhow::anyhow!("image service absent"))?
-            .begin_process(source,std::sync::Arc::from(&b"[]"[..]))
-            .map_err(|e|anyhow::anyhow!("{e}"))?;
-        // Only coverage becomes ready. Existing retained Canvas nodes and copied
-        // immutable resources continue to own the visible image.
+    let h = ObjectHandle(id);
+    let kind = rt.object_member(h, "__lp_hitType").to_integer().map_err(|e|anyhow::anyhow!("{e}"))?;
+    let threshold = rt.object_member(h, "__lp_hitThreshold").to_integer().map_err(|e|anyhow::anyhow!("{e}"))?;
+    let layer = rt.host().layer(h).map_err(|e|anyhow::anyhow!("{e}"))?;
+    let px=x-layer.image_left; let py=y-layer.image_top;
+    if kind!=0 || !(1..256).contains(&threshold) || !layer.has_image
+        || layer.kind==1 || layer.full_alpha.is_some()
+        || px<0 || py<0 || px>=layer.image_width || py>=layer.image_height {
+        return Ok(true);
+    }
+    // A layer composed by retained canvas drawing has no CPU source: its
+    // coverage comes from the same shared capture Layer.saveLayerImage uses.
+    let Some(source)=layer.image_source.as_ref() else {
+        let slot=layer.slot;
+        let job=host.begin_canvas_image(client,slot)?;
         rt.host_mut().image_job=Some((id,job,[false;2],false));
         return Ok(false);
-    }
-    Ok(true)
+    };
+    if matches!(source,ImageInput::Resource(_)) { return Ok(true); }
+    let source=source.clone();
+    let job=rt.host().images.as_ref().ok_or_else(||anyhow::anyhow!("image service absent"))?
+        .begin_process(source,std::sync::Arc::from(&b"[]"[..]))
+        .map_err(|e|anyhow::anyhow!("{e}"))?;
+    // Only coverage becomes ready. Existing retained Canvas nodes and copied
+    // immutable resources continue to own the visible image.
+    rt.host_mut().image_job=Some((id,job,[false;2],false));
+    Ok(false)
 }
 
 /// A real layerExRaster facade. Only full clip boxes and shared source resources
@@ -505,8 +562,6 @@ pub(crate) fn queue_chain(
 }
 
 /// layerExImage (wamsoft 3aff625): six Layer methods onto shared ImageEffects.
-/// The adapter has no partial clip model, so effects cover the whole image as
-/// the native does with a full clip rectangle.
 pub fn install_ex_image(rt: &mut Rt) {
     let Some(class) = rt.global_member("Layer").object_handle() else {
         return;
@@ -531,7 +586,16 @@ pub fn install_ex_image(rt: &mut Rt) {
                 let hue = need_int(&a, 0, "Layer.modulate")? as i32;
                 let saturation = need_int(&a, 1, "Layer.modulate")? as i32;
                 let luminance = need_int(&a, 2, "Layer.modulate")? as i32;
-                begin(rt, t, json!({"kind":"hsl_modulate","hue":hue,"saturation":saturation,"luminance":luminance}))
+                let h = this_of(rt, t, "Layer.modulate")?;
+                let layer = rt.host().layer(h)?;
+                // layerExImage::reset offsets the buffer by the drawing clip.
+                // Expression redraws can reuse the already modulated body.
+                let size = [0, 0, layer.image_width, layer.image_height];
+                let Some(rect) = clip_rect(layer, size) else {
+                    return Ok(Variant::Void);
+                };
+                let rect = (rect != size).then_some(rect.map(|part| part as u32));
+                begin(rt, Some(h), json!({"kind":"hsl_modulate","hue":hue,"saturation":saturation,"luminance":luminance,"rect":rect}))
             }),
             ("noise", |rt, t, a| {
                 // Native: per channel (rand/RAND_MAX - 0.5) * level.

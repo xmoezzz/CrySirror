@@ -150,12 +150,12 @@ struct Mounts {
     cache: Dir,
 }
 type ProviderMount = (String, Arc<dyn VfsProvider>);
-type ProviderMounts = Arc<RwLock<Vec<ProviderMount>>>;
+type ProviderMounts = Arc<RwLock<Arc<Vec<ProviderMount>>>>;
 
 // No provider callback runs under this lock. A poisoned writer cannot leave
 // partially valid Rust values, so retain existing mounts rather than hiding
 // overlays after a recovered panic.
-fn provider_snapshot(mounts: &ProviderMounts) -> Vec<ProviderMount> {
+fn provider_snapshot(mounts: &ProviderMounts) -> Arc<Vec<ProviderMount>> {
     mounts
         .read()
         .unwrap_or_else(|error| error.into_inner())
@@ -225,7 +225,7 @@ impl DiskVfs {
         });
         self.mounts.insert(client, Mounts { asset, save, cache });
         self.providers
-            .insert(client, Arc::new(RwLock::new(Vec::new())));
+            .insert(client, Arc::new(RwLock::new(Arc::new(Vec::new()))));
         Ok(())
     }
     /// Overlay a read-only provider at `mount_point` in one client's asset
@@ -252,7 +252,7 @@ impl DiskVfs {
         if list.len() >= MAX_PROVIDER_MOUNTS {
             return Err(Error::Limit("provider mounts"));
         }
-        list.insert(0, (point, provider));
+        Arc::make_mut(&mut *list).insert(0, (point, provider));
         Ok(())
     }
     /// Append a read-only fallback below existing overlays. Within this view,
@@ -265,7 +265,7 @@ impl DiskVfs {
         let mounts=self.providers.get(&client).ok_or(Error::NotFound)?;
         let mut list=mounts.write().unwrap_or_else(|error|error.into_inner());
         if list.len()>=MAX_PROVIDER_MOUNTS{return Err(Error::Limit("provider mounts"));}
-        list.push((point,provider));
+        Arc::make_mut(&mut *list).push((point,provider));
         Ok(())
     }
     /// A thread-safe handle with this client's authority only (ADR 0008).
@@ -290,8 +290,8 @@ impl DiskVfs {
             .get(&client)
             .map(|mounts| {
                 provider_snapshot(mounts)
-                    .into_iter()
-                    .map(|(p, v)| (p, v.kind()))
+                    .iter()
+                    .map(|(p, v)| (p.clone(), v.kind()))
                     .collect()
             })
             .unwrap_or_default()
@@ -311,7 +311,7 @@ impl DiskVfs {
         let mounts = self.providers.get(&client).ok_or(Error::NotFound)?;
         if provider_snapshot(mounts)
             .iter()
-            .any(|(point, _)| strip_mount(&point, path.relative()).is_some())
+            .any(|(point, _)| strip_mount(point, path.relative()).is_some())
         {
             return Ok(None);
         }
@@ -340,12 +340,16 @@ struct CapStorage {
 struct CapAssetReader {
     file: Mutex<crysirror_capfs::fs::File>,
     len: u64,
+    immutable: bool,
 }
 struct CapStorageLease {
     _file: std::fs::File,
 }
 impl StorageLease for CapStorageLease {}
 impl AssetReader for CapAssetReader {
+    fn is_immutable(&self) -> bool {
+        self.immutable
+    }
     fn len(&self) -> Result<u64> {
         Ok(self.len)
     }
@@ -363,6 +367,23 @@ impl AssetReader for CapAssetReader {
             .min((self.len - offset).min(usize::MAX as u64) as usize);
         file.read(&mut output[..count]).map_err(io)
     }
+}
+
+fn open_asset_stream(dir: &Dir, path: &str) -> std::io::Result<(crysirror_capfs::fs::File, bool)> {
+    #[cfg(target_os = "windows")]
+    if std::path::Path::new(path).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("xp3")) {
+        use crysirror_capfs::fs::{OpenOptions, OpenOptionsExt};
+        // Deny in-place writes for this handle while permitting atomic file
+        // replacement. Readers of a mounted archive keep the original handle.
+        const FILE_SHARE_READ: u32 = 1;
+        const FILE_SHARE_DELETE: u32 = 4;
+        let mut options = OpenOptions::new();
+        options.read(true).share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE);
+        if let Ok(file) = dir.open_with(path, &options) {
+            return Ok((file, true));
+        }
+    }
+    dir.open(path).map(|file| (file, false))
 }
 impl CapStorage {
     fn dir(&self, mount: Mount) -> &Dir {
@@ -405,11 +426,11 @@ impl ClientStorage for CapStorage {
             created_ms: None, modified_ms: None, accessed_ms: None };
         let mut virtual_directory=false;
         if mount == Mount::Asset {
-            for (point, provider) in provider_snapshot(&self.providers) {
+            for (point, provider) in provider_snapshot(&self.providers).iter() {
                 if relative == point || strip_mount(relative, &point).is_some() {
                     return Ok(Some(virtual_info(None)));
                 }
-                let Some(rest) = strip_mount(&point, relative) else { continue; };
+                let Some(rest) = strip_mount(point, relative) else { continue; };
                 virtual_directory|=!point.is_empty();
                 match provider.open(rest) {
                     Ok(reader) => return Ok(Some(virtual_info(Some(reader.len()?)))),
@@ -492,8 +513,8 @@ impl ClientStorage for CapStorage {
         }
         // Same provider order as `read`: the first provider holding the path
         // serves it.
-        for (point, provider) in provider_snapshot(&self.providers) {
-            let Some(rest) = strip_mount(&point, path.relative()) else { continue };
+        for (point, provider) in provider_snapshot(&self.providers).iter() {
+            let Some(rest) = strip_mount(point, path.relative()) else { continue };
             if provider.exists(rest) {
                 return provider.container_source_for(rest).is_some();
             }
@@ -504,10 +525,10 @@ impl ClientStorage for CapStorage {
         if path.mount() != Mount::Asset {
             return None;
         }
-        for (point, provider) in provider_snapshot(&self.providers) {
-            let Some(rest) = strip_mount(&point, path.relative()) else { continue };
+        for (point, provider) in provider_snapshot(&self.providers).iter() {
+            let Some(rest) = strip_mount(point, path.relative()) else { continue };
             if provider.exists(rest) {
-                return provider.container_source_for(rest).map(|source| (source.to_owned(), point));
+                return provider.container_source_for(rest).map(|source| (source.to_owned(), point.clone()));
             }
         }
         None
@@ -515,7 +536,7 @@ impl ClientStorage for CapStorage {
     fn container_mount(&self,source:&str)->Result<Option<String>> {
         let path=VfsPath::new(Mount::Asset,source)?;
         if path.relative()!=source {return Err(Error::Invalid("container source path"))}
-        Ok(provider_snapshot(&self.providers).into_iter().find(|(_,p)|p.container_source()==Some(source)).map(|(point,_)|point))
+        Ok(provider_snapshot(&self.providers).iter().find(|(_,p)|p.container_source()==Some(source)).map(|(point,_)|point.clone()))
     }
 
     fn begin_write_atomic(
@@ -572,8 +593,8 @@ impl ClientStorage for CapStorage {
             return Err(Error::ReadOnly);
         }
         let mut virtual_directory=false;
-        for (point, provider) in provider_snapshot(&self.providers) {
-            let Some(rest) = strip_mount(&point, path.relative()) else {
+        for (point, provider) in provider_snapshot(&self.providers).iter() {
+            let Some(rest) = strip_mount(point, path.relative()) else {
                 continue;
             };
             virtual_directory|=!point.is_empty();
@@ -586,7 +607,9 @@ impl ClientStorage for CapStorage {
         if impossible_component(path.relative()) {
             return Err(Error::NotFound);
         }
-        let file = self.asset.open(asset_spelling(&self.asset, path.relative()).as_ref()).map_err(|e|if virtual_directory&&e.kind()==std::io::ErrorKind::NotADirectory {Error::NotFound}else{io(e)})?;
+        let spelling = asset_spelling(&self.asset, path.relative());
+        let (file, immutable) = open_asset_stream(&self.asset, spelling.as_ref())
+            .map_err(|e|if virtual_directory&&e.kind()==std::io::ErrorKind::NotADirectory {Error::NotFound}else{io(e)})?;
         let metadata = file.metadata().map_err(io)?;
         if !metadata.is_file() {
             return Err(Error::Invalid("asset stream must be a file"));
@@ -594,6 +617,7 @@ impl ClientStorage for CapStorage {
         Ok(Arc::new(CapAssetReader {
             file: Mutex::new(file),
             len: metadata.len(),
+            immutable,
         }))
     }
     fn open_read(&self, path: &VfsPath) -> Result<Arc<dyn AssetReader>> {
@@ -602,13 +626,32 @@ impl ClientStorage for CapStorage {
         let file=self.dir(path.mount()).open(path.relative()).map_err(io)?;
         let metadata=file.metadata().map_err(io)?;
         if !metadata.is_file(){return Err(Error::Invalid("read stream must be a file"))}
-        Ok(Arc::new(CapAssetReader{file:Mutex::new(file),len:metadata.len()}))
+        Ok(Arc::new(CapAssetReader{file:Mutex::new(file),len:metadata.len(),immutable:false}))
+    }
+    fn exists(&self, path: &VfsPath) -> bool {
+        if path.mount() == Mount::Asset {
+            for (point, provider) in provider_snapshot(&self.providers).iter() {
+                if strip_mount(point, path.relative()).is_some_and(|rest| provider.exists(rest)) {
+                    return true;
+                }
+            }
+        }
+        if impossible_component(path.relative()) {
+            return false;
+        }
+        let dir = self.dir(path.mount());
+        let relative = if path.mount() == Mount::Asset {
+            asset_spelling(dir, path.relative())
+        } else {
+            path.relative().into()
+        };
+        dir.metadata(relative.as_ref()).is_ok_and(|m| m.is_file())
     }
     fn read(&self, path: &VfsPath) -> Result<Vec<u8>> {
         let mut virtual_directory=false;
         if path.mount() == Mount::Asset {
-            for (point, provider) in provider_snapshot(&self.providers) {
-                let Some(rest) = strip_mount(&point, path.relative()) else {
+            for (point, provider) in provider_snapshot(&self.providers).iter() {
+                let Some(rest) = strip_mount(point, path.relative()) else {
                     continue;
                 };
                 virtual_directory|=!point.is_empty();
@@ -669,11 +712,11 @@ impl ClientStorage for CapStorage {
         // before the disk fallback; never suppress an unrelated disk error.
         let mut virtual_directory = false;
         if mount == Mount::Asset {
-            for (point, provider) in provider_snapshot(&self.providers) {
-                if rel == point {
+            for (point, provider) in provider_snapshot(&self.providers).iter() {
+                if rel == *point {
                     virtual_directory = true;
                     names.extend(provider.list_dir("")?);
-                } else if let Some(rest) = strip_mount(&point, &rel) {
+                } else if let Some(rest) = strip_mount(point, &rel) {
                     match provider.list_dir(rest) {
                         Ok(children) => {
                             virtual_directory |= !children.is_empty() || provider.exists(rest);
@@ -724,8 +767,8 @@ impl FileSystem for DiskVfs {
         let mut virtual_directory=false;
         if path.mount() == Mount::Asset {
             let mounts = self.providers.get(&client).ok_or(Error::NotFound)?;
-            for (point, provider) in provider_snapshot(mounts) {
-                let Some(rest) = strip_mount(&point, path.relative()) else {
+            for (point, provider) in provider_snapshot(mounts).iter() {
+                let Some(rest) = strip_mount(point, path.relative()) else {
                     continue;
                 };
                 virtual_directory|=!point.is_empty();
@@ -759,6 +802,23 @@ impl FileSystem for DiskVfs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn xp3_streams_only_promise_immutable_bytes_when_opened_without_write_sharing() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("data.xp3");
+        std::fs::write(&path, b"contents").unwrap();
+        let root = Dir::open_ambient_dir(temp.path(), crysirror_capfs::ambient_authority()).unwrap();
+        let writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let (shared, immutable) = open_asset_stream(&root, "data.xp3").unwrap();
+        assert!(!immutable);
+        drop((shared, writer));
+        let (protected, immutable) = open_asset_stream(&root, "data.xp3").unwrap();
+        assert!(immutable);
+        assert!(std::fs::OpenOptions::new().write(true).open(&path).is_err());
+        drop(protected);
+        assert!(std::fs::OpenOptions::new().write(true).open(&path).is_ok());
+    }
     #[test]
     fn asset_lookup_folds_case_like_windows_game_data() {
         let assets = tempfile::tempdir().unwrap();
@@ -1023,10 +1083,26 @@ mod tests {
         assert!(fs.provider_mounts(ClientId(2)).is_empty());
     }
     #[test]
+    fn streaming_file_remains_visible_above_the_whole_file_budget() {
+        let assets = tempfile::tempdir().unwrap();
+        let writable = tempfile::tempdir().unwrap();
+        let movie = std::fs::File::create(assets.path().join("opening.wmv")).unwrap();
+        movie.set_len(MAX_FILE + 1).unwrap();
+        drop(movie);
+        let mut fs = DiskVfs::new(assets.path(), writable.path()).unwrap();
+        fs.register(ClientId(1), "test", "movie").unwrap();
+        let store = fs.storage(ClientId(1)).unwrap();
+        let path = VfsPath::new(Mount::Asset, "opening.wmv").unwrap();
+        assert!(store.exists(&path));
+        assert_eq!(store.open_read(&path).unwrap().len().unwrap(), MAX_FILE + 1);
+        assert!(matches!(store.read(&path), Err(Error::Limit(_))));
+    }
+
+    #[test]
     fn provider_callbacks_run_after_mount_snapshot_unlocks() {
         use crysirror_core::vfs::MemoryProvider;
         struct CheckingProvider {
-            mounts: std::sync::Weak<RwLock<Vec<ProviderMount>>>,
+            mounts: std::sync::Weak<RwLock<Arc<Vec<ProviderMount>>>>,
             memory: MemoryProvider,
         }
         impl CheckingProvider {
@@ -1229,10 +1305,10 @@ pub(crate) fn asset_storage_from_dir(dir: Dir) -> Arc<dyn ClientStorage> {
         }
         fn open_asset(&self, path: &VfsPath) -> Result<Arc<dyn AssetReader>> {
             if path.mount() != Mount::Asset { return Err(Error::ReadOnly); }
-            let file = self.0.open(path.relative()).map_err(io)?;
+            let (file, immutable) = open_asset_stream(&self.0, path.relative()).map_err(io)?;
             let metadata = file.metadata().map_err(io)?;
             if !metadata.is_file() { return Err(Error::Invalid("asset stream must be a file")); }
-            Ok(Arc::new(CapAssetReader { file: Mutex::new(file), len: metadata.len() }))
+            Ok(Arc::new(CapAssetReader { file: Mutex::new(file), len: metadata.len(), immutable }))
         }
         fn write_atomic(&self, _: &VfsPath, _: &[u8]) -> Result<()> { Err(Error::ReadOnly) }
         fn remove(&self, _: &VfsPath) -> Result<()> { Err(Error::ReadOnly) }

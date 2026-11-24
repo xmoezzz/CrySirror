@@ -76,6 +76,9 @@ impl AssetReader for Snapshot {
 /// share encoded storage while retaining independent decoder/cursor state.
 pub struct PreparedSound {
     snapshot: Arc<Snapshot>,
+    /// Short, repeatedly played compressed sounds share immutable PCM.
+    /// Every voice and visualization query still owns its own cursor.
+    short_pcm: Option<crysirror_core::service::PcmAudio>,
     extension: Option<String>,
     frame_limit: Option<u64>,
     info: AudioResourceInfo,
@@ -121,11 +124,45 @@ fn read_snapshot(
 fn extension_of(path: &crysirror_core::path::VfsPath) -> Option<String> {
     path.relative().rsplit_once('.').map(|v| v.1.to_owned())
 }
+/// Cache only complete, short sounds; long recordings keep their streaming decoder.
+fn prepare_short_pcm(
+    source: &mut dyn AudioSource, frames: Option<u64>, snapshot: &Snapshot, cancel: &Cancellation,
+) -> Result<Option<crysirror_core::service::PcmAudio>> {
+    let Some(count @ 1..=16_384) = frames else { return Ok(None) };
+    let Ok(mut charge) = Charge::new(snapshot._charge.budget.clone(), count as usize * 16) else {
+        return Ok(None);
+    };
+    // Measurement may have reached EOF. When rewind is unavailable the
+    // ordinary encoded lease can still open an independent decoder.
+    if source.seek(0).is_err() { return Ok(None); }
+    let mut pcm = vec![[0.; 2]; count as usize];
+    let mut at = 0;
+    while at < pcm.len() {
+        cancel.check()?;
+        let read = source.read(&mut pcm[at..])?;
+        ensure!(read <= pcm.len() - at, "short sound decoder extent");
+        if read == 0 { return Ok(None); }
+        at += read;
+    }
+    let Ok(mut pcm) = crysirror_core::service::PcmAudio::new(source.sample_rate(), pcm) else {
+        return Ok(None);
+    };
+    charge.shrink(count as usize * 8);
+    pcm.retain_storage(Arc::new(charge));
+    Ok(Some(pcm))
+}
+
 impl PreparedSound {
     pub fn info(&self) -> AudioResourceInfo {
         self.info
     }
     pub fn open(self: &Arc<Self>) -> Result<Box<dyn AudioSource>> {
+        if let Some(pcm) = &self.short_pcm {
+            return Ok(Box::new(Instance {
+                inner: decoder::open_pcm(pcm.clone()),
+                _resource: self.clone(),
+            }));
+        }
         if let Some(stems) = &self.stems {
             let tracks = stems
                 .iter()
@@ -418,6 +455,7 @@ impl AudioResources {
                 ensure!(longest > 0, "empty prepared audio source");
                 return Ok(Product::Prepared(Arc::new(PreparedSound {
                     snapshot,
+                    short_pcm: None,
                     extension,
                     frame_limit: None,
                     info: AudioResourceInfo {
@@ -571,6 +609,9 @@ impl AudioResources {
                 frames = Some(count);
             }
             has_replay_gain |= source.has_replay_gain();
+            let short_pcm = if frame_limit.is_none() && snapshot.bytes.starts_with(b"OggS") {
+                prepare_short_pcm(&mut *source, frames, &snapshot, &cancel)?
+            } else { None };
             drop(source);
             frames = match (frame_limit, frames) {
                 (Some(a), Some(b)) => Some(a.min(b)),
@@ -585,6 +626,7 @@ impl AudioResources {
                 .shrink(stored_len + 8192);
             Ok(Product::Prepared(Arc::new(PreparedSound {
                 snapshot,
+                short_pcm,
                 extension,
                 frame_limit,
                 info: AudioResourceInfo {

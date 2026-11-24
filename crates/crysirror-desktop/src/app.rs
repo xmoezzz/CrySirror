@@ -152,9 +152,39 @@ fn desktop_shortcut(code: KeyCode, pressed: bool, repeat: bool, siglus: bool) ->
     }
 }
 
+#[cfg(windows)]
+#[allow(unsafe_code)] // Win32 takes a virtual key by value and returns a bit mask; no handle or pointer is passed.
+fn physical_ctrl_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
+    // The high bit is the current physical level. The low bit is process-shared
+    // press history and must not create fresh input edges.
+    (unsafe { GetAsyncKeyState(i32::from(VK_CONTROL)) }) < 0
+}
+
+#[cfg(any(windows, test))]
+fn reconcile_ctrl_release(input: &mut InputFrame, sides: &mut u8, physically_down: bool) {
+    if !physically_down {
+        *sides = 0;
+        input.buttons_down &= !buttons::CTRL;
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn a_long_ctrl_hold_ends_even_without_a_window_key_up() {
+    let mut input = InputFrame { buttons_down: buttons::CTRL | buttons::SHIFT, ..Default::default() };
+    let mut sides = 3;
+    for _ in 0..10_000 { reconcile_ctrl_release(&mut input, &mut sides, true); }
+    assert_eq!(sides, 3);
+    reconcile_ctrl_release(&mut input, &mut sides, false);
+    assert_eq!(input.buttons_down, buttons::SHIFT);
+    assert_eq!(sides, 0);
+    assert_eq!(input.buttons_pressed, 0);
+}
 struct WindowState {
     pending_snapshot: Option<crysirror_runtime::frame::PendingFrame>,
     render_snapshot: Option<crysirror_runtime::frame::RenderSnapshot>,
+    presented_bitmap: Option<(u64, [u32; 2], crysirror_core::service::PresentationScale)>,
     snapshot_store: u64,
     snapshot_restored: u64,
     surface: wgpu::Surface<'static>,
@@ -173,6 +203,7 @@ pub struct App {
     #[cfg(feature = "gamepad")]
     gamepad: Option<crate::gamepad::Backend>,
     input: InputFrame,
+    ctrl_sides: u8,
     focused: bool,
     ime_composing: bool,
     text_input: crate::text_input::Presenter,
@@ -383,6 +414,7 @@ impl App {
             #[cfg(feature = "gamepad")]
             gamepad,
             input: InputFrame::default(),
+            ctrl_sides: 0,
             focused: true,
             ime_composing: false,
             text_input: Default::default(),
@@ -583,6 +615,7 @@ impl App {
         self.window = Some(WindowState {
             pending_snapshot: None,
             render_snapshot: None,
+            presented_bitmap: None,
             snapshot_store: 0,
             snapshot_restored: 0,
             surface,
@@ -667,6 +700,10 @@ impl App {
                     el.exit();
                     return Ok(());
                 }
+            }
+            #[cfg(windows)]
+            if self.focused && self.input.buttons_down & buttons::CTRL != 0 {
+                reconcile_ctrl_release(&mut self.input, &mut self.ctrl_sides, physical_ctrl_down());
             }
             #[allow(unused_mut)]
             let mut frame_input = self.input;
@@ -802,15 +839,9 @@ impl App {
         if w.snapshot_store != rt.assets.store_id() || w.snapshot_restored != rt.restored {
             w.pending_snapshot = None;
             w.render_snapshot = None;
+            w.presented_bitmap = None;
             w.snapshot_store = rt.assets.store_id();
             w.snapshot_restored = rt.restored;
-        }
-        // Always submit the first picture: startup time must not depend on a
-        // bitmap callback finishing before the window has ever presented.
-        if w.pending_snapshot.is_none()
-            && (w.render_snapshot.is_none() || !rt.presentation_pending())
-        {
-            w.pending_snapshot = Some(rt.schedule_render_snapshot()?);
         }
         if let Some(pending) = &mut w.pending_snapshot {
             if let Some(snapshot) = pending.poll(rt)? {
@@ -818,9 +849,33 @@ impl App {
                 w.pending_snapshot = None;
             }
         }
+        // Start the successor as soon as the previous extraction is consumed.
+        // Workers can extract it while the completed picture is presented.
+        if w.pending_snapshot.is_none()
+            && (w.render_snapshot.is_none() || !rt.presentation_pending())
+        {
+            w.pending_snapshot = Some(rt.schedule_render_snapshot()?);
+        }
         let Some(snapshot) = &w.render_snapshot else {
             return Ok(());
         };
+        let surface_size = [w.config.width, w.config.height];
+        let scale = rt.host.engine.ui.presentation_scale.map(|(_, mode)| mode).unwrap_or_default();
+        let bitmap = (snapshot.frame, surface_size, scale);
+        // A parked bitmap transaction keeps the previous complete frame.
+        // Windows already has that frame. Advance input and VM work above
+        // without preparing and presenting the same 2D picture again.
+        if cfg!(target_os = "windows")
+            && self.options.frames.is_none()
+            && rt.presentation_pending()
+            && snapshot.simple.is_none()
+            && snapshot.pbr.is_none()
+            && snapshot.transition.is_none()
+            && w.presented_bitmap == Some(bitmap)
+        {
+            let _held = profiler.span(profiler.frame(), "desktop.hold_presented_bitmap");
+            return Ok(());
+        }
         w.renderer.set_profiler(rt.profiler.clone(), snapshot.frame);
         let acquire_span = profiler.span(profiler.frame(), "desktop.acquire");
         let (frame, reconfigure) = match w.surface.get_current_texture() {
@@ -829,10 +884,12 @@ impl App {
             wgpu::CurrentSurfaceTexture::Lost => {
                 w.surface = self.instance.create_surface(w.window.clone())?;
                 w.surface.configure(&w.renderer.gpu.device, &w.config);
+                w.presented_bitmap = None;
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
                 w.surface.configure(&w.renderer.gpu.device, &w.config);
+                w.presented_bitmap = None;
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
@@ -845,7 +902,8 @@ impl App {
         drop(acquire_span);
         let view = frame.texture.create_view(&Default::default());
         let rt = self.core.rt();
-        w.renderer.set_presentation_scale(rt.host.engine.ui.presentation_scale.map(|(_,mode)|mode).unwrap_or_default());
+        let render_span = profiler.span(profiler.frame(), "desktop.render");
+        w.renderer.set_presentation_scale(scale);
         w.renderer.set_scene3d(snapshot.simple.as_ref())?;
         w.renderer.set_pbr_scene(snapshot.pbr.clone())?;
         w.renderer.set_engine_frame(snapshot.layers.clone())?;
@@ -857,12 +915,13 @@ impl App {
                     assets,
                     RenderTarget {
                         view: &view,
-                        size: [w.config.width, w.config.height],
+                        size: surface_size,
                     },
                     rt.project.canvas,
                     rt.project.background,
                 )
             })?;
+        drop(render_span);
         if self.options.frames.is_some_and(|limit| self.presented + 1 >= limit) {
             if let Some(path) = std::env::var_os("CRYSIRROR_SURFACE_CAPTURE") {
                 w.renderer
@@ -875,8 +934,10 @@ impl App {
             let _present_span = profiler.span(profiler.frame(), "desktop.present");
             w.renderer.gpu.queue.present(frame);
         }
+        w.presented_bitmap = Some(bitmap);
         if reconfigure {
             w.surface.configure(&w.renderer.gpu.device, &w.config);
+            w.presented_bitmap = None;
         }
         self.presented += 1;
         if self.presented % 120 == 0 {
@@ -914,6 +975,7 @@ impl App {
             WindowEvent::RedrawRequested => self.redraw(el)?,
             WindowEvent::Resized(size) => {
                 if let Some(w) = self.window.as_mut() {
+                    w.presented_bitmap = None;
                     w.minimized = size.width == 0 || size.height == 0;
                     if !w.minimized {
                         ensure!(
@@ -936,6 +998,11 @@ impl App {
                 self.last_tick = Instant::now();
                 self.remainder = Duration::ZERO;
             }
+            WindowEvent::Occluded(false) => {
+                if let Some(w) = self.window.as_mut() {
+                    w.presented_bitmap = None;
+                }
+            }
             WindowEvent::ThemeChanged(theme) => {
                 crysirror_scene::ui::theme::set_dark(theme == winit::window::Theme::Dark);
                 if let Some(w) = self.window.as_ref() { w.window.request_redraw(); }
@@ -950,6 +1017,7 @@ impl App {
                     self.core.rt().host.window_maximized = Some(w.window.is_maximized());
                 }
                 self.input = InputFrame::default();
+                self.ctrl_sides = 0;
                 #[cfg(feature = "gamepad")]
                 if let Some(backend) = &mut self.gamepad {
                     backend.reset_navigation();
@@ -959,6 +1027,15 @@ impl App {
                     actions.reset_devices();
                     actions.cancel_rebind();
                 }
+            }
+            WindowEvent::ModifiersChanged(modifiers) if self.focused => {
+                // A native menu can consume the physical key-up. Reconcile
+                // the logical Ctrl level with the window's modifier state.
+                let down = modifiers.state().control_key();
+                #[cfg(windows)]
+                let down = down && physical_ctrl_down();
+                if !down { self.ctrl_sides = 0; }
+                update_button(&mut self.input, buttons::CTRL, down);
             }
             WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
                 self.ime_composing = !text.is_empty();
@@ -982,6 +1059,35 @@ impl App {
                     return Ok(());
                 }
                 let pressed = event.state == ElementState::Pressed;
+                if pressed && !self.ime_composing {
+                    let edit_key = match event.physical_key {
+                        PhysicalKey::Code(KeyCode::ArrowLeft) => buttons::LEFT,
+                        PhysicalKey::Code(KeyCode::ArrowRight) => buttons::RIGHT,
+                        PhysicalKey::Code(KeyCode::ArrowUp) => buttons::UP,
+                        PhysicalKey::Code(KeyCode::ArrowDown) => buttons::DOWN,
+                        PhysicalKey::Code(KeyCode::Home) => buttons::HOME,
+                        PhysicalKey::Code(KeyCode::End) => buttons::END,
+                        PhysicalKey::Code(KeyCode::Delete) => buttons::DELETE,
+                        PhysicalKey::Code(KeyCode::Backspace) => buttons::BACKSPACE,
+                        PhysicalKey::Code(KeyCode::KeyA) => buttons::KEY_A,
+                        _ => 0,
+                    };
+                    let modifiers = self.input.buttons_down & (buttons::SHIFT | buttons::CTRL);
+                    if edit_key != 0 && self.core.rt().focused_editor_key(edit_key, modifiers)? {
+                        return Ok(());
+                    }
+                }
+                // KiriKiri owns the close decision. Consume this shortcut so
+                // the same Escape cannot also dismiss the game's new dialog.
+                if event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                    && self.core.rt().project.clients.iter().any(|c| c.adapter == "krkr")
+                    && !self.core.rt().host.engine.ui.focused_text_field()
+                {
+                    if pressed && !event.repeat && !self.ime_composing {
+                        self.core.rt().request_close();
+                    }
+                    return Ok(());
+                }
                 if pressed && !self.ime_composing {
                     if let Some(text) = event.text.as_ref() {
                         Self::committed_text(self.core.rt(), text.as_str())?;
@@ -1018,7 +1124,14 @@ impl App {
                         KeyCode::KeyS => Some(1 << 9),
                         KeyCode::KeyD => Some(1 << 10),
                         KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(1 << 11),
-                        KeyCode::ControlLeft | KeyCode::ControlRight => Some(1 << 12),
+                        KeyCode::ControlLeft | KeyCode::ControlRight => {
+                            if !event.repeat {
+                                let side = if code == KeyCode::ControlLeft { 1 } else { 2 };
+                                if pressed { self.ctrl_sides |= side; } else { self.ctrl_sides &= !side; }
+                                update_button(&mut self.input, buttons::CTRL, self.ctrl_sides != 0);
+                            }
+                            None
+                        }
                         KeyCode::AltLeft | KeyCode::AltRight => Some(buttons::ALT),
                         KeyCode::KeyE => Some(1 << 13),
                         KeyCode::KeyQ => Some(1 << 14),

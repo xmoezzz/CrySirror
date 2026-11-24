@@ -61,6 +61,7 @@ pub fn install(rt: &mut Rt) {
     );
 }
 fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Variant> {
+    let _span = crysirror_tasks::profile::span_current("krkr.transition.prepare");
     let dest = this_of(rt, t, "Layer.beginTransition")?;
     let name = string(&args, 0, "Layer.beginTransition")?;
     let kaicho=matches!(name.as_str(),"blur"|"dim");
@@ -327,7 +328,10 @@ fn exchange_tree(rt:&mut Rt,a:ObjectHandle,b:ObjectHandle,keep:bool)->Result<()>
     let host=rt.host_mut();
     let la=host.layer(a)?;let lb=host.layer(b)?;
     if a==b{return Ok(());}
-    if la.window!=lb.window{return Err(unsupported("Layer exchange","one layer manager"));}
+    if la.window!=lb.window || !host.same_manager(a.0,b.0){return Err(unsupported("Layer exchange","one layer manager"));}
+    if host.windows.get(&la.window).is_some_and(|w| w.views.iter().any(|v| v.layer==a.0 || v.layer==b.0)){
+        return Err(unsupported("exchange of a draw-device view root","view-state reassignment"));
+    }
     let old:BTreeMap<usize,(Option<usize>,Vec<usize>)>=host.layers.iter().map(|(id,l)|(*id,(l.parent,l.children.clone()))).collect();
     let swap=|id|if id==a.0 {b.0}else if id==b.0 {a.0}else{id};
     let mut next=old.clone();

@@ -740,6 +740,23 @@ pub(crate) fn input_size(
     nodes: &mut usize,
     bytes: &mut usize,
 ) -> Result<[u32; 2]> {
+    let mut retained_encoded_bytes = 0;
+    let size = input_size_inner(owner, input, depth, nodes, bytes, &mut retained_encoded_bytes)?;
+    *bytes = bytes
+        .checked_add(retained_encoded_bytes)
+        .filter(|n| *n <= 256 * 1024 * 1024)
+        .ok_or(Error::Limit("image composition byte budget"))?;
+    Ok(size)
+}
+
+fn input_size_inner(
+    owner: ClientId,
+    input: &ImageInput,
+    depth: usize,
+    nodes: &mut usize,
+    bytes: &mut usize,
+    retained_encoded_bytes: &mut usize,
+) -> Result<[u32; 2]> {
     *nodes += 1;
     // A full 800x600 tile grid (25x19 layers plus its base) is one ordinary
     // composition; byte budgets still bound the work.
@@ -782,7 +799,7 @@ pub(crate) fn input_size(
             ) {
                 return Err(Error::Invalid("unprocessed vector source context"));
             }
-            input_size(owner, source, depth + 1, nodes, bytes)?;
+            input_size_inner(owner, source, depth + 1, nodes, bytes, retained_encoded_bytes)?;
             *bytes = bytes
                 .checked_add(field_bytes)
                 .filter(|n| *n <= 256 * 1024 * 1024)
@@ -792,7 +809,7 @@ pub(crate) fn input_size(
         ImageInput::Process { input, effects } => {
             let effects = parse_effect_chain(effects)?;
             validate_effect_context(input, &effects)?;
-            let size = input_size(owner, input, depth + 1, nodes, bytes)?;
+            let size = input_size_inner(owner, input, depth + 1, nodes, bytes, retained_encoded_bytes)?;
             let scratch = effect_scratch_bytes(size, &effects)?;
             let size = effect_output_size(size, &effects)?;
             if !effects.is_empty() {
@@ -818,17 +835,17 @@ pub(crate) fn input_size(
             if encoded.is_empty() || encoded.len() > 64 * 1024 * 1024 {
                 return Err(Error::Limit("image encoded byte budget"));
             }
-            *bytes = bytes
+            *retained_encoded_bytes = retained_encoded_bytes
                 .checked_add(encoded.len())
                 .filter(|n| *n <= 256 * 1024 * 1024)
                 .ok_or(Error::Limit("image composition byte budget"))?;
             *size
         }
         ImageInput::Composite { base, layers } => {
-            let size = input_size(owner, base, depth + 1, nodes, bytes)?;
-            //Repeated layers over one immutable resident resource share its
-            //pixels; they are separate graph nodes but not separate bytes.
-            let mut resident = std::collections::BTreeSet::new();
+            let mut peak = 0;
+            let size = input_size_inner(owner, base, depth + 1, nodes, &mut peak, retained_encoded_bytes)?;
+            let destination_bytes = crysirror_image::rgba_len(size[0], size[1])
+                .map_err(|e| Error::Io(e.to_string()))?;
             for layer in layers {
                 if let ImageCompositeMath::IntegerStored {
                     destination_format,
@@ -884,20 +901,12 @@ pub(crate) fn input_size(
                 ) {
                     return Err(Error::Invalid("composite pair-effect input"));
                 }
-                if let ImageInput::Resource(r) = layer.input.as_ref() {
-                    let key = std::sync::Arc::as_ptr(r) as *const () as usize;
-                    if !resident.insert(key) {
-                        *nodes += 1;
-                        if *nodes > 1024 {
-                            return Err(Error::Limit("image composition graph"));
-                        }
-                        if r.client() != owner {
-                            return Err(Error::Invalid("foreign image resource"));
-                        }
-                        continue;
-                    }
-                }
-                input_size(owner, &layer.input, depth + 1, nodes, bytes)?;
+                // The worker retains the destination while it loads and drops
+                // each source in order. Encoded buffers held by the graph are
+                // counted separately because they all stay live for the job.
+                let mut source_bytes = 0;
+                input_size_inner(owner, &layer.input, depth + 1, nodes, &mut source_bytes, retained_encoded_bytes)?;
+                peak = peak.max(destination_bytes + source_bytes);
             }
             if matches!(
                 base.as_ref(),
@@ -907,6 +916,7 @@ pub(crate) fn input_size(
             ) {
                 return Err(Error::Invalid("composite pair-effect base"));
             }
+            *bytes = bytes.checked_add(peak).ok_or(Error::Limit("image composition byte budget"))?;
             size
         }
         ImageInput::Asset { path, size, .. } => {
@@ -954,9 +964,9 @@ pub(crate) fn input_size(
             {
                 return Err(Error::Invalid("nested image input"));
             }
-            let size = input_size(owner, destination, depth + 1, nodes, bytes)?;
-            input_size(owner, first, depth + 1, nodes, bytes)?;
-            input_size(owner, second, depth + 1, nodes, bytes)?;
+            let size = input_size_inner(owner, destination, depth + 1, nodes, bytes, retained_encoded_bytes)?;
+            input_size_inner(owner, first, depth + 1, nodes, bytes, retained_encoded_bytes)?;
+            input_size_inner(owner, second, depth + 1, nodes, bytes, retained_encoded_bytes)?;
             size
         }
         ImageInput::Raster {
@@ -973,8 +983,8 @@ pub(crate) fn input_size(
             }) {
                 return Err(Error::Invalid("nested image input"));
             }
-            let size = input_size(owner, destination, depth + 1, nodes, bytes)?;
-            let source_size = input_size(owner, source, depth + 1, nodes, bytes)?;
+            let size = input_size_inner(owner, destination, depth + 1, nodes, bytes, retained_encoded_bytes)?;
+            let source_size = input_size_inner(owner, source, depth + 1, nodes, bytes, retained_encoded_bytes)?;
             // A two-input worker may prepare successive half-size sample
             //planes while retaining the immutable full source. Their live
             //peak is bounded by half of the source plane's byte count.
@@ -1371,6 +1381,31 @@ mod budget_tests {
         )
         .unwrap()
     }
+
+    #[test]
+    fn ordered_large_overlays_reserve_only_the_overlapping_working_surfaces() {
+        let extent = [2440, 4380];
+        let layer = ImageCompositeLayer {
+            input: Box::new(ImageInput::Asset {
+                path: "overlay.tlg".into(),
+                size: extent,
+                fingerprint: None,
+            }),
+            source: [0, 0, 256, 256],
+            destination: [0, 0],
+            clip: None,
+            opacity: 255,
+            math: ImageCompositeMath::Copy,
+        };
+        let base = ImageInput::Solid { size: extent, color: [0; 4] };
+        let composition = ImageInput::Composite { base: Box::new(base), layers: vec![layer; 8] };
+        let mut nodes = 0;
+        let mut bytes = 0;
+        assert_eq!(input_size(ClientId(7), &composition, 0, &mut nodes, &mut bytes).unwrap(), extent);
+        assert_eq!(nodes, 10);
+        assert_eq!(bytes, crysirror_image::rgba_len(extent[0], extent[1]).unwrap() * 3);
+    }
+
     #[test]
     fn ordered_alpha_stamps_run_as_a_scoped_asynchronous_raster_job() {
         let memory = Arc::new(AtomicUsize::new(0));

@@ -12,7 +12,6 @@ enum Part {
     Pbr(Option<crysirror_scene::view::PbrScene>),
     Simple(Option<Scene3d>),
     Layers(Vec<crysirror_scene::Primitive>),
-    Ready,
 }
 /// Completed immutable scene data, never GPU/device pointers or mutable World.
 pub struct RenderSnapshot {
@@ -116,7 +115,8 @@ impl Runtime {
             cancel.check()?;
             Ok(Part::Layers(state.frame(canvas)?))
         })?;
-        graph.add("extract.ready", &[p, s, l], |_, _| Ok(Part::Ready))?;
+        // FrameGraph completes only when all three results are available.
+        // A fourth worker just to signal "ready" adds a poll to presentation.
         // Admit immediately so independent extraction overlaps subsequent owner work.
         graph.poll(&self.assets.cpu_tasks())?;
         Ok(PendingFrame {

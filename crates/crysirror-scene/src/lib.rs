@@ -260,7 +260,7 @@ impl EngineSystems {
                 layers.apply_batch(client, &batch.prepare_layers)?;
             }
             if let Some(canvases) = &mut canvases {
-                canvases.apply_batch(client, &batch.canvases, layers)?;
+                canvases.apply_commands(client, &batch.canvases, layers)?;
             }
             if let Some(world) = &mut world {
                 world.apply_batch(client, &batch.world)?;

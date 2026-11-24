@@ -1796,7 +1796,7 @@ enum ExprTask<'a> {
         result: SlotId,
         done_block: BlockId,
     },
-    AfterCallArgs,
+    AfterCallArgs { result_needed: bool },
     AfterNewCallee {
         args: &'a [syntax::CallArg],
     },
@@ -2288,6 +2288,13 @@ impl ObjectBuilder {
                         source,
                         mode: EvalMode::Statement,
                     });
+                } else if let syntax::ExprKind::Call { callee, args } = &expr.kind {
+                    // A native callee can distinguish a discarded result
+                    // (register zero) from a caller that needs a value.
+                    let mut state = ExprLoweringState::new(expr);
+                    state.tasks = vec![ExprTask::AfterCallArgs { result_needed: false },
+                        ExprTask::CallArgs(args), ExprTask::CallTarget(callee)];
+                    self.run_expr_tasks(lowerer, &mut state)?;
                 } else {
                     self.lower_expr(lowerer, expr)?;
                 }
@@ -2851,10 +2858,15 @@ impl ObjectBuilder {
 
     fn lower_expr(&mut self, lowerer: &mut Lowerer, expr: &syntax::Expr) -> Result<Value> {
         let mut state = ExprLoweringState::new(expr);
-        while let Some(task) = state.tasks.pop() {
-            self.run_expr_task(lowerer, task, &mut state)?;
-        }
+        self.run_expr_tasks(lowerer, &mut state)?;
         pop_value(&mut state.values)
+    }
+
+    fn run_expr_tasks(&mut self, lowerer: &mut Lowerer, state: &mut ExprLoweringState<'_>) -> Result<()> {
+        while let Some(task) = state.tasks.pop() {
+            self.run_expr_task(lowerer, task, state)?;
+        }
+        Ok(())
     }
 
     fn lower_expr_in_global_context(
@@ -3332,16 +3344,12 @@ impl ObjectBuilder {
                 });
                 self.set_terminator(Terminator::Goto(done_block));
             }
-            ExprTask::AfterCallArgs => {
+            ExprTask::AfterCallArgs { result_needed } => {
                 let args = pop_arg_list(arg_lists)?;
                 let target = pop_call_target(call_targets)?;
-                let dst = self.temp();
-                self.emit(MirInst::Call {
-                    dst: Some(dst),
-                    target,
-                    args,
-                });
-                values.push(Value::Slot(dst));
+                let dst = result_needed.then(|| self.temp());
+                self.emit(MirInst::Call { dst, target, args });
+                if let Some(dst) = dst { values.push(Value::Slot(dst)); }
             }
             ExprTask::AfterNewCallee { args } => {
                 let callee = pop_value(values)?;
@@ -3666,7 +3674,7 @@ impl ObjectBuilder {
                 tasks.push(ExprTask::Expr(object));
             }
             syntax::ExprKind::Call { callee, args } => {
-                tasks.push(ExprTask::AfterCallArgs);
+                tasks.push(ExprTask::AfterCallArgs { result_needed: true });
                 tasks.push(ExprTask::CallArgs(args));
                 tasks.push(ExprTask::CallTarget(callee));
             }

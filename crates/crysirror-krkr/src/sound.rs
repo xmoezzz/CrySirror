@@ -17,6 +17,9 @@ use std::collections::{BTreeMap, VecDeque};
 pub struct Buffer {
     channel: u32,
     resource: Option<AudioResourceHandle>,
+    // Reopening the same unfiltered mounted asset can restart this buffer
+    // with its existing immutable resource and an independent play cursor.
+    prepared_path: Option<VfsPath>,
     info: Option<AudioResourceInfo>,
     pub status: &'static str,
     volume: i64,
@@ -41,6 +44,9 @@ pub struct Buffer {
     multitrack: Option<std::sync::Arc<[crysirror_core::service::MultiTrackStem]>>,
 }
 impl Buffer {
+    pub(crate) fn playing_resource(&self) -> Option<AudioResourceHandle> {
+        if self.status == "play" { self.resource } else { None }
+    }
     fn group(&self) -> String {
         format!("krkr.wave.{}", self.channel)
     }
@@ -55,7 +61,7 @@ pub enum Op {
     Release(usize),
 }
 pub enum Pending {
-    Resource { object: usize, ticket: u64 },
+    Resource { object: usize, ticket: u64, path: Option<VfsPath> },
     Voice { object: usize, ticket: u64 },
 }
 #[derive(Default)]
@@ -227,6 +233,7 @@ pub fn install(rt: &mut Rt) {
         let b = Buffer {
             channel,
             resource: None,
+            prepared_path: None,
             info: None,
             status: "unload",
             volume: 100000,
@@ -599,12 +606,12 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
     for _ in 0..4096 {
         if let Some(p) = rt.host_mut().sounds.pending.take() {
             match p {
-                Pending::Resource { object, ticket } => {
+                Pending::Resource { object, ticket, path } => {
                     let status = h.audio_resource_preparation(client, ticket)?;
                     match status.phase {
                         AudioPreparePhase::Pending => {
                             rt.host_mut().sounds.pending =
-                                Some(Pending::Resource { object, ticket });
+                                Some(Pending::Resource { object, ticket, path });
                             return Ok(false);
                         }
                         AudioPreparePhase::Failed => {
@@ -633,6 +640,7 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                                 .get_mut(&object)
                                 .ok_or_else(|| anyhow::anyhow!("native sound owner invalidated"))?;
                             s.resource = Some(resource);
+                            s.prepared_path = path;
                             s.info = Some(info);
                             s.opening = false;
                             s.status = "stop";
@@ -683,6 +691,7 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
         match op {
             Op::Control(r) => h.submit_audio(client, r)?,
             Op::Open { object, path } => {
+                let mounted = rt.host().storage()?.is_mounted_asset(&path);
                 let b = rt
                     .host_mut()
                     .sounds
@@ -696,12 +705,21 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                         fade_ms: 0.,
                     },
                 )?;
+                let reusable = mounted && b.filtered.is_empty() && b.multitrack.is_none();
+                if reusable && b.resource.is_some() && b.prepared_path.as_ref() == Some(&path) {
+                    b.opening = false;
+                    b.status = "stop";
+                    b.start = 0;
+                    b.paused = false;
+                    continue;
+                }
+                b.prepared_path = None;
                 if let Some(old) = b.resource.take() {
                     h.release_audio_resource(client, old)?;
                 }
                 b.status = "unload";
                 let asset = AudioAsset {
-                    path,
+                    path: path.clone(),
                     frame_limit: None,
                 };
                 let ticket = if let Some(stems) = b.multitrack.clone() {
@@ -712,7 +730,9 @@ pub fn drive(rt: &mut Rt, h: &mut dyn HostServices, client: ClientId) -> anyhow:
                     let chain = b.filtered.clone().into();
                     h.begin_transformed_audio_resource(client, asset, AudioResourceTransform::WaveFilters(chain))?
                 };
-                rt.host_mut().sounds.pending = Some(Pending::Resource { object, ticket });
+                rt.host_mut().sounds.pending = Some(Pending::Resource {
+                    object, ticket, path: reusable.then_some(path),
+                });
             }
             Op::Play(object) => {
                 let mut flags = [0; crysirror_resource::sli::MAX_FLAGS];
@@ -859,7 +879,7 @@ impl Sounds {
 /// Playing source and cursor frame of a WaveSoundBuffer, `None` when stopped.
 pub(crate) fn sample_source(rt:&Rt,object:ObjectHandle)->crysirror_tjs2::Result<Option<(AudioResourceHandle,u64)>>{
     let buffer=rt.host().sounds.buffers.get(&object.0).ok_or_else(||TjsError::runtime("getSample source is not a WaveSoundBuffer"))?;
-    Ok(if buffer.status=="play" {buffer.resource.map(|r|(r,buffer.start))}else{None})
+    Ok(buffer.playing_resource().map(|r|(r,buffer.start)))
 }
 pub(crate) fn visualization_source(rt:&Rt,object:ObjectHandle)->crysirror_tjs2::Result<(Option<AudioResourceHandle>,u64)>{
     let buffer=rt.host().sounds.buffers.get(&object.0).ok_or_else(||TjsError::runtime("spectrum source is not a WaveSoundBuffer"))?;
