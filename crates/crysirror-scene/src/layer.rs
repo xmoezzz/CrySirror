@@ -2140,6 +2140,17 @@ impl LayerSystem {
             .get(&client.0)
             .context("snapshot client missing")?;
         ensure!(owner.contains_key(&root), "snapshot layer {root} missing");
+        // Native save UI may capture the foreground page while its back page
+        // is the hidden input of a transition. The snapshot owns one endpoint
+        // in the requested page's local coordinates, including when it is the
+        // destination root itself.
+        let root_fade = self.crossfade(client, root);
+        let capture_root = root_fade
+            .filter(|fade| fade.elapsed_ms * 2 >= fade.duration_ms)
+            .map_or(root, |fade| fade.source);
+        let excluded = root_fade
+            .filter(|fade| capture_root == root && fade.source != root)
+            .map(|fade| fade.source);
         let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
         for (&id, layer) in owner {
             if let Some(parent) = layer.parent {
@@ -2148,11 +2159,11 @@ impl LayerSystem {
         }
         let suppressed=self.sequences.suppressed_layers(client.0);
         let mut selected = BTreeSet::new();
-        let mut stack = vec![(root, 0usize)];
+        let mut stack = vec![(capture_root, 0usize)];
         let mut out = Vec::new();
         while let Some((id, depth)) = stack.pop() {
             let original = &owner[&id];
-            if id != root && (!original.visible ||suppressed.contains(&id)) {
+            if id != capture_root && (Some(id) == excluded || !original.visible || suppressed.contains(&id)) {
                 continue;
             }
             ensure!(depth < 30, "snapshot subtree depth budget");
@@ -2165,7 +2176,7 @@ impl LayerSystem {
                 coverage::Operation::Write=>Paint::CoverageWrite{paint:Box::new(paint)},
                 coverage::Operation::Reset{value}=>Paint::CoverageReset{value},
             };
-            if id == root {
+            if id == capture_root {
                 layer.parent = None;
                 layer.rect[0] = 0.;
                 layer.rect[1] = 0.;
@@ -2217,14 +2228,15 @@ impl LayerSystem {
         }
         if out.iter().any(|layer| layer.viewport_clip.is_some()) {
             let by_id = owner.iter().map(|(id, layer)| (*id, layer)).collect();
-            let inverse = viewport_clip::inverse_to_root(root, &by_id)?;
+            let inverse = viewport_clip::inverse_to_root(capture_root, &by_id)?;
             viewport_clip::rebase(&mut out, inverse)?;
         }
         // An active isolated composition wholly inside the captured subtree is
         // frozen at its nearest endpoint (before below half progress, else the
         // source in the destination's place). One crossing the root fails.
         for (id, fade) in self.crossfades.get(&client.0).into_iter().flatten() {
-            let inside = |n: u32| selected.contains(&n) && n != root;
+            if *id == root { continue; }
+            let inside = |n: u32| selected.contains(&n) && n != capture_root;
             if inside(*id) && inside(fade.source) {
                 let before = fade.elapsed_ms * 2 < fade.duration_ms;
                 let drop = descendants_of(&out, if before { fade.source } else { *id });
@@ -2244,12 +2256,23 @@ impl LayerSystem {
             // later, so it cannot change the captured subtree's own pixels.
             ensure!(
                 !selected.contains(id) && !selected.contains(&fade.source),
-                "snapshot of active composite is unsupported"
+                "snapshot of active composite is unsupported (root {root}, destination {id}, source {})",
+                fade.source
             );
         }
         self.depth_orders
             .freeze(client.0, &self.clients, &mut out)?;
         snapshot_opacity::isolate(&mut out)?;
+        if capture_root != root {
+            for layer in &mut out {
+                if layer.id == capture_root {
+                    layer.id = root;
+                }
+                if layer.parent == Some(capture_root) {
+                    layer.parent = Some(root);
+                }
+            }
+        }
         out.sort_by_key(|layer| (layer.order, layer.id));
         Ok(out)
     }
