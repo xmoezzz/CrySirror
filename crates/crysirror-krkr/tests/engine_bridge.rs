@@ -1254,7 +1254,21 @@ fn prerendered_font_binding_uses_async_engine_face_and_retained_text_nodes() {
         var mapped=new Font();mapped.face="Authored bitmap";mapped.height=24;
         mapped.mapPrerenderedFont("authored.tft");
         var win=new Window();win.visible=true;var layer=new Layer(win,null);
-        layer.font.face="Authored bitmap";layer.font.height=24;
+        var layerFont=layer.font;
+        var holder=new Dictionary();
+        &holder.nativeFace=&layerFont.face;
+        var makeHook=function() {
+            property faceHook {
+                getter { return "Friendly name"; }
+                setter(value) {
+                    holder.nativeFace=value=="Friendly name" ? "Authored bitmap" : value;
+                }
+            }
+            return &this.faceHook;
+        } incontextof holder;
+        &layerFont.face=makeHook() incontextof null;
+        layerFont.face="Friendly name";layerFont.height=24;
+        if(layerFont.face!="Friendly name") throw new Exception("script face alias");
         Debug.message("precomputed width",layer.font.getTextWidth("AA"));
         layer.drawText(1,1,"AA",0xffffff);
         mapped.unmapPrerenderedFont();

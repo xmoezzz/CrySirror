@@ -1516,6 +1516,16 @@ fn bookmark_thumbnail_round_trip_preserves_picture_and_slot_data() {
             preview.loadImages(name);
             if (preview.imageWidth != 16 || preview.imageHeight != 8) throw "preview size";
         }
+        var bmp = "savedata/bookmark.bmp";
+        layer.saveLayerImage(bmp, "bmp24");
+        (Dictionary.saveStruct incontextof body)(bmp, "o438");
+        var preview = new Layer(w, root);
+        preview.loadImages(bmp);
+        if (preview.imageWidth != 16 || preview.imageHeight != 8) throw "BMP preview size";
+        if (preview.getMainPixel(2, 4) != 0xff0000 ||
+            preview.getMainPixel(13, 4) != 0x00ff00) throw "BMP preview pixels";
+        var restored = Dictionary.loadStruct(bmp, "o438");
+        if (restored.slot != 17) throw "BMP slot data";
         Debug.message("bookmark-preview-complete");
     "#);
     runtime.set_canvas_image_presenter(true);

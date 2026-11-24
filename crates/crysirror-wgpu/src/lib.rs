@@ -361,6 +361,7 @@ pub struct Renderer {
     engine_frame: Vec<Primitive>,
     sampler: wgpu::Sampler,
     textures: BTreeMap<String, Texture>,
+    recent_snapshots: texture_cache::RecentSnapshots,
     /// Explicit capture-only generations are bounded even in a headless host
     /// that prepares images without submitting a normal display frame.
     snapshot_readbacks: std::collections::VecDeque<String>,
@@ -808,6 +809,7 @@ impl Renderer {
             engine_frame: Vec::new(),
             sampler,
             textures: BTreeMap::new(),
+            recent_snapshots: Default::default(),
             snapshot_readbacks: Default::default(),
             scene_texture_keys: Default::default(),
             capture_texture_keys: Default::default(),
@@ -1115,7 +1117,7 @@ impl Renderer {
         let bytes = u64::from(width) * u64::from(height) * 4;
         ensure!(bytes == rgba.len() as u64, "invalid RGBA length");
         ensure!(
-            self.textures.values().map(|t| t.bytes).sum::<u64>() + bytes <= 256 * 1024 * 1024,
+            self.trim_recent_snapshots_for(bytes) + bytes <= 256 * 1024 * 1024,
             "GPU texture cache exceeds 256 MiB"
         );
         let texture = self.gpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -1190,7 +1192,7 @@ impl Renderer {
     fn render_texture(&mut self, key: String, size: [u32; 2]) -> Result<()> {
         let bytes = u64::from(size[0]) * u64::from(size[1]) * 4;
         ensure!(
-            self.textures.values().map(|t| t.bytes).sum::<u64>() + bytes <= 256 * 1024 * 1024,
+            self.trim_recent_snapshots_for(bytes) + bytes <= 256 * 1024 * 1024,
             "GPU texture cache exceeds 256 MiB"
         );
         let texture = self.gpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -1512,7 +1514,7 @@ impl Renderer {
             used.insert(c.clone());
         }
         self.preserve_capture_textures(&mut used);
-        self.textures.retain(|key, _| used.contains(key.as_str()));
+        self.retain_frame_textures(&used);
         self.glyph_cells.retain(|key, _| used.contains(key));
         if filter_keys.iter().any(Option::is_some) {
             if !self.textures.contains_key("solid:white") {

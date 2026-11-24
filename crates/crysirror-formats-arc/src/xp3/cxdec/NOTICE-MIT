@@ -30,3 +30,6 @@ SHAKE256/BLAKE2s derivation (special_params.rs) and Special name records and
 filename tokens (cxdec_names.rs). Not copied: the Unicorn/x86 initialization
 fallback, SteamStub unwrapping, tjs2dec symbolic execution, CLI, GPU code,
 published per-title parameter tables, control-block binaries or test assets.
+
+Revision: 7b5fdeec318de4977787359399370927946e9795
+Adapted: Nana name-stream decoding (cxdec_names.rs).

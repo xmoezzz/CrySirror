@@ -57,6 +57,12 @@ operations to conceal allocation pressure. Declared 3D tier reductions are
 documented in [render tiers](../crates/crysirror-render-tier/README.md); they do
 not authorize degrading visual-novel composition.
 
+The wgpu renderer may retain up to 128 small immutable snapshot textures and
+2 MiB of their payload per renderer for recent reuse. Entries move out of the
+active map and use the existing texture budget. Combined renderer and
+compositor admission drops optional entries before rejecting work at that
+budget. Explicit readback and active presentation retain their own leases.
+
 ## Diagnostics and allocation failure
 
 Record what the source can actually expose: allocation purpose/format, requested
@@ -98,6 +104,15 @@ derives dimensions, verified opacity and the encoded content fingerprint from
 the same decode. The RGBA surface uses the existing prepared cache budget, and
 the worker uses the shared image scratch budget. A mount refresh invalidates
 the ticket and its metadata together.
+
+### Dynamic font sources
+
+Outline and shaping consumers share immutable encoded font bytes. The interner
+keeps weak references, so the source survives only while a consumer owns it.
+For a storage load, the runtime reserves both buffers during conversion from
+the I/O vector to shared storage and returns the temporary charge immediately.
+The remaining reservation follows the source through rendering and shaping.
+Bitmap faces also retain their separate decoded coverage reservation.
 
 ### wgpu subtree rendering
 

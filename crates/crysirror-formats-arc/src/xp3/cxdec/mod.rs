@@ -11,6 +11,7 @@
 //! protected entry is checksum-verified again before it is published.
 //! Unknown/unsupported layouts fail visibly.
 mod engine;
+mod nana;
 pub(super) mod pe;
 mod recover;
 mod special;
@@ -56,8 +57,7 @@ pub(super) fn special_descriptor(tag: &[u8], body: &[u8], file: u64) -> Option<S
 pub(super) fn requested(ctx: &DecodeContext) -> bool {
     ctx.parameters
         .get("kirikiri/xp3")
-        .and_then(|o| o.get("cxdec_modules"))
-        .is_some()
+        .is_some_and(|o| o.get("cxdec_modules").is_some() || o.get("cxdec_nana_profile").is_some())
 }
 
 pub(super) fn open(
@@ -65,6 +65,33 @@ pub(super) fn open(
     specials: Vec<Special>,
     ctx: &DecodeContext,
 ) -> Result<Box<dyn Archive>> {
+    if let Some(profile) = ctx.parameters.get("kirikiri/xp3")
+        .and_then(|options| options.get("cxdec_nana_profile"))
+    {
+        let profile = profile.as_str().context("Nana profile must be a companion resource name")?;
+        let [descriptor] = specials.as_slice() else {
+            bail!("Nana profile requires one indirect dls: descriptor");
+        };
+        let (candidate, setup) = nana::apply(&mut base, descriptor, profile, ctx)?;
+        let protected = take_protected_flags(&mut base);
+        let (engine, validated) =
+            select(vec![(candidate, "local Nana profile".into())], &base, &protected, ctx)?;
+        let report = serde_json::json!({"generator":"nana", "validated_samples":validated});
+        let mut embedded = BTreeMap::new();
+        if let Some(setup) = setup {
+            let startup = ctx.source_name.as_deref().context("Nana startup source name")?;
+            let source = serde_json::json!({"startup":format!("{startup}>$")});
+            let data = bootstrap_profile(&setup, &source, &Some(report.clone()))?;
+            publish_bootstrap(&mut base, &mut embedded, ctx, data)?;
+        }
+        return Ok(Box::new(CxArchive {
+            base,
+            protected,
+            engine: engine.map(|(e, _)| Arc::new(e)),
+            embedded,
+            report,
+        }));
+    }
     let modules = ctx
         .parameters
         .get("kirikiri/xp3")
@@ -102,15 +129,7 @@ pub(super) fn open(
         _ => bail!("multiple XP3 indirect Special descriptors"),
     }
     // Content bytes are filtered here, never by the generic pipeline.
-    let mut protected = BTreeSet::new();
-    for (e, plan) in base.entries.iter().zip(base.plans.iter_mut()) {
-        if let EntryPlan::Segments { encrypted, .. } = plan {
-            if *encrypted {
-                protected.insert(e.id);
-            }
-            *encrypted = false;
-        }
-    }
+    let protected = take_protected_flags(&mut base);
     let candidates = match &derived {
         Some(d) => {
             let c = recover::coherent_candidates(&facts, &d.control_block, (d.mask, d.offset));
@@ -129,54 +148,23 @@ pub(super) fn open(
         }
         None => recover::generic_candidates(&facts),
     };
-    let samples = samples(&base, &protected, ctx)?;
-    let engine = select(candidates, &samples)?;
+    let (engine, validated_samples) = select(candidates, &base, &protected, ctx)?;
     let engine_report = engine.as_ref().map(|(e, src)| {
         let p = e.profile();
         serde_json::json!({"generator": match p.generator {
             engine::GeneratorKind::Classic => "classic",
             engine::GeneratorKind::Cabbage{..} => "cabbage",
-        }, "prefix8": p.prefix8.is_some(), "source": src, "validated_samples": samples.len()})
+        }, "prefix8": p.prefix8.is_some(), "source": src, "validated_samples": validated_samples})
     });
     // One shared report; `CxArchive::entry_metadata` attaches it to every
     // protected entry instead of a JSON copy per entry.
     let report = serde_json::json!({"special": special_report, "content": engine_report});
     let mut embedded = BTreeMap::new();
-    let target = ctx
-        .parameters
-        .get("kirikiri/xp3")
-        .and_then(|o| o.get("cxdec_bootstrap_profile"));
-    if let Some(target) = target {
-        let target = target
-            .as_str()
-            .context("cxdec_bootstrap_profile must be a path string")?;
-        // Only the archive holding the native startup redirect describes the
-        // bootstrap; sibling containers validated by the same text do not.
-        if let Some(setup) = setup.as_ref().filter(|s| s.startup_archive) {
-            let data = bootstrap_profile(setup, &special_report, &engine_report)?;
-            let path =
-                crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Asset, target)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
-            ensure!(
-                path.relative() == target && target.len() <= 512,
-                "CXDEC bootstrap profile target must be canonical"
-            );
-            ensure!(
-                base.entries.len() < ctx.limits.max_entries
-                    && !base.entries.iter().any(|e| e.path == target),
-                "CXDEC bootstrap profile target collision or count limit"
-            );
-            let id = base.entries.len() as u32;
-            base.entries.push(ArchiveEntry {
-                id,
-                path: target.into(),
-                size: data.len() as u64,
-                stored_size: 0,
-                metadata: serde_json::json!({"format": "kirikiri/xp3",
-                    "origin": "validated CXDEC setupArchiveData profile", "derived": true}),
-            });
-            embedded.insert(id, data);
-        }
+    // Only the archive holding the native startup redirect describes the
+    // bootstrap; sibling containers validated by the same text do not.
+    if let Some(setup) = setup.as_ref().filter(|s| s.startup_archive) {
+        let data = bootstrap_profile(setup, &special_report, &engine_report)?;
+        publish_bootstrap(&mut base, &mut embedded, ctx, data)?;
     }
     Ok(Box::new(CxArchive {
         base,
@@ -185,6 +173,46 @@ pub(super) fn open(
         embedded,
         report,
     }))
+}
+
+fn publish_bootstrap(
+    base: &mut ParsedArchive,
+    embedded: &mut BTreeMap<u32, Arc<[u8]>>,
+    ctx: &DecodeContext,
+    data: Arc<[u8]>,
+) -> Result<()> {
+    let Some(target) = ctx.parameters.get("kirikiri/xp3")
+        .and_then(|options| options.get("cxdec_bootstrap_profile")) else { return Ok(()) };
+    let target = target.as_str().context("cxdec_bootstrap_profile must be a path string")?;
+    let path = crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Asset, target)?;
+    ensure!(path.relative() == target && target.len() <= 512,
+        "CXDEC bootstrap profile target must be canonical");
+    ensure!(base.entries.len() < ctx.limits.max_entries
+        && !base.entries.iter().any(|e| e.path.eq_ignore_ascii_case(target)),
+        "CXDEC bootstrap profile target collision or count limit");
+    let id = base.entries.len() as u32;
+    base.entries.push(ArchiveEntry {
+        id,
+        path: target.into(),
+        size: data.len() as u64,
+        stored_size: 0,
+        metadata: serde_json::json!({"format": "kirikiri/xp3",
+            "origin": "validated CXDEC setupArchiveData profile", "derived": true}),
+    });
+    embedded.insert(id, data);
+    Ok(())
+}
+
+fn take_protected_flags(base: &mut ParsedArchive) -> BTreeSet<u32> {
+    let mut protected = BTreeSet::new();
+    for (entry, plan) in base.entries.iter().zip(&mut base.plans) {
+        if let EntryPlan::Segments { encrypted, .. } = plan {
+            if std::mem::take(encrypted) {
+                protected.insert(entry.id);
+            }
+        }
+    }
+    protected
 }
 
 /// The `Storages.setupArchiveData` argument that authenticated this archive's
@@ -401,27 +429,21 @@ struct Sample {
 }
 fn samples(
     base: &ParsedArchive,
-    protected: &BTreeSet<u32>,
+    entries: &[&ArchiveEntry],
     ctx: &DecodeContext,
 ) -> Result<Vec<Sample>> {
-    let mut ids: Vec<&ArchiveEntry> = base
-        .entries
-        .iter()
-        .filter(|e| protected.contains(&e.id) && e.size > 0)
-        .collect();
-    ids.sort_by_key(|e| (e.size, e.id));
     let mut out = Vec::new();
     let mut total = 0u64;
-    for e in ids {
-        if out.len() >= SAMPLE_COUNT * 4 || total + e.size > SAMPLE_BYTES {
+    for e in entries {
+        if out.len() >= SAMPLE_COUNT * 4 || e.size > SAMPLE_BYTES - total {
             break;
         }
+        total += e.size;
         let hash = base.xp3(e.id).context("XP3 adlr absent")?.adler32;
         let data = read_all(base.open(e.id, ctx)?.as_ref(), SAMPLE_BYTES)?;
         if adler32(&data) == hash {
             continue;
         }
-        total += e.size;
         out.push(Sample { hash, data });
     }
     Ok(out)
@@ -430,10 +452,17 @@ fn samples(
 /// Accept exactly one behaviourally distinct candidate restoring every sample.
 fn select(
     candidates: Vec<(engine::CxdecProfile, String)>,
-    samples: &[Sample],
-) -> Result<Option<(CxdecEngine, String)>> {
+    base: &ParsedArchive,
+    protected: &BTreeSet<u32>,
+    ctx: &DecodeContext,
+) -> Result<(Option<(CxdecEngine, String)>, usize)> {
+    let mut entries: Vec<_> = base.entries.iter()
+        .filter(|e| protected.contains(&e.id) && e.size > 0)
+        .collect();
+    entries.sort_by_key(|e| (e.size, e.id));
+    let samples = samples(base, &entries, ctx)?;
     if samples.is_empty() {
-        return Ok(None);
+        return Ok((None, 0));
     }
     ensure!(
         !candidates.is_empty(),
@@ -455,9 +484,12 @@ fn select(
             passing.push((e, source));
         }
     }
-    if passing.len() > 1 {
-        passing.retain(|(e, _)| passes(e, samples));
-    }
+    let short_samples = if passing.len() > 1 {
+        passing.retain(|(e, _)| passes(e, &samples));
+        samples.len()
+    } else {
+        tests.len()
+    };
     // Distinct parameter sets with identical behaviour are equivalent.
     let fingerprint = |e: &CxdecEngine| {
         let p = e.profile();
@@ -466,15 +498,82 @@ fn select(
             .collect();
         (p.mask, p.offset, p.prefix8, lanes)
     };
-    let distinct: BTreeSet<_> = passing.iter().map(|(e, _)| fingerprint(e)).collect();
-    match distinct.len() {
+    let mut seen = BTreeSet::new();
+    passing.retain(|(e, _)| seen.insert(fingerprint(e)));
+    let boundary_samples = if passing.len() > 1 {
+        check_boundary_samples(base, &entries, ctx, &mut passing)?
+    } else {
+        0
+    };
+    match passing.len() {
         0 => bail!(
             "CXDEC: no recovered parameter set restores the archive checksums ({} samples)",
             samples.len()
         ),
-        1 => Ok(passing.into_iter().next()),
+        1 => Ok((passing.into_iter().next(), short_samples + boundary_samples)),
         n => bail!("CXDEC: {n} distinct parameter sets validate; refusing to guess"),
     }
+}
+
+/// Short entries can validate two boundary parameters because neither filter
+/// reaches its second region. Use entries that can exercise the difference.
+/// Some patch archives only have large witnesses; stream them in bounded chunks.
+fn check_boundary_samples(
+    base: &ParsedArchive,
+    entries: &[&ArchiveEntry],
+    ctx: &DecodeContext,
+    passing: &mut Vec<(CxdecEngine, String)>,
+) -> Result<usize> {
+    const CHUNK: usize = 64 * 1024;
+    let mut remaining = ctx.limits.max_entry_size.min(256 * 1024 * 1024);
+    // Also bound aggregate transform work even if many candidates passed the
+    // initial short samples.
+    let mut transform_bytes = 512 * 1024 * 1024u64;
+    let mut validated = 0;
+    let mut raw_bytes = vec![0; CHUNK];
+    let mut decoded_bytes = vec![0; CHUNK];
+    for entry in entries {
+        if passing.len() <= 1 || entry.size > remaining {
+            break;
+        }
+        let hash = base.xp3(entry.id).context("XP3 adlr absent")?.adler32;
+        let boundary = |candidate: &CxdecEngine| {
+            let p = candidate.profile();
+            u64::from((hash & p.mask).wrapping_add(p.offset)).min(entry.size)
+        };
+        if passing.iter().all(|(e, _)| boundary(e) == boundary(&passing[0].0)) {
+            continue;
+        }
+        let work_bytes = entry.size.saturating_mul(passing.len() as u64);
+        if work_bytes > transform_bytes {
+            break;
+        }
+        remaining -= entry.size;
+        transform_bytes -= work_bytes;
+        let source = base.open(entry.id, ctx)?;
+        let mut original = Adler::default();
+        let mut decoded = vec![Adler::default(); passing.len()];
+        let mut at = 0;
+        while at < entry.size {
+            let n = (entry.size - at).min(CHUNK as u64) as usize;
+            let raw = &mut raw_bytes[..n];
+            let work = &mut decoded_bytes[..n];
+            crysirror_resource::read_exact_at(source.as_ref(), at, raw)?;
+            original.update(raw);
+            for ((e, _), checksum) in passing.iter().zip(&mut decoded) {
+                work.copy_from_slice(raw);
+                e.apply(at, hash, work)?;
+                checksum.update(work);
+            }
+            at += n as u64;
+        }
+        if original.finish() != hash {
+            let mut decoded = decoded.into_iter();
+            passing.retain(|_| decoded.next().unwrap().finish() == hash);
+            validated += 1;
+        }
+    }
+    Ok(validated)
 }
 
 struct CxArchive {
@@ -765,6 +864,143 @@ mod tests {
             ),
             ("plain.txt", b"never filtered".to_vec()),
         ]
+    }
+
+    #[test]
+    fn nana_startup_uses_literal_dollar_alongside_token_index_and_decoy() {
+        use std::io::Write;
+
+        let startup_text = "synthetic Nana 起動";
+        let (control, mask, offset, state) = nana::derive_setup(startup_text).unwrap();
+        let profile = CxdecProfile {
+            mask,
+            offset,
+            prolog_order: PROLOG,
+            even_branch_order: EVEN,
+            odd_branch_order: ODD,
+            control_block: control.to_vec(),
+            generator: GeneratorKind::Cabbage { random_seed: 123 },
+            prefix8: None,
+        };
+        let engine = CxdecEngine::new(profile).unwrap();
+        let name = "system/init.tjs";
+        let token = special::token("dls:", name);
+        let plain = b"startup dependency".repeat(120);
+        let checksum = adler32(&plain);
+        let mut encrypted = plain.clone();
+        engine.apply(0, checksum, &mut encrypted).unwrap();
+        let mut data = xp3_archive(&[
+            ("startup.tjs", b"decoy".to_vec(), adler32(b"decoy"), true),
+            ("$", b"true startup".to_vec(), adler32(b"true startup"), true),
+            (&token, encrypted, checksum, true),
+        ]);
+        let at = u64::from_le_bytes(data[11..19].try_into().unwrap()) as usize;
+        let name_payload = at;
+        let table = data.split_off(at + 9);
+        data.truncate(at);
+        let mut record = checksum.to_le_bytes().to_vec();
+        record.extend((name.encode_utf16().count() as u16).to_le_bytes());
+        record.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
+        record.extend([0, 0]);
+        let names = chunk(b"hnfn", &record);
+        let mut compressor = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        compressor.write_all(&names).unwrap();
+        let mut stored = compressor.finish().unwrap();
+        nana::decode_prefix(&mut stored, state);
+        let mut descriptor = (at as u64).to_le_bytes().to_vec();
+        descriptor.extend((names.len() as u32).to_le_bytes());
+        descriptor.extend((stored.len() as u32).to_le_bytes());
+        data.extend_from_slice(&stored);
+        let at = data.len() as u64;
+        data[11..19].copy_from_slice(&at.to_le_bytes());
+        let descriptor = chunk(b"dls:", &descriptor);
+        data.push(0);
+        data.extend(((descriptor.len() + table.len()) as u64).to_le_bytes());
+        data.extend(descriptor);
+        data.extend(table);
+
+        let profile = serde_json::to_vec(&serde_json::json!({
+            "name_state": state,
+            "content": {"mask":mask, "offset":offset, "prolog_order":PROLOG, "even_branch_order":EVEN,
+                "odd_branch_order":ODD, "random_seed":123, "control_block_file":"control.bin"}
+        })).unwrap();
+        let mut ctx = DecodeContext::new(ClientId(3));
+        ctx.source_name = Some("data.xp3".into());
+        ctx.parameters.insert("kirikiri/xp3".into(), serde_json::json!({
+            "cxdec_nana_profile": "local.json",
+            "cxdec_nana_setup_file": "sample.key",
+            "cxdec_bootstrap_profile": "__cxdec/protection.json",
+        }));
+        ctx.resolver = Some(Arc::new(move |path: &str| -> Result<Arc<dyn AssetReader>> {
+            let data = match path {
+                "local.json" => profile.clone(),
+                "control.bin" => control.to_vec(),
+                "sample.key" => format!("{startup_text}\r\nunused second line").into_bytes(),
+                "wrong.key" => b"wrong input".to_vec(),
+                _ => bail!("unexpected test companion"),
+            };
+            Ok(Arc::new(MemoryAssetReader(data.into())))
+        }));
+        let mut wrong_state = data.clone();
+        wrong_state[name_payload] ^= 0x80;
+        let failed = Xp3.open(Arc::new(MemoryAssetReader(wrong_state.into())), &ctx);
+        assert!(failed.is_err());
+        let source = Arc::new(MemoryAssetReader(data.into()));
+        ctx.parameters.get_mut("kirikiri/xp3").unwrap()["cxdec_nana_setup_file"] =
+            "wrong.key".into();
+        let failure = Xp3.open(source.clone(), &ctx).err().unwrap();
+        assert!(failure.to_string().contains("does not derive the verified archive profile"));
+        ctx.parameters.get_mut("kirikiri/xp3").unwrap()["cxdec_nana_setup_file"] =
+            "sample.key".into();
+        let archive = Xp3.open(source, &ctx).unwrap();
+        let mount = crysirror_resource::ArchiveMount::new(archive, ctx).unwrap();
+        assert_eq!(mount.entries().len(), 3);
+        for (path, expected) in [
+            ("startup.tjs", &b"true startup"[..]), ("$", &b"true startup"[..]), (name, &plain[..]),
+        ] {
+            assert_eq!(read_all(mount.open_entry(path).unwrap().as_ref(), 4096).unwrap(), expected);
+        }
+        let generated = mount.open_entry("__cxdec/protection.json").unwrap();
+        let profile: serde_json::Value = serde_json::from_slice(
+            &read_all(generated.as_ref(), 4096).unwrap()
+        ).unwrap();
+        assert_eq!(profile["setup_archive_data"], startup_text);
+    }
+
+    #[test]
+    fn longer_entries_resolve_an_ambiguity_left_by_short_samples() {
+        let (mask, offset) = (0, 1024);
+        let (_, control) = synthetic_module(mask, offset);
+        let correct = CxdecProfile {
+            mask,
+            offset,
+            prolog_order: PROLOG,
+            even_branch_order: EVEN,
+            odd_branch_order: ODD,
+            control_block: control,
+            generator: GeneratorKind::Classic,
+            prefix8: None,
+        };
+        let mut wrong = correct.clone();
+        wrong.offset += 1 << 16;
+        let engine = CxdecEngine::new(correct.clone()).unwrap();
+        let protected_input = |name, mut data: Vec<u8>| {
+            let hash = adler32(&data);
+            engine.apply(0, hash, &mut data).unwrap();
+            // select receives the raw segmented archive, where the filter flag
+            // has already been moved into the set of protected IDs.
+            (name, data, hash, false)
+        };
+        let mut files = vec![protected_input("short", vec![0x51; 80]); SAMPLE_COUNT * 4];
+        files.push(protected_input("long", (0..90_000).map(|i| (i * 7) as u8).collect()));
+        let ctx = DecodeContext::new(ClientId(1));
+        let base = parse_index(Arc::new(MemoryAssetReader(xp3_archive(&files).into())), &ctx)
+            .unwrap().archive;
+        let ids = base.entries.iter().map(|entry| entry.id).collect();
+        let candidates = vec![(wrong, "other".into()), (correct, "expected".into())];
+        let (winner, sample_count) = select(candidates, &base, &ids, &ctx).unwrap();
+        assert_eq!(winner.unwrap().1, "expected");
+        assert_eq!(sample_count, SAMPLE_COUNT * 4 + 1);
     }
 
     #[test]

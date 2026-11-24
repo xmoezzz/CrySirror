@@ -5,7 +5,7 @@
 //! single-face sources; collection-wide native registration fails explicitly.
 //! Both native extraction policies use the engine capability storage: no
 //! temporary installation or global OS font registration is needed.
-use crate::natives::Rt;
+use crate::natives::{Rt, font_property};
 use crysirror_core::service::{FontJob, FontLibrary, FontLoadSource, FontLoadSpec, FontLoadState};
 use crysirror_tjs2::{
     runtime::{ObjectHandle, Variant},
@@ -23,10 +23,10 @@ pub(crate) struct Fonts {
 pub(crate) fn add(rt: &mut Rt, name: String) -> Result<Variant> {
     begin(rt, name, None)
 }
-fn signature(rt: &mut Rt, font: ObjectHandle) -> Result<String> {
+fn signature(rt: &Rt, font: ObjectHandle) -> Result<String> {
     let mut values = Vec::new();
     for member in ["face", "height", "bold", "italic", "angle", "underline", "strikeout", "faceIsFileName"] {
-        values.push(rt.resolve_object_member(font, member)?.to_tjs_string()?);
+        values.push(font_property(rt, font, member).to_tjs_string()?);
     }
     let key = serde_json::to_string(&values).map_err(|e| TjsError::runtime(e.to_string()))?;
     if key.len() > 4096 {
@@ -34,15 +34,15 @@ fn signature(rt: &mut Rt, font: ObjectHandle) -> Result<String> {
     }
     Ok(key)
 }
-pub(crate) fn is_mapped(rt: &mut Rt, font: ObjectHandle) -> Result<bool> {
-    let key = signature(rt, font)?;
-    Ok(rt.host().fonts.mapped.contains_key(&key))
+fn mapped_alias(rt: &Rt, font: ObjectHandle) -> Result<Option<&str>> {
+    let mapped = &rt.host().fonts.mapped;
+    if mapped.is_empty() {
+        return Ok(None);
+    }
+    Ok(mapped.get(&signature(rt, font)?).map(String::as_str))
 }
 pub(crate) fn map(rt: &mut Rt, font: ObjectHandle, name: String) -> Result<Variant> {
-    let size = rt
-        .resolve_object_member(font, "height")?
-        .to_integer()?
-        .unsigned_abs();
+    let size = font_property(rt, font, "height").to_integer()?.unsigned_abs();
     if !(1..=512).contains(&size) {
         return Err(TjsError::runtime(
             "Font.mapPrerenderedFont height must have magnitude 1..512",
@@ -188,9 +188,9 @@ pub(crate) struct RasterSize {
 /// The Windows font rasterizer requests a negative LOGFONT height (em pixels)
 /// and positions ink at GetOutlineTextMetrics.otmAscent. Precomputed fonts
 /// already carry the game's integer advances and bitmap origins.
-pub(crate) fn raster_size(rt: &mut Rt, font: ObjectHandle, alias: &str, em: u64) -> Result<RasterSize> {
+pub(crate) fn raster_size(rt: &Rt, font: ObjectHandle, alias: &str, em: u64) -> Result<RasterSize> {
     let identity = RasterSize { measure: em as f32, draw: em as u16, offset_y: 0 };
-    if is_mapped(rt, font)? { return Ok(identity); }
+    if mapped_alias(rt, font)? == Some(alias) { return Ok(identity); }
     let Some(lib) = &rt.host().fonts.library else { return Ok(identity) };
     if !lib.is_loaded(alias).map_err(|e| TjsError::runtime(e.to_string()))? { return Ok(identity); }
     let metric = match lib.outline_em_metrics(alias, em as f32) {
@@ -209,12 +209,15 @@ pub(crate) fn raster_size(rt: &mut Rt, font: ObjectHandle, alias: &str, em: u64)
 /// KiriKiri's comma-separated family preference list. Shared registrations are
 /// consulted first; configured project font is the portable host fallback.
 pub(crate) fn alias(rt: &mut Rt, font: ObjectHandle) -> Result<String> {
-    let binding = signature(rt, font)?;
-    if let Some(alias) = rt.host().fonts.mapped.get(&binding) {
-        return Ok(alias.clone());
+    if let Some(alias) = mapped_alias(rt, font)? {
+        return Ok(alias.to_owned());
     }
-    let face = rt.resolve_object_member(font, "face")?.to_tjs_string()?;
-    if rt.resolve_object_member(font,"faceIsFileName")?.is_truthy(){
+    outline_alias(rt, font)
+}
+
+fn outline_alias(rt: &mut Rt, font: ObjectHandle) -> Result<String> {
+    let face = font_property(rt, font, "face").to_tjs_string()?;
+    if font_property(rt, font, "faceIsFileName").is_truthy() {
         if face.is_empty(){return Err(TjsError::runtime("Font.faceIsFileName requires a resource filename"));}
         if let Some(info)=rt.host().fonts.loaded.get(&face){return Ok(info.alias.clone());}
         if rt.host().fonts.pending.is_some(){return Err(TjsError::resource_pending("font file preparation"));}
@@ -243,4 +246,44 @@ pub(crate) fn alias(rt: &mut Rt, font: ObjectHandle) -> Result<String> {
         }
     }
     Ok(rt.host().font.clone())
+}
+
+pub(crate) struct FontRun<'a> {
+    pub text: &'a str,
+    pub alias: String,
+    pub raster: RasterSize,
+    pub mapped: bool,
+}
+
+/// A bitmap font can cover only part of the text. KiriKiri uses its mapped
+/// glyphs where available and measures/draws the remaining glyphs with the
+/// underlying outline face (krkrz LayerBitmapImpl.cpp, GetTextSize).
+pub(crate) fn text_runs<'a>(rt: &mut Rt, font: ObjectHandle, em: u64, text: &'a str) -> Result<Vec<FontRun<'a>>> {
+    let Some(mapped) = mapped_alias(rt, font)?.map(str::to_owned) else {
+        let alias = outline_alias(rt, font)?;
+        let raster = raster_size(rt, font, &alias, em)?;
+        return Ok(vec![FontRun { text, alias, raster, mapped: false }]);
+    };
+    let library = rt.host().fonts.library.clone()
+        .ok_or_else(|| TjsError::runtime("engine font library absent"))?;
+    let mut segments: Vec<(usize, bool)> = Vec::new();
+    for (start, ch) in text.char_indices() {
+        let bitmap = library.glyph_id(&mapped, if ch == '\t' { ' ' } else { ch }).is_ok();
+        if segments.last().is_none_or(|(_, prev)| *prev != bitmap) {
+            segments.push((start, bitmap));
+        }
+    }
+    let outline = if segments.iter().any(|(_, bitmap)| !*bitmap) {
+        Some(outline_alias(rt, font)?)
+    } else {
+        None
+    };
+    segments.iter().enumerate().map(|(i, &(start, bitmap))| {
+        let end = segments.get(i + 1).map_or(text.len(), |(next, _)| *next);
+        let alias = if bitmap { &mapped } else { outline.as_ref().expect("outline fallback") };
+        Ok(FontRun {
+            text: &text[start..end], alias: alias.clone(),
+            raster: raster_size(rt, font, alias, em)?, mapped: bitmap,
+        })
+    }).collect()
 }

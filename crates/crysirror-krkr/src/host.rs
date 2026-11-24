@@ -278,6 +278,7 @@ pub struct KrkrHost {
 impl KrkrHost {
     pub(crate) fn before_image_work(&mut self) -> TjsResult<()> {
         if self.can_suspend && self.bitmap_work.as_mut().is_some_and(BitmapWorkSlice::checkpoint) {
+            let _defer = crysirror_tasks::profile::span_current("krkr.bitmap.defer");
             self.bitmap_redraw_pending = true;
             return Err(TjsError::resource_pending("continue native image work on the next host tick"));
         }

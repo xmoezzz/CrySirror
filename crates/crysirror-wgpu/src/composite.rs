@@ -418,8 +418,8 @@ impl Renderer {
                 c.renderer.set_engine_frame(child_frame)?;
                 c.renderer.scene_texture_keys.clear();
                 c.renderer.retire_unused_textures(assets)?;
-                let cached: u64 = self.textures.values().map(|t| t.bytes).sum();
-                let child_cached: u64 = c.renderer.textures.values().map(|t| t.bytes).sum();
+                let (cached, child_cached) =
+                    self.trim_isolated_snapshot_caches(&mut c.renderer, work_bytes);
                 ensure!(
                     cached + child_cached + work_bytes <= 256 * 1024 * 1024,
                     "composite and texture caches exceed 256 MiB"
@@ -652,11 +652,10 @@ impl Renderer {
                     pass.draw(0..3, 0..1);
                 }
                 self.gpu.queue.submit(Some(encoder.finish()));
+                let (cached, child_cached) =
+                    self.trim_isolated_snapshot_caches(&mut c.renderer, work_bytes);
                 ensure!(
-                    self.textures.values().map(|t| t.bytes).sum::<u64>()
-                        + c.renderer.textures.values().map(|t| t.bytes).sum::<u64>()
-                        + work_bytes
-                        <= 256 * 1024 * 1024,
+                    cached + child_cached + work_bytes <= 256 * 1024 * 1024,
                     "composite and texture caches exceed 256 MiB"
                 );
                 let bind = self
@@ -921,16 +920,28 @@ impl Renderer {
             .compositor
             .take()
             .unwrap_or_else(|| Compositor::new(self));
+        let gpu = self.gpu.clone();
+        let format = self.format;
         let result = (|| {
+            let mut scratch = None::<([u32; 2], wgpu::TextureView)>;
+            let mut alpha_uniform = None;
             for (owner, size, layers) in snapshots {
+                let key = Self::snapshot_key(assets, owner, size, &layers)?;
+                if self.textures.contains_key(&key) {
+                    continue;
+                }
+                if let Some(texture) = self.recent_snapshots.take(&key) {
+                    let _reuse = crysirror_tasks::profile::span_current("renderer.snapshot.reuse_small");
+                    self.textures.insert(key, texture);
+                    continue;
+                }
                 let paint = Paint::Snapshot {
                     size,
                     layers: layers.clone(),
                 };
                 paint.validate()?;
-                let key = Self::snapshot_key(assets, owner, size, &layers)?;
-                if self.textures.contains_key(&key) {
-                    continue;
+                if scratch.as_ref().is_some_and(|(previous, _)| *previous != size) {
+                    scratch = None;
                 }
                 ensure!(
                     size.iter()
@@ -948,8 +959,8 @@ impl Renderer {
                 c.renderer.set_engine_frame(isolated.frame(size)?)?;
                 c.renderer.scene_texture_keys.clear();
                 c.renderer.retire_unused_textures(assets)?;
-                let resident_bytes = self.textures.values().map(|t| t.bytes).sum::<u64>();
-                let isolated_bytes = c.renderer.textures.values().map(|t| t.bytes).sum::<u64>();
+                let (resident_bytes, isolated_bytes) =
+                    self.trim_isolated_snapshot_caches(&mut c.renderer, work_bytes);
                 ensure!(
                     resident_bytes + isolated_bytes + work_bytes
                         <= 256 * 1024 * 1024,
@@ -965,7 +976,7 @@ impl Renderer {
                     continue;
                 };
                 let make = |label| {
-                    self.gpu.device.create_texture(&wgpu::TextureDescriptor {
+                    gpu.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some(label),
                         size: wgpu::Extent3d {
                             width: size[0],
@@ -975,7 +986,7 @@ impl Renderer {
                         mip_level_count: 1,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
-                        format: self.format,
+                        format,
                         // COPY_SRC: compacted canvases are materialized from it.
                         usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                             | wgpu::TextureUsages::TEXTURE_BINDING
@@ -983,17 +994,23 @@ impl Renderer {
                         view_formats: &[],
                     })
                 };
-                let premultiplied = make("immutable snapshot isolated input");
-                let input = premultiplied.create_view(&Default::default());
+                // The conversion below is submitted before the next isolated
+                // draw. Queue order protects the reused attachment while the
+                // immutable outputs keep their own textures.
+                let (_, input) = scratch.get_or_insert_with(|| {
+                    let view = make("immutable snapshot isolated input")
+                        .create_view(&Default::default());
+                    (size, view)
+                });
                 c.renderer.render(
                     &SceneState::default(),
                     assets,
-                    RenderTarget { view: &input, size },
+                    RenderTarget { view: input, size },
                     size,
                     [0; 4],
                 )?;
-                let resident_bytes = self.textures.values().map(|t| t.bytes).sum::<u64>();
-                let isolated_bytes = c.renderer.textures.values().map(|t| t.bytes).sum::<u64>();
+                let (resident_bytes, isolated_bytes) =
+                    self.trim_isolated_snapshot_caches(&mut c.renderer, work_bytes);
                 ensure!(
                     resident_bytes + isolated_bytes + work_bytes
                         <= 256 * 1024 * 1024,
@@ -1001,14 +1018,13 @@ impl Renderer {
                 );
                 let output = make("immutable snapshot straight alpha");
                 let view = output.create_view(&Default::default());
-                let uniform =
-                    self.gpu
-                        .device
-                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("snapshot alpha conversion"),
-                            contents: bytemuck::cast_slice(&[0.0f32; 8]),
-                            usage: wgpu::BufferUsages::UNIFORM,
-                        });
+                let uniform = alpha_uniform.get_or_insert_with(|| {
+                    self.gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("snapshot alpha conversion"),
+                        contents: bytemuck::cast_slice(&[0.0f32; 8]),
+                        usage: wgpu::BufferUsages::UNIFORM,
+                    })
+                });
                 // Reuse the tested isolated compositor's alpha conversion with
                 // identical endpoints. There is no animation or screen capture.
                 let bind = self
@@ -1020,11 +1036,11 @@ impl Renderer {
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&input),
+                                resource: wgpu::BindingResource::TextureView(input),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&input),
+                                resource: wgpu::BindingResource::TextureView(input),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 2,
@@ -1033,7 +1049,7 @@ impl Renderer {
                             // Rule slot unused here (params.a.z = 0).
                             wgpu::BindGroupEntry {
                                 binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&input),
+                                resource: wgpu::BindingResource::TextureView(input),
                             },
                         ],
                     });
@@ -1113,18 +1129,14 @@ impl Renderer {
             .map(Some)
     }
 
-    /// Prepare an immutable texture using the normal engine compositor. The
-    /// returned capability reads/de-pads GPU pixels lazily on the calling
-    /// worker; preparing it never waits for mapping or copies pixel bytes.
-    /// None means image dependencies are still loading.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn snapshot_readback(
+    fn prepare_snapshot_texture(
         &mut self,
         assets: &mut Assets,
         owner: u32,
         size: [u32; 2],
         layers: &std::sync::Arc<Vec<crysirror_scene::layer::LayerSpec>>,
-    ) -> Result<Option<std::sync::Arc<dyn crysirror_core::service::AssetReader>>> {
+    ) -> Result<String> {
         let key = Self::snapshot_key(assets, owner, size, layers)?;
         self.snapshot_readbacks.retain(|cached|cached!=&key);
         self.snapshot_readbacks.push_back(key.clone());
@@ -1168,6 +1180,21 @@ impl Renderer {
             self.capture_texture_keys = saved_keys;
             result?;
         }
+        Ok(key)
+    }
+
+    /// Prepare an immutable texture using the normal engine compositor. The
+    /// returned capability reads and de-pads GPU pixels lazily on the calling
+    /// worker. None means image dependencies are still loading.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn snapshot_readback(
+        &mut self,
+        assets: &mut Assets,
+        owner: u32,
+        size: [u32; 2],
+        layers: &std::sync::Arc<Vec<crysirror_scene::layer::LayerSpec>>,
+    ) -> Result<Option<std::sync::Arc<dyn crysirror_core::service::AssetReader>>> {
+        let key = self.prepare_snapshot_texture(assets, owner, size, layers)?;
         let reader = self.textures.get(&key).map(|texture| {
             std::sync::Arc::new(SnapshotReadback {
                 gpu: self.gpu.clone(), texture: texture.texture.clone(), size,
@@ -1190,6 +1217,22 @@ impl Renderer {
     }
     /// Synchronous compaction helper. Explicit ImageJobs use snapshot_readback
     /// and put its read fence on an engine worker instead.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn materialize_snapshot(
+        &mut self, assets: &mut Assets, owner: u32, size: [u32;2],
+        layers: &std::sync::Arc<Vec<crysirror_scene::layer::LayerSpec>>,
+    ) -> Result<Option<image::RgbaImage>> {
+        let key = {
+            let _span = crysirror_tasks::profile::span_current("canvas.compaction.prepare");
+            self.prepare_snapshot_texture(assets, owner, size, layers)?
+        };
+        self.textures.get(&key).map(|texture| {
+            let _span = crysirror_tasks::profile::span_current("canvas.compaction.readback");
+            self.read_texture(&texture.texture, size[0], size[1])
+        }).transpose()
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn materialize_snapshot(
         &mut self, assets: &mut Assets, owner: u32, size: [u32;2],
         layers: &std::sync::Arc<Vec<crysirror_scene::layer::LayerSpec>>,

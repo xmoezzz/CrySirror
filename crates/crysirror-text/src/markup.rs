@@ -9,8 +9,8 @@
 //! line by line with alignment, auto-indent, kinsoku (`following`/`leading`)
 //! and per-character reveal delays. Measuring, font notifications, expression
 //! evaluation and labels are delegated to [`MarkupHost`]; nothing is drawn here.
-//! Unimplemented profiles (vertical ruby, graphical characters,
-//! width-time scaling, uneven ruby) return errors instead of approximations.
+//! Unimplemented profiles (vertical ruby, graphical characters) return
+//! errors instead of approximations.
 use anyhow::{Context, Result, bail, ensure};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,6 +162,34 @@ pub struct Ruby {
     pub x: f32,
     pub y: f32,
 }
+
+struct RubyRun {
+    text: Vec<u16>,
+    boundaries: Vec<usize>,
+    bases: usize,
+    index: usize,
+}
+
+impl RubyRun {
+    fn new(text: Vec<u16>, bases: usize) -> Self {
+        let mut boundaries = vec![0];
+        let mut offset = 0;
+        for ch in char::decode_utf16(text.iter().copied()) {
+            offset += ch.map_or(1, char::len_utf16);
+            boundaries.push(offset);
+        }
+        Self { text, boundaries, bases, index: 0 }
+    }
+
+    fn next(&mut self) -> &[u16] {
+        let count = (self.boundaries.len() - 1) as u64;
+        let boundary = |base: usize| self.boundaries[(base as u64 * count / self.bases as u64) as usize];
+        let range = boundary(self.index)..boundary(self.index + 1);
+        self.index += 1;
+        &self.text[range]
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Character {
     pub text: Vec<u16>,
@@ -399,6 +427,11 @@ impl MarkupLayout {
         }
     }
     pub fn show_count(&self, time: f32) -> usize {
+        if self.time_scale.is_finite() && self.time_scale > 0.0 {
+            return self
+                .published
+                .partition_point(|c| c.delay * self.time_scale <= time);
+        }
         self.published
             .iter()
             .take_while(|c| c.delay * self.time_scale <= time)
@@ -609,18 +642,17 @@ impl MarkupLayout {
             .transpose()?
             .unwrap_or(1)
             .max(0) as usize;
-        // The native word_break=1 profile allows a break inside a word. The
-        // ordinary glyph-placement path below already wraps at that boundary.
-        if self.option("width_time_scale").is_some_and(|v| int(v).unwrap_or(1) != 0) {
-            bail!("TextRender layout option width_time_scale is not implemented");
-        }
+        let width_time_scale = self
+            .option("width_time_scale")
+            .map_or(Ok(0.0), |value| finite(value.number()))?
+            .max(0.0);
         self.notify(host)?;
         let size = self.current.number("FontSize") * self.font_scale;
         host.text_width(&[0x3000], size)?;
         let start_count = self.count;
         let (mut i, mut delay, mut step) = (0usize, 0.0f32, base_delay);
         self.delay = 0.0;
-        let mut ruby_pending: Option<(Vec<u16>, usize, usize)> = None;
+        let mut ruby_pending = None::<RubyRun>;
         while i < units.len() && units[i] != 0 && !self.over {
             let mut unit = units[i];
             i += 1;
@@ -677,6 +709,12 @@ impl MarkupLayout {
                             115 => "Shadow",
                             _ => "Edge",
                         };
+                        if flag == 35 && matches!(command, 115 | 101) {
+                            let field = if command == 115 { "ShadowColor" } else { "EdgeColor" };
+                            let color = self.color_command(field, &units, &mut i)?;
+                            self.current.set(field, color);
+                            continue;
+                        }
                         let value = match flag {
                             48 => Value::Int(0),
                             49 => Value::Int(1),
@@ -764,11 +802,8 @@ impl MarkupLayout {
                 continue;
             }
             if !escaped && unit == u16::from(b'#') {
-                let token = terminated(&units, &mut i, 59)?;
-                let color = u32::from_str_radix(&String::from_utf16(&token)?, 16)
-                    .context("invalid TextRender color")?;
-                self.current
-                    .set("ChColor", Value::Int(i64::from(color | 0xff00_0000)));
+                let color = self.color_command("ChColor", &units, &mut i)?;
+                self.current.set("ChColor", color);
                 continue;
             }
             if !escaped && unit == u16::from(b'$') {
@@ -803,12 +838,8 @@ impl MarkupLayout {
                 } else {
                     1
                 };
-                ensure!((1..=100_000).contains(&count), "ruby character count");
-                ensure!(
-                    count == 1 || ruby.len() % count == 0,
-                    "uneven multi-character ruby spacing is not implemented"
-                );
-                ruby_pending = Some((ruby, count, 0));
+                ensure!((1..=MAX_CHARACTERS).contains(&count), "ruby character count");
+                ruby_pending = Some(RubyRun::new(ruby, count));
                 continue;
             }
             ensure!(
@@ -833,24 +864,26 @@ impl MarkupLayout {
             let size = self.current.number("FontSize") * self.font_scale;
             let width = finite(host.text_width(&text, size)?)?;
             ensure!(width >= 0.0, "TextRender width must be nonnegative");
-            let ruby = if let Some((rt, count, index)) = &mut ruby_pending {
-                let chunk =
-                    rt[*index * rt.len() / *count..(*index + 1) * rt.len() / *count].to_vec();
-                let rs = self.current.number("RubySize") * self.font_scale;
-                let offset = self.current.number("RubyOffset") * self.font_scale;
-                let rw = host.text_width(&chunk, rs)?;
-                *index += 1;
-                Some(Ruby {
-                    text: chunk,
-                    size: rs,
-                    width: rw,
-                    x: (width - rw) / 2.0,
-                    y: -(rs + offset),
-                })
+            let ruby = if let Some(run) = &mut ruby_pending {
+                let chunk = run.next();
+                if chunk.is_empty() {
+                    None
+                } else {
+                    let rs = self.current.number("RubySize") * self.font_scale;
+                    let offset = self.current.number("RubyOffset") * self.font_scale;
+                    let rw = host.text_width(chunk, rs)?;
+                    Some(Ruby {
+                        text: chunk.to_vec(),
+                        size: rs,
+                        width: rw,
+                        x: (width - rw) / 2.0,
+                        y: -(rs + offset),
+                    })
+                }
             } else {
                 None
             };
-            if ruby_pending.as_ref().is_some_and(|(_, c, i)| c == i) {
+            if ruby_pending.as_ref().is_some_and(|run| run.index == run.bases) {
                 ruby_pending = None;
             }
             let mut ch = Character {
@@ -974,8 +1007,20 @@ impl MarkupLayout {
                 self.next_indent = self.indent_stack.pop().unwrap_or(0.0);
             }
             self.count += 1;
-            self.delay = delay + base_delay;
-            delay += step;
+            // Match the TextRender compatibility profile: only advances
+            // wider than one em increase the per-character reveal interval.
+            let width_weight = if width_time_scale > 0.0 && size > 0.0 {
+                finite(1.0 + width_time_scale * (width / size - 1.0).max(0.0))?
+            } else {
+                1.0
+            };
+            let interval = step * width_weight;
+            self.delay = if width_time_scale > 0.0 {
+                finite(delay + interval)?
+            } else {
+                delay + base_delay
+            };
+            delay += interval;
             ensure!(
                 self.count <= MAX_CHARACTERS,
                 "TextRender character limit exceeded"
@@ -1001,6 +1046,16 @@ impl MarkupLayout {
             self.delay = total;
         }
         Ok(!self.over)
+    }
+
+    fn color_command(&self, field: &str, units: &[u16], i: &mut usize) -> Result<Value> {
+        let token = terminated(units, i, 59)?;
+        if token.is_empty() {
+            return Ok(self.defaults.0[ix(field)].clone());
+        }
+        let color = u32::from_str_radix(&String::from_utf16(&token)?, 16)
+            .context("invalid TextRender color")?;
+        Ok(Value::Int(i64::from(color | 0xff00_0000)))
     }
 }
 
@@ -1034,7 +1089,8 @@ mod tests {
     struct Fixed;
     impl MarkupHost for Fixed {
         fn text_width(&mut self, t: &[u16], size: f32) -> Result<f32> {
-            Ok(t.len() as f32 * size)
+            let width = t.iter().map(|&c| if c == u16::from(b'W') { 2.0 } else { 1.0 }).sum::<f32>();
+            Ok(width * size)
         }
         fn font_changed(&mut self, _: bool, _: bool, _: &[u16]) -> Result<()> {
             Ok(())
@@ -1045,6 +1101,55 @@ mod tests {
         fn label(&mut self, _: &[u16]) -> Result<f32> {
             Ok(0.0)
         }
+    }
+    #[test]
+    fn empty_color_commands_restore_each_default() {
+        let mut layout = MarkupLayout::default();
+        let mut host = Fixed;
+        layout.set_render_size(1000.0, 200.0, &mut host).unwrap();
+        let defaults = layout.defaults.clone();
+        layout
+            .render(
+                &text("#010203;%s#040506;%e#070809;a#;%s#;%e#;b"),
+                0,
+                0.0,
+                0.0,
+                false,
+                &mut host,
+            )
+            .unwrap();
+        layout.done(&mut host).unwrap();
+        let chars = layout.characters(0, 0);
+        for (field, value) in [
+            ("ChColor", 0xff01_0203),
+            ("ShadowColor", 0xff04_0506),
+            ("EdgeColor", 0xff07_0809),
+        ] {
+            assert_eq!(chars[0].format.get(field), Some(&Value::Int(value)));
+            assert_eq!(chars[1].format.get(field), defaults.get(field));
+        }
+        assert!(
+            layout
+                .render(&text("#badhex;x"), 0, 0.0, 0.0, false, &mut host)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn width_time_scale_delays_reveal_after_a_wide_glyph() {
+        let mut layout = MarkupLayout::default();
+        let mut host = Fixed;
+        layout.set_render_size(1000.0, 200.0, &mut host).unwrap();
+        layout.set_option("width_time_scale", Value::Int(1)).unwrap();
+        layout
+            .render(&text("aWa"), 0, 10.0, 0.0, false, &mut host)
+            .unwrap();
+        layout.done(&mut host).unwrap();
+        let delays: Vec<_> = layout.characters(0, 0).iter().map(|c| c.delay).collect();
+        assert_eq!(delays, [0.0, 10.0, 30.0]);
+        assert_eq!(layout.render_delay(), 40.0);
+        assert_eq!(layout.show_count(29.0), 2);
+        assert_eq!(layout.show_count(30.0), 3);
     }
     #[test]
     fn enabled_word_break_wraps_inside_a_word_at_the_last_fitting_glyph() {
@@ -1116,5 +1221,21 @@ mod tests {
                 .render(&text("a"), 0, 0.0, 0.0, false, &mut Fixed)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn ruby_spans_preserve_unicode_reading_order_with_an_uneven_base_count() {
+        let mut layout = MarkupLayout::default();
+        layout.set_render_size(400.0, 200.0, &mut Fixed).unwrap();
+        layout.render(&text("[あ𠮷い,2]甲乙[う,2]丙丁戊"), 0, 10.0, 0.0, false, &mut Fixed)
+            .unwrap();
+        layout.done(&mut Fixed).unwrap();
+        let chars = layout.characters(0, 0);
+        assert_eq!(chars[0].ruby.as_ref().unwrap().text, text("あ"));
+        assert_eq!(chars[1].ruby.as_ref().unwrap().text, text("𠮷い"));
+        assert!(chars[2].ruby.is_none());
+        assert_eq!(chars[3].ruby.as_ref().unwrap().text, text("う"));
+        assert!(chars[4].ruby.is_none());
+        assert_eq!(chars[4].delay, 40.0);
     }
 }

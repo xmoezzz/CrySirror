@@ -19,22 +19,30 @@ struct Charge {
     used: Arc<AtomicUsize>,
     bytes: usize,
 }
+impl Charge {
+    fn finish_read(&mut self, len: usize) {
+        self.used.fetch_sub(self.bytes - len, Ordering::AcqRel);
+        self.bytes = len;
+    }
+}
 impl Drop for Charge {
     fn drop(&mut self) {
         self.used.fetch_sub(self.bytes, Ordering::AcqRel);
     }
 }
-fn charge(used: &Arc<AtomicUsize>, len: usize) -> Result<Arc<Charge>> {
+fn charge(used: &Arc<AtomicUsize>, len: usize, reading: bool) -> Result<Charge> {
     ensure!(len > 0 && len <= MAX_FONT_BYTES, "font source size limit");
-    let bytes = len.checked_mul(3).context("font charge overflow")?;
+    // Moving an I/O buffer into Arc<[u8]> temporarily holds two copies.
+    // An immutable buffer supplied by the caller is already shareable.
+    let bytes = if reading { len * 2 } else { len };
     used.fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
         old.checked_add(bytes).filter(|n| *n <= MAX_RESIDENT)
     })
     .map_err(|_| anyhow::anyhow!("font resident byte budget"))?;
-    Ok(Arc::new(Charge {
+    Ok(Charge {
         used: used.clone(),
         bytes,
-    }))
+    })
 }
 fn charge_precomputed(used: &Arc<AtomicUsize>, bytes: usize) -> Result<Arc<Charge>> {
     ensure!(bytes <= MAX_RESIDENT, "precomputed font reservation limit");
@@ -47,13 +55,38 @@ fn charge_precomputed(used: &Arc<AtomicUsize>, bytes: usize) -> Result<Arc<Charg
         bytes,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reading_reserves_overlap_and_publication_only_retains_shared_font_bytes() {
+        let used = Arc::new(AtomicUsize::new(0));
+        let half = MAX_FONT_BYTES / 2;
+        let resources: Vec<_> = (0..15)
+            .map(|_| {
+                let mut charge = charge(&used, half, true).unwrap();
+                charge.finish_read(half);
+                charge
+            })
+            .collect();
+        assert_eq!(used.load(Ordering::Acquire), 15 * half);
+        assert!(charge(&used, half, true).is_err());
+        let supplied = charge(&used, half, false).unwrap();
+        assert_eq!(used.load(Ordering::Acquire), MAX_RESIDENT);
+        drop(supplied);
+        drop(resources);
+        assert_eq!(used.load(Ordering::Acquire), 0);
+    }
+}
 enum EncodedSource {
     Storage(crysirror_core::path::VfsPath),
     Bytes(Arc<[u8]>),
 }
 struct Loaded {
     bytes: Arc<[u8]>,
-    charge: Arc<Charge>,
+    charge: Charge,
     pixel_size: Option<u16>,
 }
 enum Stage {
@@ -158,7 +191,7 @@ impl FontResources {
                                     face
                                 } else {
                                     let mut face=PreparedFontFace::prepare(input.bytes,index)?;
-                                    face.retain_storage(input.charge);
+                                    face.retain_storage(Arc::new(input.charge));
                                     face
                                 };
                                 cancel.check()?;
@@ -284,7 +317,7 @@ impl FontLibrary for ClientFonts {
         }
         // Charge supplied bytes before queueing: queued jobs also retain memory.
         let supplied_charge = match &source {
-            EncodedSource::Bytes(bytes) => Some(charge(&used, bytes.len()).map_err(err)?),
+            EncodedSource::Bytes(bytes) => Some(charge(&used, bytes.len(), false).map_err(err)?),
             EncodedSource::Storage(_) => None,
         };
         let read = self
@@ -305,7 +338,7 @@ impl FontLibrary for ClientFonts {
                     EncodedSource::Storage(path) => {
                         let reader = storage.open_read(&path)?;
                         let len = usize::try_from(reader.len()?)?;
-                        let charge = charge(&used, len)?;
+                        let mut charge = charge(&used, len, true)?;
                         let mut bytes = vec![0; len];
                         let mut offset = 0;
                         while offset < len {
@@ -314,11 +347,10 @@ impl FontLibrary for ClientFonts {
                             ensure!(n > 0 && n <= len - offset, "short/invalid font stream");
                             offset += n;
                         }
-                        Ok(Loaded {
-                            bytes: bytes.into(),
-                            charge,
-                            pixel_size,
-                        })
+                        drop(reader);
+                        let bytes = bytes.into();
+                        charge.finish_read(len);
+                        Ok(Loaded { bytes, charge, pixel_size })
                     }
                 }
             })

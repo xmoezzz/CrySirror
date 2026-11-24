@@ -48,6 +48,27 @@ Fresh mounts start with an empty cache. Local Windows XP3 readers try a handle
 that allows file replacement while excluding in-place writes. A source without
 that guarantee, including ordinary remote readers, still verifies on open.
 
+Legacy XP3 `hnfn` and `eliF` tables can associate multiple names with the
+same content Adler value. When the original `info` name matches the logical
+filename's token, that token selects the entry and remains usable for explicit
+reads. A token-verified entry takes precedence over an unverified entry with
+the same logical path. Shared mounts still reject ambiguous paths.
+
+KiriKiri installations with a locally supplied Nana profile can place
+`crysirror-nana.local.json` beside the XP3 archives. The file uses
+[xp3-brute's Nana profile schema](https://github.com/xmoezzz/xp3-brute/blob/7b5fdeec318de4977787359399370927946e9795/README.md#use-a-recovered-nana-profile-for-a-dls-archive).
+Both the profile and its relative content-table path are resolved within the
+game's asset scope. The XP3 reader validates the decoded `dls:` table against
+the stored names and checksums. It exposes the native literal `$` bootstrap as
+`startup.tjs` when that entry is present. Indexed content is read and verified on
+demand. The caller supplies the initialized state and content table locally.
+When the selected executable also has its native `.key` companion, the
+startup script receives the existing `Storages.setupArchiveData` callback.
+The archive reader verifies the key's first line against the entire Nana
+control table, all six name-state words and both content filter parameters
+before publishing the callback's bootstrap profile. The original script
+still reads that file through `Array.load` and passes its first line.
+
 Rust, JS/TS and inspection tools use the same `Resources` class:
 
 ```ts

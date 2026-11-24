@@ -11,7 +11,7 @@ use crate::runtime::{
 };
 
 use super::opcode::{OpcodeForm, binary_family, execute_binary_value, opcode_form};
-use super::{CallOutcome, Continuation, DispatchFlags, Frame, Vm};
+use super::{CallOutcome, Continuation, DispatchFlags, Frame, Step, Vm};
 
 /// Labels `error` with the member access or call that was in flight, unless
 /// the error already describes a failure of its own.
@@ -3247,13 +3247,14 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         frame: &mut Frame,
         reg: i16,
         result_needed: bool,
-    ) -> Result<()> {
+        next_pc: usize,
+    ) -> Result<Step> {
         let source = frame.get(reg)?.to_tjs_string()?;
         if source.is_empty() {
             if result_needed {
                 frame.set(reg, Variant::Void)?;
             }
-            return Ok(());
+            return Ok(Step::Next(next_pc));
         }
 
         let source = if result_needed {
@@ -3266,12 +3267,21 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
             .top_level
             .ok_or_else(|| TjsError::runtime("eval bytecode has no top-level object"))?;
         let file_id = self.runtime.install_script_file(Arc::new(file));
-        let value =
-            self.execute_file_object_with_this(file_id, top_level, Vec::new(), frame.this_obj)?;
-        if result_needed {
-            frame.set(reg, value)?;
-        }
-        Ok(())
+        // Keep the evaluated code on the caller's stack so its result reaches
+        // the operand register even when a host resource lookup suspends it.
+        let evaluated = self.create_call_frame(
+            file_id,
+            top_level,
+            Vec::new(),
+            frame.this_obj,
+            Continuation::CallerRegister {
+                dest: result_needed.then_some(reg),
+            },
+        )?;
+        Ok(Step::Call {
+            frame: Box::new(evaluated),
+            resume_pc: next_pc,
+        })
     }
 
     pub(super) fn instance_of(&mut self, value: &Variant, class_name: &str) -> Result<bool> {

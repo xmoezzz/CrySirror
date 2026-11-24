@@ -49,7 +49,7 @@ Native rectangle reference: [KiriKiri Z RectItf.cpp](https://github.com/krkrz/kr
 | Handled | 909 |
 | Parameterized | 1 |
 | Partial | 2 |
-| Unsupported | 111 |
+| Unsupported | 110 |
 
 These tables cover the checked-in catalogues and explicit dispatch branches. An engine-wide upstream denominator is not inferred from these rows.
 
@@ -234,17 +234,17 @@ Native API names use the Rust registration receiver when the native class is sel
 | ID / API | Purpose | Status | Gap / condition | Source |
 | --- | --- | --- | --- | --- |
 | `font.finalize` | finalize | Handled | — | [font_class.rs:21](../../crates/crysirror-krkr/src/font_class.rs#L21) |
-| `font.getEscHeightX` | getEscHeightX | Handled | — | [font_class.rs:142](../../crates/crysirror-krkr/src/font_class.rs#L142) |
-| `font.getEscHeightY` | getEscHeightY | Handled | — | [font_class.rs:142](../../crates/crysirror-krkr/src/font_class.rs#L142) |
-| `font.getEscWidthX` | getEscWidthX | Handled | — | [font_class.rs:142](../../crates/crysirror-krkr/src/font_class.rs#L142) |
-| `font.getEscWidthY` | getEscWidthY | Handled | — | [font_class.rs:142](../../crates/crysirror-krkr/src/font_class.rs#L142) |
+| `font.getEscHeightX` | getEscHeightX | Handled | — | [font_class.rs:154](../../crates/crysirror-krkr/src/font_class.rs#L154) |
+| `font.getEscHeightY` | getEscHeightY | Handled | — | [font_class.rs:154](../../crates/crysirror-krkr/src/font_class.rs#L154) |
+| `font.getEscWidthX` | getEscWidthX | Handled | — | [font_class.rs:154](../../crates/crysirror-krkr/src/font_class.rs#L154) |
+| `font.getEscWidthY` | getEscWidthY | Handled | — | [font_class.rs:154](../../crates/crysirror-krkr/src/font_class.rs#L154) |
 | `font.getGlyphDrawRect` | getGlyphDrawRect | Handled | — | [font_class.rs:22](../../crates/crysirror-krkr/src/font_class.rs#L22) |
-| `font.getList` | getList | Handled | — | [font_class.rs:55](../../crates/crysirror-krkr/src/font_class.rs#L55) |
-| `font.getTextHeight` | getTextHeight | Handled | — | [font_class.rs:127](../../crates/crysirror-krkr/src/font_class.rs#L127) |
-| `font.getTextWidth` | getTextWidth | Handled | — | [font_class.rs:121](../../crates/crysirror-krkr/src/font_class.rs#L121) |
-| `font.mapPrerenderedFont` | mapPrerenderedFont | Handled | — | [font_class.rs:102](../../crates/crysirror-krkr/src/font_class.rs#L102) |
-| `font.rasterizer` | rasterizer | Partial | Font.rasterizer={preference}: CrySirror portable outline compatibility profile; native GDI/FreeType raster pixels are not implemented | [font_class.rs:164](../../crates/crysirror-krkr/src/font_class.rs#L164) |
-| `font.unmapPrerenderedFont` | unmapPrerenderedFont | Handled | — | [font_class.rs:112](../../crates/crysirror-krkr/src/font_class.rs#L112) |
+| `font.getList` | getList | Handled | — | [font_class.rs:67](../../crates/crysirror-krkr/src/font_class.rs#L67) |
+| `font.getTextHeight` | getTextHeight | Handled | — | [font_class.rs:139](../../crates/crysirror-krkr/src/font_class.rs#L139) |
+| `font.getTextWidth` | getTextWidth | Handled | — | [font_class.rs:133](../../crates/crysirror-krkr/src/font_class.rs#L133) |
+| `font.mapPrerenderedFont` | mapPrerenderedFont | Handled | — | [font_class.rs:114](../../crates/crysirror-krkr/src/font_class.rs#L114) |
+| `font.rasterizer` | rasterizer | Partial | Font.rasterizer={preference}: CrySirror portable outline compatibility profile; native GDI/FreeType raster pixels are not implemented | [font_class.rs:176](../../crates/crysirror-krkr/src/font_class.rs#L176) |
+| `font.unmapPrerenderedFont` | unmapPrerenderedFont | Handled | — | [font_class.rs:124](../../crates/crysirror-krkr/src/font_class.rs#L124) |
 
 ## Registered TJS native APIs / get_sample / install
 
@@ -285,7 +285,7 @@ Native API names use the Rust registration receiver when the native class is sel
 
 | ID / API | Purpose | Status | Gap / condition | Source |
 | --- | --- | --- | --- | --- |
-| `class.copyRaster` | copyRaster | Handled | — | [image_api.rs:456](../../crates/crysirror-krkr/src/image_api.rs#L456) |
+| `class.copyRaster` | copyRaster | Handled | — | [image_api.rs:480](../../crates/crysirror-krkr/src/image_api.rs#L480) |
 
 ## Registered TJS native APIs / json_plugin / install
 
@@ -532,36 +532,36 @@ Native API names use the Rust registration receiver when the native class is sel
 
 | ID / API | Purpose | Status | Gap / condition | Source |
 | --- | --- | --- | --- | --- |
-| `font.angle` | angle | Handled | — | [natives.rs:1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
-| `font.bold` | bold | Handled | — | [natives.rs:1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
-| `font.face` | face | Handled | — | [natives.rs:1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
-| `font.faceIsFileName` | faceIsFileName | Handled | — | [natives.rs:1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
-| `font.height` | height | Handled | — | [natives.rs:1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
-| `font.italic` | italic | Handled | — | [natives.rs:1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
-| `font.strikeout` | strikeout | Handled | — | [natives.rs:1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
-| `font.underline` | underline | Handled | — | [natives.rs:1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
+| `font.angle` | angle | Handled | — | [natives.rs:1712](../../crates/crysirror-krkr/src/natives.rs#L1712) |
+| `font.bold` | bold | Handled | — | [natives.rs:1712](../../crates/crysirror-krkr/src/natives.rs#L1712) |
+| `font.face` | face | Handled | — | [natives.rs:1712](../../crates/crysirror-krkr/src/natives.rs#L1712) |
+| `font.faceIsFileName` | faceIsFileName | Handled | — | [natives.rs:1712](../../crates/crysirror-krkr/src/natives.rs#L1712) |
+| `font.height` | height | Handled | — | [natives.rs:1712](../../crates/crysirror-krkr/src/natives.rs#L1712) |
+| `font.italic` | italic | Handled | — | [natives.rs:1712](../../crates/crysirror-krkr/src/natives.rs#L1712) |
+| `font.strikeout` | strikeout | Handled | — | [natives.rs:1712](../../crates/crysirror-krkr/src/natives.rs#L1712) |
+| `font.underline` | underline | Handled | — | [natives.rs:1712](../../crates/crysirror-krkr/src/natives.rs#L1712) |
 
 ## Registered TJS native APIs / natives / install_layer
 
 | ID / API | Purpose | Status | Gap / condition | Source |
 | --- | --- | --- | --- | --- |
-| `class.attentionLeft` | attentionLeft | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.attentionTop` | attentionTop | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.callOnPaint` | callOnPaint | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.enabled` | enabled | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.face` | face | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.focusable` | focusable | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.font` | font | Unsupported | property is read-only | [natives.rs:1898](../../crates/crysirror-krkr/src/natives.rs#L1898) |
-| `class.hitThreshold` | hitThreshold | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.hitType` | hitType | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.holdAlpha` | holdAlpha | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.ignoreHintSensing` | ignoreHintSensing | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.imeMode` | imeMode | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.joinFocusChain` | joinFocusChain | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.neutralColor` | neutralColor | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.showParentHint` | showParentHint | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
-| `class.type` | type | Handled | — | [natives.rs:1901](../../crates/crysirror-krkr/src/natives.rs#L1901) |
-| `class.useAttention` | useAttention | Handled | — | [natives.rs:1932](../../crates/crysirror-krkr/src/natives.rs#L1932) |
+| `class.attentionLeft` | attentionLeft | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.attentionTop` | attentionTop | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.callOnPaint` | callOnPaint | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.enabled` | enabled | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.face` | face | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.focusable` | focusable | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.font` | font | Unsupported | property is read-only | [natives.rs:1901](../../crates/crysirror-krkr/src/natives.rs#L1901) |
+| `class.hitThreshold` | hitThreshold | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.hitType` | hitType | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.holdAlpha` | holdAlpha | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.ignoreHintSensing` | ignoreHintSensing | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.imeMode` | imeMode | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.joinFocusChain` | joinFocusChain | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.neutralColor` | neutralColor | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.showParentHint` | showParentHint | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
+| `class.type` | type | Handled | — | [natives.rs:1904](../../crates/crysirror-krkr/src/natives.rs#L1904) |
+| `class.useAttention` | useAttention | Handled | — | [natives.rs:1935](../../crates/crysirror-krkr/src/natives.rs#L1935) |
 
 ## Registered TJS native APIs / natives / install_system
 
@@ -896,7 +896,7 @@ Native API names use the Rust registration receiver when the native class is sel
 
 | ID / API | Purpose | Status | Gap / condition | Source |
 | --- | --- | --- | --- | --- |
-| `c.root` | root | Handled | — | [psbfile_plugin.rs:117](../../crates/crysirror-krkr/src/psbfile_plugin.rs#L117) |
+| `c.root` | root | Handled | — | [psbfile_plugin.rs:121](../../crates/crysirror-krkr/src/psbfile_plugin.rs#L121) |
 
 ## Registered TJS native APIs / psd_plugin / members
 
@@ -973,36 +973,35 @@ Native API names use the Rust registration receiver when the native class is sel
 
 | ID / API | Purpose | Status | Gap / condition | Source |
 | --- | --- | --- | --- | --- |
-| `global.getDirList` | getDirList | Handled | — | [storage_plugins.rs:221](../../crates/crysirror-krkr/src/storage_plugins.rs#L221) |
+| `global.getDirList` | getDirList | Handled | — | [storage_plugins.rs:223](../../crates/crysirror-krkr/src/storage_plugins.rs#L223) |
 
 ## Registered TJS native APIs / storage_plugins / install_fstat
 
 | ID / API | Purpose | Status | Gap / condition | Source |
 | --- | --- | --- | --- | --- |
-| `storages.changeDirectory` | changeDirectory | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.clearStorageCaches` | clearStorageCaches | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.copyFile` | copyFile | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.copyFileNoNormalize` | copyFileNoNormalize | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.createDirectoryNoNormalize` | createDirectoryNoNormalize | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
+| `storages.changeDirectory` | changeDirectory | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.clearStorageCaches` | clearStorageCaches | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.copyFileNoNormalize` | copyFileNoNormalize | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.createDirectoryNoNormalize` | createDirectoryNoNormalize | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
 | `storages.dirlist` | dirlist | Handled | — | [storage_plugins.rs:87](../../crates/crysirror-krkr/src/storage_plugins.rs#L87) |
-| `storages.dirlistEx` | dirlistEx | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.exportFile` | exportFile | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
+| `storages.dirlistEx` | dirlistEx | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.exportFile` | exportFile | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
 | `storages.fstat` | fstat | Handled | — | [storage_plugins.rs:116](../../crates/crysirror-krkr/src/storage_plugins.rs#L116) |
-| `storages.getDisplayName` | getDisplayName | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.getFileAttributes` | getFileAttributes | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.getLastModifiedFileTime` | getLastModifiedFileTime | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.getMD5HashString` | getMD5HashString | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.getTemporaryName` | getTemporaryName | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.getTime` | getTime | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
+| `storages.getDisplayName` | getDisplayName | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.getFileAttributes` | getFileAttributes | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.getLastModifiedFileTime` | getLastModifiedFileTime | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.getMD5HashString` | getMD5HashString | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.getTemporaryName` | getTemporaryName | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.getTime` | getTime | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
 | `storages.isExistentDirectory` | isExistentDirectory | Handled | — | [storage_plugins.rs:104](../../crates/crysirror-krkr/src/storage_plugins.rs#L104) |
-| `storages.removeDirectory` | removeDirectory | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.resetFileAttributes` | resetFileAttributes | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.searchPath` | searchPath | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.selectDirectory` | selectDirectory | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.setFileAttributes` | setFileAttributes | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.setLastModifiedFileTime` | setLastModifiedFileTime | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.setTime` | setTime | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
-| `storages.truncateFile` | truncateFile | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:207](../../crates/crysirror-krkr/src/storage_plugins.rs#L207) |
+| `storages.removeDirectory` | removeDirectory | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.resetFileAttributes` | resetFileAttributes | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.searchPath` | searchPath | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.selectDirectory` | selectDirectory | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.setFileAttributes` | setFileAttributes | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.setLastModifiedFileTime` | setLastModifiedFileTime | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.setTime` | setTime | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
+| `storages.truncateFile` | truncateFile | Unsupported | scoped fstat operation with native completion semantics | [storage_plugins.rs:209](../../crates/crysirror-krkr/src/storage_plugins.rs#L209) |
 
 ## Registered TJS native APIs / storage_plugins / install_save_struct
 
@@ -1589,9 +1588,9 @@ fn enqueue_timers(&mut self, now: u64) -> Result<()>
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `mode` | `1` | Local state/value operations | Handled | [650](../../crates/crysirror-krkr/src/adapter.rs#L650) |
-| `mode` | `2` | Local state/value operations | Handled | [651](../../crates/crysirror-krkr/src/adapter.rs#L651) |
-| `mode` | `_` | Local state/value operations | Handled | [652](../../crates/crysirror-krkr/src/adapter.rs#L652) |
+| `mode` | `1` | Local state/value operations | Handled | [652](../../crates/crysirror-krkr/src/adapter.rs#L652) |
+| `mode` | `2` | Local state/value operations | Handled | [653](../../crates/crysirror-krkr/src/adapter.rs#L653) |
+| `mode` | `_` | Local state/value operations | Handled | [654](../../crates/crysirror-krkr/src/adapter.rs#L654) |
 
 ### adapter.rs / KrkrVm::execute
 
@@ -1601,13 +1600,13 @@ fn execute(&mut self, h: &mut dyn HostServices, input: InputFrame) -> Result<VmY
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `kind == 1 && !self .rt .as_ref() .unwrap() .host() .timers .get(&id) .is_some_and(\|t\| t.enabled && t.interval != 0)` | Local state/value operations | Handled | [872](../../crates/crysirror-krkr/src/adapter.rs#L872) |
-| `condition` | `kind==3` | crate::layer_movie::take_event, self.rt.as_mut, self.events.entry | Handled | [884](../../crates/crysirror-krkr/src/adapter.rs#L884) |
-| `kind` | `0` | Local state/value operations | Handled | [892](../../crates/crysirror-krkr/src/adapter.rs#L892) |
-| `kind` | `1` | Local state/value operations | Handled | [893](../../crates/crysirror-krkr/src/adapter.rs#L893) |
-| `kind` | `2` | Local state/value operations | Handled | [894](../../crates/crysirror-krkr/src/adapter.rs#L894) |
-| `kind` | `_` | Local state/value operations | Handled | [895](../../crates/crysirror-krkr/src/adapter.rs#L895) |
-| `condition` | `has_member(rt, ObjectHandle(id), "onPaint")` | self.call | Handled | [967](../../crates/crysirror-krkr/src/adapter.rs#L967) |
+| `condition` | `kind == 1 && !self .rt .as_ref() .unwrap() .host() .timers .get(&id) .is_some_and(\|t\| t.enabled && t.interval != 0)` | Local state/value operations | Handled | [875](../../crates/crysirror-krkr/src/adapter.rs#L875) |
+| `condition` | `kind==3` | crate::layer_movie::take_event, self.rt.as_mut, self.events.entry | Handled | [887](../../crates/crysirror-krkr/src/adapter.rs#L887) |
+| `kind` | `0` | Local state/value operations | Handled | [895](../../crates/crysirror-krkr/src/adapter.rs#L895) |
+| `kind` | `1` | Local state/value operations | Handled | [896](../../crates/crysirror-krkr/src/adapter.rs#L896) |
+| `kind` | `2` | Local state/value operations | Handled | [897](../../crates/crysirror-krkr/src/adapter.rs#L897) |
+| `kind` | `_` | Local state/value operations | Handled | [898](../../crates/crysirror-krkr/src/adapter.rs#L898) |
+| `condition` | `has_member(rt, ObjectHandle(id), "onPaint")` | self.call | Handled | [970](../../crates/crysirror-krkr/src/adapter.rs#L970) |
 
 ### adapter.rs / KrkrVm::hit_candidate
 
@@ -1617,10 +1616,10 @@ fn hit_candidate(&mut self, id: usize, lx: i64, ly: i64) -> Result<Option<bool>>
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `!rt.object_member(ObjectHandle(id), "__lp_enabled").is_truthy()` | Local state/value operations | Handled | [511](../../crates/crysirror-krkr/src/adapter.rs#L511) |
-| `condition` | `kind == 1` | Local state/value operations | Handled | [528](../../crates/crysirror-krkr/src/adapter.rs#L528) |
-| `condition; under receiver=else: kind == 1` | `kind == 0` | i64::from | Handled | [533](../../crates/crysirror-krkr/src/adapter.rs#L533) |
-| `condition; under receiver=else: kind == 1 / receiver=kind == 0` | `layer.kind == 1` | Local state/value operations | Handled | [544](../../crates/crysirror-krkr/src/adapter.rs#L544) |
+| `condition` | `!rt.object_member(ObjectHandle(id), "__lp_enabled").is_truthy()` | Local state/value operations | Handled | [513](../../crates/crysirror-krkr/src/adapter.rs#L513) |
+| `condition` | `kind == 1` | Local state/value operations | Handled | [530](../../crates/crysirror-krkr/src/adapter.rs#L530) |
+| `condition; under receiver=else: kind == 1` | `kind == 0` | i64::from | Handled | [535](../../crates/crysirror-krkr/src/adapter.rs#L535) |
+| `condition; under receiver=else: kind == 1 / receiver=kind == 0` | `layer.kind == 1` | Local state/value operations | Handled | [546](../../crates/crysirror-krkr/src/adapter.rs#L546) |
 
 ### alpha_movie.rs / drive
 
@@ -1779,7 +1778,7 @@ fn parse(exe: &[u8]) -> Result<Vec<(String, String)>>
 ### font_resources.rs / signature
 
 ```rust
-fn signature(rt: &mut Rt, font: ObjectHandle) -> Result<String>
+fn signature(rt: &Rt, font: ObjectHandle) -> Result<String>
 ```
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
@@ -1794,11 +1793,11 @@ fn encode_native_text(text:&str,mode:&str) -> TjsResult<Vec<u8>>
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `mode` | `""` | Local state/value operations | Handled | [1230](../../crates/crysirror-krkr/src/host.rs#L1230) |
-| `mode` | `"c"\|"c1"` | Local state/value operations | Handled | [1231](../../crates/crysirror-krkr/src/host.rs#L1231) |
-| `mode` | `"c2"\|"z"` | Local state/value operations | Handled | [1232](../../crates/crysirror-krkr/src/host.rs#L1232) |
-| `mode` | `mode if mode.len()==2&&mode.starts_with('z')&&mode.as_bytes()[1].is_ascii_digit()` | Local state/value operations | Handled | [1233](../../crates/crysirror-krkr/src/host.rs#L1233) |
-| `mode` | `_` | TjsError::runtime | Unsupported: native text offset/unknown compression mode is unsupported | [1234](../../crates/crysirror-krkr/src/host.rs#L1234) |
+| `mode` | `""` | Local state/value operations | Handled | [1232](../../crates/crysirror-krkr/src/host.rs#L1232) |
+| `mode` | `"c"\|"c1"` | Local state/value operations | Handled | [1233](../../crates/crysirror-krkr/src/host.rs#L1233) |
+| `mode` | `"c2"\|"z"` | Local state/value operations | Handled | [1234](../../crates/crysirror-krkr/src/host.rs#L1234) |
+| `mode` | `mode if mode.len()==2&&mode.starts_with('z')&&mode.as_bytes()[1].is_ascii_digit()` | Local state/value operations | Handled | [1235](../../crates/crysirror-krkr/src/host.rs#L1235) |
+| `mode` | `_` | TjsError::runtime | Unsupported: native text offset/unknown compression mode is unsupported | [1236](../../crates/crysirror-krkr/src/host.rs#L1236) |
 
 ### host.rs / KrkrHost::bind_reserved_layer
 
@@ -1808,7 +1807,7 @@ fn bind_reserved_layer(&mut self, handle: ObjectHandle, window: usize, parent: O
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `id==handle.0` | TjsError::runtime | Unsupported: native parent cycle | [582](../../crates/crysirror-krkr/src/host.rs#L582) |
+| `condition` | `id==handle.0` | TjsError::runtime | Unsupported: native parent cycle | [583](../../crates/crysirror-krkr/src/host.rs#L583) |
 
 ### host.rs / KrkrHost::canvas_op
 
@@ -1818,13 +1817,13 @@ fn canvas_op(&mut self, mut op: Value) -> ()
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `op["op"].as_str() == Some("copy")` | usize::try_from, self.slot_owners.get, self.motion.has_frame, self.layers.get | Handled | [434](../../crates/crysirror-krkr/src/host.rs#L434) |
-| `condition` | `matches!( op["op"].as_str(), Some("clear" \| "set" \| "draw" \| "copy" \| "create") )` | usize::try_from, self.slot_owners.get, self.layers.get_mut, u8::try_from | Handled | [444](../../crates/crysirror-krkr/src/host.rs#L444) |
-| `condition` | `let Some(id) = op .get("destination") .or_else(\|\| op.get("id")) .and_then(Value::as_u64)` | usize::try_from, self.slot_owners.get, self.layers.get_mut, u8::try_from | Handled | [448](../../crates/crysirror-krkr/src/host.rs#L448) |
-| `condition; under op["op"].as_str()=Some("clear")` | `let Ok(color)=serde_json::from_value::<[u8;4]>(op["color"].clone())` | Local state/value operations | Handled | [463](../../crates/crysirror-krkr/src/host.rs#L463) |
-| `op["op"].as_str()` | `Some("clear")` | u8::try_from | Handled | [462](../../crates/crysirror-krkr/src/host.rs#L462) |
-| `op["op"].as_str()` | `Some("draw") if l.full_alpha == Some(255)` | Local state/value operations | Handled | [469](../../crates/crysirror-krkr/src/host.rs#L469) |
-| `op["op"].as_str()` | `_` | Local state/value operations | Handled | [470](../../crates/crysirror-krkr/src/host.rs#L470) |
+| `condition` | `op["op"].as_str() == Some("copy")` | usize::try_from, self.slot_owners.get, self.motion.has_frame, self.layers.get | Handled | [435](../../crates/crysirror-krkr/src/host.rs#L435) |
+| `condition` | `matches!( op["op"].as_str(), Some("clear" \| "set" \| "draw" \| "copy" \| "create") )` | usize::try_from, self.slot_owners.get, self.layers.get_mut, u8::try_from | Handled | [445](../../crates/crysirror-krkr/src/host.rs#L445) |
+| `condition` | `let Some(id) = op .get("destination") .or_else(\|\| op.get("id")) .and_then(Value::as_u64)` | usize::try_from, self.slot_owners.get, self.layers.get_mut, u8::try_from | Handled | [449](../../crates/crysirror-krkr/src/host.rs#L449) |
+| `condition; under op["op"].as_str()=Some("clear")` | `let Ok(color)=serde_json::from_value::<[u8;4]>(op["color"].clone())` | Local state/value operations | Handled | [464](../../crates/crysirror-krkr/src/host.rs#L464) |
+| `op["op"].as_str()` | `Some("clear")` | u8::try_from | Handled | [463](../../crates/crysirror-krkr/src/host.rs#L463) |
+| `op["op"].as_str()` | `Some("draw") if l.full_alpha == Some(255)` | Local state/value operations | Handled | [470](../../crates/crysirror-krkr/src/host.rs#L470) |
+| `op["op"].as_str()` | `_` | Local state/value operations | Handled | [471](../../crates/crysirror-krkr/src/host.rs#L471) |
 
 ### host.rs / KrkrHost::sync
 
@@ -1834,7 +1833,7 @@ fn sync(&mut self) -> TjsResult<()>
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `l.kind == 0` | Local state/value operations | Handled | [944](../../crates/crysirror-krkr/src/host.rs#L944) |
+| `condition` | `l.kind == 0` | Local state/value operations | Handled | [946](../../crates/crysirror-krkr/src/host.rs#L946) |
 
 ### host.rs / KrkrHost::write_binary
 
@@ -1844,7 +1843,7 @@ fn write_binary(&mut self, name: &str, mode: &str, bytes: &[u8]) -> TjsResult<()
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `mode != "b"` | TjsError::runtime | Unsupported: native binary stream mode is unsupported | [1175](../../crates/crysirror-krkr/src/host.rs#L1175) |
+| `condition` | `mode != "b"` | TjsError::runtime | Unsupported: native binary stream mode is unsupported | [1177](../../crates/crysirror-krkr/src/host.rs#L1177) |
 
 ### http_plugin.rs / members
 
@@ -1886,7 +1885,7 @@ fn prepare_hit_image(
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `kind!=0 \|\| !(1..256).contains(&threshold) \|\| !layer.has_image \|\| layer.kind==1 \|\| layer.full_alpha.is_some() \|\| px<0 \|\| py<0 \|\| px>=layer.image_width \|\| py>=layer.image_height` | Local state/value operations | Handled | [427](../../crates/crysirror-krkr/src/image_api.rs#L427) |
+| `condition` | `kind!=0 \|\| !(1..256).contains(&threshold) \|\| !layer.has_image \|\| layer.kind==1 \|\| layer.full_alpha.is_some() \|\| px<0 \|\| py<0 \|\| px>=layer.image_width \|\| py>=layer.image_height` | Local state/value operations | Handled | [451](../../crates/crysirror-krkr/src/image_api.rs#L451) |
 
 ### image_api.rs / queue_chain
 
@@ -1901,7 +1900,7 @@ fn queue_chain(
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `e["kind"] == "flip"` | Local state/value operations | Handled | [512](../../crates/crysirror-krkr/src/image_api.rs#L512) |
+| `condition` | `e["kind"] == "flip"` | Local state/value operations | Handled | [536](../../crates/crysirror-krkr/src/image_api.rs#L536) |
 
 ### image_api.rs / save_format
 
@@ -2221,12 +2220,12 @@ fn composite_source(
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `(replace, dest.kind == 1, alpha_source)` | `_ if mode == -1` | Local state/value operations | Handled | [3525](../../crates/crysirror-krkr/src/natives.rs#L3525) |
-| `(replace, dest.kind == 1, alpha_source)` | `(true, _, _)` | Local state/value operations | Handled | [3526](../../crates/crysirror-krkr/src/natives.rs#L3526) |
-| `(replace, dest.kind == 1, alpha_source)` | `(false, false, true)` | Local state/value operations | Handled | [3527](../../crates/crysirror-krkr/src/natives.rs#L3527) |
-| `(replace, dest.kind == 1, alpha_source)` | `(false, false, false)` | Local state/value operations | Handled | [3528](../../crates/crysirror-krkr/src/natives.rs#L3528) |
-| `(replace, dest.kind == 1, alpha_source)` | `(false, true, true)` | Local state/value operations | Handled | [3529](../../crates/crysirror-krkr/src/natives.rs#L3529) |
-| `(replace, dest.kind == 1, alpha_source)` | `(false, true, false)` | Local state/value operations | Handled | [3530](../../crates/crysirror-krkr/src/natives.rs#L3530) |
+| `(replace, dest.kind == 1, alpha_source)` | `_ if mode == -1` | Local state/value operations | Handled | [3523](../../crates/crysirror-krkr/src/natives.rs#L3523) |
+| `(replace, dest.kind == 1, alpha_source)` | `(true, _, _)` | Local state/value operations | Handled | [3524](../../crates/crysirror-krkr/src/natives.rs#L3524) |
+| `(replace, dest.kind == 1, alpha_source)` | `(false, false, true)` | Local state/value operations | Handled | [3525](../../crates/crysirror-krkr/src/natives.rs#L3525) |
+| `(replace, dest.kind == 1, alpha_source)` | `(false, false, false)` | Local state/value operations | Handled | [3526](../../crates/crysirror-krkr/src/natives.rs#L3526) |
+| `(replace, dest.kind == 1, alpha_source)` | `(false, true, true)` | Local state/value operations | Handled | [3527](../../crates/crysirror-krkr/src/natives.rs#L3527) |
+| `(replace, dest.kind == 1, alpha_source)` | `(false, true, false)` | Local state/value operations | Handled | [3528](../../crates/crysirror-krkr/src/natives.rs#L3528) |
 
 ### natives.rs / draw_face
 
@@ -2236,9 +2235,9 @@ fn draw_face(rt: &Rt, h: ObjectHandle) -> i64
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `rt.host().layers.get(&h.0).map_or(2, \|l\| l.kind)` | `1 \| 3 \| 4 \| 5 \| 8 \| 9 \| 10 \| 11` | Local state/value operations | Handled | [2895](../../crates/crysirror-krkr/src/natives.rs#L2895) |
-| `rt.host().layers.get(&h.0).map_or(2, \|l\| l.kind)` | `12` | Local state/value operations | Handled | [2896](../../crates/crysirror-krkr/src/natives.rs#L2896) |
-| `rt.host().layers.get(&h.0).map_or(2, \|l\| l.kind)` | `_` | Local state/value operations | Handled | [2897](../../crates/crysirror-krkr/src/natives.rs#L2897) |
+| `rt.host().layers.get(&h.0).map_or(2, \|l\| l.kind)` | `1 \| 3 \| 4 \| 5 \| 8 \| 9 \| 10 \| 11` | Local state/value operations | Handled | [2898](../../crates/crysirror-krkr/src/natives.rs#L2898) |
+| `rt.host().layers.get(&h.0).map_or(2, \|l\| l.kind)` | `12` | Local state/value operations | Handled | [2899](../../crates/crysirror-krkr/src/natives.rs#L2899) |
+| `rt.host().layers.get(&h.0).map_or(2, \|l\| l.kind)` | `_` | Local state/value operations | Handled | [2900](../../crates/crysirror-krkr/src/natives.rs#L2900) |
 
 ### natives.rs / font_properties
 
@@ -2248,9 +2247,9 @@ fn font_properties(rt: &mut Rt, font: ObjectHandle) -> ()
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `*name` | `"face"` | Variant::String, String::new | Handled | [1702](../../crates/crysirror-krkr/src/natives.rs#L1702) |
-| `*name` | `"height"` | Variant::Integer | Handled | [1703](../../crates/crysirror-krkr/src/natives.rs#L1703) |
-| `*name` | `_` | Variant::Integer | Handled | [1704](../../crates/crysirror-krkr/src/natives.rs#L1704) |
+| `*name` | `"face"` | Variant::String, String::new | Handled | [1706](../../crates/crysirror-krkr/src/natives.rs#L1706) |
+| `*name` | `"height"` | Variant::Integer | Handled | [1707](../../crates/crysirror-krkr/src/natives.rs#L1707) |
+| `*name` | `_` | Variant::Integer | Handled | [1708](../../crates/crysirror-krkr/src/natives.rs#L1708) |
 
 ### natives.rs / install_layer
 
@@ -2260,8 +2259,8 @@ fn install_layer(rt: &mut Rt) -> ()
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `!(0..=31).contains(&kind)` | TjsError::runtime | Unsupported: invalid Layer.type | [1906](../../crates/crysirror-krkr/src/natives.rs#L1906) |
-| `condition` | `id == h.0` | TjsError::runtime | Unsupported: native parent cycle | [2637](../../crates/crysirror-krkr/src/natives.rs#L2637) |
+| `condition` | `!(0..=31).contains(&kind)` | TjsError::runtime | Unsupported: invalid Layer.type | [1909](../../crates/crysirror-krkr/src/natives.rs#L1909) |
+| `condition` | `id == h.0` | TjsError::runtime | Unsupported: native parent cycle | [2640](../../crates/crysirror-krkr/src/natives.rs#L2640) |
 
 ### natives.rs / install_scripts
 
@@ -2319,9 +2318,9 @@ fn layer_get_layer_at(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> 
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `exclude_self && id == h.0` | Local state/value operations | Handled | [2809](../../crates/crysirror-krkr/src/natives.rs#L2809) |
-| `condition` | `kind == 1` | TjsError::runtime | Handled | [2817](../../crates/crysirror-krkr/src/natives.rs#L2817) |
-| `condition; under receiver=else: kind == 1` | `layer.kind == 1` | Local state/value operations | Handled | [2825](../../crates/crysirror-krkr/src/natives.rs#L2825) |
+| `condition` | `exclude_self && id == h.0` | Local state/value operations | Handled | [2812](../../crates/crysirror-krkr/src/natives.rs#L2812) |
+| `condition` | `kind == 1` | TjsError::runtime | Handled | [2820](../../crates/crysirror-krkr/src/natives.rs#L2820) |
+| `condition; under receiver=else: kind == 1` | `layer.kind == 1` | Local state/value operations | Handled | [2828](../../crates/crysirror-krkr/src/natives.rs#L2828) |
 
 ### natives.rs / layer_instance_defaults
 
@@ -2331,7 +2330,7 @@ fn layer_instance_defaults(rt: &mut Rt, h: ObjectHandle, window: ObjectHandle) -
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `key == "__preLeft"` | Local state/value operations | Handled | [1800](../../crates/crysirror-krkr/src/natives.rs#L1800) |
+| `condition` | `key == "__preLeft"` | Local state/value operations | Handled | [1803](../../crates/crysirror-krkr/src/natives.rs#L1803) |
 
 ### natives.rs / layer_node_enabled_plain
 
@@ -2351,7 +2350,7 @@ fn layer_operate_affine(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `!matches!(mode, 2 \| 128)` | Local state/value operations | Unsupported: {M} mode {mode} / canvas blend operation modes | [3882](../../crates/crysirror-krkr/src/natives.rs#L3882) |
+| `condition` | `!matches!(mode, 2 \| 128)` | Local state/value operations | Unsupported: {M} mode {mode} / canvas blend operation modes | [3881](../../crates/crysirror-krkr/src/natives.rs#L3881) |
 
 ### natives.rs / layer_operate_stretch
 
@@ -2361,7 +2360,7 @@ fn layer_operate_stretch(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) 
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `!matches!(mode, 2 \| 128)` | Local state/value operations | Unsupported: {M} mode {mode} / canvas blend operation modes | [3776](../../crates/crysirror-krkr/src/natives.rs#L3776) |
+| `condition` | `!matches!(mode, 2 \| 128)` | Local state/value operations | Unsupported: {M} mode {mode} / canvas blend operation modes | [3775](../../crates/crysirror-krkr/src/natives.rs#L3775) |
 
 ### natives.rs / ps_blend
 
@@ -2371,23 +2370,23 @@ fn ps_blend(mode: i64) -> Option<crysirror_core::image_processing::PsBlend>
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `mode` | `13` | Local state/value operations | Handled | [3411](../../crates/crysirror-krkr/src/natives.rs#L3411) |
-| `mode` | `14` | Local state/value operations | Handled | [3412](../../crates/crysirror-krkr/src/natives.rs#L3412) |
-| `mode` | `15` | Local state/value operations | Handled | [3413](../../crates/crysirror-krkr/src/natives.rs#L3413) |
-| `mode` | `16` | Local state/value operations | Handled | [3414](../../crates/crysirror-krkr/src/natives.rs#L3414) |
-| `mode` | `17` | Local state/value operations | Handled | [3415](../../crates/crysirror-krkr/src/natives.rs#L3415) |
-| `mode` | `18` | Local state/value operations | Handled | [3416](../../crates/crysirror-krkr/src/natives.rs#L3416) |
-| `mode` | `19` | Local state/value operations | Handled | [3417](../../crates/crysirror-krkr/src/natives.rs#L3417) |
-| `mode` | `20` | Local state/value operations | Handled | [3418](../../crates/crysirror-krkr/src/natives.rs#L3418) |
-| `mode` | `21` | Local state/value operations | Handled | [3419](../../crates/crysirror-krkr/src/natives.rs#L3419) |
-| `mode` | `23` | Local state/value operations | Handled | [3420](../../crates/crysirror-krkr/src/natives.rs#L3420) |
-| `mode` | `24` | Local state/value operations | Handled | [3421](../../crates/crysirror-krkr/src/natives.rs#L3421) |
-| `mode` | `25` | Local state/value operations | Handled | [3422](../../crates/crysirror-krkr/src/natives.rs#L3422) |
-| `mode` | `22` | Local state/value operations | Handled | [3423](../../crates/crysirror-krkr/src/natives.rs#L3423) |
-| `mode` | `26` | Local state/value operations | Handled | [3424](../../crates/crysirror-krkr/src/natives.rs#L3424) |
-| `mode` | `27` | Local state/value operations | Handled | [3425](../../crates/crysirror-krkr/src/natives.rs#L3425) |
-| `mode` | `28` | Local state/value operations | Handled | [3426](../../crates/crysirror-krkr/src/natives.rs#L3426) |
-| `mode` | `_` | Local state/value operations | Return only: Boolean/optional result interpreted by the caller | [3427](../../crates/crysirror-krkr/src/natives.rs#L3427) |
+| `mode` | `13` | Local state/value operations | Handled | [3409](../../crates/crysirror-krkr/src/natives.rs#L3409) |
+| `mode` | `14` | Local state/value operations | Handled | [3410](../../crates/crysirror-krkr/src/natives.rs#L3410) |
+| `mode` | `15` | Local state/value operations | Handled | [3411](../../crates/crysirror-krkr/src/natives.rs#L3411) |
+| `mode` | `16` | Local state/value operations | Handled | [3412](../../crates/crysirror-krkr/src/natives.rs#L3412) |
+| `mode` | `17` | Local state/value operations | Handled | [3413](../../crates/crysirror-krkr/src/natives.rs#L3413) |
+| `mode` | `18` | Local state/value operations | Handled | [3414](../../crates/crysirror-krkr/src/natives.rs#L3414) |
+| `mode` | `19` | Local state/value operations | Handled | [3415](../../crates/crysirror-krkr/src/natives.rs#L3415) |
+| `mode` | `20` | Local state/value operations | Handled | [3416](../../crates/crysirror-krkr/src/natives.rs#L3416) |
+| `mode` | `21` | Local state/value operations | Handled | [3417](../../crates/crysirror-krkr/src/natives.rs#L3417) |
+| `mode` | `23` | Local state/value operations | Handled | [3418](../../crates/crysirror-krkr/src/natives.rs#L3418) |
+| `mode` | `24` | Local state/value operations | Handled | [3419](../../crates/crysirror-krkr/src/natives.rs#L3419) |
+| `mode` | `25` | Local state/value operations | Handled | [3420](../../crates/crysirror-krkr/src/natives.rs#L3420) |
+| `mode` | `22` | Local state/value operations | Handled | [3421](../../crates/crysirror-krkr/src/natives.rs#L3421) |
+| `mode` | `26` | Local state/value operations | Handled | [3422](../../crates/crysirror-krkr/src/natives.rs#L3422) |
+| `mode` | `27` | Local state/value operations | Handled | [3423](../../crates/crysirror-krkr/src/natives.rs#L3423) |
+| `mode` | `28` | Local state/value operations | Handled | [3424](../../crates/crysirror-krkr/src/natives.rs#L3424) |
+| `mode` | `_` | Local state/value operations | Return only: Boolean/optional result interpreted by the caller | [3425](../../crates/crysirror-krkr/src/natives.rs#L3425) |
 
 ### piled_copy.rs / copy
 
@@ -2718,8 +2717,8 @@ fn begin(rt: &mut Rt, t: Option<ObjectHandle>, args: Vec<Variant>) -> Result<Var
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `name != "crossfade" && name != "universal" && !kaicho && !glitch` | Local state/value operations | Unsupported: transition {name} / an engine transition implementation | [68](../../crates/crysirror-krkr/src/transitions.rs#L68) |
-| `condition` | `name == "universal"` | TjsError::runtime | Handled | [125](../../crates/crysirror-krkr/src/transitions.rs#L125) |
+| `condition` | `name != "crossfade" && name != "universal" && !kaicho && !glitch` | Local state/value operations | Unsupported: transition {name} / an engine transition implementation | [69](../../crates/crysirror-krkr/src/transitions.rs#L69) |
+| `condition` | `name == "universal"` | TjsError::runtime | Handled | [126](../../crates/crysirror-krkr/src/transitions.rs#L126) |
 
 ### transitions.rs / exchange_tree
 
@@ -2729,11 +2728,11 @@ fn exchange_tree(rt:&mut Rt,a:ObjectHandle,b:ObjectHandle,keep:bool) -> Result<(
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `id==a.0` | Local state/value operations | Handled | [335](../../crates/crysirror-krkr/src/transitions.rs#L335) |
-| `condition` | `id==b.0` | Local state/value operations | Handled | [335](../../crates/crysirror-krkr/src/transitions.rs#L335) |
-| `condition` | `next[&replaced].0==Some(id)` | Local state/value operations | Handled | [373](../../crates/crysirror-krkr/src/transitions.rs#L373) |
-| `condition` | `next[&child].0==Some(id)` | Local state/value operations | Handled | [373](../../crates/crysirror-krkr/src/transitions.rs#L373) |
-| `condition` | `next[&child].0==Some(id)&&!children.contains(&child)` | Local state/value operations | Handled | [376](../../crates/crysirror-krkr/src/transitions.rs#L376) |
+| `condition` | `id==a.0` | Local state/value operations | Handled | [336](../../crates/crysirror-krkr/src/transitions.rs#L336) |
+| `condition` | `id==b.0` | Local state/value operations | Handled | [336](../../crates/crysirror-krkr/src/transitions.rs#L336) |
+| `condition` | `next[&replaced].0==Some(id)` | Local state/value operations | Handled | [374](../../crates/crysirror-krkr/src/transitions.rs#L374) |
+| `condition` | `next[&child].0==Some(id)` | Local state/value operations | Handled | [374](../../crates/crysirror-krkr/src/transitions.rs#L374) |
+| `condition` | `next[&child].0==Some(id)&&!children.contains(&child)` | Local state/value operations | Handled | [377](../../crates/crysirror-krkr/src/transitions.rs#L377) |
 
 ### varfile_plugin.rs / parts
 
@@ -3215,7 +3214,7 @@ fn instance_of(&mut self, value: &Variant, class_name: &str) -> Result<bool>
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `class_name == "Class" && matches!( self.runtime.heap[handle.0].kind, ObjectKind::InterCode { context: BytecodeContextType::Class, .. } )` | Local state/value operations | Handled | [3288](../../crates/crysirror-tjs2/src/vm/dispatch.rs#L3288) |
+| `condition` | `class_name == "Class" && matches!( self.runtime.heap[handle.0].kind, ObjectKind::InterCode { context: BytecodeContextType::Class, .. } )` | Local state/value operations | Handled | [3298](../../crates/crysirror-tjs2/src/vm/dispatch.rs#L3298) |
 
 ### vm/dispatch.rs / Vm<'bc, 'rt, H>::is_class_in_instance_chain
 
@@ -3324,7 +3323,7 @@ fn register_object_members(
 
 | Selector / caller branch | Pattern / condition | Implementation calls | State / restriction | Source |
 | --- | --- | --- | --- | --- |
-| `condition` | `self.runtime.heap[dest.0].call_missing && self.runtime.heap[dest.0].get_raw(&name).is_none() && self.call_set_missing(dest, &name, value.clone())?` | Local state/value operations | Handled | [3379](../../crates/crysirror-tjs2/src/vm/dispatch.rs#L3379) |
+| `condition` | `self.runtime.heap[dest.0].call_missing && self.runtime.heap[dest.0].get_raw(&name).is_none() && self.call_set_missing(dest, &name, value.clone())?` | Local state/value operations | Handled | [3389](../../crates/crysirror-tjs2/src/vm/dispatch.rs#L3389) |
 
 ### vm/dispatch.rs / Vm<'bc, 'rt, H>::secondary_class_member_for_call
 

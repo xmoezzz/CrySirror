@@ -44,11 +44,13 @@ impl DependencyResolver for Companions {
 #[ignore = "requires explicitly authorized CRYSIRROR_CXDEC_GAME directory; no game data shipped"]
 fn actual_cxdec_archives_open_and_sample_entries_verify() {
     let root = PathBuf::from(std::env::var_os("CRYSIRROR_CXDEC_GAME").expect("game directory"));
-    let modules: Vec<String> = std::env::var("CRYSIRROR_CXDEC_MODULES")
-        .expect("companion module names")
-        .split(',')
-        .map(str::to_owned)
-        .collect();
+    let parameters = if let Ok(profile) = std::env::var("CRYSIRROR_CXDEC_NANA_PROFILE") {
+        serde_json::json!({"cxdec_nana_profile": profile})
+    } else {
+        let modules = std::env::var("CRYSIRROR_CXDEC_MODULES").expect("companion module names");
+        let modules: Vec<_> = modules.split(',').collect();
+        serde_json::json!({"cxdec_modules": modules})
+    };
     let stride: usize = std::env::var("CRYSIRROR_CXDEC_STRIDE")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -67,10 +69,7 @@ fn actual_cxdec_archives_open_and_sample_entries_verify() {
         ctx.limits.max_entry_size = 1024 * 1024 * 1024;
         ctx.limits.max_index_size = 256 * 1024 * 1024;
         ctx.limits.max_entries = 1 << 20;
-        ctx.parameters.insert(
-            "kirikiri/xp3".into(),
-            serde_json::json!({"cxdec_modules": modules}),
-        );
+        ctx.parameters.insert("kirikiri/xp3".into(), parameters.clone());
         let source = Arc::new(Reader(Mutex::new(
             std::fs::File::open(root.join(&name)).unwrap(),
         )));

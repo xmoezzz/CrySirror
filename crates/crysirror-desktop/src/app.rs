@@ -146,6 +146,7 @@ fn a_long_ctrl_hold_ends_even_without_a_window_key_up() {
 struct WindowState {
     pending_snapshot: Option<crysirror_runtime::frame::PendingFrame>,
     render_snapshot: Option<crysirror_runtime::frame::RenderSnapshot>,
+    presented_bitmap: Option<(u64, [u32; 2], crysirror_core::service::PresentationScale)>,
     snapshot_store: u64,
     snapshot_restored: u64,
     surface: wgpu::Surface<'static>,
@@ -575,6 +576,7 @@ impl App {
         self.window = Some(WindowState {
             pending_snapshot: None,
             render_snapshot: None,
+            presented_bitmap: None,
             snapshot_store: 0,
             snapshot_restored: 0,
             surface,
@@ -803,6 +805,7 @@ impl App {
         if w.snapshot_store != rt.assets.store_id() || w.snapshot_restored != rt.restored {
             w.pending_snapshot = None;
             w.render_snapshot = None;
+            w.presented_bitmap = None;
             w.snapshot_store = rt.assets.store_id();
             w.snapshot_restored = rt.restored;
         }
@@ -822,6 +825,23 @@ impl App {
         let Some(snapshot) = &w.render_snapshot else {
             return Ok(());
         };
+        let surface_size = [w.config.width, w.config.height];
+        let scale = rt.host.engine.ui.presentation_scale.map(|(_, mode)| mode).unwrap_or_default();
+        let bitmap = (snapshot.frame, surface_size, scale);
+        // A parked bitmap transaction keeps the previous complete frame.
+        // Windows already has that frame. Advance input and VM work above
+        // without preparing and presenting the same 2D picture again.
+        if cfg!(target_os = "windows")
+            && self.options.frames.is_none()
+            && rt.presentation_pending()
+            && snapshot.simple.is_none()
+            && snapshot.pbr.is_none()
+            && snapshot.transition.is_none()
+            && w.presented_bitmap == Some(bitmap)
+        {
+            let _held = profiler.span(profiler.frame(), "desktop.hold_presented_bitmap");
+            return Ok(());
+        }
         w.renderer.set_profiler(rt.profiler.clone(), snapshot.frame);
         let acquire_span = profiler.span(profiler.frame(), "desktop.acquire");
         let (frame, reconfigure) = match w.surface.get_current_texture() {
@@ -830,10 +850,12 @@ impl App {
             wgpu::CurrentSurfaceTexture::Lost => {
                 w.surface = self.instance.create_surface(w.window.clone())?;
                 w.surface.configure(&w.renderer.gpu.device, &w.config);
+                w.presented_bitmap = None;
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
                 w.surface.configure(&w.renderer.gpu.device, &w.config);
+                w.presented_bitmap = None;
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
@@ -846,7 +868,8 @@ impl App {
         drop(acquire_span);
         let view = frame.texture.create_view(&Default::default());
         let rt = self.core.rt();
-        w.renderer.set_presentation_scale(rt.host.engine.ui.presentation_scale.map(|(_,mode)|mode).unwrap_or_default());
+        let render_span = profiler.span(profiler.frame(), "desktop.render");
+        w.renderer.set_presentation_scale(scale);
         w.renderer.set_scene3d(snapshot.simple.as_ref())?;
         w.renderer.set_pbr_scene(snapshot.pbr.clone())?;
         w.renderer.set_engine_frame(snapshot.layers.clone())?;
@@ -858,12 +881,13 @@ impl App {
                     assets,
                     RenderTarget {
                         view: &view,
-                        size: [w.config.width, w.config.height],
+                        size: surface_size,
                     },
                     rt.project.canvas,
                     rt.project.background,
                 )
             })?;
+        drop(render_span);
         if self.options.frames.is_some_and(|limit| self.presented + 1 >= limit) {
             if let Some(path) = std::env::var_os("CRYSIRROR_SURFACE_CAPTURE") {
                 w.renderer
@@ -876,8 +900,10 @@ impl App {
             let _present_span = profiler.span(profiler.frame(), "desktop.present");
             w.renderer.gpu.queue.present(frame);
         }
+        w.presented_bitmap = Some(bitmap);
         if reconfigure {
             w.surface.configure(&w.renderer.gpu.device, &w.config);
+            w.presented_bitmap = None;
         }
         self.presented += 1;
         if self.presented % 120 == 0 {
@@ -915,6 +941,7 @@ impl App {
             WindowEvent::RedrawRequested => self.redraw(el)?,
             WindowEvent::Resized(size) => {
                 if let Some(w) = self.window.as_mut() {
+                    w.presented_bitmap = None;
                     w.minimized = size.width == 0 || size.height == 0;
                     if !w.minimized {
                         ensure!(
@@ -936,6 +963,11 @@ impl App {
                 }
                 self.last_tick = Instant::now();
                 self.remainder = Duration::ZERO;
+            }
+            WindowEvent::Occluded(false) => {
+                if let Some(w) = self.window.as_mut() {
+                    w.presented_bitmap = None;
+                }
             }
             WindowEvent::ThemeChanged(theme) => {
                 crysirror_scene::ui::theme::set_dark(theme == winit::window::Theme::Dark);

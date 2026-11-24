@@ -924,7 +924,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 let value = self.typeof_indirect(frame, inst, DispatchFlags::must_exist())?;
                 frame.set(inst.operands[0], value)?;
             }
-            86 | 87 => self.eval_operator(frame, inst.operands[0], inst.opcode == 86)?,
+            86 | 87 => return self.eval_operator(frame, inst.operands[0], inst.opcode == 86, next_pc),
             88 => {
                 let class_name = frame.get(inst.operands[1])?.to_tjs_string()?;
                 let value = self.instance_of(&frame.get(inst.operands[0])?, &class_name)?;
@@ -1876,6 +1876,39 @@ mod tests {
 
         let resumed = runtime.resume_suspended().expect("resume");
         assert_eq!(resumed, Some(Variant::Integer(42)));
+        assert!(!runtime.is_suspended());
+    }
+
+    #[test]
+    fn eval_writes_the_result_after_a_resource_wait_without_restarting() {
+        let file = compile_source_to_bytecode(
+            "parked-eval.tjs",
+            r#"
+            global.evaluations = 0;
+            function resolveDialog() {
+                global.evaluations++;
+                return probeResource();
+            }
+            var dialog = "resolveDialog()"!;
+            return dialog;
+            "#,
+        )
+        .unwrap();
+        let mut runtime = Runtime::new();
+        runtime.register_global_native(
+            "probeResource",
+            |rt: &mut Runtime, _, _| match rt.global_member("readyResource") {
+                Variant::Void => Err(TjsError::resource_pending("confirm.pimg")),
+                resource => Ok(resource),
+            },
+        );
+        assert_eq!(runtime.execute_file(&file).unwrap(), Variant::Void);
+        assert!(runtime.is_suspended());
+
+        let resource = Variant::String("confirm_localized.pimg".into());
+        runtime.set_global_member("readyResource", resource.clone());
+        assert_eq!(runtime.resume_suspended().unwrap(), Some(resource));
+        assert_eq!(runtime.global_member("evaluations"), Variant::Integer(1));
         assert!(!runtime.is_suspended());
     }
 

@@ -4,9 +4,15 @@
 //! (desktop window, offscreen, console) performs between ticks.
 use crate::detect::Plan;
 use anyhow::{bail, ensure, Context, Result};
+use crysirror_core::{
+    image_processing::RgbaImage,
+    service::HostServices,
+    state::ClientId,
+    Error,
+};
 use crysirror_runtime::{AdapterRegistry, Project, Runtime};
 use crysirror_wgpu::Renderer;
-use std::{io::Read, path::Path, time::{Duration, Instant}};
+use std::{io::Read, path::Path, sync::Arc, time::{Duration, Instant}};
 
 /// What a host drives: a plain runtime, or the engine App with
 /// behaviours/scripts (which owns the runtime).
@@ -249,12 +255,39 @@ pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result
         let _span = profiler.span(frame, "canvas.region_readback");
         renderer.snapshot_readback(assets,request.client,request.size,&request.layers)
     })?;
-    for request in rt.host.engine.canvases.materialize_requests() {
+    for request in rt.host.engine.canvases.live_materialize_requests() {
         let _span = profiler.span(frame, "canvas.compaction");
-        let Some(image) = renderer.materialize_snapshot(&mut rt.assets, request.client, request.size, &request.layers)?
+        let image = profiler.scope(frame, || {
+            renderer.materialize_snapshot(&mut rt.assets, request.client, request.size, &request.layers)
+        })?;
+        let Some(image) = image
         else {
             continue;
         };
+        let _publish = profiler.span(frame, "canvas.compaction.publish");
+        let client = ClientId(request.client);
+        // A parked bitmap redraw often overwrites these pixels within a few
+        // ticks. Keep its compacted surface as a bounded resident image rather
+        // than encoding PNG on the presentation thread and decoding it again.
+        if rt.presentation_pending() {
+            let bytes = Arc::from(image.as_raw().as_slice());
+            let resource = Arc::new(RgbaImage::new(client, request.size, bytes)?);
+            match rt.host.publish_image_resource(client, request.surface, resource) {
+                Ok(image) => {
+                    let path = image.path.relative();
+                    let engine = &mut rt.host.engine;
+                    let resolved = engine.canvases.resolve_materialized(&request, path, &mut engine.layers);
+                    let retired = rt.host.release_image_resource(client, path);
+                    resolved?;
+                    retired?;
+                    continue;
+                }
+                // Keep the existing storage path when the resident-image
+                // budget is full. Both paths preserve the same frozen pixels.
+                Err(Error::Limit(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
         let mut png = Vec::new();
         image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
         // FNV-1a over the pixels names the immutable image.
@@ -265,7 +298,6 @@ pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result
             "__crysirror/canvas-{}-{}x{}-{hash:016x}.png",
             request.surface, request.size[0], request.size[1]
         );
-        let client = crysirror_core::state::ClientId(request.client);
         rt.assets.register_generated(client, &path, png)?;
         let engine = &mut rt.host.engine;
         engine.canvases.resolve_materialized(&request, &path, &mut engine.layers)?;

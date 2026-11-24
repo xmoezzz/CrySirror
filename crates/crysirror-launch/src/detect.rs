@@ -557,6 +557,12 @@ fn krkr(dir: &SourcePath, names: &[String], name: &str, explicit_exe: Option<&st
     // finds its startup wins.
     let mut tried = Vec::new();
     let mut candidates: Vec<Protection> = Vec::new();
+    if let Some(profile) = find(names, "crysirror-nana.local.json") {
+        let setup_file = exe.rsplit_once('.')
+            .and_then(|(stem, _)| find(names, &format!("{stem}.key")))
+            .filter(|name| dir.join(name).is_file()).cloned();
+        candidates.push(Protection::Nana { profile: profile.clone(), setup_file });
+    }
     if !tpm.is_empty() {
         candidates.push(Protection::AdlerXor {
             modules: tpm.clone(),
@@ -738,6 +744,7 @@ mod krkr_probe {
     #[derive(Clone)]
     pub enum Protection {
         Hxv4,
+        Nana { profile: String, setup_file: Option<String> },
         Cxdec { modules: Vec<String>, setup: bool },
         AdlerXor { modules: Vec<String> },
         HashFoldXor { key_bias: Option<u8>, zero_key: Option<u8> },
@@ -747,6 +754,7 @@ mod krkr_probe {
         pub fn label(&self) -> &'static str {
             match self {
                 Self::Hxv4 => "HXV4",
+                Self::Nana { .. } => "Nana (local dls profile)",
                 Self::HashFoldXor { .. } => "checksum-authenticated folded Adler XOR",
                 Self::AdlerXor { .. } => "rotating Adler XOR",
                 Self::Cxdec { modules, setup: false } if modules.len() > 1 => "CXDEC (combined modules)",
@@ -756,6 +764,10 @@ mod krkr_probe {
             }
         }
         pub(super) fn authenticated(&self, opened: &Opened) -> Result<Self> {
+            if matches!(self, Self::Nana { setup_file: Some(_), .. }) {
+                ensure!(opened.find("__cxdec/protection.json").is_some(),
+                    "Nana startup input has no matching archive bootstrap");
+            }
             if let Self::Cxdec{modules,setup:true}=self {
                 // The format publishes a bootstrap only for setupArchiveData
                 // startup redirects. Classic CXDEC uses ordinary startup.tjs
@@ -792,6 +804,11 @@ mod krkr_probe {
                 } => json!({"cxdec_modules": modules,
                     "cxdec_bootstrap_profile": "__cxdec/protection.json"}),
                 Self::Cxdec { modules, .. } => json!({"cxdec_modules": modules}),
+                Self::Nana { profile, setup_file: Some(setup_file) } => json!({
+                    "cxdec_nana_profile": profile, "cxdec_nana_setup_file": setup_file,
+                    "cxdec_bootstrap_profile": "__cxdec/protection.json",
+                }),
+                Self::Nana { profile, setup_file: None } => json!({"cxdec_nana_profile": profile}),
                 Self::Plain => json!({}),
             }
         }
@@ -827,9 +844,10 @@ mod krkr_probe {
                 !path.split(['/', '\\']).any(|s| s == ".."),
                 "companion escapes the game folder"
             );
-            Ok(Arc::new(File(Mutex::new(crate::source_path::SourceFile::open(
-                self.0.join(path),
-            )?))))
+            let root = self.0.canonicalize()?;
+            let file = root.join(path).canonicalize()?;
+            ensure!(file.starts_with(&root) && file.is_file(), "companion escapes the game folder");
+            Ok(Arc::new(File(Mutex::new(crate::source_path::SourceFile::open(file)?))))
         }
     }
 
@@ -1029,7 +1047,7 @@ mod krkr_probe {
                 config["bootstrap_profile"] = "__bootstrap/protection.json".into();
                 config.as_object_mut().unwrap().remove("executable");
             }
-            Protection::Cxdec { setup: true, .. } => {
+            Protection::Cxdec { setup: true, .. } | Protection::Nana { setup_file: Some(_), .. } => {
                 config["startup"] = "startup.tjs".into();
                 config["bootstrap_profile"] = "__cxdec/protection.json".into();
             }

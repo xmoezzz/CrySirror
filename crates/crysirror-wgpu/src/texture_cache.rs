@@ -2,8 +2,80 @@
 //! Retire old GPU cache generations before isolated-render budget admission.
 //! Cache residency follows declared dependencies, not the most recent upload.
 use super::*;
+use std::collections::VecDeque;
+
+/// Optional residency for small immutable bitmap cells across isolate passes.
+/// Active frame entries are moved here, so an output is allocated only once.
+#[derive(Default)]
+pub(super) struct RecentSnapshots {
+    entries: VecDeque<(String, Texture)>,
+    bytes: u64,
+}
+
+impl RecentSnapshots {
+    fn park(&mut self, key: String, texture: Texture) {
+        const MAX_BYTES: u64 = 2 * 1024 * 1024;
+        const MAX_ENTRIES: usize = 128;
+        if !key.starts_with("snapshot:") || texture.texture.width() > 96
+            || texture.texture.height() > 96
+        {
+            return;
+        }
+        while self.entries.len() >= MAX_ENTRIES || self.bytes + texture.bytes > MAX_BYTES {
+            let Some((_, evicted)) = self.entries.pop_front() else { return };
+            self.bytes -= evicted.bytes;
+        }
+        self.bytes += texture.bytes;
+        self.entries.push_back((key, texture));
+    }
+
+    pub(super) fn take(&mut self, key: &str) -> Option<Texture> {
+        let index = self.entries.iter().position(|(name, _)| name == key)?;
+        let (_, texture) = self.entries.remove(index)?;
+        self.bytes -= texture.bytes;
+        Some(texture)
+    }
+}
 
 impl Renderer {
+    pub(super) fn retain_frame_textures(&mut self, used: &BTreeSet<String>) {
+        for (key, texture) in self.textures.extract_if(.., |key, _| !used.contains(key)) {
+            self.recent_snapshots.park(key, texture);
+        }
+    }
+
+    pub(super) fn resident_texture_bytes(&self) -> u64 {
+        self.textures.values().map(|texture| texture.bytes).sum::<u64>()
+            + self.recent_snapshots.bytes
+    }
+
+    pub(super) fn trim_recent_snapshots_for(&mut self, additional: u64) -> u64 {
+        let resident = self.resident_texture_bytes();
+        if resident + additional > 256 * 1024 * 1024 {
+            let live = resident - self.recent_snapshots.bytes;
+            self.recent_snapshots = Default::default();
+            live
+        } else {
+            resident
+        }
+    }
+
+    pub(super) fn trim_isolated_snapshot_caches(
+        &mut self,
+        child: &mut Self,
+        work_bytes: u64,
+    ) -> (u64, u64) {
+        let (mut resident, mut isolated) =
+            (self.resident_texture_bytes(), child.resident_texture_bytes());
+        if resident + isolated + work_bytes > 256 * 1024 * 1024 {
+            resident -= self.recent_snapshots.bytes;
+            isolated -= child.recent_snapshots.bytes;
+            self.recent_snapshots = Default::default();
+            child.recent_snapshots = Default::default();
+        }
+        (resident, isolated)
+    }
+
     pub(super) fn scene_cache_keys(assets: &Assets, scene: &SceneState) -> Result<BTreeSet<String>> {
         let mut keys = BTreeSet::new();
         for (id, node) in scene.draw_order() {
@@ -123,7 +195,7 @@ impl Renderer {
         let mut used = self.frame_cache_keys(assets, &self.engine_frame)?;
         used.extend(self.scene_texture_keys.iter().cloned());
         self.preserve_capture_textures(&mut used);
-        self.textures.retain(|key,_| used.contains(key));
+        self.retain_frame_textures(&used);
         self.target_write_revisions.retain(|key,_|used.contains(key));
         Ok(())
     }

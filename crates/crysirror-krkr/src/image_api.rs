@@ -283,6 +283,30 @@ pub(crate) fn save_layer_image(rt:&mut Rt,t:Option<ObjectHandle>,args:Vec<Varian
     rt.request_suspend();Ok(Variant::Void)
 }
 
+/// Legacy bookmarks append the saved variables after a BMP. PackinOne
+/// bookmarks use their own JPEG or PNG boundary.
+pub(crate) fn load_save_thumbnail(
+    rt: &mut Rt,
+    layer: ObjectHandle,
+    name: &str,
+    mut bytes: Vec<u8>,
+) -> Result<Variant> {
+    let end = if bytes.starts_with(b"BM") {
+        let field = |at: usize| {
+            let value = bytes.get(at..at + 4)?.try_into().ok()?;
+            usize::try_from(u32::from_le_bytes(value)).ok()
+        };
+        field(2).zip(field(10)).and_then(|(size, pixels)| {
+            (pixels >= 14 && pixels < size && size <= bytes.len()).then_some(size)
+        })
+    } else {
+        crate::plugin_ports::packinone::image_end(&bytes)
+    };
+    let end = end.ok_or_else(|| TjsError::runtime(format!("no valid BMP, JPEG or PNG thumbnail in `{name}`")))?;
+    bytes.truncate(end);
+    crate::psbfile_plugin::load_encoded_image(rt, layer, name, bytes)
+}
+
 pub(crate) fn capture_bookmark_thumbnail(rt: &mut Rt, layer: ObjectHandle, jpeg: bool, quality: u8) -> Result<Variant> {
     before_bitmap_call(rt)?;
     if !rt.host().can_suspend {

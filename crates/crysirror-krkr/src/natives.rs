@@ -1681,10 +1681,8 @@ fn window_mut(rt: &mut Rt, h: ObjectHandle) -> Result<&mut WindowState> {
 /// Default `Font.height` (pixels) of a new layer.
 pub const DEFAULT_FONT_HEIGHT: i64 = 24;
 
-/// Font members read through PropGet: scripts may replace them with
-/// properties (PreRenderFontEx-style font wrappers).
-/// krkr `Font` members are native properties (scripts take `&font.face`
-/// and wrap it, e.g. Yuzusoft's objectHookInjection), backed per object.
+/// KiriKiri exposes native properties that scripts can wrap, while drawing
+/// and measurement still read the font owned by the native instance.
 const FONT_SLOTS: &[(&str, &str)] = &[
     ("face", "__font_face"),
     ("height", "__font_height"),
@@ -1696,6 +1694,12 @@ const FONT_SLOTS: &[(&str, &str)] = &[
     ("faceIsFileName", "__font_faceIsFileName"),
 ];
 
+pub(crate) fn font_property(rt: &Rt, font: ObjectHandle, name: &str) -> Variant {
+    let (_, slot) = FONT_SLOTS.iter().find(|(property, _)| *property == name)
+        .expect("native font property");
+    rt.object_member(font, slot)
+}
+
 fn font_properties(rt: &mut Rt, font: ObjectHandle) {
     for (name, slot) in FONT_SLOTS {
         let initial = match *name {
@@ -1705,7 +1709,7 @@ fn font_properties(rt: &mut Rt, font: ObjectHandle) {
         };
         rt.set_object_member(font, *slot, initial);
         let (get_slot, set_slot) = (*slot, *slot);
-        rt.register_object_native_property(
+        let property = rt.register_object_native_property(
             font,
             *name,
             move |rt: &mut Rt, this: Option<ObjectHandle>| {
@@ -1718,12 +1722,15 @@ fn font_properties(rt: &mut Rt, font: ObjectHandle) {
                 Ok(())
             },
         );
+        // Scripts move &font.face and its peers into a hook dictionary.
+        // The original accessor must keep its owning Font across that copy.
+        rt.set_object_member(font, *name, Variant::Closure(Closure::new(property, Some(font))));
     }
 }
 
 pub(crate) fn font_size(rt: &mut Rt, font: ObjectHandle) -> Result<u64> {
     for property in ["angle"] {
-        if rt.resolve_object_member(font, property)?.to_integer()? != 0 {
+        if font_property(rt, font, property).to_integer()? != 0 {
             return Err(unsupported(
                 &format!("Font.{property}"),
                 "matching engine canvas text style and metrics",
@@ -1733,14 +1740,11 @@ pub(crate) fn font_size(rt: &mut Rt, font: ObjectHandle) -> Result<u64> {
     font_metric_size(rt, font)
 }
 
-fn font_metric_size(rt: &mut Rt, font: ObjectHandle) -> Result<u64> {
-    if rt.resolve_object_member(font, "italic")?.to_integer()? != 0 {
+fn font_metric_size(rt: &Rt, font: ObjectHandle) -> Result<u64> {
+    if font_property(rt, font, "italic").to_integer()? != 0 {
         return Err(unsupported("Font.italic", "matching engine canvas text style and metrics"));
     }
-    let size = rt
-        .resolve_object_member(font, "height")?
-        .to_integer()?
-        .unsigned_abs();
+    let size = font_property(rt, font, "height").to_integer()?.unsigned_abs();
     if !(1..=512).contains(&size) {
         return Err(TjsError::runtime("Font.height must have magnitude 1..512"));
     }
@@ -1751,16 +1755,15 @@ fn font_text_width(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     let font = this_of(rt, t, "Font.getTextWidth")?;
     let text = string(&a, 0, "Font.getTextWidth")?;
     let size = font_metric_size(rt, font)?;
-    let alias=crate::font_resources::alias(rt,font)?;
-    let raster = crate::font_resources::raster_size(rt, font, &alias, size)?;
-    let host = rt.host();
-    let metrics = host
-        .text_measurement
-        .as_ref()
-        .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?
-        .measure_simple(&alias, raster.measure, &text)
-        .map_err(|e| TjsError::runtime(format!("Font.getTextWidth: {e}")))?;
-    Ok(Variant::Integer(metrics.advance.round() as i64))
+    let runs = crate::font_resources::text_runs(rt, font, size, &text)?;
+    let measurement = rt.host().text_measurement.as_ref()
+        .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?;
+    let mut pixels = 0.0;
+    for run in runs {
+        pixels += measurement.measure_simple(&run.alias, run.raster.measure, run.text)
+            .map_err(|e| TjsError::runtime(format!("Font.getTextWidth: {e}")))?.advance;
+    }
+    Ok(Variant::Integer(pixels.round() as i64))
 }
 
 fn font_text_height(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
@@ -1768,7 +1771,7 @@ fn font_text_height(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Re
     // KiriKiri returns abs(Font.height), even for the empty string. It does
     // not return the glyph ink box or the engine's line pitch.
     let _ = string(&a, 0, "Font.getTextHeight")?;
-    let height = rt.resolve_object_member(font, "height")?.to_integer()?.checked_abs()
+    let height = font_property(rt, font, "height").to_integer()?.checked_abs()
         .ok_or_else(|| TjsError::runtime("Font.height magnitude overflow"))?;
     Ok(Variant::Integer(height))
 }
@@ -2930,12 +2933,9 @@ fn layer_load_images(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> R
         .map_err(|e| TjsError::runtime(e.to_string()))?
         .is_some()
     {
-        let mut bytes = rt.host().storage()?.read_limited(&name, 64 * 1024 * 1024)
+        let bytes = rt.host().storage()?.read_limited(&name, 64 * 1024 * 1024)
             .map_err(|e| TjsError::runtime(format!("read save image `{name}`: {e}")))?;
-        let end = crate::plugin_ports::packinone::image_end(&bytes)
-            .ok_or_else(|| TjsError::runtime(format!("no JPEG or PNG thumbnail in `{name}`")))?;
-        bytes.truncate(end);
-        return crate::psbfile_plugin::load_encoded_image(rt, h, &name, bytes);
+        return crate::image_api::load_save_thumbnail(rt, h, &name, bytes);
     }
     if crate::psbfile_plugin::is_uri(&name) {
         return crate::psbfile_plugin::load_image(rt, h, &name);
@@ -3331,16 +3331,17 @@ fn layer_copy(
     if sw <= 0 || sh <= 0 {
         return Ok(Variant::Void);
     }
-    let source = rt.host().layer(src)?.clone();
-    let dest = rt.host().layer(h)?.clone();
+    let source = rt.host().layer(src)?;
+    let dest = rt.host().layer(h)?;
     if replace && copy_face==3 {
         let owner=rt.host().client;
         let Some((rect,at))=crysirror_core::region_map::clip_region_copy(None,
             [dest.image_width as u32,dest.image_height as u32],
             [sx,sy,sw,sh],[dx,dy],dest.draw_clip).map_err(|e|TjsError::runtime(e.to_string()))? else {return Ok(Variant::Void);};
+        let regions=source.province_allocated.then(||source.regions.clone());
         let layer=rt.host_mut().layer_mut(h)?;
-        if source.province_allocated {
-            let changed=layer.regions.copy_from(owner,&source.regions,rect,at,None)
+        if let Some(regions)=regions {
+            let changed=layer.regions.copy_from(owner,&regions,rect,at,None)
                 .map_err(|e|TjsError::runtime(e.to_string()))?;
             layer.province_allocated=true;layer.image_modified|=changed;
         } else {
@@ -3368,38 +3369,35 @@ fn layer_copy(
     // destination clips; each operation keeps its original source mapping.
     // Modes without a composite form leave the layer canvas-only.
     let composed = match atop_mode {
-        None => composite_source(rt, h, src, &dest, &source, [sx, sy, sw, sh], [dx, dy], opa as u8, replace, mode),
-        Some("normal") => composite_source(rt, h, src, &dest, &source, [sx, sy, sw, sh], [dx, dy], opa as u8, replace, -1),
+        None => composite_source(rt, h, src, dest, source, [sx, sy, sw, sh], [dx, dy], opa as u8, replace, mode),
+        Some("normal") => composite_source(rt, h, src, dest, source, [sx, sy, sw, sh], [dx, dy], opa as u8, replace, -1),
         Some("copy") => composite_with(
-            rt, h, src, &dest, &source, [sx, sy, sw, sh], [dx, dy], 255,
+            rt, h, src, dest, source, [sx, sy, sw, sh], [dx, dy], 255,
             crysirror_core::image_processing::ImageCompositeMath::CopyRgb,
         ),
         Some(_) => None,
     };
     // Partial copyRect replaces the destination region (shared canvas
     // region replace); onto a blank destination it is a plain draw.
-    let host = rt.host_mut();
-    host.canvas_op(
-        json!({"op":"copy","source":source.slot,"destination":dest.slot,
+    let draw = json!({"op":"copy","source":source.slot,"destination":dest.slot,
         "rect":[sx,sy,sw,sh],"position":[dx,dy],"opacity":opa,"replace":replace && !atop && (whole || !dest.blank),
-        "clip":dest.draw_clip,"atop":atop_mode}),
-    );
-    if atop {
-        // Alpha is unchanged; only colour moved.
-        host.layer_mut(h)?.image_source = composed;
-        host.api_calls += 1;
-        return Ok(Variant::Void);
-    }
-    host.layer_mut(h)?.image_source = composed;
+        "clip":dest.draw_clip,"atop":atop_mode});
     let blank = (replace && whole && source.blank) || (dest.blank && source.blank);
-    host.layer_mut(h)?.blank = blank;
-    host.layer_mut(h)?.full_alpha = if replace && whole {
+    let full_alpha = if replace && whole {
         source.full_alpha
     } else if !replace && dest.full_alpha == Some(255) {
         Some(255)
     } else {
         None
     };
+    let host = rt.host_mut();
+    host.canvas_op(draw);
+    let layer = host.layer_mut(h)?;
+    layer.image_source = composed;
+    if !atop {
+        layer.blank = blank;
+        layer.full_alpha = full_alpha;
+    }
     host.api_calls += 1;
     Ok(Variant::Void)
 }
@@ -3629,56 +3627,57 @@ fn layer_draw_text(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     }
     let font = layer_font(rt, h)?;
     let size = font_size(rt, font)?;
-    let l = rt.host().layer(h)?.clone();
-    let alias=crate::font_resources::alias(rt,font)?;
-    let raster = crate::font_resources::raster_size(rt, font, &alias, size)?;
-    let size = raster.draw;
-    let y = y.checked_add(i64::from(raster.offset_y)).ok_or_else(|| TjsError::runtime("text y overflow"))?;
-    // A mapped precomputed face already contains the native Font style.
-    let bold = rt.resolve_object_member(font, "bold")?.is_truthy()
-        && !crate::font_resources::is_mapped(rt,font)?;
-    let mapped=crate::font_resources::is_mapped(rt,font)?;
-    let underline=!mapped&&rt.resolve_object_member(font,"underline")?.is_truthy();
-    let strikeout=!mapped&&rt.resolve_object_member(font,"strikeout")?.is_truthy();
-    if !bold && shadow_level == 0 && !underline && !strikeout {
-        let host = rt.host_mut();
-        if host.layer(h)?.full_alpha != Some(255) {
-            host.layer_mut(h)?.full_alpha = None;
-        }
-        host.canvas_op(json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x,y,(l.image_width-x).max(1),size as i64*2],"paint":{"kind":"text","text":text,"font":alias,"size":size,"color":color,"layout":crysirror_core::service::UNWRAPPED_TEXT_LAYOUT}}}));
-        host.layer_mut(h)?.blank = false;
-        host.api_calls += 1;
-        return Ok(Variant::Void);
-    }
-    if text.len() > 4096 {
-        return Err(TjsError::runtime(
-            "native positioned text exceeds 4096 bytes",
-        ));
-    }
+    let (slot, image_width, image_height) = {
+        let layer = rt.host().layer(h)?;
+        (layer.slot, layer.image_width, layer.image_height)
+    };
+    let runs = crate::font_resources::text_runs(rt, font, size, &text)?;
+    let styled = ["bold", "underline", "strikeout"].map(|name| font_property(rt, font, name).is_truthy());
     let host = rt.host();
-    let placements = host
-        .text_measurement
-        .as_ref()
-        .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?
-        .position_simple(&alias, size as u16, &text)
-        .map_err(|e| TjsError::runtime(e.to_string()))?;
-    let glyphs = placements
-        .into_iter()
-        .map(|g| json!({"character":g.character.to_string(),"baseline":g.baseline,"style":{"bold":bold,"underline":underline,"strikeout":strikeout}}))
-        .collect::<Vec<_>>();
+    let measurement = host.text_measurement.as_ref()
+        .ok_or_else(|| TjsError::runtime("engine text measurement handle absent"))?;
+    let mut shadows = Vec::new();
+    let mut foreground = Vec::new();
+    let mut pen = 0.0f32;
+    let run_count = runs.len();
+    for (i, run) in runs.into_iter().enumerate() {
+        let alias = run.alias;
+        let size = run.raster.draw;
+        let x = x.checked_add(pen.round() as i64).ok_or_else(|| TjsError::runtime("text x overflow"))?;
+        let y = y.checked_add(i64::from(run.raster.offset_y)).ok_or_else(|| TjsError::runtime("text y overflow"))?;
+        let [bold, underline, strikeout] = if run.mapped { [false; 3] } else { styled };
+        if i + 1 < run_count {
+            pen += measurement.measure_simple(&alias, f32::from(size), run.text)
+                .map_err(|e| TjsError::runtime(e.to_string()))?.advance;
+        }
+        if !bold && shadow_level == 0 && !underline && !strikeout {
+            foreground.push(json!({"op":"draw","id":slot,"layer":{"id":0,"rect":[x,y,(image_width-x).max(1),size as i64*2],"paint":{"kind":"text","text":run.text,"font":alias,"size":size,"color":color,"layout":crysirror_core::service::UNWRAPPED_TEXT_LAYOUT}}}));
+            continue;
+        }
+        if text.len() > 4096 {
+            return Err(TjsError::runtime("native positioned text exceeds 4096 bytes"));
+        }
+        let glyphs = measurement.position_simple(&alias, size, run.text)
+            .map_err(|e| TjsError::runtime(e.to_string()))?
+            .into_iter()
+            .map(|g| json!({"character":g.character.to_string(),"baseline":g.baseline,"style":{"bold":bold,"underline":underline,"strikeout":strikeout}}))
+            .collect::<Vec<_>>();
+        if shadow_level != 0 {
+            let offset = [int(&a, 9, 0)?, int(&a, 10, 0)?];
+            // Native CharacterData::Blur scales coverage by level/256.
+            let shadow = argb(int(&a, 7, 0)?, Some(opa));
+            let blur = json!({"radius": blur.unsigned_abs(), "level": shadow_level});
+            shadows.push(json!({"op":"draw","id":slot,"layer":{"id":0,"rect":[x+offset[0],y+offset[1],image_width.max(1),image_height.max(1)],"paint":{"kind":"glyph_run","font":alias,"size":size,"color":shadow,"bold":bold,"glyphs":glyphs,"blur":blur}}}));
+        }
+        foreground.push(json!({"op":"draw","id":slot,"layer":{"id":0,"rect":[x,y,image_width.max(1),image_height.max(1)],"paint":{"kind":"glyph_run","font":alias,"size":size,"color":color,"bold":bold,"glyphs":glyphs}}}));
+    }
     let host = rt.host_mut();
     if host.layer(h)?.full_alpha != Some(255) {
         host.layer_mut(h)?.full_alpha = None;
     }
-    if shadow_level != 0 {
-        let offset = [int(&a, 9, 0)?, int(&a, 10, 0)?];
-        // krkrz CharacterData::Blur: coverage blurred by |width| and scaled by
-        // level/256 (shared glyph blur), drawn in the shadow colour at `opa`.
-        let shadow = argb(int(&a, 7, 0)?, Some(opa));
-        let blur = json!({"radius": blur.unsigned_abs(), "level": shadow_level});
-        host.canvas_op(json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x+offset[0],y+offset[1],l.image_width.max(1),l.image_height.max(1)],"paint":{"kind":"glyph_run","font":alias,"size":size,"color":shadow,"bold":bold,"glyphs":glyphs,"blur":blur}}}));
+    for draw in shadows.into_iter().chain(foreground) {
+        host.canvas_op(draw);
     }
-    host.canvas_op(json!({"op":"draw","id":l.slot,"layer":{"id":0,"rect":[x,y,l.image_width.max(1),l.image_height.max(1)],"paint":{"kind":"glyph_run","font":alias,"size":size,"color":color,"bold":bold,"glyphs":glyphs}}}));
     host.layer_mut(h)?.blank = false;
     host.api_calls += 1;
     Ok(Variant::Void)

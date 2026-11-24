@@ -32,6 +32,15 @@ pub struct MaterializeRequest {
     pub size: [u32; 2],
     pub layers: Arc<Vec<LayerSpec>>,
 }
+
+fn references_compaction(nodes: &[CanvasNode], target: &Arc<Vec<LayerSpec>>) -> bool {
+    nodes.iter().any(|node| match node {
+        CanvasNode::Group { nodes, .. } => references_compaction(nodes, target),
+        CanvasNode::Draw { layer } => {
+            matches!(&layer.paint, Paint::Snapshot { layers, .. } if Arc::ptr_eq(layers, target))
+        }
+    })
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanvasSurface {
@@ -1278,6 +1287,19 @@ impl CanvasSystem {
     pub fn materialize_requests(&self) -> Vec<MaterializeRequest> {
         self.materialize.values().cloned().collect()
     }
+    /// Clear requests superseded by a later write in the same host tick.
+    /// Copies still referring to the same generation keep the request alive.
+    pub fn live_materialize_requests(&mut self) -> Vec<MaterializeRequest> {
+        let clients = &self.clients;
+        self.materialize.retain(|(owner, _), request| {
+            clients.get(owner).is_some_and(|surfaces| {
+                surfaces.values().any(|surface| {
+                    references_compaction(&surface.nodes, &request.layers)
+                })
+            })
+        });
+        self.materialize_requests()
+    }
     /// Replace every draw of the frozen `layers` snapshot (in any surface of
     /// the client, including copies of it) with the published `asset` image
     /// of identical pixels, and refresh affected presentations.
@@ -1326,8 +1348,7 @@ impl CanvasSystem {
         let mut touched = BTreeSet::new();
         for id in ids {
             let hit = next.surface(c, id).is_some_and(|s| {
-                let mut probe = s.nodes.clone();
-                replace(&mut probe, &request.layers, asset)
+                references_compaction(&s.nodes, &request.layers)
             });
             if hit {
                 let s = next.get_mut(c, id)?;
@@ -2172,7 +2193,17 @@ fn snapshot_specs(
         if *next_id > 4096 { return false; }
         let id = *next_id;
         if let CanvasNode::Draw { layer } = node {
-            if let Some(inner) = region_snapshot(layer).filter(|_| inline_regions) {
+            if let Some(inner) = region_snapshot(layer).filter(|inner| {
+                inline_regions
+                    && (inner.iter().all(|child| child.blend == Blend::Normal)
+                        // A destination-dependent blend can be inlined only
+                        // while the target is still clear. In a later draw it
+                        // would read the outer canvas instead of its own alpha.
+                        || out.iter().all(|prior| {
+                            prior.blend == Blend::Normal
+                                && matches!(prior.paint, Paint::Solid { color } if color[3] == 0)
+                        }))
+            }) {
                 // Inline instead of nesting: remap ids, hang the frozen root
                 // under `parent`, clipped to the region it showed.
                 let mut map = std::collections::BTreeMap::new();
@@ -2242,6 +2273,27 @@ fn snapshot_specs(
 #[cfg(test)]
 mod region_snapshot_tests {
     use super::*;
+
+    #[test]
+    fn keep_alpha_snapshot_stays_isolated_over_an_existing_draw() {
+        let rect = [0., 0., 10., 10.];
+        let solid = |color| CanvasNode::Draw { layer: spec(0, rect, Paint::Solid { color }) };
+        let mut recolor = spec(0, rect, Paint::Solid { color: [255; 4] });
+        recolor.blend = Blend::AtopCopy;
+        let (paint, uv) = region_paint(
+            &[solid([0, 0, 0, 100]), CanvasNode::Draw { layer: recolor }],
+            rect,
+        ).unwrap();
+        let mut isolated = spec(0, rect, paint);
+        isolated.uv = Some(uv);
+        let (paint, _) = region_paint(
+            &[solid([0, 0, 0, 255]), CanvasNode::Draw { layer: isolated }],
+            rect,
+        ).unwrap();
+        let Paint::Snapshot { layers, .. } = paint else { panic!("outer snapshot") };
+        assert!(layers.iter().any(|layer| matches!(layer.paint, Paint::Snapshot { .. })));
+        assert!(layers.iter().all(|layer| layer.blend == Blend::Normal));
+    }
     #[test]
     fn deep_copy_chain_preserves_the_intersection_and_translation() {
         let rect = [0., 0., 128., 8.];

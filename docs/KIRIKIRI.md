@@ -38,8 +38,10 @@ The calling TJS script decides how a failed check affects startup.
 For outline fonts, KiriKiri's absolute `Font.height` specifies the em size in
 pixels. Glyph advances and drawing use that size and the selected face's
 ascender. Games can install a script property over a layer's `font` and access
-the backing font through `(Layer incontextof layer).font`. Native drawing
-uses the backing font, including faces registered from the game's own archives.
+the backing font through `(Layer incontextof layer).font`. Native measurement
+and drawing use the backing font properties even when a script's getter
+returns the alias it displays in settings. This also applies to faces
+registered from the game's own archives.
 Pre-rendered bitmap fonts retain their stored metrics.
 
 An image reference of the form `psb://file/key` can open its named PSB from

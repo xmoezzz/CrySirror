@@ -1,5 +1,5 @@
 //! Immutable dynamic faces shared by measurement and renderer views.
-use crate::TextSystem;
+use crate::{outline_font::FontBacking, TextSystem};
 use ab_glyph::FontArc;
 use anyhow::{Context, Result, ensure};
 use crysirror_core::state::ClientId;
@@ -13,7 +13,7 @@ pub const MAX_FONT_BYTES: usize = 32 * 1024 * 1024;
 pub struct PreparedFontFace {
     pub(crate) font: Option<FontArc>,
     pub(crate) precomputed: Option<Arc<crate::precomputed_font::PrecomputedFont>>,
-    pub(crate) bytes: Arc<[u8]>,
+    pub(crate) bytes: Arc<FontBacking>,
     /// Selected collection face index.
     pub face_index: u32,
     /// Face count in the encoded source collection.
@@ -23,7 +23,6 @@ pub struct PreparedFontFace {
     /// Unicode family/full/PostScript names from the validated face.
     pub families: Vec<String>,
     pub(crate) style: Option<crysirror_core::service::FontFaceStyle>,
-    retention: Option<Arc<dyn Send + Sync>>,
 }
 impl PreparedFontFace {
     /// Validate both outline and shaping backends on a CPU worker.
@@ -36,9 +35,8 @@ impl PreparedFontFace {
             .context("invalid shaping font face/index")?;
         let families = family_names(&face)?;
         let style = face_style(&face);
-        let shared = crate::intern_font_arc(bytes);
-        let bytes = shared.clone();
-        let font = crate::font_arc(shared, face_index).map_err(|e| anyhow::anyhow!("font outline: {e}"))?;
+        let bytes = FontBacking::new(bytes);
+        let font = crate::font_arc(bytes.clone(), face_index).map_err(|e| anyhow::anyhow!("font outline: {e}"))?;
         let digest = if face_index == 0 {
             blake3::hash(&bytes).to_hex().to_string()
         } else {
@@ -56,7 +54,6 @@ impl PreparedFontFace {
             digest,
             families,
             style,
-            retention: None,
         })
     }
     /// Prepare a fixed-size coverage face without an outline/shaping backend.
@@ -74,13 +71,12 @@ impl PreparedFontFace {
         Ok(Self {
             font: None,
             precomputed: Some(Arc::new(face)),
-            bytes,
+            bytes: FontBacking::new(bytes),
             face_index: 0,
             collection_faces: 1,
             digest: hash.finalize().to_hex().to_string(),
             families: Vec::new(),
             style: None,
-            retention: None,
         })
     }
     /// Keep a host memory reservation alive with every font clone.
@@ -92,7 +88,7 @@ impl PreparedFontFace {
                 .expect("prepared bitmap face shared before publication")
                 .retain_storage(lease.clone());
         }
-        self.retention = Some(lease);
+        self.bytes.retain_storage(lease);
     }
     /// Resident source size, excluding parsed outline backend overhead.
     pub fn byte_len(&self) -> usize {
