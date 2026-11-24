@@ -25,6 +25,13 @@ pub fn offscreen(
     font: Option<&Path>,
 ) -> Result<()> {
     let input = InputTrack::load(track)?;
+    // A replay supplies committed text to the same capture sessions as the
+    // window presenter. No OS IME or preedit events are synthesized.
+    if track.is_some() {
+        let text = &mut runtime(&mut core)?.host.text_input;
+        text.set_presenter_available(true);
+        text.focus(true);
+    }
     // Optional wall pacing gives asynchronous decoder/resource workers time
     // during reproducible offline runs. It never changes native elapsed time,
     // input frames or decoder EOF/completion receipts.
@@ -80,10 +87,16 @@ pub fn offscreen(
         let frame_input = input.at(frame);
         let rt = runtime(&mut core)?;
         virtual_window.begin_tick(rt);
-        if let Some(text)=input.text_at(frame){
-            let focus=rt.host.engine.ui.focus.context("input track text requires a focused engine text field")?;
-            ensure!(rt.host.engine.ui.focused_text_field(),"input track text focus is not a text field");
-            crysirror_core::service::HostServices::submit_engine(&mut rt.host,crysirror_core::state::ClientId(focus.owner),1,&serde_json::to_vec(&serde_json::json!({"ui":[{"op":"insert_text","text":text}]}))?)?;
+        if let Some(text) = input.text_at(frame) {
+            if rt.host.engine.ui.focused_text_field() {
+                let focus = rt.host.engine.ui.focus.context("missing focused text field")?;
+                crysirror_core::service::HostServices::submit_engine(
+                    &mut rt.host, crysirror_core::state::ClientId(focus.owner), 1,
+                    &serde_json::to_vec(&serde_json::json!({"ui":[{"op":"insert_text","text":text}]}))?,
+                )?;
+            } else {
+                ensure!(rt.host.text_input.commit(text)?, "input track text has no active recipient");
+            }
         }
         // The offline host explicitly supplies a virtual pointer, including
         // its initial origin. This is a backend policy, never a VM fallback

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // ---- Tonemapping ----
 struct Post {
-    // x: exposure multiplier, y: tonemap (0 PBR Neutral, 1 ACES, 2 none), z: bloom strength
+    // x: exposure multiplier, y: tonemap (0 PBR Neutral, 1 ACES, 2 none, 3 filmic), z: bloom strength
     params: vec4<f32>,
     // x: auto exposure enabled, y: compensation (stops)
     adapt: vec4<f32>,
@@ -36,6 +36,19 @@ fn pbr_neutral(c_in: vec3<f32>) -> vec3<f32> {
 fn aces(x: vec3<f32>) -> vec3<f32> {
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3<f32>(0.0), vec3<f32>(1.0));
 }
+// Hable's filmic operator (Uncharted 2), normalised by its white point.
+fn hable(x: vec3<f32>) -> vec3<f32> {
+    let a = 0.15;
+    let b = 0.50;
+    let c = 0.10;
+    let d = 0.20;
+    let e = 0.02;
+    let f = 0.30;
+    return ((x * (a * x + c * b) + d * e) / (x * (a * x + b) + d * f)) - e / f;
+}
+fn filmic(x: vec3<f32>) -> vec3<f32> {
+    return clamp(hable(2.0 * x) / hable(vec3<f32>(11.2)), vec3<f32>(0.0), vec3<f32>(1.0));
+}
 
 @fragment
 fn fs_tonemap(i: FsOut) -> @location(0) vec4<f32> {
@@ -58,8 +71,10 @@ fn fs_tonemap(i: FsOut) -> @location(0) vec4<f32> {
         o = pbr_neutral(c);
     } else if post.params.y < 1.5 {
         o = aces(c);
-    } else {
+    } else if post.params.y < 2.5 {
         o = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    } else {
+        o = filmic(c);
     }
     // The output view is sRGB: write linear values.
     return vec4<f32>(o, 1.0);

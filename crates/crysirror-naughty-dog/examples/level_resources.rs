@@ -30,6 +30,60 @@ fn file(dir: &Dir, path: &str) -> Result<Arc<dyn AssetReader>> {
     let len = f.metadata()?.len();
     Ok(Arc::new(File(Mutex::new(f), len)))
 }
+fn write_glb(
+    out: &std::path::Path,
+    meshes: &[crysirror_naughty_dog::mesh::Mesh],
+    package: &dyn AssetReader,
+    directory: &crysirror_naughty_dog::package::Directory,
+) -> Result<()> {
+    use crysirror_asset::interchange::glb::{Document, Material, Node, Primitive};
+    let mut doc = Document { generator: "CrySirror Naughty Dog background inspection".into(), ..Default::default() };
+    let mut textures = std::collections::HashMap::new();
+    for item in directory.items.iter().filter(|i| i.kind == "VRAM_DESC") {
+        let desc = crysirror_naughty_dog::texture::VramDesc::read(package, item.payload_offset)?;
+        textures.insert(desc.id, desc);
+    }
+    let mut images = std::collections::HashMap::new();
+    for (m, mesh) in meshes.iter().enumerate() {
+        let mut primitives = Vec::new();
+        for group in &mesh.groups {
+            let image = match group.material.base_color().and_then(|id| textures.get(&id)) {
+                Some(desc) => match images.get(&desc.id) {
+                    Some(&i) => Some(i),
+                    None => {
+                        let png = crysirror_image::encode_png(&desc.decode(package, directory.texture_base)?)?;
+                        doc.images.push((png, "image/png"));
+                        images.insert(desc.id, doc.images.len() - 1);
+                        Some(doc.images.len() - 1)
+                    }
+                },
+                None => None,
+            };
+            doc.materials.push(Material { name: group.material.name.clone(), base_color_texture: image, ..Default::default() });
+            let material = doc.materials.len() - 1;
+            for f in &mesh.fragments[group.fragments.clone()] {
+                if f.positions.is_empty() {
+                    continue;
+                }
+                primitives.push(Primitive {
+                    positions: f.positions.clone(),
+                    uvs: if f.uvs.len() == f.positions.len() { f.uvs.clone() } else { Vec::new() },
+                    indices: f.triangles.iter().flatten().map(|&i| u32::from(i)).collect(),
+                    material: Some(material),
+                    ..Default::default()
+                });
+            }
+        }
+        doc.meshes.push((format!("prototype-{m}"), primitives));
+        let mut node = Node::named(format!("prototype-{m}"));
+        node.mesh = Some(m);
+        doc.roots.push(doc.nodes.len());
+        doc.nodes.push(node);
+    }
+    std::fs::write(out, doc.to_glb()?)?;
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
     let root = args
@@ -43,6 +97,9 @@ fn main() -> Result<()> {
         })
         .transpose()?
         .unwrap_or_else(|| "con-1-start".into());
+    // Optional GLB of the level's background prototype meshes, written
+    // where the user asks (never inside the repository).
+    let glb_out = args.next().map(std::path::PathBuf::from);
     ensure!(args.next().is_none(), "unexpected argument");
     let disc = Dir::open_ambient_dir(root, ambient_authority())?;
     let dir = disc.open_dir("PS3_GAME/USRDIR/build/main")?;
@@ -120,6 +177,35 @@ fn main() -> Result<()> {
                             directory.page_count,
                             directory.items.len()
                         );
+                        let (mut decoded, mut colours) = (0, std::collections::BTreeSet::new());
+                        for item in directory.items.iter().filter(|i| i.kind == "VRAM_DESC") {
+                            let desc = crysirror_naughty_dog::texture::VramDesc::read(handle.as_ref(), item.payload_offset)?;
+                            let image = desc.decode(handle.as_ref(), directory.texture_base)?;
+                            colours.extend(image.rgba.chunks_exact(4).take(4096).map(|c| u32::from_be_bytes(c.try_into().unwrap())));
+                            decoded += 1;
+                        }
+                        println!("  {p}: decoded {decoded} VRAM textures, {} distinct sampled RGBA values", colours.len());
+                        let collections: Vec<_> = directory.items.iter().filter(|i| i.kind == "PM_COLLECTION_2").collect();
+                        if !collections.is_empty() {
+                            let loaded = crysirror_naughty_dog::mesh::Loaded::read(handle.as_ref(), 256 << 20)?;
+                            let decoded = collections.iter().try_fold(Vec::new(), |mut all, item| {
+                                all.extend(crysirror_naughty_dog::mesh::prototype_meshes(&loaded, item.payload_offset as usize)?);
+                                anyhow::Ok(all)
+                            });
+                            let meshes = match decoded {
+                                Ok(m) => m,
+                                Err(e) => {
+                                    println!("  {p}: prototype meshes not decoded: {e:#}");
+                                    continue;
+                                }
+                            };
+                            let (fragments, vertices, triangles) = meshes.iter().flat_map(|m| &m.fragments).fold((0, 0, 0), |a, f| (a.0 + 1, a.1 + f.positions.len(), a.2 + f.triangles.len()));
+                            println!("  {p}: {} prototype meshes, {fragments} fragments, {vertices} vertices, {triangles} triangles", meshes.len());
+                            if let Some(out) = glb_out.as_ref().filter(|_| ext == "pak" && name == "pak22.psarc") {
+                                write_glb(out, &meshes, handle.as_ref(), &directory)?;
+                                println!("  wrote {}", out.display());
+                            }
+                        }
                     }
                     let digest = crysirror_resource::checksum::sha256_reader(
                         handle.as_ref(),

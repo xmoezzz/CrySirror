@@ -551,6 +551,9 @@ struct ObjectUniform {
 struct GpuPrim {
     /// Joints (u16x4) + weights (f32x4) stream for skinned primitives.
     skin: Option<wgpu::Buffer>,
+    /// `_AUX` (f32x4) stream of static primitives that carry one; drawn by
+    /// the opaque `vs_aux` pipelines, other passes ignore it.
+    aux: Option<wgpu::Buffer>,
     vertices: wgpu::Buffer,
     vertex_count: usize,
     indices: wgpu::Buffer,
@@ -944,6 +947,11 @@ fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
         attributes: &ATTRS,
     }
 }
+/// `_AUX` stream of `vs_aux` (location 6).
+fn aux_layout() -> wgpu::VertexBufferLayout<'static> {
+    const ATTRS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![6 => Float32x4];
+    wgpu::VertexBufferLayout { array_stride: 16, step_mode: wgpu::VertexStepMode::Vertex, attributes: &ATTRS }
+}
 fn skin_layout() -> wgpu::VertexBufferLayout<'static> {
     const ATTRS: [wgpu::VertexAttribute; 2] =
         wgpu::vertex_attr_array![4 => Uint16x4, 5 => Float32x4];
@@ -1081,6 +1089,9 @@ struct SurfacePipelines {
     opaque_double: wgpu::RenderPipeline,
     opaque_skin: wgpu::RenderPipeline,
     opaque_skin_double: wgpu::RenderPipeline,
+    /// Static primitives with an `_AUX` stream (`vs_aux`).
+    opaque_aux: wgpu::RenderPipeline,
+    opaque_aux_double: wgpu::RenderPipeline,
     prepass: wgpu::RenderPipeline,
     prepass_double: wgpu::RenderPipeline,
     prepass_skin: wgpu::RenderPipeline,
@@ -1101,15 +1112,20 @@ struct SurfacePipelines {
 impl SurfacePipelines {
     fn forward_pipeline(d: &wgpu::Device, layout: &wgpu::PipelineLayout, module: &wgpu::ShaderModule,
         cull: Option<wgpu::Face>, skinned: bool, alpha: AlphaMode, depth_write: bool, geometry: bool, authored: bool) -> wgpu::RenderPipeline {
-        let buffers = [Some(vertex_layout()), Some(skin_layout())];
+        Self::forward_pipeline_streams(d, layout, module, cull, skinned, false, alpha, depth_write, geometry, authored)
+    }
+    /// `aux`: static primitives with an `_AUX` stream (`vs_aux`, buffer 1).
+    fn forward_pipeline_streams(d: &wgpu::Device, layout: &wgpu::PipelineLayout, module: &wgpu::ShaderModule,
+        cull: Option<wgpu::Face>, skinned: bool, aux: bool, alpha: AlphaMode, depth_write: bool, geometry: bool, authored: bool) -> wgpu::RenderPipeline {
+        let buffers = [Some(vertex_layout()), Some(if aux { aux_layout() } else { skin_layout() })];
         d.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             cache: None,
             label: Some("pbr forward"),
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module,
-                entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
-                buffers: &buffers[..if skinned { 2 } else { 1 }],
+                entry_point: Some(if skinned { "vs_skinned" } else if aux { "vs_aux" } else { "vs_main" }),
+                buffers: &buffers[..if skinned || aux { 2 } else { 1 }],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -1235,6 +1251,8 @@ impl SurfacePipelines {
         let opaque_double = opaque_pipeline(None, false, AlphaMode::Opaque, true, true, false);
         let opaque_skin = opaque_pipeline(Some(wgpu::Face::Back), true, AlphaMode::Opaque, true, true, false);
         let opaque_skin_double = opaque_pipeline(None, true, AlphaMode::Opaque, true, true, false);
+        let opaque_aux = Self::forward_pipeline_streams(d, &main_layout, &pbr_sh, Some(wgpu::Face::Back), false, true, AlphaMode::Opaque, true, true, false);
+        let opaque_aux_double = Self::forward_pipeline_streams(d, &main_layout, &pbr_sh, None, false, true, AlphaMode::Opaque, true, true, false);
         let mut transparent = Vec::new();
         for alpha in [
             AlphaMode::Blend,
@@ -1334,6 +1352,8 @@ impl SurfacePipelines {
             opaque_double,
             opaque_skin,
             opaque_skin_double,
+            opaque_aux,
+            opaque_aux_double,
             prepass,
             prepass_double,
             prepass_skin,
@@ -2598,6 +2618,13 @@ impl PbrRenderer {
             });
         GpuPrim {
             lod,
+            aux: p.aux.as_ref().filter(|a| p.skin_attrs.is_none() && a.len() == p.vertices.len()).map(|a| {
+                d.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("pbr aux"),
+                    contents: bytemuck::cast_slice(a.as_slice()),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+            }),
             skin: p.skin_attrs.as_ref().map(|a| {
                 let mut bytes = Vec::with_capacity(a.len() * 24);
                 for (j, w) in a {
@@ -4601,6 +4628,7 @@ impl PbrRenderer {
             Tonemap::PbrNeutral => 0.,
             Tonemap::Aces => 1.,
             Tonemap::None => 2.,
+            Tonemap::Filmic => 3.,
         };
         self.gpu.queue.write_buffer(
             &self.post_buf,
@@ -5278,14 +5306,19 @@ impl PbrRenderer {
                         if alpha.transparent() {
                             continue;
                         }
-                        pass.set_pipeline(match (r.skinned, double || gi) {
-                            (false, false) => &pipelines.opaque,
-                            (false, true) => &pipelines.opaque_double,
-                            (true, false) => &pipelines.opaque_skin,
-                            (true, true) => &pipelines.opaque_skin_double,
+                        let aux = (!r.skinned).then_some(p.aux.as_ref()).flatten();
+                        pass.set_pipeline(match (r.skinned, aux.is_some(), double || gi) {
+                            (false, false, false) => &pipelines.opaque,
+                            (false, false, true) => &pipelines.opaque_double,
+                            (false, true, false) => &pipelines.opaque_aux,
+                            (false, true, true) => &pipelines.opaque_aux_double,
+                            (true, _, false) => &pipelines.opaque_skin,
+                            (true, _, true) => &pipelines.opaque_skin_double,
                         });
                         if r.skinned {
                             pass.set_vertex_buffer(1, p.skin.as_ref().unwrap().slice(..));
+                        } else if let Some(aux) = aux {
+                            pass.set_vertex_buffer(1, aux.slice(..));
                         }
                         pass.set_bind_group(1, mat, &[]);
                         pass.set_bind_group(
@@ -5867,16 +5900,21 @@ impl PbrRenderer {
                 } else if !write {
                     &pipelines.geometry_no_write[slot]
                 } else {
-                    match (r.skinned, double) {
-                        (false, false) => &pipelines.opaque,
-                        (false, true) => &pipelines.opaque_double,
-                        (true, false) => &pipelines.opaque_skin,
-                        (true, true) => &pipelines.opaque_skin_double,
+                    match (r.skinned, p.aux.is_some(), double) {
+                        (false, false, false) => &pipelines.opaque,
+                        (false, false, true) => &pipelines.opaque_double,
+                        (false, true, false) => &pipelines.opaque_aux,
+                        (false, true, true) => &pipelines.opaque_aux_double,
+                        (true, _, false) => &pipelines.opaque_skin,
+                        (true, _, true) => &pipelines.opaque_skin_double,
                     }
                 };
+                let aux_pipeline = !r.skinned && p.aux.is_some() && alpha != AlphaMode::Blend && write;
                 pass.set_pipeline(pipeline);
                 if r.skinned {
                     pass.set_vertex_buffer(1, p.skin.as_ref().unwrap().slice(..));
+                } else if aux_pipeline {
+                    pass.set_vertex_buffer(1, p.aux.as_ref().unwrap().slice(..));
                 }
                 pass.set_bind_group(1, mat, &[]);
                 pass.set_bind_group(

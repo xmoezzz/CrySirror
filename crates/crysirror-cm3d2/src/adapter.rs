@@ -134,7 +134,7 @@ struct CameraTween {
 }
 
 /// iTween easing curves used by the scripts.
-fn ease(name: &str, t: f32) -> f32 {
+pub(crate) fn ease(name: &str, t: f32) -> f32 {
     let t = t.clamp(0., 1.);
     match name.to_ascii_lowercase().as_str() {
         "easeoutcubic" => 1. - (1. - t).powi(3),
@@ -150,7 +150,7 @@ fn ease(name: &str, t: f32) -> f32 {
 
 /// `CharacterMgr.GetOffsetMaid`: offset by (DouPer − 50) and
 /// (sintyou − 50) over `split`, towards the greater/less vectors.
-fn maid_offset(m: &crate::chara::Maid, split: i32, per: &crate::kag::CharaPer) -> ([f32; 3], [f32; 3]) {
+pub(crate) fn maid_offset(m: &crate::chara::Maid, split: i32, per: &crate::kag::CharaPer) -> ([f32; 3], [f32; 3]) {
     let dou = m.value("DouPer") - 50;
     let shin = m.value("sintyou") - 50;
     let part = |n: i32, g: [f32; 3], l: [f32; 3]| -> [f32; 3] {
@@ -686,6 +686,15 @@ impl Game {
                     self.stop_motion_scripts();
                     *self.active_maids.get_mut(slot).context("maid slot")? = Some(chara);
                     self.characters.get_mut(chara).context("SetActiveMaid character")?.visible = visible;
+                }
+                crate::tjs::Request::RefreshMaid(slot) => {
+                    let id = self.active_maids.get(slot).copied().flatten().context("empty refresh slot")?;
+                    self.characters[id].all_proc_prop(&self.files,opener.storage.as_ref())?;
+                }
+                crate::tjs::Request::DeactivateMaid(slot) => {
+                    if let Some(index) = self.active_maids.get_mut(slot).and_then(Option::take) {
+                        self.characters[index].visible = false;
+                    }
                 }
                 crate::tjs::Request::ClearCallStack => self.adv.clear_call_stack(),
                 crate::tjs::Request::TrophyEffect(id) => {

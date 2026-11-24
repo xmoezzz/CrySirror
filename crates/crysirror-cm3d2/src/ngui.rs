@@ -39,6 +39,11 @@ pub struct Rect2 {
     pub y1: f32,
 }
 
+/// Native NGUI SlicedFill keeps the two edges in pixel units.
+pub(super) fn slice_boundaries(start: f32, end: f32, first: f32, last: f32) -> [f32; 4] {
+    [start, start + first, end - last, end]
+}
+
 #[derive(Clone, Debug)]
 struct AtlasSprite {
     x: f32,
@@ -185,7 +190,7 @@ pub fn strip_markup(text: &str) -> String {
 /// Horizontal pivot offset of `UIWidget.Pivot`.
 /// Lines of `text` broken at `\n` and wrapped to `width` (NGUIText.WrapText
 /// breaks at spaces for Latin text and at any character otherwise).
-fn wrap(text: &str, width: f32, measure: impl Fn(&str) -> f32) -> Vec<String> {
+pub(crate) fn wrap(text: &str, width: f32, measure: impl Fn(&str) -> f32) -> Vec<String> {
     let mut out = Vec::new();
     for para in text.split('\n') {
         let mut line = String::new();
@@ -822,10 +827,10 @@ impl Ui {
         }
         // Nine patches: borders keep pixel size, the centre stretches.
         let [bl, br, bt, bb] = s.border;
-        let xs = [inner.x0, inner.x0 + bl, inner.x1 - br, inner.x1];
-        let ys = [inner.y0, inner.y0 + bt, inner.y1 - bb, inner.y1];
-        let us = [s.x, s.x + bl, s.x + s.w - br, s.x + s.w];
-        let vs = [s.y, s.y + bt, s.y + s.h - bb, s.y + s.h];
+        let xs = slice_boundaries(inner.x0, inner.x1, bl, br);
+        let ys = slice_boundaries(inner.y0, inner.y1, bt, bb);
+        let us = slice_boundaries(s.x, s.x + s.w, bl, br);
+        let vs = slice_boundaries(s.y, s.y + s.h, bt, bb);
         let fill_center = f.bool("mFillCenter").unwrap_or(true);
         for row in 0..3 {
             for col in 0..3 {

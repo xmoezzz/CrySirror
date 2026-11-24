@@ -1050,6 +1050,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "bzip2"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a53fac24f34a81bc9954b5d6cfce0c21e18ec6959f44f56e8e90e4bb7c346c"
+dependencies = [
+ "libbz2-rs-sys",
+]
+
+[[package]]
 name = "cab"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2167,6 +2176,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "chrono",
  "crysirror-asset",
  "crysirror-audio",
  "crysirror-core",
@@ -2184,6 +2194,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -2538,6 +2549,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "bzip2",
  "core-foundation 0.10.1",
  "crysirror-amanatsu",
  "crysirror-audio",
@@ -2556,6 +2568,7 @@ dependencies = [
  "crysirror-malie",
  "crysirror-minori",
  "crysirror-n2system",
+ "crysirror-naughty-dog",
  "crysirror-network",
  "crysirror-nscripter",
  "crysirror-nsystem",
@@ -2588,6 +2601,7 @@ dependencies = [
  "pollster 0.3.0",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "wgpu",
  "windows-sys 0.61.2",
@@ -2705,11 +2719,17 @@ name = "crysirror-naughty-dog"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "crysirror-asset",
  "crysirror-capfs",
  "crysirror-core",
  "crysirror-formats-arc",
  "crysirror-image",
  "crysirror-resource",
+ "crysirror-runtime",
+ "crysirror-scene",
+ "glam 0.27.0",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5992,6 +6012,12 @@ dependencies = [
  "ogg 0.8.0",
  "tinyvec",
 ]
+
+[[package]]
+name = "libbz2-rs-sys"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34b357333733e8260735ba5894eb928c02ecc69c78715f01a8019e7fa7f2db4c"
 
 [[package]]
 name = "libc"

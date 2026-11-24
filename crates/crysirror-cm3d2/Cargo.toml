@@ -16,6 +16,7 @@ runtime = ["dep:crysirror-runtime"]
 
 [dependencies]
 anyhow.workspace = true
+chrono = { version = "0.4.45", features = ["clock", "wasmbind"] }
 crysirror-kag.workspace = true
 crysirror-asset.workspace = true
 crysirror-image.workspace = true
@@ -27,6 +28,7 @@ crysirror-core.workspace = true
 crysirror-unity.workspace = true
 crysirror-dotnet.workspace = true
 crysirror-audio.workspace = true
+unicode-segmentation = "1.13.3"
 encoding_rs = "0.8"
 serde.workspace = true
 serde_json.workspace = true

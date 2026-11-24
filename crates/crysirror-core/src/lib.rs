@@ -7,6 +7,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod binary;
+pub mod limits;
 pub mod graphics;
 pub mod image_blend;
 pub mod input_buffer;

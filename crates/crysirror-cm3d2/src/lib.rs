@@ -6,6 +6,7 @@
 pub mod adapter;
 pub mod bg;
 pub mod binio;
+mod bone_shape;
 pub mod chara;
 pub mod config;
 pub mod charselect;

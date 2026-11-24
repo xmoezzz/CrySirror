@@ -73,24 +73,31 @@ pub struct Sound {
     /// `SoundMgr` per-type volumes (percent), indexed by `Kind`.
     pub volumes: [f32; 5],
     pub current_bgm: Option<String>,
+    bgm_legacy: bool,
 }
 
 impl Sound {
     pub fn new() -> Self {
         let volumes = [Kind::Bgm, Kind::Env, Kind::Se, Kind::System, Kind::Voice].map(Kind::volume);
-        Self { pending: Vec::new(), all_volume: 50., volumes, current_bgm: None }
+        Self { pending: Vec::new(), all_volume: 50., volumes, current_bgm: None, bgm_legacy:false }
     }
 
     pub fn play(&mut self, host: &mut dyn HostServices, client: ClientId, files: &GameFiles, kind: Kind, name: &str, fade_s: f32, looping: bool) -> Result<()> {
+        self.play_profile(host,client,files,kind,name,fade_s,looping,false)
+    }
+
+    pub(crate) fn play_profile(&mut self, host:&mut dyn HostServices, client:ClientId,files:&GameFiles,kind:Kind,name:&str,fade_s:f32,looping:bool,legacy:bool)->Result<()>{
         let path = files.path(name).with_context(|| format!("SoundMgr: {name} is not in the archives"))?;
         if kind == Kind::Bgm {
-            if self.current_bgm.as_deref().is_some_and(|b| b.eq_ignore_ascii_case(name)) {
+            if self.bgm_legacy==legacy && self.current_bgm.as_deref().is_some_and(|b| b.eq_ignore_ascii_case(name)) {
                 return Ok(());
             }
+            self.bgm_legacy=legacy;
             self.current_bgm = Some(name.to_owned());
         }
         let parameters = AudioParameters {
             gain: self.gain(kind),
+            decode_gain: if legacy { match kind { Kind::Bgm=>0.3,Kind::Se=>0.8,Kind::System=>0.5,Kind::Env=>0.15,Kind::Voice=>2.0 } } else {1.0},
             looping,
             ..Default::default()
         };

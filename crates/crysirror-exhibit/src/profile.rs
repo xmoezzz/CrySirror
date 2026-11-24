@@ -157,6 +157,10 @@ impl Seeds {
         };
         Ok(Self { normal, definition })
     }
+    #[cfg(test)]
+    pub(super) fn unencoded_fixture() -> Self {
+        Self { normal: 0, definition: 0 }
+    }
     pub fn decode(self, name: &str, bytes: &mut [u8]) -> Result<()> {
         let payload = bytes.get_mut(16..).context("truncated RLD payload")?;
         let seed = if name.eq_ignore_ascii_case("def") || name.starts_with('$') {

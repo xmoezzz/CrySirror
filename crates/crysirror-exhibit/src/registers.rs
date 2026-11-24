@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! RLD v1 local register overrides and native register arithmetic.
 use crate::branch::{Condition, number};
+use crate::midori_state::{DbDefinition, DbLookup, SceneDone};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -104,6 +105,9 @@ pub(super) enum Change {
         when: Condition,
     },
     Experience(Bank, Vec<i32>),
+    MidoriDefineDb(DbDefinition),
+    MidoriGetDb(DbLookup),
+    MidoriSceneDone(SceneDone),
     LocalFlag(i32, bool),
 }
 #[derive(Debug, PartialEq)]
@@ -137,6 +141,35 @@ pub(super) fn action2011(raw: &[u8]) -> Result<Change> {
     Ok(Change::Action2011 { operation, result })
 }
 
+/// Detached native system-register image. Every absent cell in the
+/// contiguous span is an explicit zero when this is eventually applied.
+pub(super) struct ExperienceCapture {
+    pub base: i32,
+    pub counts: [usize; 4],
+    pub words: usize,
+    nonzero: BTreeMap<i32, i32>,
+}
+impl ExperienceCapture {
+    pub fn nonzero_words(&self) -> usize {
+        self.nonzero.len()
+    }
+
+    #[cfg(test)]
+    pub fn cell(&self, offset: usize) -> Option<i32> {
+        (offset < self.words).then(|| {
+            self.nonzero
+                .get(&(self.base + offset as i32))
+                .copied()
+                .unwrap_or(0)
+        })
+    }
+
+    fn apply(self, system: &mut BTreeMap<i32, i32>) {
+        system.retain(|&index, _| index < self.base || index >= self.base + self.words as i32);
+        system.extend(self.nonzero);
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Registers {
     limits: Option<Limits>,
@@ -147,6 +180,7 @@ pub(super) struct Registers {
     strings: BTreeMap<i32, Vec<u8>>,
     local_flag: bool,
     messages: BTreeMap<usize, u32>,
+    integer_tables: [BTreeMap<i32, [i32; 8]>; 8],
 }
 impl Registers {
     pub fn new(limits: Option<Limits>) -> Result<Self> {
@@ -241,33 +275,76 @@ impl Registers {
         }
         Ok(regs)
     }
+    pub fn capture_experience(&self) -> Result<ExperienceCapture> {
+        let l = self
+            .limits
+            .context("missing ExHibit checkpoint dimensions")?;
+        // The native history bitmap (2011 0x16ea50) allocates a minimum
+        // of one bit and rounds storage up to a whole DWORD.
+        let counts = [l.cg, l.scene, l.sound, l.messages.max(1).div_ceil(32)];
+        let base = self.read(Value::System(16))?;
+        let words = 4 + counts.into_iter().sum::<usize>();
+        ensure!(
+            base >= 0
+                && (base as usize)
+                    .checked_add(words)
+                    .is_some_and(|end| end <= l.sys),
+            "invalid ExHibit scene checkpoint layout"
+        );
+        let mut nonzero = BTreeMap::new();
+        for (offset, count) in counts.into_iter().enumerate().filter(|(_, n)| *n != 0) {
+            nonzero.insert(base + offset as i32, count as i32);
+        }
+        let mut at = base + 4;
+        for (bank, count) in [Bank::Cg, Bank::Scene, Bank::Sound].into_iter().zip(counts) {
+            nonzero.extend(
+                self.seen[bank as usize]
+                    .iter()
+                    .filter(|&(index, value)| (*index as usize) < count && *value != 0)
+                    .map(|(&index, &value)| (at + index, value)),
+            );
+            at += count as i32;
+        }
+        nonzero.extend(
+            self.messages
+                .iter()
+                .filter(|&(index, bits)| *index < counts[3] && *bits != 0)
+                .map(|(&index, &bits)| (at + index as i32, bits as i32)),
+        );
+        Ok(ExperienceCapture {
+            base,
+            counts,
+            words,
+            nonzero,
+        })
+    }
+
     pub fn checkpoint_v1(
         &mut self,
         block: i32,
         title: &[u8],
         draw: &[i32; 19],
         audio: &[i32; 12],
+        views: [bool; 2],
     ) -> Result<()> {
         let l = self
             .limits
             .context("missing ExHibit checkpoint dimensions")?;
-        let history_words = l.messages.max(1).div_ceil(32);
-        let base = self.read(Value::System(16))?;
-        let length = 4 + l.cg + l.scene + l.sound + history_words;
         ensure!(
-            l.strings > 1
-                && l.regs >= 73
-                && base >= 0
-                && (base as usize)
-                    .checked_add(length)
-                    .is_some_and(|end| end <= l.sys),
+            l.strings > 1 && l.regs >= 73,
             "invalid ExHibit scene checkpoint layout"
         );
+        let experience = self.capture_experience()?;
         self.local.insert(2, block);
         self.strings.insert(1, title.to_vec());
-        // Neither message nor local-control views have been entered on the admitted execution paths.
+        // blockEntry (v1 RVA 0x54b70) captures message open and local
+        // control depth <= 0 before flushing the LocalHolder.
+        let [message_open, local_controls_open] = views;
         let flags = self.normal.get(&4).copied().unwrap_or(0);
-        self.normal.insert(4, (flags & !3) | 2);
+        self.normal.insert(
+            4,
+            (flags & !3) | i32::from(message_open) | (i32::from(local_controls_open) << 1),
+        );
         for (i, v) in std::mem::take(&mut self.local) {
             self.normal.insert(Self::index(i, l.regs), v);
         }
@@ -275,27 +352,7 @@ impl Registers {
         // saveCharactersInfo clears all eight fields of each inactive display slot.
         self.normal.extend((29..61).map(|i| (i, -1)));
         self.normal.extend((61..73).zip(audio.iter().copied()));
-        let mut at = base;
-        self.sys
-            .retain(|&i, _| i < base || i >= base + length as i32);
-        for n in [l.cg, l.scene, l.sound, history_words] {
-            self.sys.insert(at, n as i32);
-            at += 1;
-        }
-        for (bank, count) in [
-            (Bank::Cg, l.cg),
-            (Bank::Scene, l.scene),
-            (Bank::Sound, l.sound),
-        ] {
-            self.sys
-                .extend(self.seen[bank as usize].iter().map(|(&i, &v)| (at + i, v)));
-            at += count as i32;
-        }
-        self.sys.extend(
-            self.messages
-                .iter()
-                .map(|(&i, &v)| (at + i as i32, v as i32)),
-        );
+        experience.apply(&mut self.sys);
         Ok(())
     }
     pub fn mark_message(&mut self, id: i32) -> Result<()> {
@@ -304,16 +361,41 @@ impl Registers {
             .context("missing ExHibit message capacity")?
             .messages
             .max(1);
+        self.mark_message_in(id, count);
+        Ok(())
+    }
+    fn mark_message_in(&mut self, id: i32, count: usize) {
         if (id as usize) < count {
             *self.messages.entry(id as usize / 32).or_default() |= 1u32 << ((id as usize % 32) ^ 7);
         }
-        Ok(())
+    }
+    fn increment_experience(&mut self, bank: Bank, id: i32, capacity: usize) {
+        if (id as usize) < capacity {
+            let n = self.seen[bank as usize].entry(id).or_default();
+            if *n < 0x7fff_ff00 {
+                *n += 1
+            }
+        }
     }
     pub fn set_normal(&mut self, index: i32, n: i32) -> Result<()> {
         let l = self
             .limits
             .context("missing ExHibit register configuration")?;
         self.normal.insert(Self::index(index, l.regs), n);
+        Ok(())
+    }
+    pub fn set_local(&mut self, index: i32, n: i32) -> Result<()> {
+        let limits = self
+            .limits
+            .context("missing ExHibit register configuration")?;
+        self.store(Value::Local(index), n, limits);
+        Ok(())
+    }
+    pub fn set_system(&mut self, index: i32, n: i32) -> Result<()> {
+        let l = self
+            .limits
+            .context("missing ExHibit register configuration")?;
+        self.sys.insert(Self::index(index, l.sys), n);
         Ok(())
     }
     // FCRegItem returns element zero for an invalid ordinary/system index.
@@ -351,6 +433,21 @@ impl Registers {
             _ => {}
         }
     }
+    /// Midori liteLoad (0xc5d50) publishes the caller's successful logical
+    /// RLD path, not the joined host/prefix path and not the script stem.
+    pub fn midori_scenario_loaded(&mut self, path: &crysirror_core::path::VfsPath) -> Result<()> {
+        let Some(_) = self.limits else { return Ok(()) };
+        self.text(2)?;
+        let name = path.relative();
+        ensure!(
+            path.mount() == crysirror_core::path::Mount::Asset
+                && name.starts_with("rld/") && name.ends_with(".rld"),
+            "invalid Midori scenario register path"
+        );
+        let native = name.bytes().map(|b| if b == b'/' { b'\\' } else { b }).collect();
+        self.strings.insert(2, native);
+        Ok(())
+    }
     pub fn enter_transferred_script(&mut self) {
         if let Some(l) = self.limits {
             for (i, n) in std::mem::take(&mut self.local) {
@@ -360,6 +457,76 @@ impl Registers {
             self.strings.remove(&1);
         }
     }
+    #[allow(dead_code)] // gated until action250 can execute its complete program
+    pub fn apply_midori_rnf_literals(
+        &mut self,
+        writes: &[crate::midori_state::RnfWrite],
+    ) -> Result<()> {
+        use crate::midori_state::RnfWrite;
+        let l = self
+            .limits
+            .context("missing Midori settings register dimensions")?;
+        let base = self.read(Value::System(15))?;
+        let flag_slot = base.checked_add(4).context("Midori flag base overflow")?;
+        let relative = |index: i32| {
+            base.checked_add(index)
+                .context("Midori local settings index overflow")
+        };
+        let system = |index: i32| {
+            ensure!(
+                (index as usize) < l.sys && !matches!(index, 15 | 16),
+                "Midori settings register out of scoped range"
+            );
+            Ok(())
+        };
+        // Validate the entire literal program before mutating any register.
+        // The normal/relative banks keep native aliases; structural bases
+        // cannot be altered by this subset.
+        for &write in writes {
+            match write {
+                RnfWrite::LocalFlag(index, _) => {
+                    ensure!(index < 32 && flag_slot >= 4, "unsupported Midori flag slot");
+                    system(flag_slot)?;
+                }
+                RnfWrite::NormalAndSystem(index, _) => {
+                    ensure!(
+                        (index as usize) < l.regs,
+                        "Midori normal settings register out of range"
+                    );
+                    system(index)?;
+                }
+                RnfWrite::System(index, _) => system(index)?,
+                RnfWrite::Relative(index, _) => system(relative(index)?)?,
+            }
+        }
+        for &write in writes {
+            match write {
+                RnfWrite::LocalFlag(index, on) => {
+                    let value = self.sys.entry(flag_slot).or_default();
+                    let mask = 1_i32 << index;
+                    if on {
+                        *value |= mask;
+                    } else {
+                        *value &= !mask;
+                    }
+                }
+                RnfWrite::NormalAndSystem(index, value) => {
+                    // Native action250's R case falls through to S, reading
+                    // the same literal twice. LocalHolder overrides survive.
+                    self.normal.insert(index, value);
+                    self.sys.insert(index, value);
+                }
+                RnfWrite::System(index, value) => {
+                    self.sys.insert(index, value);
+                }
+                RnfWrite::Relative(index, value) => {
+                    self.sys.insert(base + index, value);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn read(&self, v: Value) -> Result<i32> {
         let l = self
             .limits
@@ -590,12 +757,26 @@ impl Registers {
                     Bank::Sound => l.sound,
                     Bank::Scene => l.scene,
                 };
-                for id in ids.into_iter().filter(|i| (*i as usize) < capacity) {
-                    let n = self.seen[bank as usize].entry(id).or_default();
-                    if *n < 0x7fff_ff00 {
-                        *n += 1
+                for id in ids {
+                    self.increment_experience(bank, id, capacity);
+                }
+            }
+            Change::MidoriDefineDb(definition) => {
+                // This map belongs to RetouchSystem, not SaveDataControl.
+                self.integer_tables[definition.table] = definition.rows;
+            }
+            Change::MidoriGetDb(lookup) => {
+                let key = self.read(lookup.key)?;
+                if let Some(row) = self.integer_tables[lookup.table].get(&key).copied() {
+                    for (col, register) in lookup.outputs {
+                        let value = row.get(col as usize).copied().unwrap_or(0);
+                        self.store(Value::Local(register), value, l);
                     }
                 }
+            }
+            Change::MidoriSceneDone(SceneDone(id)) => {
+                self.increment_experience(Bank::Scene, id, l.scene);
+                self.mark_message_in(id, l.messages);
             }
             Change::LocalFlag(i, set) => {
                 if (0..32).contains(&i) {
@@ -798,4 +979,40 @@ mod tests {
         assert!(!Condition::text(b"R3\x81\x831;MS9\x81\x811")?.matches(&regs)?);
         Ok(())
     }
+}
+#[test]
+fn midori_literal_scene_done_updates_two_banks_independently() -> Result<()> {
+    let mut bytes = b"\0DLR".to_vec();
+    for n in [3u32, 12, 5] {
+        bytes.extend(n.to_le_bytes());
+    }
+    for text in [
+        b"2,1,3\0".as_slice(),
+        b"2,1,3\0",
+        b"2,1,9\0",
+        b"2,1,65\0",
+        b"2,1,-1\0",
+    ] {
+        bytes.extend([0xbd, 0, 0, 1]);
+        bytes.extend(text);
+    }
+    let mut script = crate::Script::new(bytes, 3)?;
+    let mut regs = crate::native_state_tests::fresh(3)?;
+    for _ in 0..5 {
+        let crate::Action::Change(c) = script.next()? else {
+            bail!("expected Midori change");
+        };
+        regs.change(c)?;
+    }
+    assert_eq!(regs.seen[Bank::Scene as usize], BTreeMap::from([(3, 2)]));
+    assert_eq!(regs.read(Value::Seen(Bank::Scene, 3))?, 1);
+    // Out of range for the scene bank is still in range for messages.
+    assert_eq!(regs.messages, BTreeMap::from([(0, 0x4010)]));
+    assert!(regs.seen[Bank::Cg as usize].is_empty());
+    assert!(regs.seen[Bank::Sound as usize].is_empty());
+    regs.seen[Bank::Scene as usize].insert(3, 0x7fff_ff00);
+    regs.change(Change::MidoriSceneDone(SceneDone(3)))?;
+    assert_eq!(regs.seen[Bank::Scene as usize][&3], 0x7fff_ff00);
+    assert_eq!(regs.messages[&0], 0x4010);
+    Ok(())
 }

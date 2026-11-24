@@ -8,11 +8,25 @@ struct VertexOut {
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(3) tangent: vec4<f32>,
+    /// Per-vertex auxiliary vector (`_AUX`); ones when the primitive has none.
+    @location(4) aux: vec4<f32>,
+};
+
+// Optional second vertex stream of primitives with an `_AUX` attribute.
+struct AuxIn {
+    @location(6) aux: vec4<f32>,
 };
 
 @vertex
 fn vs_main(v: VertexIn) -> VertexOut {
     return transform_vertex(v);
+}
+
+@vertex
+fn vs_aux(v: VertexIn, a: AuxIn) -> VertexOut {
+    var o = transform_vertex(v);
+    o.aux = a.aux;
+    return o;
 }
 // Entry points cannot call each other; both vertex paths share this.
 fn transform_vertex(v: VertexIn) -> VertexOut {
@@ -23,6 +37,7 @@ fn transform_vertex(v: VertexIn) -> VertexOut {
     o.normal = (object.normal * vec4<f32>(v.normal, 0.0)).xyz;
     o.tangent = vec4<f32>((object.model * vec4<f32>(v.tangent.xyz, 0.0)).xyz, v.tangent.w);
     o.uv = v.uv + object.uv.xy;
+    o.aux = vec4<f32>(1.0);
     return o;
 }
 
@@ -621,7 +636,15 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
     // Sample everything first: derivatives stay in uniform control flow.
     if object.uv.w > 0.0 && !bayer_visible(1.0 - object.uv.w, vec2<u32>(vec2<f32>(i.clip.x, frame.screen.y - i.clip.y))) { discard; }
     let uv=material_uv(i.uv);
-    let surface=sample_surface(uv,i.world,i.normal,frame.camera_pos.xyz,frame.misc.z);
+    var surface=sample_surface(uv,i.world,i.normal,frame.camera_pos.xyz,frame.misc.z);
+    // Vertex layer blend (effect 7): the emissive slot holds the second
+    // layer, mixed in by 1 − aux.x; the slot then contributes no emission.
+    let layer_b = textureSample(t_emissive, s_material, uv);
+    if material.surface.y == 7.0 {
+        let w = clamp(i.aux.x, 0.0, 1.0);
+        surface.color = vec4<f32>(mix(layer_b.rgb * material.base_color.rgb, surface.color.rgb, w), surface.color.a);
+        surface.emission = vec3<f32>(0.0);
+    }
     let base=surface.color;
     let tn = decode_normal(textureSample(t_normal, s_material, uv));
     let specular_color = textureSample(t_specular, s_material, uv).rgb * material.surface.w;
@@ -878,6 +901,10 @@ fn fs_main(i: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec
         let direction = textureSample(t_mr, s_material, atlas_uv);
         let half_lambert = dot(n, direction.rgb - vec3<f32>(0.5)) + 0.5;
         diffuse_irr = PI * radiance * half_lambert / max(direction.a, 0.0001);
+    }
+    // Baked vertex irradiance (effect 8) from the `_AUX` stream.
+    if material.surface.y == 8.0 {
+        diffuse_irr = i.aux.rgb * material.effect_params[0].x;
     }
     let ambient = (kd_ibl * base.rgb * diffuse_irr / PI + specular_ibl) * occlusion;
     let local = local_lights(i.world, i.clip.xy, ng, n, v, base.rgb, metallic, f0, max(a, 0.002), nv);

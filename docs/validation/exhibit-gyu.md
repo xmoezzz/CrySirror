@@ -171,3 +171,53 @@ An additional paced run (`CRYSIRROR_OFFSCREEN_PACING_MS=3`, 1,248 frames)
 wrote the 800 × 600 `target/exhibit-proof/gated-title-late.png` locally. Its
 `gated-final-capture.log` confirms slots 41 and 42 at their final positions and
 all four title layers at opacity 255. The capture ends before input dispatch.
+
+
+### Famisupi primary title input (2026-11-24 JST)
+
+The release player on M4 Max/Metal accepts a primary press and release on
+最初から始める at canvas pixel (420,475), commits item 10 to the v1 script, and
+takes the START branch rather than waiting in opcode 0x5c. With a press at
+frame 1601 and release at 1605, the real script reaches its exit fade at
+title.rld+0x10e1. The first input-only build stopped there because the fade
+includes unbound slot 44. That run did not present a scene or dialogue. In a separate
+1,800-frame run, dragging off START and clicking the disabled Extra Mode
+item at (650,505) left the same title wait active, with no item selected.
+
+The standard release desktop build and all 22 adapter release tests pass.
+The tests cover accepted click, disabled item, pointer loss, release outside
+and blocked layer. Real replay used the original installation only as assets.
+No vendor code ran. To reproduce the positive input, supply this JSON with
+`--input-track` and use a private writable `--data-dir`:
+
+```json
+[
+  {"frame":1600,"pointer":[420,475]},
+  {"frame":1601,"down":["mouse_left"],"pressed":["mouse_left"]},
+  {"frame":1605,"down":[]}
+]
+```
+
+Use `--headless --no-audio --frames 1800` and
+`CRYSIRROR_OFFSCREEN_PACING_MS=3` on a host with an accessible GPU. Local
+logs, both tracks and the negative-run capture are under
+`target/exhibit-proof/primary-select-play.*`.
+
+
+The bounded title-exit build replays this same track on Metal through the
+synchronized fade, group exit (0x5d), and the four zero-time removals (0x5f).
+An inactive zero fade is admitted only when a full-opacity bound lane shares
+the same synchronized channel and duration. This preserves the original
+completion without conflating a native descriptor with a drawable layer.
+The adapter does not write opacity to the inactive slot. The release test
+also rejects asynchronous, unmatched-duration and nonzero-target forms,
+and checks the expected 500-ms fade's quantized endpoint at 469 ms.
+
+The real replay stops at frame 1,671 at `title.rld+0xf91`, opcode 0x4e
+(scene fade-out). No menu sprites or retained composed images remain.
+The original handler coordinates music fade, scene drawing and cleanup of
+renderer, character and message state. The following message frame (0x48)
+and scenario path have not been run. Local evidence is under
+`target/exhibit-proof/exit-stage-play.*`: `exit.log` and
+`exit-001660.png` show the frontier and intermediate fade. The latter is not a
+capture of the opening scene.

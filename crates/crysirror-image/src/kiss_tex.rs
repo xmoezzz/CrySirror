@@ -24,17 +24,35 @@ impl crate::ImageFormat for Format {
     }
     fn decode(&self, bytes: &[u8], ctx: &ImageDecodeContext<'_>) -> Result<ImageSurface> {
         ctx.check_cancelled()?;
-        let image = payload(bytes)?;
-        ensure!(
-            image.starts_with(b"\x89PNG") || image.starts_with(b"\xff\xd8\xff"),
-            "CM3D2 texture payload is neither PNG nor JPEG"
-        );
-        decode_standard(image)
+        decode_texture(bytes)
     }
 }
 
 /// The embedded encoded image of a `.tex` container.
 pub fn payload(bytes: &[u8]) -> Result<&[u8]> {
+    let (kind,_,_,data)=descriptor(bytes)?;
+    ensure!(kind==5,"raw CM3D2 texture has no encoded PNG/JPEG payload");
+    Ok(data)
+}
+
+/// Decode the installed Unity texture payload, including bottom-up DXT1/DXT5.
+pub fn decode_texture(bytes:&[u8])->Result<ImageSurface>{
+    let (kind,w,h,data)=descriptor(bytes)?;
+    if kind==5{return decode_standard(data);}
+    use crate::block_compressed::{self, Block};
+    let block=match kind{10=>Block::Bc1,12=>Block::Bc3,_=>bail!("unsupported COM3D2 raw texture format {kind}")};
+    ensure!(u64::from(w)*u64::from(h)<=crate::MAX_DECODED_BYTES as u64/4,"CM3D2 image dimensions exceed budget");
+    let mut img=block_compressed::decode(block,w,h,data)?;
+    let stride=w as usize*4;
+    for y in 0..h as usize/2 {
+        let (top,bottom)=img.rgba.split_at_mut((h as usize-1-y)*stride);
+        top[y*stride..(y+1)*stride].swap_with_slice(&mut bottom[..stride]);
+    }
+    Ok(img)
+}
+
+fn descriptor(bytes:&[u8])->Result<(i32,u32,u32,&[u8])>{
+    let mut desc=(5,0,0);
     ensure!(bytes.starts_with(SIGNATURE), "not a CM3D2 texture");
     let mut at = SIGNATURE.len();
     let version = i32::from_le_bytes(bytes.get(at..at + 4).context("truncated CM3D2 texture")?.try_into()?);
@@ -64,13 +82,13 @@ pub fn payload(bytes: &[u8]) -> Result<&[u8]> {
         let height = i32::from_le_bytes(header[4..8].try_into()?);
         let format = i32::from_le_bytes(header[8..].try_into()?);
         ensure!(width > 0 && height > 0, "invalid COM3D2 texture dimensions");
-        ensure!(format == 5, "unsupported COM3D2 raw texture format {format}");
+        desc=(format,width as u32,height as u32);
         at += 12;
     }
     let size = i32::from_le_bytes(bytes.get(at..at + 4).context("truncated texture length")?.try_into()?);
     ensure!(size >= 0, "negative CM3D2 texture payload size");
     at += 4;
-    bytes.get(at..at + size as usize).context("CM3D2 texture payload outside the file")
+    Ok((desc.0,desc.1,desc.2,bytes.get(at..at + size as usize).context("CM3D2 texture payload outside the file")?))
 }
 
 #[cfg(test)]
@@ -100,6 +118,22 @@ mod tests {
         bytes[descriptor + 8..descriptor + 12].copy_from_slice(&10i32.to_le_bytes());
         assert!(payload(&bytes).is_err());
         assert!(payload(&bytes[..descriptor + 2]).is_err());
+    }
+
+    #[test]
+    fn dxt1_rows_follow_unity_texture_orientation() {
+        // RGB565 red and blue blocks in the on-disk bottom-to-top order.
+        let blocks = [0x00, 0xf8, 0, 0, 0, 0, 0, 0, 0x1f, 0, 0, 0, 0, 0, 0, 0];
+        let mut tex = container(&blocks);
+        let version = SIGNATURE.len();
+        tex[version..version + 4].copy_from_slice(&1010i32.to_le_bytes());
+        let descriptor = tex.len() - blocks.len() - 4;
+        tex.splice(descriptor..descriptor, [4i32, 8, 10].map(i32::to_le_bytes).concat());
+        let img = decode_texture(&tex).unwrap();
+        assert_eq!((img.width, img.height), (4, 8));
+        assert!(img.rgba[..64].chunks_exact(4).all(|pixel| pixel == [0, 0, 255, 255]));
+        assert!(img.rgba[64..].chunks_exact(4).all(|pixel| pixel == [255, 0, 0, 255]));
+        assert!(decode_texture(&tex[..tex.len()-1]).is_err());
     }
 
     #[test]

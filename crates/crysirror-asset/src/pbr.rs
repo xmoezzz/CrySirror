@@ -25,6 +25,10 @@ pub struct PbrPrimitive {
     pub bounds: ([f32; 3], [f32; 3]),
     /// Morph targets (blend shapes), sparse: only displaced vertices.
     pub morphs: Vec<MorphTarget>,
+    /// Optional per-vertex auxiliary vector (glTF custom attribute `_AUX`)
+    /// for material effects that read vertex data, such as layer masks.
+    /// `None` leaves the primitive's draws unchanged.
+    pub aux: Option<Vec<[f32; 4]>>,
 }
 
 /// One morph target of a primitive: displaced vertex indices and their
@@ -380,6 +384,7 @@ pub fn flat_primitive(positions: &[[f32; 3]], indices: &[u32]) -> PbrPrimitive {
         material: 0,
         bounds,
         morphs: Vec::new(),
+        aux: None,
     }
 }
 
@@ -677,6 +682,16 @@ fn load_pbr_with(
                 }
                 morphs.push(t);
             }
+            let aux = match prim.attributes().find(|(s, _)| matches!(s, gltf::Semantic::Extras(n) if n == "AUX")) {
+                None => None,
+                Some((_, a)) => {
+                    let values: Vec<[f32; 4]> = gltf::accessor::Iter::<[f32; 4]>::new(a, |b| buffers.get(b.index()).map(Vec::as_slice))
+                        .context("_AUX accessor")?
+                        .collect();
+                    ensure!(values.len() == pos.len() && values.iter().flatten().all(|v| v.is_finite()), "_AUX attribute count");
+                    Some(values)
+                }
+            };
             prims.push(PbrPrimitive {
                 skin_attrs,
                 vertices,
@@ -684,6 +699,7 @@ fn load_pbr_with(
                 material: prim.material().index().unwrap_or(default_material),
                 bounds,
                 morphs,
+                aux,
             });
         }
         model.meshes.push(prims);

@@ -34,9 +34,38 @@ advance. The adapter reads the Unity BuildSettings, logo, warning and title
 widgets from the installation. It executes the installed `AllMain.ks` and
 `reset_scene.ks` through the shared KAG/TJS machinery. The title uses the
 retail club mesh hierarchy, texture resources, six buttons and BGM004. Start
-resumes the scenario at `*title_end`; the next scene controller is pending.
-See the [installed-data validation](../../docs/validation/com3d2.md) and
-[remaining work](SATD.md#satd-com3d2-standalone).
+resumes the scenario at `*title_end`. The initial settings controller loads
+the office prefab and the serialized NGUI radio groups. OK writes the three
+player flags, fades out the BGM and returns to the script at `*user_edit`.
+That label opens the standalone player editor, which reads its NGUI layout
+from the installed scene and the stock man’s head and body from KISS item menus.
+The desktop launcher also accepts bzip2-wrapped KISS archives when the
+uncompressed archive is absent. For the installed motion pack, first launch
+writes a 2.27 GiB seekable copy into the game’s disposable cache. Subsequent
+launches reuse it after fingerprinting the compressed input. The editor plays
+the installed idle clip. Finishing first-time setup on the default route
+returns to the opening dialogue in `OP_0001a`.
+
+The opening assembles named NPCs from retail presets and plays the installed
+conversation animations on the assigned character slots. The verified route
+tracks the secretary’s animated neck, presents the two opening choices,
+shows the first calendar-day scene and reaches the three-person recruitment
+menu. The standalone factory creates each candidate, activates the new stock
+model and applies the installed preset. The stock editor loads its Theater
+background, pose and serialized controls. Mouse input can change the owned
+hair menu, body sliders and the name used in dialogue. Profile confirmation still requires
+the native portrait and return sequence. Title End supports confirmation
+and cancellation. Title Shop requests the unlinked installation's shop URL
+through the desktop host.
+
+The standalone profile binds the 128 names registered by its retail
+`ScriptManager.Initialize`. The [registration list](src/tjs/standalone.rs)
+and [standalone handlers](src/tjs/retail.rs) distinguish the two Unity
+profiles. The installation supplies the NEI tables, presets, Unity resources,
+fonts and audio. Character, activity and save controllers also supply live
+state to these methods. The player editor returns to the label supplied by the calling scenario.
+See the [behavior and coverage record](../../docs/validation/com3d2.md)
+and [remaining work](SATD.md#satd-com3d2-standalone).
 
 ## Source provenance
 

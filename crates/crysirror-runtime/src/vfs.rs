@@ -28,7 +28,8 @@ use std::{
     },
 };
 
-pub const MAX_FILE: u64 = 64 * 1024 * 1024;
+/// Largest file read whole (`crysirror_core::limits::LARGE_ASSET_BYTES`).
+pub const MAX_FILE: u64 = crysirror_core::limits::LARGE_ASSET_BYTES;
 /// Bounded overlays per client, matching the common compound-storage budget.
 /// Voice-bank layouts commonly contain more than 64 independently indexed packs.
 pub const MAX_PROVIDER_MOUNTS: usize = 256;

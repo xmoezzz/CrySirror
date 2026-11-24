@@ -314,59 +314,70 @@ impl VideoStream for TheoraStream {
     }
 }
 
-/// MPEG-1/2: decoded exactly as siglus_scene_vm does (whole stream pushed,
-/// then flushed); frames are timed by index at the sequence header's rate.
+/// MPEG-1/2 program or elementary streams, decoded on demand: the stream
+/// is pushed through the pipeline in chunks until a frame is available,
+/// so memory holds a few decoded frames rather than the whole movie.
+/// Frames are timed by index at the sequence header's rate.
 struct MpegStream {
     bytes: Vec<u8>,
-    frames: Vec<Frame>,
-    cursor: usize,
+    pos: usize,
+    flushed: bool,
+    pipe: na_mpeg2_decoder::av::MpegAvPipeline,
+    queue: std::collections::VecDeque<na_mpeg2_decoder::av::MpegRgbaFrame>,
+    index: u64,
+    frame_ms: f64,
     info: VideoInfo,
 }
+const MPEG_CHUNK: usize = 256 << 10;
 impl MpegStream {
     fn new(bytes: Vec<u8>) -> Result<Self> {
         let header = crate::mpeg_probe::find_sequence_header(&bytes[..bytes.len().min(1 << 20)]);
         let fps = header
             .and_then(|h| crate::mpeg_probe::fps_from_frame_rate_code(h.frame_rate_code))
             .map(f64::from);
-        let mut pipe = na_mpeg2_decoder::av::MpegAvPipeline::new();
-        let mut raw = Vec::new();
-        let mut collect = |ev| {
-            if let na_mpeg2_decoder::av::MpegAvEvent::Video(f) = ev {
-                raw.push(f);
-            }
+        let mut s = Self {
+            bytes,
+            pos: 0,
+            flushed: false,
+            pipe: na_mpeg2_decoder::av::MpegAvPipeline::new(),
+            queue: Default::default(),
+            index: 0,
+            frame_ms: 1000. / fps.unwrap_or(30.),
+            info: VideoInfo { container: Container::Mpeg, width: 0, height: 0, fps },
         };
-        pipe.push_with(&bytes, None, &mut collect)
-            .map_err(|e| anyhow::anyhow!("MPEG decode: {e}"))?;
-        pipe.flush_with(&mut collect)
-            .map_err(|e| anyhow::anyhow!("MPEG flush: {e}"))?;
-        ensure!(!raw.is_empty(), "MPEG stream has no video frames");
-        let frame_ms = 1000. / fps.unwrap_or(30.);
-        let frames: Vec<Frame> = raw
-            .into_iter()
-            .enumerate()
-            .map(|(i, f)| Frame {
-                pts_ms: (i as f64 * frame_ms).round() as u64,
-                width: f.width,
-                height: f.height,
-                rgba: f.rgba,
-            })
-            .collect();
-        let info = VideoInfo {
-            container: Container::Mpeg,
-            width: frames[0].width,
-            height: frames[0].height,
-            fps,
-        };
+        ensure!(s.fill()?, "MPEG stream has no video frames");
+        let first = s.queue.front().expect("filled");
+        s.info.width = first.width;
+        s.info.height = first.height;
         ensure!(
-            (1..=8192).contains(&info.width) && (1..=8192).contains(&info.height),
+            (1..=8192).contains(&s.info.width) && (1..=8192).contains(&s.info.height),
             "video dimensions"
         );
-        Ok(Self {
-            bytes,
-            frames,
-            cursor: 0,
-            info,
-        })
+        Ok(s)
+    }
+    /// Decode until a frame is queued; false at the end of the stream.
+    fn fill(&mut self) -> Result<bool> {
+        while self.queue.is_empty() {
+            let queue = &mut self.queue;
+            let mut collect = |ev| {
+                if let na_mpeg2_decoder::av::MpegAvEvent::Video(f) = ev {
+                    queue.push_back(f);
+                }
+            };
+            if self.pos < self.bytes.len() {
+                let end = (self.pos + MPEG_CHUNK).min(self.bytes.len());
+                self.pipe
+                    .push_with(&self.bytes[self.pos..end], None, &mut collect)
+                    .map_err(|e| anyhow::anyhow!("MPEG decode: {e}"))?;
+                self.pos = end;
+            } else if !self.flushed {
+                self.pipe.flush_with(&mut collect).map_err(|e| anyhow::anyhow!("MPEG flush: {e}"))?;
+                self.flushed = true;
+            } else {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 impl VideoStream for MpegStream {
@@ -374,13 +385,16 @@ impl VideoStream for MpegStream {
         &self.info
     }
     fn next_frame(&mut self) -> Result<Option<Frame>> {
-        let f = self.frames.get(self.cursor).cloned();
-        self.cursor += f.is_some() as usize;
-        Ok(f)
+        if !self.fill()? {
+            return Ok(None);
+        }
+        let f = self.queue.pop_front().expect("filled");
+        let pts_ms = (self.index as f64 * self.frame_ms).round() as u64;
+        self.index += 1;
+        Ok(Some(Frame { pts_ms, width: f.width, height: f.height, rgba: f.rgba }))
     }
     fn rewind(&mut self) -> Result<()> {
-        let _ = &self.bytes;
-        self.cursor = 0;
+        *self = Self::new(std::mem::take(&mut self.bytes))?;
         Ok(())
     }
 }

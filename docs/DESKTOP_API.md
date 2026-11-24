@@ -33,6 +33,10 @@ for supported formats, plug-ins and save-file compatibility.
 `play` supports `--data-dir`, `--font`, `--no-audio`, `--input-track`, `--frames`,
 `--capture`, `--headless`, `--detect-only` and `--allow-borderless`. Headless mode
 creates no window/audio device but capture still requires the renderer.
+In a headless input track, a `text` event delivers a committed string to
+the focused engine text field or the native adapter’s active text capture
+session. Focus the field on an earlier frame. The track supplies no OS IME
+composition events.
 Without a subcommand the executable attempts to play the game beside itself.
 
 ### Games on an SMB share

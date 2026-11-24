@@ -497,13 +497,13 @@ impl Source {
         cancel.check()?;
         let p = VfsPath::new(Mount::Asset, path)?;
         if let Some(data) = self.cache.get(p.relative()) {
-            ensure!(data.len() <= 64 * 1024 * 1024, "async asset exceeds 64 MiB");
+            ensure!(data.len() as u64 <= crysirror_core::limits::LARGE_ASSET_BYTES, "async asset exceeds the asset limit");
             return Ok(data.clone());
         }
         let bytes = if let Some(storage) = &self.storage {
             let reader = storage.open_asset(&p)?;
             let len = reader.len()?;
-            ensure!(len <= 64 * 1024 * 1024, "async asset exceeds 64 MiB");
+            ensure!(len <= crysirror_core::limits::LARGE_ASSET_BYTES, "async asset exceeds the asset limit");
             let mut out = vec![0; len as usize];
             let mut at = 0;
             while at < out.len() {

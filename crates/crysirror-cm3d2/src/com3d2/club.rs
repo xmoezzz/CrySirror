@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-//! The night club entrance embedded in the retail SceneTitle.
+//! Static scene and Resources prefab geometry in the Unity 5.6 retail player.
 use super::*;
 use crate::unity_scene::{ObjectKey, UnityData, UnityFiles};
 use crysirror_asset::pbr::{AlphaMode, PbrMaterial};
@@ -57,6 +57,7 @@ pub(super) fn model(
     unity: &mut UnityData,
     op: &mut Opener,
     file: &str,
+    root_name: &str,
 ) -> Result<(Vec<u8>, usize)> {
     let sf = unity.file(op, file)?;
     let mut root = None;
@@ -69,12 +70,44 @@ pub(super) fn model(
         }
         let tr = r.pptr64()?;
         r.take((n - 1) * 12 + 4)?;
-        if r.string()? == "EmpireClub_Rotary_Night" {
+        if r.string()? == root_name {
             root = Some(tr.path_id);
             break;
         }
     }
-    let mut stack = vec![(root.context("title club root")?, None)];
+    build(
+        unity,
+        op,
+        file,
+        root.with_context(|| format!("scene root {root_name}"))?,
+    )
+}
+
+pub(super) fn prefab(
+    unity: &mut UnityData,
+    op: &mut Opener,
+    name: &str,
+) -> Result<(Vec<u8>, usize)> {
+    let key = unity
+        .resource_of(op, &format!("bg/{name}"), c::GAME_OBJECT)?
+        .with_context(|| format!("background resource {name}"))?;
+    let (_, data) = unity.bytes(op, &key)?;
+    let mut r = Reader::new(&data);
+    ensure!(r.count(12)? > 0, "background prefab has no transform");
+    let root = unity
+        .resolve(op, &key.file, r.pptr64()?)?
+        .context("background transform")?;
+    build(unity, op, &root.file, root.path_id)
+}
+
+fn build(
+    unity: &mut UnityData,
+    op: &mut Opener,
+    file: &str,
+    root: i64,
+) -> Result<(Vec<u8>, usize)> {
+    let sf = unity.file(op, file)?;
+    let mut stack = vec![(root, None)];
     let mut glb = GlbBuilder::new("CrySirror COM3D2");
     let mut materials = HashMap::new();
     let mut seen = std::collections::HashSet::new();
@@ -111,6 +144,12 @@ pub(super) fn model(
             stack.push((r.pptr64()?.path_id, Some(index)));
         }
         if let (Some(f), Some(re)) = (filter, renderer) {
+            let data = sf.bytes(f)?;
+            let mut r = Reader::new(&data);
+            r.seek(12)?;
+            let Some(k) = unity.resolve(op, file, r.pptr64()?)? else {
+                continue;
+            };
             let data = sf.bytes(re)?;
             let mut r = Reader::new(&data);
             r.seek(12)?;
@@ -133,10 +172,6 @@ pub(super) fn model(
                 };
                 slots.push(id);
             }
-            let data = sf.bytes(f)?;
-            let mut r = Reader::new(&data);
-            r.seek(12)?;
-            let k = unity.resolve(op, file, r.pptr64()?)?.context("club mesh")?;
             let (_, m) = unity.bytes(op, &k)?;
             let mesh = Mesh::read_56(&m).with_context(|| format!("club mesh {name}"))?;
             ensure!(

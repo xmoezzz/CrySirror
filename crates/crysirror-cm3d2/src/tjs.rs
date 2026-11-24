@@ -25,6 +25,7 @@ use std::{
 pub struct BodyMirror {
     /// MPN name → (`MaidProp.type`, value).
     pub props: HashMap<String, (u8, i32)>,
+    pub menu_files: HashMap<String, String>,
     /// `TBody.SlotID` names with a loaded model.
     pub loaded_slots: HashSet<String>,
     /// `TBodySkin.GetParam` tables in slot order.
@@ -37,6 +38,8 @@ pub enum Request {
     /// `CharacterMgr.AddStockMaid` + `SetActiveMaid(maid, 0)` + visible;
     /// the parameters are already initialized at this character index.
     CreateMaid(usize),
+    DeactivateMaid(usize),
+    RefreshMaid(usize),
     /// `ScriptManager.StopMotionScript` then `SetActiveMaid(chara, slot)`.
     SetActiveMaid { slot: usize, chara: usize, visible: bool },
     /// `ScriptManager.ClearCallStack`.
@@ -50,6 +53,7 @@ pub enum Request {
 pub struct TjsState {
     pub data: Option<Arc<GameData>>,
     pub player: PlayerStatus,
+    pub(crate) retail: retail::State,
     /// `MaidParam` per character index.
     pub maids: BTreeMap<usize, MaidStatus>,
     /// `CharacterMgr` active maid slots → character index (mirrored).
@@ -61,6 +65,10 @@ pub struct TjsState {
     pub bodies: HashMap<usize, BodyMirror>,
     /// `BgMgr.GetBGName` (mirrored).
     pub bg_name: String,
+    /// Standalone PlayerStatus.Status.clubGauge.
+    pub club_gauge: i32,
+    /// CMSystem.m_SystemVers, distinct from per-player and temporary flags.
+    pub system_versions: BTreeMap<String, String>,
     /// `YotogiStageSelectManager.StageName`.
     pub stage_name: String,
     /// `YotogiStageSelectManager.StagePrefab`.
@@ -100,7 +108,7 @@ impl TjsState {
     pub fn seed(&mut self, seed: u64) {
         self.rng = seed | 1;
     }
-    fn guid(&mut self) -> String {
+    pub(crate) fn guid(&mut self) -> String {
         let mut b = [0u8; 16];
         for x in &mut b {
             *x = self.random(256) as u8;
@@ -589,9 +597,26 @@ pub fn update_maid_ranking(s: &mut TjsState) {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScriptProfile {
+    Cm3d2,
+    Com3d2,
+}
+
+pub(crate) mod retail;
+mod standalone;
+
 impl Tjs {
     pub fn new(sources: HashMap<String, String>) -> Result<Self> {
-        let mut runtime = Runtime::with_host(Host { state: TjsState::default(), sources });
+        Self::for_profile(sources, ScriptProfile::Cm3d2)
+    }
+
+    pub(crate) fn for_profile(sources: HashMap<String, String>, profile: ScriptProfile) -> Result<Self> {
+        Self::with_state(sources,profile,TjsState::default())
+    }
+
+    pub(crate) fn with_state(sources: HashMap<String,String>, profile:ScriptProfile,state:TjsState)->Result<Self> {
+        let mut runtime = Runtime::with_host(Host { state, sources });
         let scripts = runtime.alloc_ordinary_object();
         runtime.register_object_native(scripts, "execStorage", |rt: &mut Runtime<Host>, _: Option<ObjectHandle>, args: Vec<Variant>| {
             let name = arg_string(&args, 0);
@@ -600,7 +625,14 @@ impl Tjs {
             rt.execute_file(&file)
         });
         runtime.set_global_member("Scripts", Variant::Object(scripts));
-        for (name, f) in FUNCS {
+        let standalone = profile == ScriptProfile::Com3d2;
+        if standalone {
+            runtime.host_mut().state.player.schedule_slot.resize_with(40, Default::default);
+        }
+        let overrides = standalone::FUNCS.iter().chain(retail::METHODS);
+        let common = FUNCS.iter().filter(|(name, _)| !standalone ||
+            (standalone::REGISTERED.contains(name) && !overrides.clone().any(|(override_name, _)| override_name == name)));
+        for (name, f) in common.chain(overrides.clone().filter(|_| standalone)) {
             let (name, f) = (*name, *f);
             runtime.register_global_native(name, move |rt: &mut Runtime<Host>, _: Option<ObjectHandle>, a: Vec<Variant>| {
                 f(&mut rt.host_mut().state, &a).map_err(|e| crysirror_tjs2::TjsError::runtime(format!("{name}: {e:#}")))

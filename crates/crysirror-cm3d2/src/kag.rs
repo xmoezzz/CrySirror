@@ -61,6 +61,7 @@ pub enum AdvUi {
     CharaVisible { man: bool, slot: usize, visible: bool },
     CharaVisibleAllOff { man: bool },
     /// `CharacterMgr.ActivateNpc` / `Activate(slot, stock)`.
+    RetailNpc { man: bool, slot: usize, name: String, load: bool },
     CharaActivate { man: bool, slot: usize, npc: Option<String>, stock: Option<usize> },
     CharaDeactivate { man: bool, slot: usize },
     /// `MainCamera.SetTargetPos/SetDistance/SetAroundAngle`.
@@ -71,6 +72,7 @@ pub enum AdvUi {
     /// `GameMain.MainLight` rotation (Euler) and intensity.
     LightMain { rotation: Option<[f32; 3]>, intensity: Option<f32> },
     /// `ScriptManager.LoadMotionScript(slot, false, file, label)`.
+    RetailMotionScript { slot:i32, file:String, label:String, maid:Option<usize>, man:Option<usize>, positions:bool },
     MotionScript { slot: i32, file: String, label: String },
     /// `PlayMaidMotion(maid, file, loop, blend)`.
     Motion { man: bool, slot: usize, file: String, looping: bool, blend_s: f32, queue: bool },
@@ -88,6 +90,11 @@ pub enum AdvUi {
     MotionBlend(bool),
     /// `ScriptManager.StopMotionScript`.
     StopMotionScripts,
+    RetailDeactivate(usize),
+    RetailTrophy(i32),
+    RetailClearMotionStacks,
+    RetailSwap { man:bool, slot:usize, other:usize },
+    RetailStock { index: usize, slot: usize, visible: Option<bool> },
     /// `YotogiManager.TagYotogiCall` (on the ADV KAG).
     YotogiCall { name: String, label: String, edit_label: Option<String> },
     /// `YotogiManager.TagPlayBGMRoom`: the selected stage's BGM.
@@ -173,6 +180,7 @@ pub enum AdvUi {
     EndDay,
     /// `MessageWindowMgr.CreateSelectButtons(choices)`: `(text, label)`.
     Choices(Vec<(String, String)>),
+    RetailChoices(Vec<(String,String,bool)>),
     /// A delayed `SoundMgr` call (`playse wait=`).
     Sound(crate::sound::SoundOp),
     /// `TagHitRet` voice: `VoiceStopAll`, then the target maid's
@@ -260,6 +268,8 @@ struct Wait {
 }
 
 struct Ctx<'a> {
+    adv: bool,
+    r_depth: usize,
     files: &'a GameFiles,
     storage: &'a dyn ClientStorage,
     tjs: std::sync::MutexGuard<'a, Tjs>,
@@ -284,11 +294,35 @@ fn replace_personal(tjs: &Tjs, name: &str) -> String {
     name.replace('?', c)
 }
 
+impl Ctx<'_> {
+    fn check_target(&self, storage:Option<&str>)->crysirror_kag::Result<bool>{
+        let state=&self.tjs.runtime.host().state.retail;
+        if state.compatibility && let Some(file)=storage.filter(|f|!f.is_empty()) {
+            let name=scenario_name(&replace_personal(&self.tjs,file));
+            if !state.files(self.files).exists(&name){return Err(KagError::host(format!("missing legacy script {name}")));}
+        }
+        Ok(true)
+    }
+}
+
 impl KagHost for Ctx<'_> {
+    fn on_jump(&mut self,_:&Tag,storage:Option<&str>,_:Option<&str>)->crysirror_kag::Result<bool>{ self.check_target(storage) }
+    fn on_call(&mut self,_:&Tag,storage:Option<&str>,_:Option<&str>)->crysirror_kag::Result<bool>{ self.check_target(storage) }
+    fn on_return(&mut self,_:&Tag,storage:Option<&str>,_:Option<&str>)->crysirror_kag::Result<bool>{ self.check_target(storage) }
+    fn sync_parser_state(&mut self, parser:&KagParser)->crysirror_kag::Result<()>{
+        if self.adv { self.tjs.runtime.host_mut().state.retail.adv_depth=(parser.call_stack_depth(),self.r_depth); }
+        Ok(())
+    }
+    fn on_call_stack_depth(&mut self, depth:usize)->crysirror_kag::Result<()>{
+        if self.adv && let Some(caller)=depth.checked_sub(1) {
+            self.tjs.runtime.host_mut().state.retail.returned_to((caller,self.r_depth));
+        }
+        Ok(())
+    }
     fn load_scenario(&mut self, storage: &str) -> crysirror_kag::Result<String> {
         // KagScript.SetReplaceEvent(ReplaceFileNameCallBack).
         let name = scenario_name(&replace_personal(&self.tjs, storage));
-        let bytes = self.files.read(self.storage, &name).map_err(|e| KagError::host(format!("{e:#}")))?;
+        let bytes = self.tjs.runtime.host().state.retail.files(self.files).read(self.storage, &name).map_err(|e| KagError::host(format!("{e:#}")))?;
         Ok(encoding_rs::SHIFT_JIS.decode(&bytes).0.into_owned())
     }
     fn eval_bool(&mut self, expression: &str) -> crysirror_kag::Result<bool> {
@@ -316,6 +350,8 @@ pub struct AdvKag {
     pub motion_blend: bool,
     /// `SoundMgr` calls of this frame's tags.
     pub sound: Vec<crate::sound::SoundOp>,
+    // Preserve the filesystem mode at each retail sound tag, including switches within one Exec.
+    pub(crate) retail_sound: Option<Vec<(crate::sound::SoundOp,bool)>>,
     pub ui: Vec<AdvUi>,
     /// `BaseKagManager.fade_wait_`.
     fade_wait: bool,
@@ -332,8 +368,8 @@ pub struct AdvKag {
     /// `BaseKagManager.wait_event_list_`: name → `(due ms, delay ms, op)`.
     wait_events: BTreeMap<&'static str, Vec<(u64, u64, AdvUi)>>,
     /// `choise_data_` / `choise_random_data_`.
-    choices: Vec<(String, String)>,
-    random_choices: Vec<(String, String)>,
+    choices: Vec<(String, String,bool)>,
+    random_choices: Vec<(String, String,bool)>,
     /// `KagStackCall` of `R_call`: caller storage, called stem, id.
     r_stack: Vec<(String, String, i32)>,
     /// xorshift state for `Random` draws.
@@ -367,6 +403,10 @@ fn as_bool(v: &str) -> bool {
 
 impl AdvKag {
     pub fn new(files: &GameFiles, storage: &dyn ClientStorage) -> Result<Self> {
+        Self::for_profile(files, storage, crate::tjs::ScriptProfile::Cm3d2, Default::default())
+    }
+
+    pub(crate) fn for_profile(files: &GameFiles, storage: &dyn ClientStorage, profile: crate::tjs::ScriptProfile, state:crate::tjs::TjsState) -> Result<Self> {
         let mut sources = HashMap::new();
         for name in ["startup.tjs", "utils.tjs", "game_utils.tjs"] {
             if files.exists(name) {
@@ -380,7 +420,7 @@ impl AdvKag {
         parser.set_macro_definitions([("choicesshow", "\t@_choicesshow\n\t@s\n")]);
         Ok(Self {
             parser,
-            tjs: Arc::new(Mutex::new(Tjs::new(sources)?)),
+            tjs: Arc::new(Mutex::new(Tjs::with_state(sources, profile, state)?)),
             enabled: false,
             loaded: false,
             exec_requested: false,
@@ -390,6 +430,7 @@ impl AdvKag {
             tag_backup: BTreeMap::new(),
             motion_blend: true,
             sound: Vec::new(),
+            retail_sound: (profile == crate::tjs::ScriptProfile::Com3d2).then(Vec::new),
             ui: Vec::new(),
             fade_wait: false,
             hitret_wait: false,
@@ -466,6 +507,7 @@ impl AdvKag {
             tag_backup: BTreeMap::new(),
             motion_blend: true,
             sound: Vec::new(),
+            retail_sound: None,
             ui: Vec::new(),
             fade_wait: false,
             hitret_wait: false,
@@ -510,7 +552,7 @@ impl AdvKag {
     pub fn load(&mut self, files: &GameFiles, storage: &dyn ClientStorage, file: &str, label: &str) -> Result<()> {
         self.enabled = true;
         let tjs = self.tjs.clone();
-        let mut ctx = Ctx { files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
+        let mut ctx = Ctx { adv: self.kind == KagKind::Adv, r_depth: self.r_stack.len(), files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
         self.parser.load_scenario_with(scenario_name(file), &mut ctx)?;
         if !label.is_empty() {
             self.parser.go_to_with(None, Some(label), &mut ctx)?;
@@ -523,7 +565,7 @@ impl AdvKag {
     /// `BaseKagManager.JumpLabel`.
     pub fn jump_label(&mut self, files: &GameFiles, storage: &dyn ClientStorage, label: &str) -> Result<()> {
         let tjs = self.tjs.clone();
-        let mut ctx = Ctx { files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
+        let mut ctx = Ctx { adv: self.kind == KagKind::Adv, r_depth: self.r_stack.len(), files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
         self.parser.go_to_with(None, Some(label), &mut ctx)?;
         self.stopped = false;
         Ok(())
@@ -591,7 +633,7 @@ impl AdvKag {
             r_stack.push((caller, stem, r.i32()?));
         }
         let tjs = self.tjs.clone();
-        let mut ctx = Ctx { files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
+        let mut ctx = Ctx { adv: self.kind == KagKind::Adv, r_depth: self.r_stack.len(), files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
         let dict = if text.is_empty() { None } else { Some(ctx.tjs.eval(&text)?) };
         if let Some(v) = dict {
             use crysirror_kag::krkr_store::{self, Profile};
@@ -755,8 +797,28 @@ impl AdvKag {
     fn run(&mut self, now: u64, files: &GameFiles, storage: &dyn ClientStorage) -> Result<KagStep> {
         for _ in 0..TAGS_PER_EXEC {
             let tjs = self.tjs.clone();
-            let mut ctx = Ctx { files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
+            let mut ctx = Ctx { adv: self.kind == KagKind::Adv, r_depth: self.r_stack.len(), files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
             let next = self.parser.next_tag_with(&mut ctx);
+            if ctx.adv {
+                ctx.tjs.runtime.host_mut().state.retail.adv_depth=(self.parser.call_stack_depth(), self.r_stack.len());
+            }
+            if std::mem::take(&mut ctx.tjs.runtime.host_mut().state.retail.stop_motions) {
+                self.ui.push(AdvUi::StopMotionScripts);
+            }
+            if self.retail_sound.is_some() {
+                use crate::tjs::Request;
+                let state=&mut ctx.tjs.runtime.host_mut().state;
+                for request in std::mem::take(&mut state.requests) {
+                    match request {
+                        Request::DeactivateMaid(slot) => self.ui.push(AdvUi::RetailDeactivate(slot)),
+                        Request::RefreshMaid(slot) => self.ui.push(AdvUi::AllProcProp {man:false,slot}),
+                        Request::CreateMaid(index) => self.ui.push(AdvUi::RetailStock {index, slot:0, visible:Some(true)}),
+                        Request::SetActiveMaid {slot,chara,visible} => self.ui.push(AdvUi::RetailStock {index:chara,slot,visible:Some(visible)}),
+                        Request::ClearCallStack => {self.parser.clear_call_stack(); self.ui.push(AdvUi::RetailClearMotionStacks);},
+                        Request::TrophyEffect(id) => self.ui.push(AdvUi::RetailTrophy(id)),
+                    }
+                }
+            }
             drop(ctx);
             let Some(tag) = next.with_context(|| self.position())? else {
                 self.stopped = true;
@@ -784,18 +846,29 @@ impl AdvKag {
                     self.text.push_str(&format!("[{}]", tag.tagname));
                     continue;
                 }
+                "hlf" | "hf1" | "hf2" | "hf3" | "hf4"
+                | "hl1" | "hl2" | "hl3" | "hl4"
+                | "hlf1" | "hlf2" | "hlf3" | "hlf4" if self.retail_sound.is_some() => {
+                    self.text.push_str(&format!("[{}]", tag.tagname));
+                    continue;
+                }
                 "s" => {
                     self.stopped = true;
                     return Ok(KagStep::Waiting);
                 }
                 _ => {}
             }
-            if let Some(step) = self.tag(now, &name, &a).with_context(|| format!("[{name}] at {}", self.position()))? {
+            let step=self.tag(now, &name, &a).with_context(|| format!("[{name}] at {}", self.position()))?;
+            if let Some(queue)=self.retail_sound.as_mut() && !self.sound.is_empty() {
+                let mode=tjs.lock().map_err(|_|anyhow::anyhow!("TJS lock"))?.runtime.host().state.retail.compatibility;
+                queue.extend(self.sound.drain(..).map(|op|(op,mode)));
+            }
+            if let Some(step) = step {
                 return Ok(step);
             }
             if let Some((file, label)) = self.pending_load.take() {
                 let tjs = self.tjs.clone();
-                let mut ctx = Ctx { files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
+                let mut ctx = Ctx { adv: self.kind == KagKind::Adv, r_depth: self.r_stack.len(), files, storage, tjs: tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock poisoned"))? };
                 self.parser.load_scenario_with(file.clone(), &mut ctx).with_context(|| format!("load {file}"))?;
                 if let Some(label) = label {
                     self.parser.go_to_with(None, Some(&label), &mut ctx).with_context(|| format!("{file} {label}"))?;
@@ -917,6 +990,28 @@ impl AdvKag {
                 let (man, slot) = who(a);
                 let npc = a.get("npc").cloned();
                 let stock = a.get("pc").map(|v| crate::text::atoi(v.as_bytes()).max(0) as usize);
+                if self.retail_sound.is_some() {
+                    let mut tjs = self.tjs.lock().map_err(|_| anyhow::anyhow!("TJS lock"))?;
+                    let state = &mut tjs.runtime.host_mut().state;
+                    let named = !state.retail.compatibility && ["leader","rank1","main"].iter().any(|key|a.contains_key(*key));
+                    if !state.retail.compatibility { self.ui.push(AdvUi::StopMotionScripts); }
+                    if !named && let Some(name) = npc {
+                        self.ui.push(AdvUi::RetailNpc {man,slot,name,load:!a.contains_key("noload")});
+                    } else if !named && !a.contains_key("slot") && !a.contains_key("sub") && let Some(other) = a.get("swap") {
+                        self.ui.push(AdvUi::RetailSwap {man,slot,other:other.parse()?});
+                    } else {
+                        anyhow::ensure!(!man && slot < 18,"invalid retail stock destination");
+                        if let Some(index) = crate::tjs::retail::select_stock(state,a)? {
+                            self.ui.push(AdvUi::RetailStock {index,slot,visible:(!a.contains_key("noload")).then_some(true)});
+                            for active in &mut state.active_maids { if *active == Some(index) { *active=None; } }
+                            state.active_maids.resize(state.active_maids.len().max(slot+1),None);
+                            state.active_maids[slot]=Some(index);
+                        }
+                    }
+                    // Commit the CharacterMgr effects before the next tag can query the slots.
+                    self.exec_requested=true;
+                    return Ok(Some(KagStep::Running));
+                }
                 anyhow::ensure!(npc.is_some() || stock.is_some(), "@charaactivate needs npc or pc");
                 self.ui.push(AdvUi::CharaActivate { man, slot, npc, stock });
                 None
@@ -924,6 +1019,10 @@ impl AdvKag {
             "charadeactivate" => {
                 let (man, slot) = who(a);
                 self.ui.push(AdvUi::CharaDeactivate { man, slot });
+                if self.retail_sound.is_some() {
+                    self.exec_requested=true;
+                    return Ok(Some(KagStep::Running));
+                }
                 None
             }
             "camera" => {
@@ -958,7 +1057,11 @@ impl AdvKag {
             "motionscript" => {
                 let file = format!("{}.ks", property(a, name, "file")?);
                 let slot = a.get("sloat").map(|v| crate::text::atoi(v.as_bytes())).unwrap_or(0);
-                let op = AdvUi::MotionScript { slot, file, label: a.get("label").cloned().unwrap_or_default() };
+                let label = a.get("label").cloned().unwrap_or_default();
+                let op = if self.retail_sound.is_some() {
+                    let actor = |key:&str| a.get(key).map(|v| usize::try_from(crate::text::atoi(v.as_bytes()))).transpose();
+                    AdvUi::RetailMotionScript {slot,file,label,maid:actor("maid")?,man:actor("man")?,positions:!a.contains_key("npos")}
+                } else { AdvUi::MotionScript { slot, file, label } };
                 let wait = a.get("wait").map(|v| crate::text::atoi(v.as_bytes())).unwrap_or(0);
                 if wait <= 0 {
                     self.ui.push(op);
@@ -1362,9 +1465,9 @@ impl AdvKag {
                 let text = property(a, name, "text")?.to_owned();
                 let label = property(a, name, "label")?.to_owned();
                 if name == "choicesset" {
-                    self.choices.push((text, label));
+                    self.choices.push((text, label, a.get("enabled").is_none_or(|v|as_bool(v))));
                 } else {
-                    self.random_choices.push((text, label));
+                    self.random_choices.push((text, label, a.get("enabled").is_none_or(|v|as_bool(v))));
                 }
                 None
             }
@@ -1382,7 +1485,8 @@ impl AdvKag {
                 None
             }
             "_choicesshow" => {
-                self.ui.push(AdvUi::Choices(std::mem::take(&mut self.choices)));
+                let choices=std::mem::take(&mut self.choices);
+                self.ui.push(if self.retail_sound.is_some(){AdvUi::RetailChoices(choices)}else{AdvUi::Choices(choices.into_iter().map(|(text,label,_)|(text,label)).collect())});
                 None
             }
             // KagScript::TagFuncR_Call / R_return (cm3d2_x64.dll): a
@@ -1399,6 +1503,10 @@ impl AdvKag {
             }
             "r_return" => {
                 let (caller, stem, id) = self.r_stack.pop().context("R_return without R_call")?;
+                if self.kind == KagKind::Adv {
+                    self.tjs.lock().map_err(|_|anyhow::anyhow!("TJS lock"))?.runtime.host_mut().state.retail
+                        .returned_to((self.parser.call_stack_depth(),self.r_stack.len()));
+                }
                 let label = if id >= 0 { format!("*RET_{stem}_{id}") } else { format!("*RET_{stem}") };
                 self.pending_load = Some((caller, Some(label)));
                 None

@@ -9,6 +9,7 @@ pub mod circus_pck;
 pub mod circus_voice;
 pub mod exhibit_voice;
 pub mod exhibit_pcm;
+pub mod exhibit_dlt;
 pub mod circus_crm;
 pub mod circus_frames;
 pub mod cg_catalog;

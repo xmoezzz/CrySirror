@@ -76,7 +76,13 @@ impl UnityData {
         if let Some(f) = self.files.get(name) {
             return Ok(f.clone());
         }
-        let file = Arc::new(SerializedFile::open(opener.open(name)?).with_context(|| format!("Unity file {name}"))?);
+        let source = match name {
+            "builtin:unity default resources" => "Resources/unity default resources",
+            "builtin:unity_builtin_extra" => "Resources/unity_builtin_extra",
+            _ => name,
+        };
+        let reader = opener.open(source).with_context(|| format!("open Unity file {source:?}"))?;
+        let file = Arc::new(SerializedFile::open(reader).with_context(|| format!("Unity file {source}"))?);
         self.files.insert(Arc::from(name), file.clone());
         Ok(file)
     }
@@ -84,15 +90,22 @@ impl UnityData {
     /// `Resources.Load(path)`: objects registered under `path` (case-insensitive).
     pub fn resource(&mut self, opener: &mut dyn UnityFiles, path: &str) -> Result<Vec<ObjectKey>> {
         if self.resources.is_none() {
-            let main = self.file(opener, "mainData")?;
+            let owner = if self.files.contains_key("globalgamemanagers") { "globalgamemanagers" } else { "mainData" };
+            let main = self.file(opener, owner)?;
             let info = *main
                 .objects
                 .iter()
                 .find(|o| o.class_id == c::RESOURCE_MANAGER)
                 .context("mainData has no ResourceManager")?;
             let mut map: HashMap<String, Vec<ObjectKey>> = HashMap::new();
-            for (name, p) in crysirror_unity::classes::resource_container(&main.bytes(&info)?)? {
-                if let Some(k) = self.resolve(opener, "mainData", p)? {
+            let bytes = main.bytes(&info)?;
+            let container = match main.format {
+                9 => crysirror_unity::classes::resource_container(&bytes)?,
+                17 => crysirror_unity::classes::resource_container_64(&bytes)?,
+                other => anyhow::bail!("unsupported ResourceManager format {other}"),
+            };
+            for (name, p) in container {
+                if let Some(k) = self.resolve(opener, owner, p)? {
                     map.entry(name.to_ascii_lowercase()).or_default().push(k);
                 }
             }

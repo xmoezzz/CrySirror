@@ -7,13 +7,22 @@ rust-version.workspace = true
 publish = false
 description = "Naughty Dog native resource semantics for CrySirror"
 
+[features]
+runtime = ["dep:crysirror-runtime"]
+
 [dependencies]
 anyhow.workspace = true
+serde.workspace = true
+glam.workspace = true
+serde_json.workspace = true
+crysirror-asset.workspace = true
+crysirror-scene.workspace = true
+crysirror-formats-arc.workspace = true
+crysirror-runtime = { workspace = true, optional = true }
 
 crysirror-core.workspace = true
 crysirror-resource.workspace = true
+crysirror-image.workspace = true
 
 [dev-dependencies]
-crysirror-image.workspace = true
-crysirror-formats-arc.workspace = true
 crysirror-capfs.workspace = true

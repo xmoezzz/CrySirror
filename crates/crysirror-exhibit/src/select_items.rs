@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! RLD v1 image select items. Binding copies the idle cell into the parent
 //! bitmap's colour plane, preserving its independent alpha. A button atlas
-//! contains three horizontal cells. Event execution belongs to opcode 0x5c.
+//! contains three horizontal cells. The v1 selection wait consumes primary
+//! pointer activations for the attached, unmasked image-item profile.
 use super::{branch::number, panel_animation::Kind, surfaces::Surface};
 use anyhow::{Context, Result, bail, ensure};
 use crysirror_core::{
@@ -9,7 +10,7 @@ use crysirror_core::{
         ImageCompositeLayer, ImageCompositeMath, ImageInput, ImageJob, ImageProcessState,
     },
     path::{Mount, VfsPath},
-    service::{AssetReader, HostServices},
+    service::{AssetReader, HostServices, InputFrame, buttons},
     state::ClientId,
 };
 use crysirror_tasks::{Task, TaskPool};
@@ -22,6 +23,7 @@ pub(super) struct Button {
     parent: u8,
     id: u8,
     pos: [i32; 2],
+    extent: [u32; 2],
     atlas: VfsPath,
 }
 impl Button {
@@ -49,8 +51,44 @@ impl Button {
             parent: parent as u8,
             id: u8::try_from(n(3)?)?,
             pos,
+            extent: [0; 2], // Published together with the composed button.
             atlas: VfsPath::new(Mount::Asset, &std::str::from_utf8(f[6])?.replace('\\', "/"))?,
         })
+    }
+}
+
+pub(super) struct Selection {
+    group: u8,
+    pub destination: i32,
+    pressed: Option<(u8, u8)>,
+}
+impl Selection {
+    pub fn new(group: u8, destination: i32) -> Self {
+        Self { group, destination, pressed: None }
+    }
+
+    /// The native normal-item result is the low byte of the layer/item
+    /// result (cmdExecSelectItem, RVA 0x66570). A host primary activation
+    /// captures an item and completes only when the pointer releases on it.
+    /// Do not translate other native event classes into ordinary item IDs.
+    pub fn poll(
+        &mut self,
+        panels: &Panels,
+        input: InputFrame,
+        pointer: Option<[i32; 2]>,
+    ) -> Option<u8> {
+        let hit = pointer.and_then(|p| panels.hit(self.group, p));
+        let down = input.buttons_down & buttons::MOUSE_LEFT != 0;
+        if input.buttons_pressed & buttons::MOUSE_LEFT != 0 {
+            self.pressed = hit;
+        } else if self.pressed != hit {
+            self.pressed = None;
+        }
+        if down {
+            None
+        } else {
+            self.pressed.take().map(|(_, id)| id)
+        }
     }
 }
 fn button_cell(
@@ -74,7 +112,7 @@ fn button_cell(
         math: ImageCompositeMath::CopyRgb,
     })
 }
-fn palette(reader: &dyn AssetReader) -> Result<([u32; 2], [u8; 1024])> {
+pub(super) fn palette(reader: &dyn AssetReader) -> Result<([u32; 2], [u8; 1024])> {
     let mut header = [0; 36];
     crysirror_resource::read_exact_at(reader, 0, &mut header)?;
     let word = |o: usize| u32::from_le_bytes(header[o..o + 4].try_into().expect("header field"));
@@ -99,7 +137,7 @@ struct Layer {
     items: BTreeMap<u8, Button>,
 }
 enum Pending {
-    Preparing(Task<ImageJob>),
+    Preparing(Task<(ImageJob, [u32; 2])>),
     Composing(ImageJob),
 }
 #[derive(Default)]
@@ -110,6 +148,33 @@ pub(super) struct Panels {
     pending: Option<(Button, Pending)>,
 }
 impl Panels {
+    fn hit(&self, group: u8, point: [i32; 2]) -> Option<(u8, u8)> {
+        use crysirror_core::region_map::contains_rect;
+        let point = point.map(i64::from);
+        for (&slot, layer) in self.layers.iter().rev() {
+            if (61..=71).contains(&slot)
+                || layer.surface.level == 0
+                || self.input_blocks.get(&slot).copied().unwrap_or(0) != 0
+            {
+                continue;
+            }
+            let [x, y] = layer.surface.origin.map(i64::from);
+            let [w, h] = layer.size.map(i64::from);
+            if !contains_rect([x, y, w, h], point) {
+                continue;
+            }
+            for (&id, button) in layer.items.iter().rev() {
+                let [dx, dy] = button.pos.map(i64::from);
+                let [bw, bh] = button.extent.map(i64::from);
+                if id != 0 && button.group == group && button.enable_count >= 0
+                    && contains_rect([x + dx, y + dy, bw, bh], point)
+                {
+                    return Some((slot, id));
+                }
+            }
+        }
+        None
+    }
     pub fn for_characters(count: usize) -> Result<Self> {
         ensure!(count <= 1_000_000, "ExHibit character layer count");
         // RetouchAdvCharacter's constructor initializes the layer field to -1.
@@ -145,6 +210,45 @@ impl Panels {
                 }
             }
         }
+    }
+    pub fn input_blocked(&self, slot: u8) -> bool {
+        self.input_blocks.get(&slot).copied().unwrap_or(0) != 0
+    }
+    pub fn scene_empty(&self) -> bool {
+        self.layers.is_empty() && self.pending.is_none()
+            && self.character_layers.iter().all(Option::is_none)
+    }
+    pub fn is_bound(&self, slot: u8) -> bool {
+        self.layers.contains_key(&slot)
+    }
+    pub fn exit_group(&mut self, group: u8) {
+        // cmdExitSelectItem destroys the group's objects. Image binding copies
+        // into the parent bitmap, which lives until the later billboard removal.
+        for layer in self.layers.values_mut() {
+            layer.items.retain(|_, button| button.group != group);
+        }
+    }
+    pub fn remove(
+        &mut self,
+        h: &mut dyn HostServices,
+        c: ClientId,
+        slot: u8,
+    ) -> Result<()> {
+        let Some(layer) = self.layers.get(&slot) else {
+            return Ok(());
+        };
+        ensure!(layer.items.is_empty(), "unsupported ExHibit removal with attached controls");
+        let id = 256 + u32::from(slot);
+        h.submit_engine(
+            c,
+            1,
+            &serde_json::to_vec(&serde_json::json!({"layers":[{"op":"remove","id":id}]}))?,
+        )?;
+        let layer = self.layers.remove(&slot).expect("removed layer");
+        if let Some(path) = layer.published {
+            h.release_image_resource(c, &path)?;
+        }
+        Ok(())
     }
     pub fn values(&self, slot: u8, kind: Kind) -> Result<[i32; 2]> {
         let surface = &self
@@ -321,7 +425,10 @@ impl Panels {
                 }
             };
             let cell = button_cell(pos, source, size, enabled)?;
-            Ok(meta.begin_process(base.with_composite_layer(cell), Arc::from(&b"[]"[..]))?)
+            Ok((
+                meta.begin_process(base.with_composite_layer(cell), Arc::from(&b"[]"[..]))?,
+                [size[0] / 3, size[1]],
+            ))
         })?;
         self.pending = Some((button, Pending::Preparing(task)));
         Ok(())
@@ -331,9 +438,10 @@ impl Panels {
             return Ok(true);
         };
         if let Pending::Preparing(task) = pending {
-            let Some(job) = task.try_take()? else {
+            let Some((job, extent)) = task.try_take()? else {
                 return Ok(false);
             };
+            button.extent = extent;
             *pending = Pending::Composing(job);
         }
         let Pending::Composing(job) = pending else {
@@ -364,7 +472,7 @@ impl Panels {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::{
         fs,
@@ -384,7 +492,7 @@ mod tests {
         panels.control_input(42, true, false);
         assert_eq!(panels.input_blocks[&42], 0);
     }
-    fn bitmap(indices: &[u8], alpha: &[u8]) -> Vec<u8> {
+    pub(crate) fn bitmap(indices: &[u8], alpha: &[u8]) -> Vec<u8> {
         let stride = indices.len().next_multiple_of(4);
         let mut b = b"GYU\x1a\x03\x00\x00\x01".to_vec();
         for word in [
@@ -486,6 +594,26 @@ mod tests {
                 &*image.rgba(),
                 &[4, 2, 1, 9, 5, 2, 1, 15, 8, 2, 1, 80, 9, 2, 1, 255]
             );
+            let mut selection = Selection::new(0, 1300);
+            let press = InputFrame {
+                buttons_down: buttons::MOUSE_LEFT,
+                buttons_pressed: buttons::MOUSE_LEFT,
+                ..InputFrame::default()
+            };
+            let release = InputFrame::default();
+            assert_eq!(selection.poll(&panels, release, Some([1, 0])), None);
+            assert_eq!(selection.poll(&panels, press, Some([2, 0])), None);
+            assert_eq!(selection.poll(&panels, release, Some([2, 0])), None);
+            assert_eq!(selection.poll(&panels, press, Some([1, 0])), None);
+            assert_eq!(selection.poll(&panels, release, Some([4, 0])), None);
+            assert_eq!(selection.poll(&panels, press, Some([1, 0])), None);
+            assert_eq!(selection.poll(&panels, release, None), None);
+            panels.control_input(42, false, false);
+            assert_eq!(selection.poll(&panels, press, Some([1, 0])), None);
+            assert_eq!(selection.poll(&panels, release, Some([1, 0])), None);
+            panels.control_input(42, true, false);
+            assert_eq!(selection.poll(&panels, press, Some([1, 0])), None);
+            assert_eq!(selection.poll(&panels, release, Some([1, 0])), Some(10));
             panels.disable(&mut rt.host, c, &pool, 42, 11)?;
             assert!(!panels.pending());
             assert_eq!(panels.layers[&42].items[&11].enable_count, -2);
@@ -524,6 +652,40 @@ mod tests {
                 rt.inspect()["engine"]["layers"]["clients"]["1"]["298"]["opacity"],
                 0
             );
+            panels.set_values(&mut rt.host, c, 42, Kind::Fade, [16, 0])?;
+            let tail = ",-1,0,0,0".repeat(6);
+            let mut exact = Animations::default();
+            for invalid in [
+                "0,1,42,0,500,0,44,0,500,0", // Asynchronous.
+                "0,0,42,0,499,0,44,0,500,0", // Different timing.
+                "0,0,42,0,500,0,44,1,500,0", // Nonzero target.
+            ] {
+                let spec = Spec::parse(Kind::Fade, format!("{invalid}{tail}").as_bytes())?;
+                assert!(exact.begin(spec, &panels, 1000, false).is_err());
+            }
+            let spec = Spec::parse(
+                Kind::Fade,
+                format!("0,0,42,0,500,0,44,0,500,0{tail}").as_bytes(),
+            )?;
+            exact.begin(spec, &panels, 1000, false)?;
+            exact.tick(&mut panels, &mut rt.host, c, 1468)?;
+            assert!(exact.waiting());
+            assert_eq!(panels.values(42, Kind::Fade)?, [1, 0]);
+            exact.tick(&mut panels, &mut rt.host, c, 1469)?;
+            assert!(!exact.waiting());
+            assert_eq!(panels.values(42, Kind::Fade)?, [0, 0]);
+            assert!(!panels.is_bound(44));
+            assert!(panels.remove(&mut rt.host, c, 42).is_err());
+            panels.exit_group(7);
+            assert_eq!(panels.layers[&42].items.len(), 2);
+            let published = panels.layers[&42].published.clone().unwrap();
+            panels.exit_group(0);
+            assert!(panels.layers[&42].items.is_empty());
+            assert_eq!(panels.layers[&42].published.as_deref(), Some(published.as_str()));
+            panels.remove(&mut rt.host, c, 42)?;
+            panels.remove(&mut rt.host, c, 42)?;
+            assert!(!panels.is_bound(42));
+            assert!(rt.inspect()["engine"]["layers"]["clients"]["1"]["298"].is_null());
             Ok(())
         })();
         fs::remove_dir_all(dir)?;

@@ -355,6 +355,11 @@ pub enum Tonemap {
     Aces,
     /// Clamp only, for debugging linear output.
     None,
+    /// Hable's filmic curve as published for Uncharted 2 (GDC 2010,
+    /// "Uncharted 2: HDR Lighting"): shoulder 0.15, linear strength 0.50,
+    /// linear angle 0.10, toe strength 0.20, toe numerator 0.02, toe
+    /// denominator 0.30, white point 11.2, after a fixed 2× exposure bias.
+    Filmic,
 }
 
 /// Colour adjustments before tonemapping (URP `ColorAdjustments`-style):

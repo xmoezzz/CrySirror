@@ -109,6 +109,7 @@ pub fn mesh(spec: &TerrainSpec, grid: &Grid) -> (PbrPrimitive, MipImage, PbrMate
     let prim = PbrPrimitive {
         skin_attrs: None,
         morphs: Vec::new(),
+        aux: None,
         vertices,
         indices,
         material: 0,

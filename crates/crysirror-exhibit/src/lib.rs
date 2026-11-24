@@ -3,17 +3,44 @@
 #![forbid(unsafe_code)]
 mod billboard;
 mod branch;
+mod character;
+mod character_body;
 mod clip;
 mod environment;
+mod message_area;
+mod local_controls;
+mod midori_state;
+mod midori_music;
+mod midori_sound_capture;
+mod midori_status_capture;
+mod midori_ambient;
+mod midori_actor;
+mod midori_actor_image;
+mod midori_color_filter;
+mod midori_background;
+mod midori_message;
+mod midori_positions;
+mod midori_prelude;
+mod midori_control_parts;
+mod midori_shortcuts;
 mod movie;
+mod opening_dlt;
 mod panel_animation;
+mod printer;
 mod profile;
 mod registers;
+mod scene_fade;
 mod select_items;
 mod slot_index;
 mod sound;
 mod surfaces;
 mod voice;
+#[cfg(test)]
+mod v1_census;
+#[cfg(test)]
+mod v3_census;
+#[cfg(test)]
+mod scenario_load_tests;
 use anyhow::{Context, Result, bail, ensure};
 use branch::{Condition, Position};
 use crysirror_core::{
@@ -136,6 +163,7 @@ impl Script {
         checkpoint_flag: &mut bool,
         draw: &[i32; 19],
         audio: &[i32; 12],
+        views: [bool; 2],
     ) -> Result<()> {
         if block.condition.matches(registers)? {
             if !block.marker {
@@ -150,7 +178,7 @@ impl Script {
                 } else {
                     block.id
                 };
-                registers.checkpoint_v1(id, &block.title, draw, audio)?;
+                registers.checkpoint_v1(id, &block.title, draw, audio, views)?;
                 self.block = id;
             }
         } else {
@@ -197,14 +225,27 @@ impl Script {
                     op,
                     0x05..=0x08
                         | 0x0a
+                        | 0x0b
                         | 0x0d
+                        | 0x12
                         | 0x14
                         | 0x16
                         | 0x17
                         | 0x18
-                        | 0x2f
-                        | 0x46
+                        | 0x2c | 0x2f
+                        | 0x30..=0x35 | 0xfb..=0xfd
+                        | 0x38..=0x3a
+                        | 0x3d
+                        | 0x3e
+                        | 0x46 | 0x47
+                        | 0x48
+                        | 0x49
+                        | 0x4a
+                        | 0x50
+                        | 0x6c | 0x6d
                         | 0x8c
+                        | 0xa7
+                        | 0xbd
                         | 0xbf
                 ),
             "unsupported ExHibit v{} execution opcode {op:#06x}",
@@ -250,6 +291,41 @@ impl Script {
                 at = end;
                 Action::Branch(op, 0, when)
             }
+            (0x46, 1, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineMidoriAmbient(midori_ambient::Definition::parse(raw)?)
+            }
+            (0x32, 0x31, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::MidoriMusic(midori_music::Track::parse(raw)?)
+            }
+            (0x33, 0, [ms, wait]) if self.abi == 3 => {
+                Action::StopMidoriMusic(midori_music::stop_duration(*ms, *wait)?)
+            }
+            (0x34 | 0x35, _, args) if self.abi == 3 => {
+                Action::MidoriAmbient(midori_ambient::Command::parse(op, flags, args)?)
+            }
+            (0xa7, 1, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::MidoriColorFilter(midori_color_filter::ColorFilter::deferred(raw)?)
+            }
+            (0xfc | 0xfd, 1, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                if op == 0xfc {
+                    Action::DrawMidoriActor(midori_actor::Draw::parse(raw)?)
+                } else {
+                    Action::ClearMidoriActor(midori_actor::clear_slot(raw)?)
+                }
+            }
+            (0xfb, 1, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineMidoriActorSlot(midori_actor::Definition::parse(raw)?)
+            }
             (0x46, 1, []) => {
                 let (raw, end) = cstring(&self.bytes, at)?;
                 at = end;
@@ -258,10 +334,36 @@ impl Script {
             (0xbf, 1, []) if self.abi == 3 => {
                 let (raw, end) = cstring(&self.bytes, at)?;
                 at = end;
-                Action::Change(registers::action2011(raw)?)
+                if raw.starts_with(b"338,") {
+                    Action::MidoriControlSounds(midori_control_parts::SoundUpdate::parse(raw)?)
+                } else {
+                    Action::Change(registers::action2011(raw)?)
+                }
             }
             (0x32..=0x3a, _, args) if self.abi == 1 => {
                 Action::Sound(sound::decode(op, flags, args)?)
+            }
+            (0x38..=0x3a, _, args) if self.abi == 3 => {
+                Action::MidoriEffect(sound::effect2011(op, flags, args)?)
+            }
+            (0x49, 0x91, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineMidoriArea(midori_message::AreaDefinition::parse(raw)?)
+            }
+            (0x47, 0x21, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineMidoriDebug(midori_prelude::DebugDefinition::parse(raw)?)
+            }
+            (0x48, 0x31, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                ensure!(raw == b"L9,0,-1", "unsupported ExHibit 2011 printer frame expression");
+                at = end;
+                Action::SelectMidoriFrame
+            }
+            (0x12, 0, [open, duration]) if self.abi == 3 => {
+                Action::ChangeMidoriVisibility(midori_message::Visibility::parse(*open, *duration)?)
             }
             (0x06 | 0x08 | 0x0a, 0x11, []) => {
                 let (raw, end) = cstring(&self.bytes, at)?;
@@ -290,10 +392,56 @@ impl Script {
                 left: Value::from_pair(*ak, *a),
                 right: Value::from_pair(*bk, *b),
             }),
-            (0x0b, 1, []) => {
+            (0x0b, 1, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                if raw.starts_with(b"60,") {
+                    Action::DefineMidoriMarker(midori_prelude::MarkerDefinition::parse(raw)?)
+                } else if raw.starts_with(b"57,") {
+                    Action::DefineMidoriControlPart(midori_control_parts::Part::parse(raw)?)
+                } else {
+                    Action::MidoriEntryName(midori_state::EntryAssignment::parse(raw)?)
+                }
+            }
+            (0x0b, 1, []) if self.abi == 1 => {
                 let (raw, end) = cstring(&self.bytes, at)?;
                 at = end;
                 registers::syscall(raw)?
+            }
+            (0x3d, 1, [table]) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::Change(Change::MidoriDefineDb(midori_state::DbDefinition::parse(
+                    *table, raw,
+                )?))
+            }
+            (0x3e | 0xbd, 1, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::Change(if op == 0x3e {
+                    Change::MidoriGetDb(midori_state::DbLookup::parse(raw)?)
+                } else {
+                    Change::MidoriSceneDone(midori_state::SceneDone::parse(raw)?)
+                })
+            }
+            (0x2c, 1, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineMidoriControlParts(midori_control_parts::Parts::parse(raw)?)
+            }
+            (0x6d, flags, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineMidoriShortcut(midori_shortcuts::Define::parse(flags, raw)?)
+            }
+            (0x6c, flags, args) if self.abi == 3 => {
+                Action::MidoriPosition(midori_positions::PositionCommand::read(flags,args)?)
+            }
+            (0x50, flags, args) if self.abi == 3 => {
+                Action::PanMidoriBackground(midori_background::MoveCrop::read(flags,args)?)
+            }
+            (0x4a, flags, args) if self.abi == 3 => {
+                Action::DrawMidoriBackground(midori_background::Draw::full_canvas(flags, args)?)
             }
             (
                 0x4a,
@@ -312,6 +460,22 @@ impl Script {
             {
                 Action::ControlInput(*first, *enable != 0, *complement != 0)
             }
+            (0x2c, 1, []) if self.abi == 1 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineLocalControls(local_controls::Definition::parse(raw)?)
+            }
+            (0x13, 0, [open @ (0 | 1)]) if self.abi == 1 => Action::LocalControlScope(*open != 0),
+            (0x12, 0, [1, _]) if self.abi == 1 => Action::OpenMessageBackdrop,
+            (0x48, 0, [id]) if self.abi == 1 && (0..=6).contains(id) => {
+                Action::MessageFrame(*id as u8)
+            }
+            (0x49, 1, []) if self.abi == 1 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineMessageArea(message_area::Area::parse(raw)?)
+            }
+            (0x4e, 0, [1200, 0x30001, 400, 0, 83]) if self.abi == 1 => Action::TitleSceneFade,
             (0x52, 0, [1, 1, _, _, 0, _] | [1, 1, _, _, 0, _, _, _, _, _]) if self.abi == 1 => {
                 Action::LeaveCompletedClip
             }
@@ -337,6 +501,21 @@ impl Script {
                 let (raw, end) = cstring(&self.bytes, at)?;
                 at = end;
                 Action::SelectItem(select_items::Button::parse(raw)?)
+            }
+            (0x5c, 0x20, [group, -1, dest, -1, -1, -1, -1, first, last, 23])
+                if self.abi == 1
+                    && (0..8).contains(group)
+                    && *dest >= 0
+                    && (0..127).contains(first)
+                    && (*first..127).contains(last) =>
+            {
+                Action::WaitForSelection(*group as u8, *dest)
+            }
+            (0x5d, 0, [group]) if self.abi == 1 && (0..8).contains(group) => {
+                Action::ExitSelection(*group as u8)
+            }
+            (0x5f, 0, [slot, 0]) if self.abi == 1 && (0..127).contains(slot) => {
+                Action::RemoveSurface(*slot as u8)
             }
             (0x5e, 0x11 | 0x21, []) if self.abi == 1 => {
                 let (raw, end) = cstring(&self.bytes, at)?;
@@ -365,6 +544,36 @@ impl Script {
                 })
             }
             (0x72, 0, [wait, fade]) => Action::LeaveMovie(*wait != 0, *fade),
+            (0x76, 0, [0, 1239, 4, 0, 0, -1, -1, -2, -1]) if self.abi == 1 => Action::PrepareOpeningDlt,
+            (0x77, 0, [0, 16, 800, -1]) if self.abi == 1 => Action::StartOpeningDlt,
+            (0x1c, 2, values) if self.abi == 1 && values == printer::FIRST_WORDS => {
+                let (speaker, end) = cstring(&self.bytes, at)?;
+                let (body, _) = cstring(&self.bytes, end)?;
+                let _checked = printer::OrdinarySay::decode(speaker, body)?;
+                // Keep PC and operand count unchanged until the linked native
+                // character-voice, history and hit-wait behavior can commit.
+                bail!("unsupported ExHibit opening printer voice/history/hit-wait")
+            }
+            (0x30, 1, []) if matches!(self.abi, 1 | 3) => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineCharacter(if self.abi == 3 {
+                    character::Definition::parse_2011(raw)?
+                } else {
+                    character::Definition::parse(raw)?
+                })
+            }
+            (0x31, 1, []) if self.abi == 1 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineBody(character_body::Definition::parse(raw)?)
+            }
+            (0x31, 0x11, []) if self.abi == 3 => {
+                let (raw, end) = cstring(&self.bytes, at)?;
+                at = end;
+                Action::DefineBody2011(character_body::Definition2011::parse(raw)?)
+            }
+            (0x75, 0, [0, 800, 0]) if self.abi == 1 => Action::StopOpeningDlt,
             (0x18 | 0x8c, 0, []) => Action::End,
             (0x11, 0x12, []) => {
                 let (name, end) = cstring(&self.bytes, at)?;
@@ -399,9 +608,42 @@ fn cstring(bytes: &[u8], at: usize) -> Result<(&[u8], usize)> {
 #[derive(Debug, PartialEq)]
 enum Action {
     Draw(i32, u64, [i32; 4], bool),
+    TitleSceneFade,
+    DefineLocalControls(local_controls::Definition),
+    DefineCharacter(character::Definition),
+    DefineBody(character_body::Definition),
+    DefineBody2011(character_body::Definition2011),
+    DefineMidoriActorSlot(midori_actor::Definition),
+    MidoriColorFilter(midori_color_filter::ColorFilter),
+    DrawMidoriBackground(midori_background::Draw),
+    PanMidoriBackground(midori_background::MoveCrop),
+    MidoriPosition(midori_positions::PositionCommand),
+    DrawMidoriActor(midori_actor::Draw),
+    ClearMidoriActor(usize),
+    DefineMidoriAmbient(midori_ambient::Definition),
+    MidoriAmbient(midori_ambient::Command),
+    MidoriMusic(midori_music::Track),
+    StopMidoriMusic(u32),
+    MidoriEntryName(midori_state::EntryAssignment),
+    DefineMidoriDebug(midori_prelude::DebugDefinition),
+    DefineMidoriMarker(midori_prelude::MarkerDefinition),
+    DefineMidoriControlPart(midori_control_parts::Part),
+    DefineMidoriControlParts(midori_control_parts::Parts),
+    DefineMidoriShortcut(midori_shortcuts::Define),
+    MidoriControlSounds(midori_control_parts::SoundUpdate),
+    LocalControlScope(bool),
+    MessageFrame(u8),
+    OpenMessageBackdrop,
+    DefineMessageArea(message_area::Area),
+    DefineMidoriArea(midori_message::AreaDefinition),
+    SelectMidoriFrame,
+    ChangeMidoriVisibility(midori_message::Visibility),
     Billboard(billboard::Billboard),
     Surface(surfaces::Surface),
     SelectItem(select_items::Button),
+    WaitForSelection(u8, i32),
+    ExitSelection(u8),
+    RemoveSurface(u8),
     DisableButton(i32, i32),
     ControlInput(i32, bool, bool),
     LeaveCompletedClip,
@@ -413,6 +655,7 @@ enum Action {
     CancelAuto,
     QuerySlots(i32),
     Sound(sound::Sound),
+    MidoriEffect(sound::Effect2011),
     Environment(environment::Definition),
     Wait(u64),
     Transfer(String, Condition),
@@ -421,6 +664,9 @@ enum Action {
     Label,
     Movie(movie::Movie),
     LeaveMovie(bool, i32),
+    PrepareOpeningDlt,
+    StartOpeningDlt,
+    StopOpeningDlt,
     End,
 }
 
@@ -434,18 +680,27 @@ impl Controls {
         if self.skip { 0 } else { ms }
     }
 }
+// Keep the capability path that actually produced the accepted script. A
+// queued transfer name is not yet the resident's current scenario (T2).
+struct ScenarioLoad {
+    script: Script,
+    seeds: Option<profile::Seeds>,
+    path: VfsPath,
+}
+
 struct Vm {
     client: ClientId,
     name: String,
     canvas: [u32; 2],
     script: Option<Script>,
     worker: TaskPool,
-    load: Option<Task<(Script, Option<profile::Seeds>)>>,
+    load: Option<Task<ScenarioLoad>>,
     abi: u32,
     sources: Option<profile::Sources>,
     seeds: Option<profile::Seeds>,
     deadline: u64,
     movie: Option<movie::Playing>,
+    opening_dlt: Option<opening_dlt::OpeningDlt>,
     leaving: Option<(bool, i32)>,
     halted: bool,
     checkpoint_flag: bool,
@@ -455,14 +710,40 @@ struct Vm {
     clip: Option<clip::Clip>,
     magnify_target: Option<[i32; 4]>,
     panels: select_items::Panels,
+    selection: Option<select_items::Selection>,
+    last_selected_item: Option<u8>,
     animations: panel_animation::Animations,
     billboard_shown: bool,
     billboard_fade: Option<billboard::Fade>,
     draw_scene: [i32; 19],
+    scene_fade: Option<scene_fade::SceneFade>,
+    message_areas: message_area::Catalog,
+    selected_message_area: Option<u8>,
+    message_backdrop: message_area::Backdrop,
+    local_controls: local_controls::Toolbar,
+    characters: character::Catalog,
+    midori_entries: midori_state::EntryNames,
+    midori_ambient: midori_ambient::Ambient,
+    midori_music: midori_music::Music,
+    midori_actor_slots: midori_actor::Slots,
+    midori_background: midori_background::Background,
+    midori_areas: midori_message::Catalog,
+    midori_positions: Option<midori_positions::Work>,
+    midori_debug: Option<midori_prelude::DebugDefinition>,
+    midori_marker: midori_prelude::Marker,
+    midori_control_defs: midori_control_parts::Definitions,
+    midori_shortcuts: midori_shortcuts::Catalog,
+    pending_message_area: Option<(u8, Task<message_area::Catalog>)>,
     registers: Registers,
     audio: sound::Audio,
 }
 impl Vm {
+    fn request_transferred_script(&mut self, name: String) {
+        self.registers.enter_transferred_script();
+        self.name = name;
+        self.script = None;
+    }
+
     fn tick(
         &mut self,
         h: &mut dyn HostServices,
@@ -486,17 +767,117 @@ impl Vm {
                 self.clip = None;
             }
         }
-        if !self
+        let mut delta_ready = true;
+        if let Some(delta) = &mut self.opening_dlt {
+            delta_ready = delta.present(h, self.client, &self.worker)?;
+            if delta.retired() {
+                self.opening_dlt = None;
+            }
+        }
+        let audio_ready = self
             .audio
-            .poll(h, self.client, &mut self.registers, input)?
-        {
+            .poll(h, self.client, &mut self.registers, input)?;
+        let ambience_ready = self.midori_ambient.poll(h, self.client)?;
+        let actor_ready = self.midori_actor_slots.present(h, self.client)?;
+        let music_ready = self.midori_music.poll(h, self.client, &mut self.registers)?;
+        let background_ready = self.midori_background.poll(h, self.client, &mut self.registers)?;
+        if !delta_ready || !audio_ready || !ambience_ready || !actor_ready || !music_ready {
             return Ok(VmYield::BudgetExhausted);
+        }
+        if !background_ready {
+            return Ok(self.midori_background.wait_until(clock).map_or(VmYield::BudgetExhausted, VmYield::WaitUntil));
+        }
+        if let Some(fade) = &mut self.scene_fade {
+            if !fade.present(h, self.client, self.canvas, &mut self.audio, &mut self.draw_scene)? {
+                return Ok(VmYield::WaitUntil(clock.saturating_add(1)));
+            }
+            self.scene_fade = None;
+        }
+        if !self.message_backdrop.present(h, self.client)? {
+            return Ok(VmYield::WaitUntil(clock.saturating_add(1)));
+        }
+        if !self.local_controls.present(h, self.client)? {
+            return Ok(VmYield::BudgetExhausted);
+        }
+        if !self.midori_marker.poll(self.client)? {
+            return Ok(VmYield::BudgetExhausted);
+        }
+        if !self.midori_areas.poll()? {
+            return Ok(VmYield::BudgetExhausted);
+        }
+        if !self.midori_areas.present(h, self.client, self.controls.skip)? {
+            return Ok(VmYield::WaitUntil(clock.saturating_add(1)));
+        }
+        if let Some((id, task)) = &mut self.pending_message_area {
+            let Some(catalog) = task.try_take()? else {
+                return Ok(VmYield::BudgetExhausted);
+            };
+            let id = *id;
+            self.message_areas.merge_missing(catalog);
+            self.message_areas.attach_inactive(id, h, self.client, &mut self.registers)?;
+            self.selected_message_area = Some(id);
+            self.pending_message_area = None;
         }
         if self.animations.waiting() {
             return Ok(VmYield::WaitUntil(clock.saturating_add(1)));
         }
         if !self.panels.poll(h, self.client)? {
             return Ok(VmYield::BudgetExhausted);
+        }
+        if let Some(selection) = &mut self.selection {
+            let pointer = if h.ui_input_owned(self.client).unwrap_or(false) {
+                None
+            } else {
+                match h.input_observation(self.client) {
+                    Ok(observed) if observed.focused == Some(false)
+                        || observed.pointer_inside == Some(false) => None,
+                    Ok(observed) => observed.pointer.or(Some([input.pointer_x, input.pointer_y])),
+                    Err(_) => Some([input.pointer_x, input.pointer_y]),
+                }
+            };
+            let (owned, action) = self.local_controls.pointer(h, self.client, input, pointer,
+                |slot| self.panels.input_blocked(slot))?;
+            if owned {
+                selection.poll(&self.panels, input, None);
+                if let Some(action) = action {
+                    use local_controls::ToolbarAction;
+                    match action {
+                        ToolbarAction::Auto => {
+                            let active = !self.controls.auto;
+                            self.controls.auto = active;
+                            self.registers.set_system(11, i32::from(active))?;
+                            self.local_controls.set_bank(h, self.client, 5, active)?;
+                            if active {
+                                self.controls.skip = false;
+                                let value = self.registers.read(Value::System(10))? & !15;
+                                self.registers.set_system(10, value)?;
+                                self.local_controls.set_bank(h, self.client, 6, false)?;
+                            }
+                        }
+                        ToolbarAction::Skip => {
+                            let value = self.registers.read(Value::System(10))?;
+                            let active = value & 15 == 0;
+                            self.registers.set_system(10, (value & !15) | i32::from(active))?;
+                            self.local_controls.set_bank(h, self.client, 6, active)?;
+                            if active {
+                                self.controls.auto = false;
+                                self.registers.set_system(11, 0)?;
+                                self.local_controls.set_bank(h, self.client, 5, false)?;
+                            } else {
+                                self.controls.skip = false;
+                            }
+                        }
+                        other => bail!("unsupported ExHibit toolbar action {} ({other:?})", other.native_id()),
+                    }
+                }
+                return Ok(VmYield::WaitForInput);
+            }
+            let Some(id) = selection.poll(&self.panels, input, pointer) else {
+                return Ok(VmYield::WaitForInput);
+            };
+            self.registers.set_normal(selection.destination, i32::from(id))?;
+            self.last_selected_item = Some(id);
+            self.selection = None;
         }
         if let Some((dest, task)) = &mut self.slot_query {
             let Some(occupied) = task.try_take()? else {
@@ -542,15 +923,19 @@ impl Vm {
                             .decode(&name, &mut bytes)?;
                     }
                     cancel.check()?;
-                    Ok((Script::new(bytes, abi)?, seeds))
+                    Ok(ScenarioLoad { script: Script::new(bytes, abi)?, seeds, path })
                 })?);
             }
-            if let Some((script, seeds)) = self
+            if let Some(ScenarioLoad { script, seeds, path }) = self
                 .load
                 .as_mut()
                 .context("missing scenario task")?
                 .try_take()?
             {
+                if script.abi == 3 {
+                    self.registers.midori_scenario_loaded(&path)?;
+                    self.midori_positions = Some(midori_positions::Work::begin_script());
+                }
                 self.script = Some(script);
                 self.seeds = seeds;
                 self.load = None;
@@ -582,6 +967,67 @@ impl Vm {
                 .next()
                 .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
             let ms = match action {
+                Action::DefineMidoriAmbient(def) => {
+                    self.midori_ambient.define(def);
+                    0
+                }
+                Action::MidoriMusic(track) => {
+                    if self.midori_music.play(h, self.client, &self.registers, track, self.controls.skip)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))? {
+                        return Ok(VmYield::BudgetExhausted);
+                    }
+                    0
+                }
+                Action::StopMidoriMusic(fade) => {
+                    if self.midori_music.stop(h, self.client, fade, self.controls.skip)? {
+                        return Ok(VmYield::BudgetExhausted);
+                    }
+                    0
+                }
+                Action::MidoriAmbient(command) => {
+                    if self.midori_ambient.issue(h, self.client, &self.registers, command, self.controls.skip)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))? {
+                        return Ok(VmYield::BudgetExhausted);
+                    }
+                    0
+                }
+                Action::MidoriPosition(cmd) => {
+                    self.midori_positions.as_mut().context("missing Midori local position work")?.apply(cmd);
+                    0
+                }
+                Action::PanMidoriBackground(pan) => {
+                    ensure!(!self.controls.skip && self.registers.read(Value::Flag(3))? == 0, "unsupported Midori pan HQ or skip state");
+                    self.midori_background.pan(pan, now)?;
+                    return Ok(VmYield::BudgetExhausted);
+                }
+                Action::DrawMidoriBackground(draw) => {
+                    ensure!(self.canvas == midori_background::VIEW && self.clip.is_none() && self.magnify_target.is_none()
+                        && !self.controls.skip, "unsupported Midori background canvas, clip or skip state");
+                    if self.midori_background.issue(draw, h, self.client, &self.worker, &mut self.registers)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))? {
+                        return Ok(VmYield::BudgetExhausted);
+                    }
+                    0
+                }
+                Action::MidoriColorFilter(filter) => {
+                    self.midori_actor_slots.set_filter(filter)?;
+                    0
+                }
+                Action::DefineMidoriActorSlot(def) => {
+                    ensure!(self.name.eq_ignore_ascii_case("def"), "unsupported Midori actor slot redefinition outside def");
+                    self.midori_actor_slots.define(def)?;
+                    0
+                }
+                Action::DrawMidoriActor(draw) => {
+                    self.midori_actor_slots.draw(draw, &self.characters, h, self.client, &self.worker)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
+                    return Ok(VmYield::BudgetExhausted);
+                }
+                Action::ClearMidoriActor(slot) => {
+                    self.midori_actor_slots.clear(slot, h, self.client)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
+                    0
+                }
                 Action::Environment(def) => {
                     self.audio.environment.define(def)?;
                     0
@@ -592,12 +1038,25 @@ impl Vm {
                         .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
                     return Ok(VmYield::BudgetExhausted);
                 }
+                Action::MidoriEffect(effect) => {
+                    if self.audio
+                        .issue_2011_effect(h, self.client, &self.registers, effect, self.controls.skip)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))? {
+                        return Ok(VmYield::BudgetExhausted);
+                    }
+                    0
+                }
                 Action::CancelSkip => {
                     self.controls.skip = false;
+                    let value = self.registers.read(Value::System(10))? & !15;
+                    self.registers.set_system(10, value)?;
+                    self.local_controls.set_bank(h, self.client, 6, false)?;
                     0
                 }
                 Action::CancelAuto => {
                     self.controls.auto = false;
+                    self.registers.set_system(11, 0)?;
+                    self.local_controls.set_bank(h, self.client, 5, false)?;
                     0
                 }
                 Action::QuerySlots(dest) => {
@@ -624,6 +1083,8 @@ impl Vm {
                     0
                 }
                 Action::Surface(surface) => {
+                    ensure!(surface.slot != opening_dlt::SLOT || self.opening_dlt.is_none(),
+                        "ExHibit billboard conflicts with opening delta layer");
                     self.panels
                         .define(h, self.client, surface)
                         .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
@@ -631,7 +1092,8 @@ impl Vm {
                 }
                 Action::PanelAnimation(spec) => {
                     self.animations
-                        .begin(spec, &self.panels, now, self.controls.skip)?;
+                        .begin(spec, &self.panels, now, self.controls.skip)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
                     if self.animations.waiting() {
                         return Ok(VmYield::WaitUntil(now.saturating_add(1)));
                     }
@@ -675,6 +1137,22 @@ impl Vm {
                         .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
                     return Ok(VmYield::BudgetExhausted);
                 }
+                Action::WaitForSelection(group, dest) => {
+                    self.selection = Some(select_items::Selection::new(group, dest));
+                    return Ok(VmYield::WaitForInput);
+                }
+                Action::ExitSelection(group) => {
+                    self.panels.exit_group(group);
+                    0
+                }
+                Action::RemoveSurface(slot) => {
+                    ensure!(slot != opening_dlt::SLOT || self.opening_dlt.is_none(),
+                        "ExHibit removal conflicts with opening delta layer");
+                    self.panels
+                        .remove(h, self.client, slot)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
+                    0
+                }
                 Action::Clip(target, duration, mode) => {
                     let id = self.draw_scene[0];
                     ensure!(
@@ -700,46 +1178,183 @@ impl Vm {
                     }
                     0
                 }
-                Action::Draw(id, ms, crop, retain_clip) => {
-                    self.clip = None;
+                Action::DefineMessageArea(area) => {
+                    self.message_areas.define(area);
+                    0
+                }
+                Action::DefineMidoriArea(definition) => {
+                    self.midori_areas.begin(definition, h, self.client, &self.worker)?;
+                    return Ok(VmYield::BudgetExhausted);
+                }
+                Action::SelectMidoriFrame => {
+                    if self.midori_areas
+                        .select_frame(h, self.client, &mut self.registers, self.controls.skip)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))? {
+                        return Ok(VmYield::WaitUntil(now.saturating_add(1)));
+                    }
+                    0
+                }
+                Action::ChangeMidoriVisibility(visibility) => {
+                    if self.midori_areas.change_visibility(
+                        visibility, h, self.client, &self.registers, self.controls.skip
+                    ).with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))? {
+                        return Ok(VmYield::WaitUntil(now.saturating_add(1)));
+                    }
+                    0
+                }
+                Action::DefineCharacter(definition) => {
+                    ensure!(
+                        self.name.eq_ignore_ascii_case("defChara"),
+                        "unsupported ExHibit character redefinition outside defChara"
+                    );
+                    self.characters.define(definition)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
+                    0
+                }
+                Action::DefineBody(definition) => {
+                    ensure!(
+                        self.name.eq_ignore_ascii_case("defChara"),
+                        "unsupported ExHibit body definition outside defChara"
+                    );
+                    self.characters.define_body(definition)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
+                    0
+                }
+                Action::DefineBody2011(definition) => {
+                    ensure!(
+                        self.name.eq_ignore_ascii_case("defChara"),
+                        "unsupported ExHibit 2011 body definition outside defChara"
+                    );
+                    self.characters.define_body_2011(definition)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
+                    0
+                }
+                Action::DefineMidoriDebug(definition) => {
+                    self.midori_debug = Some(definition);
+                    0
+                }
+                Action::DefineMidoriControlParts(parts) => {
+                    self.midori_control_defs.set_parts(parts);
+                    0
+                }
+                Action::DefineMidoriShortcut(definition) => {
+                    self.midori_shortcuts.define(definition);
+                    0
+                }
+                Action::DefineMidoriControlPart(part) => {
+                    self.midori_control_defs.set_part(part);
+                    0
+                }
+                Action::MidoriControlSounds(update) => {
+                    self.midori_control_defs.update_sound(update);
+                    0
+                }
+                Action::DefineMidoriMarker(definition) => {
+                    self.midori_marker.begin(definition, h, self.client)?;
+                    return Ok(VmYield::BudgetExhausted);
+                }
+                Action::MidoriEntryName(assignment) => {
+                    self.midori_entries.set(assignment);
+                    0
+                }
+                Action::DefineLocalControls(definition) => {
+                    self.local_controls.define(definition)?;
+                    0
+                }
+                Action::LocalControlScope(open) => {
+                    let mut banks = [false; 8];
+                    banks[5] = self.controls.auto;
+                    banks[6] = self.registers.read(Value::System(10))? & 15 != 0;
+                    self.local_controls.change_scope(open, self.controls.skip, banks,
+                        h, self.client, &self.worker)
+                        .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
+                    if self.local_controls.busy() { return Ok(VmYield::BudgetExhausted); }
+                    0
+                }
+                Action::OpenMessageBackdrop => {
+                    let id = self.selected_message_area.context("no selected ExHibit message area")?;
+                    self.message_areas.open(
+                        id, &mut self.message_backdrop, h, self.client, &self.registers,
+                        self.controls.skip,
+                    ).with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
+                    if self.message_backdrop.waiting() {
+                        return Ok(VmYield::WaitUntil(now.saturating_add(1)));
+                    }
+                    0
+                }
+                Action::MessageFrame(id) => {
+                    ensure!(!self.message_backdrop.opened || self.selected_message_area == Some(id),
+                        "unsupported ExHibit active message area replacement");
+                    if self.selected_message_area == Some(id) {
+                        self.registers.set_normal(77, i32::from(id))?;
+                    } else if self.message_areas.has(id) {
+                        self.message_areas.attach_inactive(id, h, self.client, &mut self.registers)?;
+                        self.selected_message_area = Some(id);
+                    } else {
+                        let storage = h.storage(self.client)?;
+                        let task = self.worker.spawn(move |cancel| {
+                            cancel.check()?;
+                            let path = script_path("def")?;
+                            let reader = storage.open_read(&path)?;
+                            let bytes = crysirror_resource::read_all(reader.as_ref(), 8 << 20)?;
+                            cancel.check()?;
+                            message_area::Catalog::from_v1_definition(bytes)
+                        })?;
+                        self.pending_message_area = Some((id, task));
+                        return Ok(VmYield::BudgetExhausted);
+                    }
+                    0
+                }
+                Action::TitleSceneFade => {
+                    ensure!(
+                        self.name.eq_ignore_ascii_case("title") && self.last_selected_item == Some(10)
+                            && !self.controls.skip && self.panels.scene_empty()
+                            && !self.animations.live() && self.movie.is_none()
+                            && self.clip.is_none() && self.billboard_fade.is_none()
+                            && self.selected_message_area.is_none()
+                            && self.draw_scene[0] == 1246,
+                        "unsupported ExHibit title scene state at {}.rld+{pc:#x}",
+                        self.name
+                    );
                     self.magnify_target = None;
+                    self.scene_fade = Some(scene_fade::SceneFade::begin(
+                        h, self.client, self.canvas, &self.audio,
+                    )?);
+                    return Ok(VmYield::WaitUntil(now.saturating_add(1)));
+                }
+                Action::Draw(id, ms, crop, retain_clip) => {
+                    let opening = clip::is_opening_draw(
+                        script.abi, &self.name, pc, id, ms, crop, retain_clip,
+                    );
+                    if opening {
+                        ensure!(
+                            self.clip.is_none() && self.magnify_target.is_none()
+                                && self.opening_dlt.is_none() && self.movie.is_none()
+                                && !self.controls.skip,
+                            "unsupported ExHibit opening CG state"
+                        );
+                    }
                     let mut clip_flag = self.draw_scene[1] & 0x10000;
                     let asset = format!("res/g/ev/{:02}/{id:04}.gyu", id / 100);
                     let [w, hgt] = self.canvas;
-                    let mut layers = Vec::new();
-                    if ms != 0 {
-                        layers.push(json!({"op":"transition","transition":{"effect":{"kind":"crossfade"},"duration_ms":ms,"easing":{"progress":{"shape":{"kind":"steps","segments":16}}}}}));
-                    }
-                    let mut layer = json!({"id":1,"order":[0,0],"rect":[0,0,w,hgt],"paint":{"kind":"image","asset":asset}});
-                    if crop[2] > 0 {
-                        let [sx, sy, rw, rh] = crop.map(|v| v as u32);
-                        let [sw, sh] = h.image_size(self.client, &asset)?;
-                        clip_flag = if retain_clip && [sw, sh] != [16, 16] {
-                            0x10000
-                        } else {
-                            0
-                        };
-                        let right = sx.checked_add(rw).context("CG crop width overflow")?;
-                        let bottom = sy.checked_add(rh).context("CG crop height overflow")?;
-                        ensure!(
-                            rw == w && rh == hgt && right <= sw && bottom <= sh,
-                            "unsupported ExHibit CG crop {crop:?} on {sw}x{sh}"
-                        );
-                        layer["uv"] = json!([
-                            sx as f32 / sw as f32,
-                            sy as f32 / sh as f32,
-                            right as f32 / sw as f32,
-                            bottom as f32 / sh as f32
-                        ]);
-                    }
-                    layers.push(json!({"op":"put","layer":layer}));
+                    let uv = if crop[2] > 0 {
+                        let source = h.image_size(self.client, &asset)?;
+                        clip_flag = if retain_clip && source != [16, 16] { 0x10000 } else { 0 };
+                        Some(clip::draw_uv(crop, source, self.canvas, opening)?)
+                    } else {
+                        None
+                    };
                     h.submit_engine(
                         self.client,
                         1,
-                        &serde_json::to_vec(&json!({"layers":layers}))?,
+                        &serde_json::to_vec(&clip::draw_commands(&asset, self.canvas, uv, ms))?,
                     )?;
+                    self.clip = None;
+                    self.magnify_target = None;
                     self.draw_scene[0] = id;
                     self.draw_scene[1] = clip_flag;
+                    // 0x32580 snapshots the authored rectangle, not the
+                    // intersected copy geometry or the released backup rect.
                     self.draw_scene[2..6].copy_from_slice(&crop);
                     self.draw_scene[11] = (w | (hgt << 16)) as i32;
                     if self.registers.configured() {
@@ -749,6 +1364,27 @@ impl Vm {
                     ms
                 }
                 Action::Wait(ms) => self.controls.delay(ms),
+                Action::PrepareOpeningDlt => {
+                    ensure!(self.name.eq_ignore_ascii_case("F00A1101_2") && !self.controls.skip
+                        && self.opening_dlt.is_none() && !self.panels.is_bound(opening_dlt::SLOT),
+                        "unsupported ExHibit opening delta state");
+                    self.opening_dlt = Some(opening_dlt::OpeningDlt::prepare(h, self.client, &self.worker)?);
+                    if self.registers.configured() {
+                        self.registers.change(Change::Experience(registers::Bank::Cg, vec![opening_dlt::ID]))?;
+                    }
+                    return Ok(VmYield::BudgetExhausted);
+                }
+                Action::StartOpeningDlt => {
+                    ensure!(!self.controls.skip, "unsupported ExHibit skip during opening delta");
+                    self.opening_dlt.as_mut().context("missing ExHibit opening delta")?
+                        .start(h, self.client, &self.worker)?;
+                    return Ok(VmYield::BudgetExhausted);
+                }
+                Action::StopOpeningDlt => {
+                    ensure!(!self.controls.skip, "unsupported ExHibit skip during opening delta");
+                    self.opening_dlt.as_mut().context("missing ExHibit opening delta")?.stop(now)?;
+                    return Ok(VmYield::BudgetExhausted);
+                }
                 Action::Movie(movie) => {
                     self.movie = Some(movie::Playing::start(self.client, h, self.canvas, movie)?);
                     0
@@ -758,6 +1394,7 @@ impl Vm {
                     return Ok(VmYield::BudgetExhausted);
                 }
                 Action::End => {
+                    ensure!(self.opening_dlt.is_none(), "unsupported ExHibit end with live delta");
                     if script.abi == 3 {
                         self.registers.set_normal(6, 0)?;
                     }
@@ -773,6 +1410,7 @@ impl Vm {
                             &mut self.checkpoint_flag,
                             &self.draw_scene,
                             &self.audio.scene,
+                            [self.message_backdrop.opened, self.local_controls.open()],
                         )
                         .with_context(|| format!("ExHibit {}.rld+{pc:#x}", self.name))?;
                     0
@@ -788,9 +1426,8 @@ impl Vm {
                     if !when.matches(&self.registers)? {
                         continue;
                     }
-                    self.registers.enter_transferred_script();
-                    self.name = name;
-                    self.script = None;
+                    ensure!(self.opening_dlt.is_none(), "unsupported ExHibit transfer with live delta");
+                    self.request_transferred_script(name);
                     return Ok(VmYield::BudgetExhausted);
                 }
             };
@@ -822,6 +1459,11 @@ impl VmAdapter for Vm {
         self.script.is_none()
             || self.slot_query.is_some()
             || self.panels.pending()
+            || self.midori_marker.preparing()
+            || self.midori_areas.pending()
+            || self.midori_actor_slots.pending()
+            || self.midori_background.preparing()
+            || self.midori_music.preparing()
             || self.audio.preparation_pending()
     }
     fn step(
@@ -839,14 +1481,82 @@ impl VmAdapter for Vm {
     fn restore(&mut self, _: &[u8]) -> crysirror_core::Result<()> {
         Err(Error::Unsupported("ExHibit restore"))
     }
+    fn diagnostics(&self) -> Vec<u8> {
+        // A prepared native register image only, independent of script T204.
+        // In particular this does not unguard the 2011 block or write R61.
+        let midori_audio_candidate = if self.abi == 3 && self.seeds.is_some() && self.script.is_some() {
+            midori_sound_capture::SoundCapture::from_owners(&self.midori_music, &self.midori_ambient)
+                .map(|capture| json!({"normal":capture.normal, "text":capture.text}))
+        } else {
+            None
+        };
+        let midori_status_candidate = if self.abi == 3 && self.seeds.is_some() && self.script.is_some() {
+            midori_status_capture::StatusCapture::from_owners(&self.registers, &self.midori_areas, &self.midori_entries)
+                .ok()
+                .map(|capture| json!({
+                    "printer_open": capture.printer_open.map(|write| [write.register as i32, write.mask, write.bits]),
+                    "block_flag_0x40": ({
+                        let w = midori_status_capture::MaskedNormal::authored_block_flag(self.checkpoint_flag);
+                        [w.register as i32,w.mask,w.bits]
+                    }),
+                    "printer_socket": capture.printer_socket.map(|socket| json!({"normal":socket.index, "text":socket.packet})),
+                    "entry_names": [json!(capture.entry_names.0), json!(String::from_utf8_lossy(&capture.entry_names.1))],
+                    "experience": {
+                        "base": capture.experience.base, "counts": capture.experience.counts,
+                        "words": capture.experience.words, "nonzero": capture.experience.nonzero_words()
+                    }
+                }))
+        } else {
+            None
+        };
+        let midori_filter_candidate = if self.abi == 3 && self.seeds.is_some() && self.script.is_some() {
+            self.registers.text(4).ok().and_then(|text| self.midori_actor_slots.capture_filter(text))
+        } else {
+            None
+        };
+        serde_json::to_vec(&json!({
+            "abi": self.abi,
+            "scenario": self.name,
+            "record_offset": self.script.as_ref().map(|script| script.pc),
+            "waiting_for_selection": self.selection.is_some(),
+            "last_selected_item": self.last_selected_item,
+            "scene_fade_in_progress": self.scene_fade.is_some(),
+            "message_area": self.selected_message_area,
+            "message_backdrop_open": self.message_backdrop.opened,
+            "local_controls_open": self.local_controls.open(),
+            "opening_dlt_live": self.opening_dlt.is_some(),
+            "authored_characters": self.characters.len(),
+            "authored_body_variants": self.characters.body_count(),
+            "midori_entry_names": self.midori_entries.count(),
+            "midori_area_geometry": self.midori_areas.geometries(),
+            "midori_installed_frame": self.midori_areas.installed(),
+            "midori_bgm_requested_and_audible": self.midori_music.ids(),
+            "midori_audio_checkpoint_candidate": midori_audio_candidate,
+            "midori_status_checkpoint_candidate": midori_status_candidate,
+            "midori_filter_checkpoint_candidate": midori_filter_candidate,
+            "midori_background_checkpoint_candidate": self.midori_background.capture(),
+            "midori_background_crop": self.midori_background.current_crop(),
+            "midori_debug_definition": self.midori_debug.as_ref().map(|state| json!({"mode":state.mode,"pairs":state.pairs})),
+            "midori_control_parts": self.midori_control_defs.part_status().ok(),
+            "midori_shortcuts": self.midori_shortcuts,
+            "midori_control_sounds": self.midori_control_defs.sound_slots(),
+            "midori_marker_geometry": self.midori_marker.geometry(),
+            "midori_marker_checkpoint_candidate": self.midori_marker.capture(),
+            "midori_local_position_checkpoint_candidate": self.midori_positions.as_ref().map(midori_positions::Work::capture),
+            "midori_printer_depth": self.midori_areas.depth(),
+            "midori_portrait_poses": self.midori_actor_slots.poses(),
+            "midori_portrait_checkpoint_rows": self.midori_actor_slots.checkpoint_rows()
+                .filter(|_| self.abi == 3 && self.script.is_some()),
+        }))
+        .unwrap_or_default()
+    }
 }
 struct Factory;
-impl crysirror_runtime::runtime::VmFactory for Factory {
-    fn create(
-        &self,
+impl Factory {
+    fn scenario(
         client: ClientId,
         spec: &crysirror_runtime::model::ClientSpec,
-    ) -> Result<Box<dyn VmAdapter>> {
+    ) -> Result<Vm> {
         let config: Config = serde_json::from_value(spec.config.clone())?;
         ensure!(
             matches!(config.abi, 1 | 3),
@@ -862,7 +1572,7 @@ impl crysirror_runtime::runtime::VmFactory for Factory {
             "invalid ExHibit slot count"
         );
         script_path(&config.entry)?;
-        Ok(Box::new(Vm {
+        Ok(Vm {
             client,
             name: config.entry,
             canvas: config.canvas,
@@ -874,6 +1584,7 @@ impl crysirror_runtime::runtime::VmFactory for Factory {
             sources: config.sources,
             seeds: None,
             movie: None,
+            opening_dlt: None,
             leaving: None,
             halted: false,
             checkpoint_flag: false,
@@ -886,8 +1597,30 @@ impl crysirror_runtime::runtime::VmFactory for Factory {
             panels: select_items::Panels::for_characters(
                 config.limits.map_or(0, |l| l.characters.saturating_add(3)),
             )?,
+            selection: None,
+            last_selected_item: None,
             billboard_shown: false,
             billboard_fade: None,
+            scene_fade: None,
+            message_areas: Default::default(),
+            selected_message_area: None,
+            message_backdrop: Default::default(),
+            local_controls: Default::default(),
+            midori_entries: Default::default(),
+            midori_ambient: Default::default(),
+            midori_music: Default::default(),
+            midori_actor_slots: midori_actor::Slots::for_view(config.canvas),
+            midori_background: Default::default(),
+            midori_areas: Default::default(),
+            midori_positions: None,
+            midori_debug: None,
+            midori_marker: Default::default(),
+            midori_control_defs: Default::default(),
+            midori_shortcuts: Default::default(),
+            characters: character::Catalog::new(
+                config.limits.map_or(0, |l| l.characters.saturating_add(3)),
+            ),
+            pending_message_area: None,
             draw_scene: [
                 -1,
                 0,
@@ -911,7 +1644,16 @@ impl crysirror_runtime::runtime::VmFactory for Factory {
             ],
             registers: Registers::for_scenario(config.limits, config.abi, config.canvas)?,
             audio: sound::Audio::default(),
-        }))
+        })
+    }
+}
+impl crysirror_runtime::runtime::VmFactory for Factory {
+    fn create(
+        &self,
+        client: ClientId,
+        spec: &crysirror_runtime::model::ClientSpec,
+    ) -> Result<Box<dyn VmAdapter>> {
+        Ok(Box::new(Self::scenario(client, spec)?))
     }
 }
 pub fn register(registry: &mut crysirror_runtime::AdapterRegistry) -> Result<()> {
@@ -929,6 +1671,21 @@ mod tests {
         }
         bytes.extend(records);
         Script::new(bytes, 1)
+    }
+
+    #[test]
+    fn shape_checked_opening_say_does_not_advance_an_unimplemented_operation() -> Result<()> {
+        let mut record = vec![0x1c, 0, 7, 2];
+        for value in printer::FIRST_WORDS {
+            record.extend(value.to_le_bytes());
+        }
+        record.extend([0x8b, 0x4c, 0x8f, 0x71, 0, 0x96, 0x7b, 0]);
+        let mut script = fixture(&record, 1)?;
+        let before = (script.pc, script.remaining);
+        let error = script.next().expect_err("staged printer does not admit native say");
+        assert!(error.to_string().contains("voice/history/hit-wait"));
+        assert_eq!((script.pc, script.remaining), before);
+        Ok(())
     }
 
     #[test]
@@ -1060,7 +1817,7 @@ mod native_state_tests {
         r.mark_message(31)?;
         r.mark_message(32)?;
         r.change(registers::assignment(6, b"0,77,0,22,*,")?)?;
-        r.checkpoint_v1(9, b"gallery", &draw, &audio.scene)?;
+        r.checkpoint_v1(9, b"gallery", &draw, &audio.scene, [true, true])?;
         assert_eq!(r.read(Value::Local(2))?, 9);
         assert_eq!(r.text(1)?, b"gallery");
         assert_eq!(r.read(Value::Local(10))?, 13);
@@ -1074,6 +1831,16 @@ mod native_state_tests {
         assert_eq!(r.read(Value::System(base + 4 + 32 + 4))?, 2);
         assert_eq!(r.read(Value::System(base + 4 + 32 + 8 + 16))?, 0x01000080);
         assert_eq!(r.read(Value::System(base + 5 + 32 + 8 + 16))?, 128);
+        Ok(())
+    }
+    #[test]
+    fn checkpoint_replaces_only_the_two_native_view_bits() -> Result<()> {
+        let mut r = fresh(1)?;
+        r.set_normal(4, 0x97)?;
+        for bits in 0..4 {
+            r.checkpoint_v1(1, b"", &[0; 19], &[0; 12], [bits & 1 != 0, bits & 2 != 0])?;
+            assert_eq!(r.read(Value::Local(4))?, 0x94 | bits);
+        }
         Ok(())
     }
     #[test]
@@ -1091,11 +1858,14 @@ mod native_state_tests {
             let Action::Block(b) = script.next()? else {
                 bail!("expected block")
             };
-            script.visit_block(b, &mut regs, &mut flag, &[0; 19], &[0; 12])?;
+            script.visit_block(b, &mut regs, &mut flag, &[0; 19], &[0; 12], [false; 2])?;
         }
         assert_eq!(script.remaining, 0);
         assert!(flag);
         assert_eq!(script.block, 1);
+        let page = midori_status_capture::MaskedNormal::authored_block_flag(flag);
+        assert_eq!((page.register, page.mask, page.bits), (4, 0x80, 0x80));
+        assert_eq!(regs.read(Value::Local(4))?, 0);
         assert!(regs.text(1)?.is_empty());
         Ok(())
     }

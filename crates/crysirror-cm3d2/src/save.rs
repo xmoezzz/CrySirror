@@ -416,6 +416,27 @@ impl Game {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn legacy_colour_record_keeps_seven_entries_and_the_following_field() {
+        use super::*;
+        let mut maid = Maid::new(false);
+        let mut changed = maid.parts_color[2];
+        changed.main_hue = 73;
+        maid.set_parts_color(2, changed);
+        let mut w = Writer::default();
+        write_colors(&mut w, &maid);
+        w.i32(0x12345678);
+        let mut header = Reader::new(&w.bytes);
+        header.expect_str("CM3D2_MULTI_COL").unwrap();
+        assert_eq!(header.i32().unwrap(), 100);
+        assert_eq!(header.i32().unwrap(), 7);
+        let mut restored = Maid::new(false);
+        let mut r = Reader::new(&w.bytes);
+        read_colors(&mut r, &mut restored).unwrap();
+        assert_eq!(restored.parts_color, maid.parts_color);
+        assert_eq!(r.i32().unwrap(), 0x12345678);
+    }
+
+    #[test]
     fn mono_hash_matches_the_managed_string_hash() {
         // h = 31·h + c: "a" → 97, "ab" → 97·31 + 98.
         assert_eq!(super::mono_string_hash(""), 0);

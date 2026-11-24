@@ -23,7 +23,14 @@ use crysirror_scene::{
 use glam::{EulerRot, Quat};
 use serde::Serialize;
 
-pub const MAX_IMPORT_BYTES: usize = 64 * 1024 * 1024;
+/// Mirrors `crysirror_core::limits::LARGE_ASSET_BYTES` (64 MiB on PS Vita
+/// and Switch, 256 MiB in the browser, 1 GiB elsewhere).
+#[cfg(any(target_os = "vita", target_os = "horizon"))]
+pub const MAX_IMPORT_BYTES: usize = 64 << 20;
+#[cfg(all(target_arch = "wasm32", not(any(target_os = "vita", target_os = "horizon"))))]
+pub const MAX_IMPORT_BYTES: usize = 256 << 20;
+#[cfg(not(any(target_os = "vita", target_os = "horizon", target_arch = "wasm32")))]
+pub const MAX_IMPORT_BYTES: usize = 1 << 30;
 pub const MAX_ENTITIES: usize = 4096;
 pub const MAX_TRIANGLES: usize = 1_000_000 / 3;
 /// glTF extensions whose data the engine represents (others are reported).

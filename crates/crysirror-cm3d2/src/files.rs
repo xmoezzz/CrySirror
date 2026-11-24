@@ -33,7 +33,7 @@ impl GameFiles {
         for root in archives {
             let mut pending = vec![root.clone()];
             while let Some(dir) = pending.pop() {
-                for name in storage.list(Mount::Asset, &dir)? {
+                for name in storage.list(Mount::Asset, &dir).with_context(|| format!("list game archive directory {dir:?}"))? {
                     let path = format!("{dir}/{name}");
                     // Every file has a short ASCII extension; folders may
                     // contain dots too (`01.処女喪失セックス`).
@@ -71,7 +71,8 @@ impl GameFiles {
 
     pub fn read(&self, storage: &dyn ClientStorage, name: &str) -> Result<Vec<u8>> {
         let path = self.path(name).with_context(|| format!("CM3D2 file {name} is not in the game archives"))?;
-        Ok(storage.read(&VfsPath::new(Mount::Asset, path)?)?)
+        let path = VfsPath::new(Mount::Asset, path).with_context(|| format!("invalid game archive entry {path:?}"))?;
+        storage.read(&path).with_context(|| format!("read game archive entry {}", path.relative()))
     }
 
     pub fn len(&self) -> usize {

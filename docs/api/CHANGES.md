@@ -1,27 +1,20 @@
 # API change log
 
-## `dee14378e9a0505e` (2026-11-24) · Clipped HSL modulation
+## `54baf5ebf50648f1` (2026-11-24) — KiriKiri compatibility
 
-`ImageEffect.hsl_modulate` accepts an optional `rect` in image pixels
-`[x, y, width, height]`. Existing JSON that omits it still modulates the
-whole image. Rust constructors can supply `rect: None` for that behavior.
+- `Ui.setTextSelection(id, start, end)` enables caret editing in an owned field. Offsets are UTF-16 code units. End `-1` extends to the end and start `-1` collapses at the caret. Insertion replaces the selection, and backspace deletes it or the preceding grapheme. Plain fields retain append and scalar deletion. Rust matches over `UiCommand` must handle `SetTextSelection`.
+- `ImageEffect.hsl_modulate` accepts an optional `rect` in image pixels `[x, y, width, height]`. Existing JSON without it still modulates the whole image. Rust constructors can pass `rect: None` for that behavior.
+- KiriKiri adapter configuration accepts an optional `launcher_overlay` with an ordered list of session-local XP3 overrides. The launcher resolves it with `detect_source_with_entry`. Existing directory callers can continue using `detect_source`.
 
-## `1c2e078251b5e7a6` (2026-11-22) · Text field selection
+The previous upstream fingerprint was `9640ededc06f0fce`.
 
-`Ui.setTextSelection(id, start, end)` enables caret editing for an owned
-editable field. The two offsets are UTF-16 code units. End `-1` extends
-the selection to the end, and start `-1` collapses it at the caret.
-`Ui.insertText` replaces that range or inserts at the caret. Existing
-fields keep their original editing behavior until selection is requested.
-The corresponding `UiCommand::SetTextSelection` is appended to the enum.
+## `9640ededc06f0fce` (2026-11-24) — filmic tonemap
 
-## `a6235515c431567d` (2026-11-22) · KiriKiri launcher overrides
+`Environment.tonemap` accepts `filmic`: Hable's curve as published for Uncharted 2 (GDC 2010), with a fixed 2× exposure bias and white point 11.2. Existing environments keep their tonemap. Rust callers with exhaustive `Tonemap` matches need the new arm. The previous fingerprint was `01a2119f5ee7031e`.
 
-KiriKiri project configuration gains an optional `launcher_overlay`. Explicit
-launcher selection supplies an ordered set of mounted XP3 archives and the
-accepted protocols from the launcher's manifest. Existing project files omit
-the field. Rust callers can use `detect_source_with_entry` to preserve the
-selected executable. Directory callers continue to use `detect_source`.
+## `01a2119f5ee7031e` (2026-11-24) — vertex layer blend and baked vertex irradiance effects
+
+Regeneration adds the `vertex_layer_blend` and `baked_vertex_irradiance` `ShaderEffect` variants to the reference. Both read the primitive's `_AUX` vertex stream; materials without them are unchanged. Rust callers with exhaustive `ShaderEffect` matches need the new arms. The previous fingerprint was `c95d822ee88e0793`.
 
 ## `c95d822ee88e0793` (2026-11-23) — authored material raster queues
 

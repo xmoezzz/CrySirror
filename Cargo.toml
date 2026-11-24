@@ -171,6 +171,7 @@ crysirror-kag = { path = "crates/crysirror-kag" }
 crysirror-cm3d2 = { path = "crates/crysirror-cm3d2" }
 crysirror-exhibit = { path = "crates/crysirror-exhibit" }
 crysirror-amanatsu = { path = "crates/crysirror-amanatsu" }
+crysirror-naughty-dog = { path = "crates/crysirror-naughty-dog" }
 crysirror-unity = { path = "crates/crysirror-unity" }
 crysirror-dotnet = { path = "crates/crysirror-dotnet" }
 crysirror-rfvp-vm = { path = "crates/crysirror-rfvp-vm", default-features = false, features = ["no_std"] }

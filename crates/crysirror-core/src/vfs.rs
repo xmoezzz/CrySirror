@@ -27,7 +27,7 @@ pub trait VfsProvider: Send + Sync {
     /// Legacy providers retain a bounded in-memory fallback.
     fn open(&self, relative: &str) -> Result<Arc<dyn AssetReader>> {
         let bytes = self.read(relative)?;
-        if bytes.len() > 64 * 1024 * 1024 {
+        if bytes.len() as u64 > crate::limits::LARGE_ASSET_BYTES {
             return Err(Error::Limit("provider file size"));
         }
         Ok(Arc::new(MemoryAssetReader(Arc::from(bytes))))

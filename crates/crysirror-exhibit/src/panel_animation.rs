@@ -135,6 +135,14 @@ impl Lane {
         })
     }
 }
+fn covered_empty_fade(lanes: &[Lane], duration: u32) -> bool {
+    // The arithmetic proof needs no overflow in level * duration.
+    duration <= u32::MAX / 16
+        && lanes
+            .iter()
+            .any(|l| l.from == [16, 0] && l.to == [0, 0] && l.ms == duration)
+}
+
 struct Sequence {
     start: u64,
     delay: u32,
@@ -154,10 +162,19 @@ impl Animations {
             "unsupported ExHibit append to retained animation channel"
         );
         let mut lanes = Vec::new();
+        let mut empty_fades = Vec::new();
         for target in spec.targets {
             let Some(slot) = panels.resolve_slot(target.slot) else {
                 continue;
             };
+            if spec.kind == Kind::Fade && !panels.is_bound(slot) {
+                ensure!(
+                    !spec.asynchronous && target.value == [0, 0],
+                    "unsupported ExHibit fade of unbound slot {slot}"
+                );
+                empty_fades.push((slot, target.duration));
+                continue;
+            }
             let from = panels.values(slot, spec.kind)?;
             let to = if spec.relative {
                 std::array::from_fn(|i| from[i].wrapping_add(target.value[i]))
@@ -178,6 +195,17 @@ impl Animations {
                 ms: if skip { 0 } else { target.duration },
                 mode: target.mode,
             });
+        }
+        for (slot, duration) in empty_fades {
+            // The native inactive slot retains its descriptor level and cannot
+            // paint (0x81090). Any level 0..=16 reaches zero no later than a
+            // full-opacity bound lane of the same duration and channel delay
+            // under the native integer interpolation (0xd7a0). Only admit
+            // that synchronized case rather than guessing a dormant level.
+            ensure!(
+                covered_empty_fade(&lanes, if skip { 0 } else { duration }),
+                "unsupported ExHibit fade completion for unbound slot {slot}"
+            );
         }
         if !lanes.is_empty() {
             self.channels.insert(
@@ -255,6 +283,18 @@ impl Animations {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn empty_fade_requires_a_matching_bound_completion() {
+        let mut bound = Lane { slot: 42, from: [16, 0], to: [0, 0], ms: 500, mode: 0 };
+        assert!(covered_empty_fade(&[bound], 500));
+        assert!(!covered_empty_fade(&[], 500));
+        bound = Lane { slot: 42, from: [15, 0], to: [0, 0], ms: 500, mode: 0 };
+        assert!(!covered_empty_fade(&[bound], 500));
+        bound = Lane { slot: 42, from: [16, 0], to: [0, 0], ms: 499, mode: 0 };
+        assert!(!covered_empty_fade(&[bound], 500));
+        bound = Lane { slot: 42, from: [16, 0], to: [1, 0], ms: 500, mode: 0 };
+        assert!(!covered_empty_fade(&[bound], 500));
+    }
     #[test]
     fn original_fade_and_move_have_distinct_rounding() {
         let mut lane = Lane {

@@ -59,6 +59,7 @@ pub fn adapter_registry() -> Result<AdapterRegistry> {
     crysirror_cm3d2::register(&mut registry)?;
     crysirror_exhibit::register(&mut registry)?;
     crysirror_amanatsu::register(&mut registry)?;
+    crysirror_naughty_dog::register(&mut registry)?;
     Ok(registry)
 }
 pub fn load_project(path: &Path) -> Result<Project> {
@@ -99,6 +100,9 @@ pub fn load_project(path: &Path) -> Result<Project> {
     for c in project.clients.iter().filter(|c| c.adapter == "amanatsu") {
         serde_json::from_value::<crysirror_amanatsu::Config>(c.config.clone())?.validate()?;
     }
+    for c in project.clients.iter().filter(|c| c.adapter == crysirror_naughty_dog::ENGINE_ID) {
+        serde_json::from_value::<crysirror_naughty_dog::Config>(c.config.clone())?.validate()?;
+    }
     for c in project.clients.iter().filter(|c| c.adapter == "avg32") {
         serde_json::from_value::<crysirror_avg32::Config>(c.config.clone())?.validate()?;
     }
@@ -130,6 +134,16 @@ pub fn bootstrap_interruptible(mut rt: Runtime, plan: &Plan, cancelled: impl Fn(
     }
     {
         use crysirror_engine::Value;
+        let mut sources = std::collections::BTreeMap::<String, String>::new();
+        for mount in &plan.mounts {
+            if mount.options["format"] == "kiss/warc" && mount.source.to_ascii_lowercase().ends_with(".bz2") {
+                #[cfg(target_arch = "wasm32")]
+                bail!("bzip2 archive preparation requires a disk cache");
+                #[cfg(not(target_arch = "wasm32"))]
+                sources.insert(mount.source.clone(),
+                    crate::compressed_archive::mount(&mut rt, &mount.source, &cancelled)?);
+            }
+        }
         let mut engine = crysirror_engine::App::new(rt, "game")?;
         engine.init()?;
         let cx = engine.context();
@@ -169,7 +183,7 @@ pub fn bootstrap_interruptible(mut rt: Runtime, plan: &Plan, cancelled: impl Fn(
                     resources,
                     "beginDecode",
                     &[
-                        Value::Str(mount.source.clone()),
+                        Value::Str(sources.get(&mount.source).unwrap_or(&mount.source).clone()),
                         Value::Str("archive".into()),
                         Value::from_json(mount.options.clone()),
                     ],

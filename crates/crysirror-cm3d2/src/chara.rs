@@ -159,6 +159,7 @@ pub fn mpn(name: &str) -> Option<usize> {
 
 #[derive(Clone, Debug, Default)]
 pub struct Maid {
+    pub(crate) prop_names: &'static [&'static str],
     pub man: bool,
     /// `m_aryMaidProp`, indexed by MPN.
     pub props: Vec<Prop>,
@@ -171,6 +172,8 @@ pub struct Maid {
     pub face: crate::face::FaceState,
     /// Head morph weights of this frame.
     pub morphs: BTreeMap<String, f32>,
+    pub(crate) tracking_rotations: BTreeMap<String,[f32;4]>,
+    pub body_morphs: BTreeMap<String, f32>,
     /// `Maid.SetAutoTwist` switches by `AutoTwist` name.
     pub auto_twist: BTreeMap<&'static str, bool>,
     /// `SetModeHairR`, `MuneYureL/R`, `SetBoneHitHeightY`.
@@ -205,6 +208,7 @@ pub struct Maid {
     pub chinko_visible: bool,
     /// `MaidParts` colours by `PARTS_COLOR`.
     pub parts_color: [crate::parts_color::PartsColor; 7],
+    pub(crate) outline_colors: Option<[crate::parts_color::PartsColor; 2]>,
     /// `Menu.m_dicResourceRef`: menu file (lower case) → key → menu
     /// (`リソース参照`, `半脱ぎ`).
     pub resource_refs: BTreeMap<String, BTreeMap<String, String>>,
@@ -238,6 +242,7 @@ impl Maid {
         // Maid.m_colMan default.
         Self {
             man,
+            prop_names: MPN,
             props,
             man_color: [0., 0.09, 1., 1.],
             man_alpha: 0.5,
@@ -252,6 +257,10 @@ impl Maid {
         }
     }
 
+    fn prop_index(&self, name: &str) -> Option<usize> {
+        self.prop_names.iter().position(|p| p.eq_ignore_ascii_case(name))
+    }
+
     /// A stock character (not an NPC, not dismissed).
     pub fn is_stock(&self) -> bool {
         !self.npc && !self.banished
@@ -259,17 +268,17 @@ impl Maid {
 
     /// Numeric prop value by MPN name (`GetProp(..).value`).
     pub fn value(&self, name: &str) -> i32 {
-        mpn(name).and_then(|i| self.props.get(i)).map_or(0, |p| p.value)
+        self.prop_index(name).and_then(|i| self.props.get(i)).map_or(0, |p| p.value)
     }
 
     /// Item menu of a prop (`strFileName`).
     pub fn file(&self, name: &str) -> Option<&str> {
-        mpn(name).and_then(|i| self.props.get(i)).map(|p| p.file.as_str()).filter(|f| !f.is_empty())
+        self.prop_index(name).and_then(|i| self.props.get(i)).map(|p| p.file.as_str()).filter(|f| !f.is_empty())
     }
 
     /// `Maid.SetProp(MPN, int)`: clamped to the prop's range.
     pub fn set_value(&mut self, name: &str, value: i32) -> Result<()> {
-        let i = mpn(name).with_context(|| format!("指定されたプロパティ名がありません。{name}"))?;
+        let i = self.prop_index(name).with_context(|| format!("指定されたプロパティ名がありません。{name}"))?;
         let p = &mut self.props[i];
         p.value = value.clamp(p.min, p.max);
         p.dut = true;
@@ -278,7 +287,7 @@ impl Maid {
 
     /// `Maid.SetProp(MaidProp, filename, rid, temp)`.
     pub fn set_prop_file(&mut self, name: &str, file: &str, temp: bool) -> Result<()> {
-        let i = mpn(name).with_context(|| format!("指定されたプロパティ名がありません。{name}"))?;
+        let i = self.prop_index(name).with_context(|| format!("指定されたプロパティ名がありません。{name}"))?;
         let p = &mut self.props[i];
         if temp {
             if file != p.temp_file {
@@ -286,7 +295,7 @@ impl Maid {
                 p.temp_file = file.to_owned();
             }
         } else {
-            if p.file != file || (70..=72).contains(&i) {
+            if p.file != file || matches!(self.prop_names[i], "set_maidwear" | "set_mywear" | "set_underwear" | "set_body") {
                 p.dut = true;
             }
             p.file = file.to_owned();
@@ -305,7 +314,7 @@ impl Maid {
 
     /// `Maid.ResetProp`: drop the temporary item, reprocess the original.
     pub fn reset_prop(&mut self, name: &str) -> Result<()> {
-        let i = mpn(name).with_context(|| format!("指定されたプロパティ名がありません。{name}"))?;
+        let i = self.prop_index(name).with_context(|| format!("指定されたプロパティ名がありません。{name}"))?;
         let p = &mut self.props[i];
         p.dut = true;
         p.temp_file.clear();
@@ -316,7 +325,7 @@ impl Maid {
     /// `Maid.ItemChangeTemp`: the `リソース参照` alternative of the prop's
     /// current menu as a temporary item.
     pub fn item_change_temp(&mut self, name: &str, key: &str) -> Result<()> {
-        let i = mpn(name).with_context(|| format!("指定されたプロパティ名がありません。{name}"))?;
+        let i = self.prop_index(name).with_context(|| format!("指定されたプロパティ名がありません。{name}"))?;
         let file = self.props[i].file.to_lowercase();
         let file = file.rsplit('/').next().unwrap_or(&file).to_owned();
         if let Some(alt) = self.resource_refs.get(&file).and_then(|r| r.get(key)).cloned() {
@@ -383,12 +392,14 @@ impl Maid {
 
     /// `MaidParts.SetPartsColor`: slots tinted by that colour rebuild.
     pub fn set_parts_color(&mut self, id: usize, color: crate::parts_color::PartsColor) {
-        if self.parts_color.get(id) == Some(&color) {
-            return;
-        }
-        if let Some(c) = self.parts_color.get_mut(id) {
-            *c = color;
-        }
+        let color_slot = if id < self.parts_color.len() {
+            self.parts_color.get_mut(id)
+        } else {
+            self.outline_colors.as_mut().and_then(|colors| colors.get_mut(id - self.parts_color.len()))
+        };
+        let Some(value) = color_slot else { return };
+        if *value == color { return; }
+        *value = color;
         for s in self.slots.values_mut() {
             if s.multicolor.values().any(|v| *v == id) {
                 s.dirty = true;
@@ -435,17 +446,18 @@ impl Maid {
             for i in 0..self.props.len() {
                 if self.props[i].kind == 3 && self.proc_item(files, storage, i)? {
                     changed = true;
+                    let prop_name = self.prop_names[i];
                     let mut redirty = |names: &[&str]| {
                         for n in names {
-                            if let Some(k) = mpn(n) {
+                            if let Some(k) = self.prop_index(n) {
                                 self.props[k].dut = true;
                             }
                         }
                     };
-                    match i {
-                        24..=27 | 49 => redirty(&["haircolor"]),
-                        23 => redirty(&["skin", "eye", "mayu", "eye_hi"]),
-                        29 => redirty(&["acctatoo", "hokuro", "lip"]),
+                    match prop_name {
+                        "hairf" | "hairr" | "hairt" | "hairs" | "hairaho" => redirty(&["haircolor"]),
+                        "head" => redirty(&["skin", "eye", "mayu", "eye_hi"]),
+                        "skin" => redirty(&["acctatoo", "hokuro", "lip"]),
                         _ => {}
                     }
                 }
@@ -455,7 +467,7 @@ impl Maid {
     }
 
     /// `Maid.ProcItem` for an item prop: the temporary menu, then the
-    /// original; sets (70..=72) clear themselves after running.
+    /// original; outfit and body sets clear themselves after running.
     fn proc_item(&mut self, files: &GameFiles, storage: &dyn ClientStorage, i: usize) -> Result<bool> {
         let mut result = false;
         if self.props[i].temp_dut {
@@ -465,7 +477,7 @@ impl Maid {
             }
             result = true;
             self.props[i].temp_dut = false;
-            if (70..=72).contains(&i) {
+            if matches!(self.prop_names[i], "set_maidwear" | "set_mywear" | "set_underwear" | "set_body") {
                 self.props[i].temp_file.clear();
             }
         }
@@ -476,7 +488,7 @@ impl Maid {
             }
             result = true;
             self.props[i].dut = false;
-            if (70..=72).contains(&i) {
+            if matches!(self.prop_names[i], "set_maidwear" | "set_mywear" | "set_underwear" | "set_body") {
                 self.props[i].file.clear();
             }
         }
@@ -568,7 +580,10 @@ impl Maid {
                 // the property are removed (MulTexRemove).
                 "tex" | "テクスチャ変更" if !self.man => {
                     let color = if c.len() == 6 {
-                        Some(crate::parts_color::id(arg(5)).with_context(|| format!("無限色IDがありません。{}", arg(5)))?)
+                        Some(crate::parts_color::id(arg(5)).or_else(|| {
+                            if self.prop_names == MPN { return None; }
+                            match arg(5) { "HAIR_OUTLINE" => Some(7), "SKIN_OUTLINE" => Some(8), _ => None }
+                        }).with_context(|| format!("無限色IDがありません。{}", arg(5)))?)
                     } else {
                         None
                     };
@@ -770,11 +785,20 @@ pub fn body_skin_visibility(body: &Mesh, slots: &[&Slot]) -> Vec<bool> {
     visible
 }
 
+struct DrawnPart {
+    id: u32,
+    asset: String,
+    bones: Vec<crysirror_asset::interchange::cm3d2::Bone>,
+    /// Native MPN and the matching blend shape on this particular mesh.
+    numeric_morphs: Vec<(usize, String)>,
+    bone_shapes: Vec<crate::bone_shape::Binding>,
+}
+
 /// World projection of the character manager's maids and men.
 #[derive(Default)]
 pub struct View {
-    /// (character, slot) → (entity, asset, bone names of the model).
-    parts: BTreeMap<(usize, &'static str), (u32, String, Vec<crysirror_asset::interchange::cm3d2::Bone>)>,
+    pub(crate) shape_rules: Option<crate::bone_shape::Rules>,
+    parts: BTreeMap<(usize, &'static str), DrawnPart>,
     /// Last submitted animation state per entity.
     states: BTreeMap<u32, String>,
     visible: BTreeMap<usize, bool>,
@@ -787,13 +811,30 @@ pub struct View {
 }
 
 impl View {
+    /// Recycle one character while retaining the other actors on the stage.
+    pub(crate) fn remove_actor(&mut self, index: usize) -> Vec<u32> {
+        let mut children = Vec::new();
+        let mut body = None;
+        self.parts.retain(|&(actor, slot), part| {
+            if actor != index { return true; }
+            self.states.remove(&part.id);
+            self.released.push(std::mem::take(&mut part.asset));
+            if slot == "body" { body = Some(part.id); } else { children.push(part.id); }
+            false
+        });
+        self.body_nodes.remove(&index);
+        self.visible.remove(&index);
+        children.extend(body);
+        children
+    }
+
     /// Forget every character entity (indices changed, e.g. by a load);
     /// returns the entities to despawn.
     pub fn reset(&mut self) -> Vec<u32> {
         // Parts are children of their body: children first.
         let (bodies, parts): (Vec<_>, Vec<_>) = self.parts.iter().partition(|(k, _)| k.1 == "body");
-        let ids = parts.into_iter().chain(bodies).map(|(_, p)| p.0).collect();
-        let assets: Vec<String> = self.parts.values().map(|p| p.1.clone()).collect();
+        let ids = parts.into_iter().chain(bodies).map(|(_, p)| p.id).collect();
+        let assets: Vec<String> = self.parts.values().map(|p| p.asset.clone()).collect();
         self.released.extend(assets);
         self.parts.clear();
         self.states.clear();
@@ -855,6 +896,7 @@ impl View {
             }
             let visible_slots = maid.visible_slots();
             let (is_man, man_color, parts_color, man_alpha) = (maid.man, maid.man_color, maid.parts_color, maid.man_alpha);
+            let outlines = maid.outline_colors;
             // TBody.FixVisibleFlag reruns when a visible slot's nodes change.
             let node_sig: Vec<(&'static str, Vec<(String, bool)>)> = visible_slots
                 .iter()
@@ -877,7 +919,20 @@ impl View {
                     continue;
                 }
                 state.dirty = false;
-                if let Some((id, asset, _)) = self.parts.remove(&key) {
+                // Despawning a body recursively despawns its attachments. Preserve
+                // their live entities while replacing the body model in this batch.
+                let mut children = Vec::new();
+                if slot == "body" && present && self.parts.contains_key(&key) {
+                    for ((owner, part), drawn) in &self.parts {
+                        let id = &drawn.id;
+                        if *owner == index && *part != "body" {
+                            children.push(*id);
+                            out.push(json!({"op":"set_parent","id":id,"parent":null}));
+                        }
+                    }
+                    self.visible.remove(&index);
+                }
+                if let Some(DrawnPart { id, asset, .. }) = self.parts.remove(&key) {
                     out.push(json!({"op": "despawn", "id": id}));
                     self.released.push(asset);
                     self.states.remove(&id);
@@ -895,6 +950,14 @@ impl View {
                     self.body_nodes.insert(index, node_sig.clone());
                 }
                 let bones = mesh.bones.clone();
+                let mut numeric_morphs = Vec::new();
+                for (mpn, (&name, prop)) in maid.prop_names.iter().zip(&maid.props).enumerate() {
+                    if prop.kind != 1 || is_man && !name.eq_ignore_ascii_case("hara") { continue; }
+                    let native = if is_man { "karadal" } else { name };
+                    if let Some(target) = mesh.morphs.iter().find(|target| target.name.eq_ignore_ascii_case(native)) {
+                        numeric_morphs.push((mpn, target.name.clone()));
+                    }
+                }
                 // `res:<path>` textures are Unity `Resources/Texture/<path>`.
                 let mut external = |name: &str| match name.strip_prefix("res:") {
                     Some(_) => resources.get(name).cloned().with_context(|| format!("Resources texture {name}")),
@@ -902,7 +965,8 @@ impl View {
                 };
                 let mut edits = state.edits.clone();
                 for (mat, id) in &state.multicolor {
-                    edits.color_tables.insert(*mat, crate::parts_color::table(&parts_color[*id]));
+                    let color = parts_color.get(*id).or_else(|| outlines.as_ref()?.get(id.checked_sub(parts_color.len())?)).context("missing material color in character profile")?;
+                    edits.color_tables.insert(*mat, crate::parts_color::table(color));
                 }
                 if is_man {
                     // TBodySkin.ManColorUpdate on `CM3D2/Man` materials;
@@ -927,7 +991,11 @@ impl View {
                     spec["parent"] = json!(body_id);
                 }
                 out.push(json!({"op": "spawn", "entity": spec}));
-                self.parts.insert(key, (id, asset, bones));
+                let bone_shapes = self.shape_rules.as_ref().filter(|_| !is_man).map_or_else(Vec::new, |r| r.bind(&bones));
+                self.parts.insert(key, DrawnPart { id, asset, bones, numeric_morphs, bone_shapes });
+                for child in children {
+                    out.push(json!({"op":"set_parent","id":child,"parent":id}));
+                }
             }
             // Transform, visibility, motion, hidden nodes and face per frame.
             if !self.parts.contains_key(&(index, "body")) {
@@ -939,11 +1007,18 @@ impl View {
             }
             let transform = world_transform(all_pos, all_rot, maid.position, maid.rotation);
             let morphs = maid.morphs.clone();
-            for ((i, slot), (id, _, bones)) in &self.parts {
+            for ((i, slot), part) in &self.parts {
+                let (id, bones) = (&part.id, &part.bones);
                 if *i != index {
                     continue;
                 }
                 let mut nodes = serde_json::Map::new();
+                for (name, q) in &maid.tracking_rotations {
+                    if (*slot == "body" && !name.starts_with("Eye_")) || (*slot == "head" && name.starts_with("Eye_")) {
+                        nodes.insert(name.clone(), json!({"rotation":q}));
+                    }
+                }
+                for binding in &part.bone_shapes { binding.apply(maid, &mut nodes); }
                 // TBody.SetChinkoVisible: `chinkoCenter` scale 0 in every slot.
                 if !maid.chinko_visible && bones.iter().any(|b| b.name == "chinkoCenter") {
                     nodes.insert("chinkoCenter".into(), json!({"scale": [0., 0., 0.]}));
@@ -977,9 +1052,12 @@ impl View {
                         anim.insert("attach".into(), json!(bone));
                     }
                 }
-                if *slot == "head" && !morphs.is_empty() {
-                    anim.insert("morphs".into(), json!(morphs));
-                }
+                let mut weights: BTreeMap<_, _> = part.numeric_morphs.iter()
+                    .map(|(mpn, name)| (name.clone(), maid.props[*mpn].value as f32 / 100.))
+                    .collect();
+                if *slot == "body" { weights.extend(maid.body_morphs.clone()); }
+                if *slot == "head" { weights.extend(morphs.clone()); }
+                if !weights.is_empty() { anim.insert("morphs".into(), json!(weights)); }
                 if !nodes.is_empty() {
                     anim.insert("nodes".into(), serde_json::Value::Object(nodes));
                 }
@@ -1003,5 +1081,25 @@ impl View {
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod actor_lifetime {
+    use super::*;
+
+    #[test]
+    fn replacing_a_pooled_actor_releases_only_its_drawn_parts() {
+        let mut view = View::default();
+        for (actor, slot) in [(0, "body"), (0, "head"), (1, "body")] {
+            let id = entity(actor, slot);
+            view.parts.insert((actor, slot), DrawnPart { id, asset: format!("{id}.glb"), bones: vec![], numeric_morphs: vec![], bone_shapes: vec![] });
+            view.states.insert(id, String::from("previous pose"));
+        }
+        assert_eq!(view.remove_actor(0), vec![entity(0,"head"), entity(0,"body")]);
+        assert!(view.states.contains_key(&entity(1,"body")));
+        assert_eq!(view.parts.len(), 1);
+        assert_eq!(view.released.len(), 2);
+        assert!(view.remove_actor(0).is_empty());
     }
 }

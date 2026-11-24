@@ -128,6 +128,37 @@ fn status_list_check(st: &MaidStatus, list: &[(String, i32)]) -> Result<bool> {
     Ok(true)
 }
 
+pub(crate) fn measure_body(b: &mut crate::params::Body, prop: &dyn Fn(&str) -> f32, bust_adjustment: f32) {
+        let f = prop;
+        let num = 1340. + f("sintyou") * 4. + f("DouPer") * (1. + f("sintyou") * 0.005) + f("KubiScl") * 0.5 + f("HeadY") * 0.5;
+        let n2 = 55. * f("RegFat") + 50. * f("sintyou") * 0.5 + 50. * f("DouPer") * 0.4;
+        let n3 = 55. * f("RegMeet") + 50. * f("sintyou") * 0.5 + 50. * f("DouPer") * 0.4;
+        let n4 = 10. * f("UdeScl") * 0.1;
+        let n5 = 5. * f("ArmL") + 5. * f("sintyou") * 1. + 5. * f("UdeScl") * 0.5;
+        let n6 = 70. * f("Hara") + 50. * f("sintyou") * 0.7 + 50. * f("west") * f("Hara") * 0.005;
+        let n7 = 10. * f("MuneL") * 2.;
+        let n8 = n7 * f("MuneTare") * 0.005;
+        let n9 = 20. * f("west") * 0.5 + 15. * f("west") * f("sintyou") * 0.02 + 15. * f("west") * f("DouPer") * 0.01;
+        let n10 = 10. * f("koshi") + 7. * f("koshi") * f("sintyou") * 0.04;
+        let n11 = 4. * f("kata");
+        let n12: f32 = 38000. + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11;
+
+        b.height = (num / 10.) as i32;
+        b.weight = (n12 / 1000.) as i32;
+        let n13 = 70. + f("MuneL") * 0.31 + f("west") * 0.02 - bust_adjustment;
+        b.bust = n13 as i32;
+        b.waist = (40. + f("west") * 0.25 + f("Hara") * 0.35) as i32;
+        b.hip = (65. + f("koshi") * 0.3 + f("RegFat") * 0.025 + f("RegMeet") * 0.025) as i32;
+        b.cup = if n13 < 80. {
+            "A".into()
+        } else if 110. <= n13 {
+            "N".into()
+        } else {
+            const CUPS: [char; 12] = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'];
+            CUPS[(((n13 - 80.) / 2.5) as usize).min(11)].to_string()
+        };
+}
+
 /// `MaidParam`: one maid's status with the game tables it reads.
 pub struct MaidParam<'a> {
     pub st: &'a mut MaidStatus,
@@ -204,34 +235,7 @@ impl MaidParam<'_> {
 
     /// `MaidParam.UpdateBodyParam` from the maid's slider values.
     pub fn update_body(&mut self, prop: &dyn Fn(&str) -> f32) {
-        let f = prop;
-        let num = 1340. + f("sintyou") * 4. + f("DouPer") * (1. + f("sintyou") * 0.005) + f("KubiScl") * 0.5 + f("HeadY") * 0.5;
-        let n2 = 55. * f("RegFat") + 50. * f("sintyou") * 0.5 + 50. * f("DouPer") * 0.4;
-        let n3 = 55. * f("RegMeet") + 50. * f("sintyou") * 0.5 + 50. * f("DouPer") * 0.4;
-        let n4 = 10. * f("UdeScl") * 0.1;
-        let n5 = 5. * f("ArmL") + 5. * f("sintyou") * 1. + 5. * f("UdeScl") * 0.5;
-        let n6 = 70. * f("Hara") + 50. * f("sintyou") * 0.7 + 50. * f("west") * f("Hara") * 0.005;
-        let n7 = 10. * f("MuneL") * 2.;
-        let n8 = n7 * f("MuneTare") * 0.005;
-        let n9 = 20. * f("west") * 0.5 + 15. * f("west") * f("sintyou") * 0.02 + 15. * f("west") * f("DouPer") * 0.01;
-        let n10 = 10. * f("koshi") + 7. * f("koshi") * f("sintyou") * 0.04;
-        let n11 = 4. * f("kata");
-        let n12: f32 = 38000. + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + n11;
-        let b = &mut self.st.body;
-        b.height = (num / 10.) as i32;
-        b.weight = (n12 / 1000.) as i32;
-        let n13 = 70. + f("MuneL") * 0.31 + f("west") * 0.02;
-        b.bust = n13 as i32;
-        b.waist = (40. + f("west") * 0.25 + f("Hara") * 0.35) as i32;
-        b.hip = (65. + f("koshi") * 0.3 + f("RegFat") * 0.025 + f("RegMeet") * 0.025) as i32;
-        b.cup = if n13 < 80. {
-            "A".into()
-        } else if 110. <= n13 {
-            "N".into()
-        } else {
-            const CUPS: [char; 12] = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'];
-            CUPS[(((n13 - 80.) / 2.5) as usize).min(11)].to_string()
-        };
+        measure_body(&mut self.st.body, prop, 0.);
     }
 
     /// `MaidParam.UpdateFeature`: the newly gained features.

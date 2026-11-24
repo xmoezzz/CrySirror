@@ -118,6 +118,108 @@ installations and other retail revisions need separate evidence.
 serialized format 17 and startup through the retail title. Start resumes
 the original scenario and reaches the request for `SceneNetorareCheck`.
 
+2026-11-24 — Ported the initial settings controller through its KAG return,
+including the three script-visible player flags. The standalone TJS profile
+at that point bound 69 of the 128 registered names.
+Same-name inherited methods also need semantic checks. In particular,
+the retail `CreateNewMaid` takes a personality or sub-character identifier,
+and `PresetLoad` must apply the selected character preset. The next scene
+requested by ordinary Start/OK input is `SceneUserEdit`. Character assembly,
+pose playback, system settings persistence and original slot round-trips
+remain open.
+
+2026-11-24 — Added handlers for the other 59 registered names. The retail
+VM exposes all 128, including the original rejected NPC-preset call and
+the original empty setter. Added the scoped resource loader, retail preset
+properties, class and event queries, schedule and activity state, and ADV
+title-bar output. Installed data and host-state tests exercise the changes.
+The tested normal route still stops on `SceneUserEdit`.
+
+At that revision gameplay work included providing the standalone character factory
+and character body assembly to `CreateNewMaid`, consuming the preset and
+temporary costume on a rendered character, the actual schedule/competition,
+casino and skill-selection screens, dance results, and VR controller startup.
+These controllers produce state read by TJS. Native save/load must restore
+that state, including per-character flags, skill/class ownership, completed
+scenarios, purchases, and facility assignments. A linked older installation
+also needs its own archive and key profile. Audit the remaining 33 inherited
+handlers against their standalone bodies and exercise them in authored scenes.
+
+2026-11-24 — Connected the standalone player editor in `src/com3d2/editor.rs`,
+the scene dispatcher and widget loader. It uses the installed stock-man
+menus, shared character scene projection, player name, RGB/palette, opacity,
+abdomen morph, single-page tutorial and caller-supplied return label. The
+installed sample ships its posture animation in a bzip2-wrapped motion
+archive. A regular mounted motion archive feeds the animation layer; the
+wrapper is not mounted by the launcher. Desktop IME, second-entry UI, original
+save persistence and later story controllers need further validation.
+
+2026-11-24 — The standalone desktop launcher now prepares the installed
+bzip2-wrapped WARC in the scoped game cache. The title-to-editor replay
+shows the original idle clip on the edited body. After returning, the two
+message labels from the persistent scene render the speaker and opening
+line, and the next input advances to narration. Physical IME, return visits
+and native save/reload remain outside this evidence.
+
+2026-11-24 — Standalone ADV now allocates three pooled NPC maids, resolves
+named presets from the mounted tables and Unity resources, and applies the
+retail property layout and nine material colors to shared character models.
+Animation scripts bind slot zero to their caller's actor. The installed
+opening displays a clothed NPC bow, plays scenario voice requests, and fades
+the world independently of message UI. Title End opens the serialized system
+dialog and Shop issues the standalone host URL request. Six formerly
+inherited TJS entries have retail handlers. Twenty-seven still use the
+CM3D2 implementations. Stock character creation, post-creation preset changes
+on live models, title Continue/Guest/Config, daily controllers and standalone
+native save/load remain open. The normal-route failure at that revision in
+`OP_0001a` was camera tracking of the secretary's animated neck at `*L103`.
+Its managed `CameraChase` component reads the posed bone every update through
+expiry. The subsequent `EyeToCamera` calls the native head and eye controller.
+
+2026-11-24 — The opening now follows the animated secretary, updates head/eye
+rotations and accepts both answers using the installed NGUI button prefab.
+The date panel displays the next day, waits for input and returns to its
+authored label. For standalone first entry with empty stock, the day change
+records the installed default facilities and eligible night work, clears the
+two result flags and advances the day counter. Occupied schedules, linked
+installs and pending facility changes still require their native controllers.
+Choice backlog UI, exact vignette output and physical input remain unverified.
+
+All three recruitment labels in `OP_main_0001` request a new stock character.
+At that revision the regular first-choice replay stopped in `CreateNewMaid("Muku")` at frame 9218.
+The other two inputs reached the same factory for Majime and Rindere at frame
+9330. The inherited factory requested legacy game tables. That revision required
+`Maid.InitializeStatus`, retail class and skill acquisition, body-derived
+profile values, and activation of the rendered stock body. Sub-characters
+also apply the selected original/alternate status and preset with portrait
+and thumbnail data. The opening NPC pool has distinct identity and lifetime.
+See `src/com3d2/{actors,tracking,choices}.rs`, `src/tjs/retail/day.rs` and
+the dated playback evidence.
+
+2026-11-24 — Implemented retail stock creation, initial identity and class/skill
+ownership, live appearance changes, named sub-character status/presets and
+separate stock/NPC model lifetimes. The three recruitment arguments now pass
+direct installed-data tests. Schedule casting uses the day/night job and
+communication flag appropriate to each selector; empty random selection
+deactivates slot zero. Contract and relation awards update the player trophy
+set. Ordinary and transferred-state method tests cover temporary flags,
+skill levels and mode-specific lookups.
+
+The standalone stock editor now reads its main/original mode scene, background,
+pose script, controls and owned item menus. Remaining editor scope includes
+profile/category controllers, item icon groups and colors, eye/brow menu offsets,
+physics-driven body properties and finalization. Stock constructor and slider
+property logic moved into `src/tjs/retail/stock.rs` so both crate feature
+configurations can use them. `src/bone_shape.rs` decodes the installed
+`BoneMorph.Init` scale/position registrations. `chara::View` binds the
+matching bone and vertex morph names on each loaded mesh. Original `SceneEdit`
+captures a 90×90 icon and 630×890 card from `Bip01 HeadNub`, executes
+`KasizukiThumShot.ks` for a separate portrait and returns to the saved KAG
+label. The runtime still needs a separate 3D camera capture with its own
+target, visibility and transparent clear. The current confirmation reports
+this boundary. Linked/VR branches, populated day advancement, later scene
+controllers and original v1040 slots also remain open.
+
 **Closure.** Exercise the remaining controllers, rendering and resource
 variants through installed original scripts and ordinary input, including
 native save/reload and character assembly. See [validation](../../docs/validation/com3d2.md).

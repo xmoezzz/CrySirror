@@ -21,6 +21,7 @@ mod channel_exchange;
 pub mod decoder;
 pub mod pcm_levels;
 pub mod fsb5;
+pub mod xvag;
 pub mod onset;
 pub mod wave_box;
 mod wave_ogg;

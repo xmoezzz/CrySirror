@@ -1871,11 +1871,12 @@ impl HostServices for SharedHost {
         if !self.clients.contains(&client) {
             return Err(Error::NotFound);
         }
-        if glb.len() < 12 || &glb[..4] != b"glTF" || glb.len() > 64 * 1024 * 1024 {
-            return Err(Error::Invalid("model upload is not a GLB within 64 MiB"));
+        let limit = crysirror_core::limits::LARGE_ASSET_BYTES as usize;
+        if glb.len() < 12 || &glb[..4] != b"glTF" || glb.len() > limit {
+            return Err(Error::Invalid("model upload is not a GLB within the asset limit"));
         }
         let path = format!("__crysirror/{id}-{}.glb", blake3::hash(glb).to_hex());
-        if self.generated.iter().map(|(_, _, b)| b.len()).sum::<usize>() + glb.len() > 128 * 1024 * 1024 {
+        if self.generated.iter().map(|(_, _, b)| b.len()).sum::<usize>() + glb.len() > 2 * limit {
             return Err(Error::Limit("model upload batch"));
         }
         self.generated.push((client, path.clone(), glb.to_vec()));
@@ -1937,8 +1938,8 @@ impl HostServices for SharedHost {
             blake3::hash(rgba).to_hex()
         );
         let bytes = crysirror_image::encode_png(&surface).map_err(|e| Error::Io(e.to_string()))?;
-        // A batch holds at most 128 MiB of generated assets (the model
-        // limit), of which at most 64 MiB encoded images.
+        // A batch holds at most twice the large-asset limit of generated
+        // assets (the model limit), of which at most 64 MiB encoded images.
         let images = self
             .generated
             .iter()
@@ -1946,7 +1947,7 @@ impl HostServices for SharedHost {
             .map(|(_, _, b)| b.len())
             .sum::<usize>();
         let total = self.generated.iter().map(|(_, _, b)| b.len()).sum::<usize>();
-        if images + bytes.len() > 64 * 1024 * 1024 || total + bytes.len() > 128 * 1024 * 1024 {
+        if images + bytes.len() > 64 * 1024 * 1024 || total + bytes.len() > 2 * crysirror_core::limits::LARGE_ASSET_BYTES as usize {
             return Err(Error::Limit("image upload batch"));
         }
         self.collect_retired_images()?;

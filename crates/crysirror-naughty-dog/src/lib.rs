@@ -1,7 +1,27 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Native data from the BCAS20097 01.00 disc build. SATD-nd-retail-runtime.
 #![forbid(unsafe_code)]
+#[cfg(feature = "runtime")]
+pub use adapter::register;
+pub use adapter::{Config, ENGINE_ID};
+pub mod adapter;
+pub mod anim;
+pub mod dc;
+pub mod game;
+pub mod ground;
+pub mod native_names;
+pub mod script;
+pub mod ss;
+pub mod task;
+pub mod geometry;
+pub mod menu;
+pub mod mesh;
 pub mod package;
+pub mod probes;
+pub mod region;
+pub mod scene;
+pub mod skeleton;
+pub mod texture;
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::{BTreeMap, BTreeSet};
 

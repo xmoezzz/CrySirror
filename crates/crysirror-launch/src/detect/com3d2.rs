@@ -26,10 +26,14 @@ fn paths(dir: &SourcePath) -> Result<Vec<String>> {
     Ok(out)
 }
 
+fn archive_name<'a>(names: &'a [String], stem: &str) -> Option<&'a String> {
+    find(names, &format!("{stem}.arc")).or_else(|| find(names, &format!("{stem}.arc.bz2")))
+}
+
 fn series(stems: &mut Vec<String>, base: &str, suffixes: &[String], names: &[String]) {
     for suffix in suffixes {
         let stem = format!("{base}_{suffix}");
-        if find(names, &format!("{stem}.arc")).is_some() {
+        if archive_name(names, &stem).is_some() {
             stems.extend([stem.clone(), format!("{stem}_2"), format!("{stem}_3")]);
         }
     }
@@ -105,7 +109,7 @@ pub(super) fn detect(dir: &SourcePath, names: &[String], name: &str) -> Result<O
             }
         }
         for stem in stems {
-            let Some(file) = find(&names, &format!("{stem}.arc")) else {
+            let Some(file) = archive_name(&names, &stem) else {
                 continue;
             };
             let path = source.join(file).canonicalize()?;
@@ -113,7 +117,11 @@ pub(super) fn detect(dir: &SourcePath, names: &[String], name: &str) -> Result<O
             let mut magic = [0; 8];
             crate::source_path::SourceFile::open(path)?.read_exact(&mut magic)?;
             ensure!(
-                magic == *b"warc\xff\xaa\x45\xf1",
+                if file.to_ascii_lowercase().ends_with(".bz2") {
+                    &magic[..3] == b"BZh" && matches!(magic[3], b'1'..=b'9')
+                } else {
+                    magic == *b"warc\xff\xaa\x45\xf1"
+                },
                 "invalid KISS archive {folder}/{file}"
             );
             let target = format!("__com3d2/{folder}/{stem}");

@@ -22403,6 +22403,12 @@
           "doc": "Clamp only, for debugging linear output.",
           "name": "none",
           "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Hable's filmic curve as published for Uncharted 2 (GDC 2010, \"Uncharted 2: HDR Lighting\"): shoulder 0.15, linear strength 0.50, linear angle 0.10, toe strength 0.20, toe numerator 0.02, toe denominator 0.30, white point 11.2, after a fixed 2× exposure bias.",
+          "name": "filmic",
+          "rust_type": ""
         }
       ],
       "name": "Tonemap",
@@ -23143,6 +23149,18 @@
           "doc": "Directional baked diffuse radiance. The occlusion and metallic-roughness slots carry linear RGB radiance and encoded direction/normalization respectively. UV0 is mapped into the atlas independently of base UV.",
           "name": "directional_lightmap",
           "rust_type": "scale: [f32; 2], offset: [f32; 2]"
+        },
+        {
+          "default": null,
+          "doc": "Two-layer blend by the primitive's `_AUX` vertex stream: the base texture weighted by `aux.x`, the emissive-slot texture by `1 − aux.x`; the emissive slot then contributes no emission. Primitives without `_AUX` show the base layer.",
+          "name": "vertex_layer_blend",
+          "rust_type": ""
+        },
+        {
+          "default": null,
+          "doc": "Baked diffuse irradiance from the primitive's `_AUX` vertex stream (linear RGB, scaled by `intensity`) replaces the environment and GI-volume irradiance; direct lights still apply. Primitives without `_AUX` receive white irradiance × `intensity`.",
+          "name": "baked_vertex_irradiance",
+          "rust_type": "intensity: f32"
         },
         {
           "default": null,
@@ -30519,7 +30537,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "d82d74c816b67f6a",
+  "fingerprint": "54baf5ebf50648f1",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

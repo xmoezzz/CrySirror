@@ -1089,6 +1089,7 @@ mod collision_mesh_tests {
             material: 0,
             bounds: ([0.; 3], [1.; 3]),
             morphs: vec![],
+            aux: None,
         }
     }
 

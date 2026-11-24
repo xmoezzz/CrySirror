@@ -78,6 +78,19 @@ pub enum ShaderEffect {
     /// slots carry linear RGB radiance and encoded direction/normalization
     /// respectively. UV0 is mapped into the atlas independently of base UV.
     DirectionalLightmap { scale: [f32; 2], offset: [f32; 2] },
+    /// Two-layer blend by the primitive's `_AUX` vertex stream: the base
+    /// texture weighted by `aux.x`, the emissive-slot texture by
+    /// `1 − aux.x`; the emissive slot then contributes no emission.
+    /// Primitives without `_AUX` show the base layer.
+    VertexLayerBlend,
+    /// Baked diffuse irradiance from the primitive's `_AUX` vertex stream
+    /// (linear RGB, scaled by `intensity`) replaces the environment and
+    /// GI-volume irradiance; direct lights still apply. Primitives without
+    /// `_AUX` receive white irradiance × `intensity`.
+    BakedVertexIrradiance {
+        #[serde(default = "one")]
+        intensity: f32,
+    },
     Custom {
         asset: String,
         #[serde(default)]
@@ -129,6 +142,8 @@ impl ShaderEffect {
             Self::DirectionalLightmap { scale, offset } => ensure!(
                 scale.iter().chain(offset).all(|v| v.is_finite()), "non-finite lightmap transform"
             ),
+            Self::VertexLayerBlend => {}
+            Self::BakedVertexIrradiance { intensity } => ensure!(intensity.is_finite() && (0. ..=64.).contains(intensity), "baked irradiance intensity"),
             Self::Custom { asset, parameters } => {
                 let p =
                     crysirror_core::path::VfsPath::new(crysirror_core::path::Mount::Asset, asset)
@@ -196,6 +211,11 @@ impl ShaderEffect {
                 p[0] = [scale[0], scale[1], offset[0], offset[1]];
                 6.
             }
+            Self::VertexLayerBlend => 7.,
+            Self::BakedVertexIrradiance { intensity } => {
+                p[0][0] = *intensity;
+                8.
+            }
             Self::Custom { parameters, .. } => {
                 p = *parameters;
                 0.
@@ -234,4 +254,8 @@ mod tests {
                 .unwrap();
         }
     }
+}
+
+fn one() -> f32 {
+    1.
 }

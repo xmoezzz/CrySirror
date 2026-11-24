@@ -17,6 +17,8 @@ pub struct Item {
 #[derive(Debug)]
 pub struct Directory {
     pub page_count: usize,
+    /// Start of VRAM data: file length minus the header's data size.
+    pub texture_base: u64,
     pub items: Vec<Item>,
 }
 
@@ -47,6 +49,7 @@ impl Directory {
         let count = word(&h, 16) as usize;
         let table_at = u64::from(word(&h, 20));
         let len = source.len()?;
+        let texture_base = len.checked_sub(u64::from(word(&h, 32))).context("ND VRAM data size")?;
         ensure!(
             count > 0
                 && count <= 4096
@@ -102,8 +105,10 @@ impl Directory {
                 });
             }
         }
+        ensure!(previous <= texture_base, "ND VRAM data overlaps pages");
         Ok(Self {
             page_count: count,
+            texture_base,
             items,
         })
     }

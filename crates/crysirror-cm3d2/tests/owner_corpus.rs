@@ -546,3 +546,436 @@ fn com3d2_parts_use_shared_kiss_formats() {
     let image = crysirror_image::decode_standard(crysirror_image::kiss_tex::payload(&tex).unwrap()).unwrap();
     assert_eq!((image.width, image.height), (512, 1024));
 }
+
+/// A synthetic ADV script isolates the host call. Widgets, font and sounds
+/// are loaded from the user's standalone installation by the production VM.
+#[test]
+#[cfg(feature = "runtime")]
+#[ignore = "needs COM3D2_ROOT"]
+fn com3d2_adv_title_bar_animates_render_layers() -> anyhow::Result<()> {
+    use crysirror_core::{service::{buttons, InputFrame},vfs::MemoryProvider};
+    use crysirror_runtime::{AdapterRegistry,Runtime};
+    use serde_json::json;
+    let install=PathBuf::from(std::env::var_os("COM3D2_ROOT").unwrap());
+    let temp=tempfile::tempdir()?;
+    let project=serde_json::from_value(json!({"schema":2,"name":"com3d2-titlebar","content_revision":"1",
+        "canvas":[1920,1080],"assets":"game","clients":[{"name":"game","game":"titlebar","adapter":"com3d2",
+        "config":{"data_dir":"COM3D2x64_Data","archives":["fixture"]}}]}))?;
+    let mut registry=AdapterRegistry::default();
+    crysirror_cm3d2::register(&mut registry)?;
+    let mut rt=Runtime::with_asset_root(project,&install,temp.path(),registry)?;
+    let cx=context();
+    let sound=open_path(install.join("GameData/sound.arc"),&cx);
+    let names=by_name(sound.as_ref());
+    let mut fixture=MemoryProvider::new();
+    fixture.insert("SE002.ogg",read_all(sound.open(names["se002.ogg"],&cx)?.as_ref(),cx.limits.max_entry_size)?)?;
+    fixture.insert("AllMain.ks",b"@eval exp=\"CallTitleBar('Chapter One')\"\n@s\n".to_vec())?;
+    rt.mount_provider(ClientId(1),"fixture",Arc::new(fixture))?;
+    let mut poses=Vec::new();
+    for frame in 0..720 {
+        let held=if frame==100 || frame==285{buttons::ENTER}else{0};
+        rt.tick(16,InputFrame{buttons_pressed:held,buttons_down:held,..Default::default()})?;
+        if frame>=340 {
+            let state=rt.inspect();
+            if let Some(layers)=state["engine"]["layers"]["clients"]["1"].as_object()
+                && let Some(text)=layers.values().find(|v|v["paint"]["text"]=="Chapter One"){
+                poses.push((text["rect"][0].as_f64().unwrap(),text["opacity"].as_u64().unwrap()));
+            }
+        }
+    }
+    assert!(poses.windows(2).any(|p|p[0].0<p[1].0 && p[0].1==255),"title should slide into view");
+    assert!(poses.windows(2).any(|p|p[0].0==p[1].0 && p[0].1>p[1].1),"title should fade in place");
+    assert_eq!(poses.last().map(|p|p.1),Some(0));
+    Ok(())
+}
+
+#[cfg(feature = "runtime")]
+fn retail_ui_runtime(
+    install: &std::path::Path,
+    writable: &std::path::Path,
+    archives: &[&str],
+    motion: Option<&std::path::Path>,
+) -> anyhow::Result<crysirror_runtime::Runtime> {
+    use anyhow::Context;
+    use crysirror_runtime::{AdapterRegistry, Runtime};
+    use serde_json::json;
+    let project = serde_json::from_value(
+        json!({"schema":2,"name":"editor-test","content_revision":"1","assets":"game","canvas":[1920,1080],"clients":[{"name":"game","game":"local","adapter":"com3d2","config":{"data_dir":"COM3D2x64_Data","archives":archives}}]}),
+    )?;
+    let mut registry = AdapterRegistry::default();
+    crysirror_cm3d2::register(&mut registry)?;
+    let mut rt = Runtime::with_asset_root(project, install, writable, registry)?;
+    for name in archives.iter().copied().filter(|n|*n != "fixture") {
+        let cx = context();
+        let arc = open_path(
+            if name == "motion" {
+                motion.context("raw motion archive")?.to_path_buf()
+            } else {
+                install.join("GameData").join(format!("{name}.arc"))
+            },
+            &cx,
+        );
+        rt.mount_provider(
+            ClientId(1),
+            name,
+            Arc::new(crysirror_resource::ArchiveMount::new(arc, cx)?),
+        )?;
+    }
+    Ok(rt)
+}
+
+#[test]
+#[cfg(feature="runtime")]
+#[ignore="needs COM3D2_ROOT"]
+fn com3d2_user_editor_from_title() -> anyhow::Result<()> {
+    use crysirror_core::service::{buttons,InputFrame};
+    use crysirror_runtime::Runtime;
+    use serde_json::json;
+    let install=PathBuf::from(std::env::var_os("COM3D2_ROOT").unwrap());
+    let writable=tempfile::tempdir()?;
+    let mut rt=retail_ui_runtime(&install,writable.path(),&["parts","system","script","sound","csv"],None)?;
+    let native=|rt:&Runtime|rt.inspect()["sessions"][0]["native"].clone();
+    for frame in 0..1350 {
+        let (pressed,point)=match frame{100|285|770=>(buttons::ENTER,[0,0]),1140=>(buttons::MOUSE_LEFT,[1820,985]),_=>(0,[1820,985])};
+        rt.tick(16,InputFrame{buttons_pressed:pressed,buttons_down:pressed,pointer_x:point[0],pointer_y:point[1]})?;
+    }
+    let before=native(&rt);
+    assert_eq!(before["scene"],"SceneUserEdit");
+    assert!(before["player_editor"]["items"].as_u64().unwrap()>=10);
+    let click=|rt:&mut Runtime,x,y|->anyhow::Result<()>{
+        for state in [buttons::MOUSE_LEFT,0]{
+            rt.tick(16,InputFrame{buttons_pressed:state,buttons_down:state,pointer_x:x,pointer_y:y})?;
+        }
+        Ok(())
+    };
+    assert_eq!(before["player_editor"]["tutorial"],true);
+    click(&mut rt,545,123)?;
+    assert_eq!(native(&rt)["player_editor"]["name"],before["player_editor"]["name"]);
+    click(&mut rt,1830,990)?;
+    for _ in 0..40 {rt.tick(16,Default::default())?;}
+    assert_eq!(native(&rt)["player_editor"]["tutorial"],false);
+    click(&mut rt,545,123)?;
+    assert_ne!(native(&rt)["player_editor"]["name"],before["player_editor"]["name"]);
+    rt.host.text_input.set_presenter_available(true);
+    rt.host.text_input.focus(true);
+    click(&mut rt,350,123)?;
+    assert!(rt.host.text_input.commit("新主人")?);
+    rt.tick(16,Default::default())?;
+    assert_eq!(native(&rt)["player_editor"]["name"],"新主人");
+    click(&mut rt,212,253)?;
+    click(&mut rt,212,525)?;
+    click(&mut rt,435,802)?;
+    click(&mut rt,435,909)?;
+    let after=native(&rt);
+    eprintln!("editor before {} after {}",before["player_editor"],after["player_editor"]);
+    for k in ["name","head","body","alpha","abdomen"]{assert_ne!(before["player_editor"][k],after["player_editor"][k],"{k}");}
+    click(&mut rt,1834,997)?;
+    let mut returned=false;
+    for _ in 0..450{
+        rt.tick(16,Default::default())?;
+        let s=native(&rt);
+        if !returned && s["scene"]=="SceneADV" {
+            assert_eq!(s["player_editor"],after["player_editor"]);
+            returned=true;
+        }
+        if returned && s["dialogue"].is_array() {
+            assert_eq!(s["script"].as_str().unwrap().split(':').next(), Some("OP_0001a"));
+            assert_eq!(s["dialogue"], json!(["新主人", "大きな屋敷だな。"]));
+            let inspection = rt.inspect();
+            let layers = inspection["engine"]["layers"]["clients"]["1"].as_object().unwrap();
+            if !["新主人", "大きな屋敷だな。"].iter().all(|text| layers.values().any(|layer|
+                layer["paint"]["text"] == *text && layer["visible"] == true && layer["opacity"] == 255
+            )) {
+                continue;
+            }
+            return Ok(())
+        }
+    }
+    panic!("missing opening dialogue after editor");
+}
+
+#[test]
+#[cfg(feature = "runtime")]
+#[ignore = "needs COM3D2_ROOT"]
+fn com3d2_title_shop_and_quit_dialog() -> anyhow::Result<()> {
+    use crysirror_core::service::{InputFrame, buttons};
+    let install = PathBuf::from(std::env::var_os("COM3D2_ROOT").unwrap());
+    let writable = tempfile::tempdir()?;
+    let mut rt = retail_ui_runtime(
+        &install,
+        writable.path(),
+        &["parts", "system", "script", "sound", "csv"],
+        None,
+    )?;
+    use crysirror_core::service::{
+        DesktopProvider, DesktopRequest, DesktopRequestJob, DesktopRequestState, DesktopResponse,
+    };
+    #[derive(Default)]
+    struct Recorded(Mutex<Vec<DesktopRequest>>);
+    struct Open(bool);
+    impl DesktopRequestJob for Open {
+        fn poll(&mut self) -> crysirror_core::Result<DesktopRequestState> {
+            Ok(if std::mem::replace(&mut self.0, true) {
+                DesktopRequestState::Ready(DesktopResponse::Opened)
+            } else {
+                DesktopRequestState::Pending
+            })
+        }
+    }
+    impl DesktopProvider for Recorded {
+        fn begin(
+            &self,
+            client: ClientId,
+            request: DesktopRequest,
+        ) -> crysirror_core::Result<Box<dyn DesktopRequestJob>> {
+            assert_eq!(client, ClientId(1));
+            self.0.lock().unwrap().push(request);
+            Ok(Box::new(Open(false)))
+        }
+    }
+    let recorded = Arc::new(Recorded::default());
+    rt.host.desktop_provider = Some(recorded.clone());
+    for frame in 0..950 {
+        let (key, point) = match frame {
+            100 | 285 | 756 | 784 | 830 | 883 => (buttons::ENTER, [0, 0]),
+            753 => (buttons::UP, [0, 0]),
+            760 | 770 | 773 | 776 | 779 => (buttons::DOWN, [0, 0]),
+            // Release on the opposite choice must cancel the click.
+            813 => (buttons::MOUSE_LEFT, [1163, 640]),
+            814 => (0, [1064, 640]),
+            839 => (buttons::MOUSE_LEFT, [1064, 640]),
+            840 => (0, [1064, 640]),
+            926 => (buttons::MOUSE_LEFT, [1163, 640]),
+            927 => (0, [1163, 640]),
+            _ => (0, [0, 0]),
+        };
+        rt.tick(
+            16,
+            InputFrame {
+                buttons_down: key,
+                buttons_pressed: key,
+                pointer_x: point[0],
+                pointer_y: point[1],
+            },
+        )?;
+        if matches!(frame, 810 | 815 | 831 | 875 | 916 | 930) {
+            let inspection = rt.inspect();
+            let session = &inspection["sessions"][0];
+            let native = &session["native"];
+            assert_eq!(native["scene"], "SceneTitle");
+            assert_eq!(native["focus"], "End");
+            assert_eq!(native["quit_dialog"], frame != 875);
+            if frame == 810 {
+                let layers = inspection["engine"]["layers"]["clients"]["1"]
+                    .as_object()
+                    .unwrap();
+                assert!(
+                    layers
+                        .values()
+                        .any(|l| l["paint"]["text"] == "終了しますか？")
+                );
+            }
+            if frame == 930 {
+                assert_eq!(session["yield"], "Halted");
+            }
+        }
+    }
+    assert_eq!(
+        recorded.0.lock().unwrap().as_slice(),
+        &[DesktopRequest::OpenUrl {
+            url: "https://com3d2-shop.s-court.me/?ctv=1&cmd=0".into()
+        }]
+    );
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "runtime")]
+#[ignore = "needs COM3D2_ROOT and COM3D2_MOTION_WARC (launcher-decoded motion.arc)"]
+fn com3d2_opening_activates_and_animates_npc() -> anyhow::Result<()> {
+    use crysirror_core::service::{InputFrame, buttons};
+    let install = PathBuf::from(std::env::var_os("COM3D2_ROOT").unwrap());
+    let motion = PathBuf::from(std::env::var_os("COM3D2_MOTION_WARC").unwrap());
+    let writable = tempfile::tempdir()?;
+    let mut rt = retail_ui_runtime(
+        &install,
+        writable.path(),
+        &[
+            "parts", "parts2", "system", "system2", "script", "sound", "sound2", "csv", "motion",
+            "motion2", "voice",
+        ],
+        Some(&motion),
+    )?;
+    let mut voiced = false;
+    let mut narration_over_fade = false;
+    let mut chase_targets = Vec::new();
+    let mut head_poses = Vec::new();
+    let mut tracked = false;
+    let mut prompt_frame = None;
+    let mut second_branch = false;
+    let mut day_screen = false;
+    for frame in 0..12000 {
+        let (key, point) = match frame {
+            100 | 285 | 770 => (buttons::ENTER, [0, 0]),
+            1140 => (buttons::MOUSE_LEFT, [1820, 985]),
+            1336 => (buttons::MOUSE_LEFT, [1830, 990]),
+            1450 => (buttons::MOUSE_LEFT, [1834, 997]),
+            n if prompt_frame.is_some_and(|f| n == f + 1) => (buttons::DOWN, [1834, 997]),
+            n if prompt_frame.is_some_and(|f| n == f + 3) => (buttons::ENTER, [1834, 997]),
+            n if n > 1500 && n % 30 == 0 => (buttons::ENTER, [1834, 997]),
+            _ => (0, [1834, 997]),
+        };
+        rt.tick(
+            16,
+            InputFrame {
+                buttons_down: key,
+                buttons_pressed: key,
+                pointer_x: point[0],
+                pointer_y: point[1],
+            },
+        )?;
+        if frame > 2000 && (frame % 8 == 0 || (frame > 8000 && prompt_frame.is_none())) {
+            let inspection = rt.inspect();
+            let s = &inspection["sessions"][0]["native"];
+            if s["script"]
+                .as_str()
+                .is_some_and(|p| p.starts_with("OP_0001a:") && p.ends_with("*L10"))
+            {
+                assert_eq!(s["npc_slots"], serde_json::json!([[false, 4, 0]]));
+                assert_eq!(s["dialogue"][0], "叔父メイド");
+                let entities = inspection["engine"]["world"]["clients"]["1"]["entities"]
+                    .as_object()
+                    .unwrap();
+                assert!(entities.contains_key("4096") && entities.contains_key("4097"));
+                assert!(
+                    entities["4096"].to_string().contains(".anm"),
+                    "body has no active animation"
+                );
+                voiced = true;
+            }
+            if voiced
+                && inspection["engine"]["layers"]["clients"]["1"]["65534"]["opacity"] == 255
+                && s["script"].as_str().is_some_and(|v| v.ends_with("*L15"))
+            {
+                assert!(s["dialogue"][1].as_str().is_some_and(|v| !v.is_empty()));
+                narration_over_fade = true;
+            }
+            if prompt_frame.is_none() && s["choices"].is_array() {
+                assert!(tracked);
+                assert_eq!(s["choices"],serde_json::json!(["今から会えるかな？","他のクラブに斡旋できないかな？"]));
+                prompt_frame = Some(frame);
+            }
+            if prompt_frame.is_some() && s["script"].as_str().is_some_and(|v|v.starts_with("OP_0001a:"))
+                && s["dialogue"][1].as_str().is_some_and(|v|v.contains("きょとん")) {
+                second_branch = true;
+            }
+            if s["scene"] == "SceneStartDaily" {
+                assert!(second_branch, "second choice callback did not reach its authored line");
+                assert!(s["club_meshes"].as_u64().is_some_and(|v|v > 0));
+                assert_eq!(s["widgets"],4, "missing date background, title, unit or first digit");
+                assert_eq!(s["day"]["number"], 0, "date presentation advanced the calendar early");
+                day_screen = true;
+            }
+            if day_screen && s["choices"].as_array().is_some_and(|rows| rows.len() == 3) {
+                assert_eq!(s["day"]["number"], 1);
+                assert_eq!(s["day"]["facility_record"], 2);
+                assert_eq!(s["day"]["night_work_states"], 29);
+                return Ok(());
+            }
+            let world = &inspection["engine"]["world"];
+            let body = &world["clients"]["1"]["entities"]["4096"]["spec"]["animation"]["nodes"]["Bip01 Head"]["rotation"];
+            if body.is_array() && s["script"].as_str().is_some_and(|v|v.starts_with("OP_0001a:")) {
+                assert!(narration_over_fade);
+                let target = world["view"]["camera"]["target"].clone();
+                if chase_targets.last()!=Some(&target) {chase_targets.push(target);}
+                if head_poses.last()!=Some(body) {head_poses.push(body.clone());}
+                if s["script"].as_str().unwrap().ends_with("*L106") {
+                    assert!(chase_targets.len()>1, "camera never tracked the animated neck");
+                    assert!(head_poses.len()>1, "head local rotation never changed");
+                    tracked = true;
+                }
+            }
+        }
+    }
+    anyhow::bail!("opening did not reach the date scene via the second choice");
+}
+
+/// A small original-script call sequence isolates the recruitment editor from the opening movie.
+#[test]
+#[cfg(feature="runtime")]
+#[ignore="needs COM3D2_ROOT and COM3D2_MOTION_WARC"]
+fn com3d2_stock_editor_controls() -> anyhow::Result<()> {
+    use anyhow::Context;
+    use crysirror_core::{service::{buttons,InputFrame},vfs::MemoryProvider};
+    use crysirror_runtime::Runtime;
+    let root=PathBuf::from(std::env::var_os("COM3D2_ROOT").unwrap());
+    let motion=PathBuf::from(std::env::var_os("COM3D2_MOTION_WARC").unwrap());
+    let temp=tempfile::tempdir()?;
+    let mut rt=retail_ui_runtime(&root,temp.path(),&["parts","parts2","system","system2","script","sound","sound2","csv","motion","fixture"],Some(&motion))?;
+    let mut fixture=MemoryProvider::new();
+    fixture.insert("AllMain.ks",br#"@eval exp="SetNewTrophy(10)"
+@eval exp="CreateNewMaid('Muku')"
+@eval exp="PresetLoad(0,'pre_muku')"
+@AllProcPropSeqStart maid=0 sync
+@SceneCall name=SceneEdit label=*returned main
+*returned
+@s
+"#.to_vec())?;
+    rt.mount_provider(ClientId(1),"fixture",Arc::new(fixture))?;
+    let native=|rt:&Runtime|rt.inspect()["sessions"][0]["native"].clone();
+    let mut award_visible = false;
+    for i in 0..32 {
+        let key=if i==5 || i==16 {buttons::ENTER}else{0};
+        rt.tick(250,InputFrame{buttons_pressed:key,buttons_down:key,..Default::default()}).with_context(||format!("edit fixture tick {i}"))?;
+        for piece in rt.host.engine.layers.frame([1920,1080])? {
+            let paint=serde_json::to_value(piece.paint)?;
+            award_visible |= piece.opacity > 0 && paint.get("text").and_then(|t| t.as_str()).is_some_and(|t| t.contains("みんなのメイド"));
+        }
+    }
+    assert!(award_visible, "stock editor fixture did not draw the awarded trophy");
+    let before=native(&rt);
+    assert_eq!(before["scene"],"SceneEdit","{before}");
+    assert!(before["club_meshes"].as_u64().unwrap()>0);
+    let click=|rt:&mut Runtime,x,y|->anyhow::Result<()>{
+        for key in [buttons::MOUSE_LEFT,0] {
+            rt.tick(16,InputFrame{buttons_pressed:key,buttons_down:key,pointer_x:x,pointer_y:y})?;
+        }
+        Ok(())
+    };
+    let pick=|rt:&mut Runtime,which:&str|->anyhow::Result<()> {
+        let info=native(rt);
+        let r=info["stock_editor"]["hits"].get(which).with_context(|| format!("missing edit control {which}: {}", info["stock_editor"]))?;
+        let x=r[0].as_f64().unwrap() + r[2].as_f64().unwrap()*0.75;
+        let y=r[1].as_f64().unwrap() + r[3].as_f64().unwrap()/2.;
+        click(rt,x as i32,y as i32)
+    };
+    assert!(rt.host.engine.world.entities(ClientId(1)).iter().any(|(id, _, spec)| *id >= 0x1900 && spec.visible));
+    pick(&mut rt,"髪")?;
+    pick(&mut rt,"前髪")?;
+    let ui=native(&rt);
+    let selected=ui["stock_editor"]["hits"].as_object().unwrap().keys().find(|key| key.ends_with(".menu") && *key != ui["stock_editor"]["worn"]["hairf"].as_str().unwrap_or("")).context("visible alternate hair menu")?.clone();
+    pick(&mut rt,&selected)?;
+    assert_eq!(native(&rt)["stock_editor"]["worn"]["hairf"],selected);
+    pick(&mut rt,"身体")?;
+    pick(&mut rt,"上半身")?;
+    pick(&mut rt,"Hara")?;
+    let weight = |rt: &Runtime| rt.host.engine.world.entities(ClientId(1)).into_iter().find(|(_, _, e)| e.name.ends_with("/body") && e.visible)
+        .and_then(|(_, _, e)| e.animation.as_ref()).and_then(|a| a.morphs.iter().find(|(n, _)| n.eq_ignore_ascii_case("hara"))).map(|(_, w)| *w);
+    assert!(weight(&rt).is_some_and(|w| w > 0.65 && w < 0.85), "expected edited morph on rendered character, got {:?}",weight(&rt));
+    pick(&mut rt,"全身")?;
+    let thigh = |rt: &Runtime| rt.host.engine.world.entities(ClientId(1)).into_iter()
+        .find(|(_, _, e)| e.visible && e.name.ends_with("/body")).and_then(|(_, _, e)| e.animation.as_ref())
+        .and_then(|a| a.nodes.get("Bip01 L Thigh_SCL_")).and_then(|n| n.scale).map(|s|s[0]);
+    let original_scale = thigh(&rt).context("original stock thigh scale")?;
+    pick(&mut rt,"sintyou")?;
+    assert!(thigh(&rt).context("edited stock thigh scale")? > original_scale);
+    assert_ne!(native(&rt)["stock_editor"]["height"],before["stock_editor"]["height"]);
+    pick(&mut rt,"OK")?;
+    pick(&mut rt,"family")?;
+    assert_eq!(native(&rt)["stock_editor"]["first_name_call"],false);
+    assert_eq!(native(&rt)["stock_editor"]["confirm"],true);
+    click(&mut rt,1064,640)?;
+    rt.tick(350,InputFrame::default())?;
+    assert_eq!(native(&rt)["stock_editor"]["confirm"],false);
+    Ok(())
+}

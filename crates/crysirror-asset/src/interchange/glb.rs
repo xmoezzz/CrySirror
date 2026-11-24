@@ -14,6 +14,9 @@ pub struct Primitive {
     pub joints: Vec<[u16; 4]>,
     pub weights: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
+    /// Optional per-vertex auxiliary vector, written as the custom glTF
+    /// attribute `_AUX` (see `PbrPrimitive::aux`).
+    pub aux: Vec<[f32; 4]>,
     pub material: Option<usize>,
     /// Morph targets: dense position deltas per vertex. Every primitive of a
     /// mesh carries the same targets; their names are the mesh's
@@ -266,6 +269,10 @@ impl Document {
                         json!(w.floats(&p.uvs, "VEC2", false, Some(34962))),
                     );
                 }
+                if !p.aux.is_empty() {
+                    ensure!(p.aux.len() == n, "mesh `{name}`: aux count");
+                    attributes.insert("_AUX".into(), json!(w.floats(&p.aux, "VEC4", false, Some(34962))));
+                }
                 if !p.joints.is_empty() {
                     attributes.insert("JOINTS_0".into(), json!(w.joints(&p.joints)));
                     attributes.insert(
@@ -463,7 +470,7 @@ impl Document {
         let total = 12 + 8 + json.len() + 8 + bin.len();
         ensure!(
             total <= crate::MAX_IMPORT_BYTES,
-            "converted model exceeds 64 MiB"
+            "converted model exceeds the import limit"
         );
         let mut out = Vec::with_capacity(total);
         out.extend_from_slice(b"glTF");
