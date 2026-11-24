@@ -19,6 +19,139 @@ fn tick(ui: &mut UiSystem, pressed: u64) {
     )
     .unwrap();
 }
+
+#[test]
+fn range_editor_uses_measured_drag_positions_and_unicode_boundaries() {
+    use crysirror_core::service::{TextExtent, TextMeasurement};
+    struct Metrics;
+    impl TextMeasurement for Metrics {
+        fn measure_simple(&self, _: &str, _: f32, s: &str) -> crysirror_core::Result<TextExtent> {
+            Ok(TextExtent {
+                advance: s.chars().map(|c| if c.is_ascii() { 6. } else { 14. }).sum(),
+                line_height: 18.,
+                ascent: 14.,
+                descent: -4.,
+            })
+        }
+    }
+    let mut ui = UiSystem::default();
+    let mut f = field(1, "a甲乙b");
+    f.rect = [10., 10., 120., 60.];
+    f.text_inset = [2, 2];
+    f.multiline = true;
+    f.max_length = 32;
+    ui.install(ClientId(1), &[f]).unwrap();
+    let apply = |ui: &mut UiSystem, cmd| ui.apply_batch(ClientId(1), &[cmd]).unwrap();
+    apply(&mut ui, C::Focus { id: 1 });
+    apply(
+        &mut ui,
+        C::SetTextSelection {
+            id: 1,
+            start: 0,
+            end: -1,
+        },
+    );
+    ui.prepare_text_editor(|_, _| Some(Metrics)).unwrap();
+    let pointer = |ui: &mut UiSystem, x, held, pressed| {
+        ui.tick(
+            InputFrame {
+                pointer_x: x,
+                pointer_y: 18,
+                buttons_down: held,
+                buttons_pressed: pressed,
+                ..Default::default()
+            },
+            [300, 300],
+        )
+        .unwrap();
+    };
+    pointer(&mut ui, 18, buttons::MOUSE_LEFT, buttons::MOUSE_LEFT);
+    pointer(&mut ui, 46, buttons::MOUSE_LEFT, 0);
+    pointer(&mut ui, 46, 0, 0);
+    apply(&mut ui, C::InsertText { text: "中".into() });
+    assert_eq!(ui.get(1, 1).unwrap().text, "a中b");
+    ui.prepare_text_editor(|_, _| Some(Metrics)).unwrap();
+    pointer(&mut ui, 18, buttons::MOUSE_LEFT, buttons::MOUSE_LEFT);
+    pointer(&mut ui, 18, 0, 0);
+    apply(
+        &mut ui,
+        C::InsertText {
+            text: "🙂".into()
+        },
+    );
+    assert_eq!(ui.get(1, 1).unwrap().text, "a🙂中b");
+    // UTF-16 indices 1..3 span the whole non-BMP character.
+    apply(
+        &mut ui,
+        C::SetTextSelection {
+            id: 1,
+            start: 1,
+            end: 3,
+        },
+    );
+    apply(&mut ui, C::Backspace { id: 1 });
+    assert_eq!(ui.get(1, 1).unwrap().text, "a中b");
+    ui.tick(
+        InputFrame {
+            buttons_down: buttons::CTRL | buttons::KEY_A,
+            buttons_pressed: buttons::KEY_A,
+            ..Default::default()
+        },
+        [300, 300],
+    )
+    .unwrap();
+    apply(
+        &mut ui,
+        C::InsertText {
+            text: "e\u{301}\r\n甲乙".into(),
+        },
+    );
+    tick(&mut ui, buttons::LEFT);
+    ui.tick(
+        InputFrame {
+            buttons_down: buttons::SHIFT | buttons::LEFT,
+            buttons_pressed: buttons::LEFT,
+            ..Default::default()
+        },
+        [300, 300],
+    )
+    .unwrap();
+    apply(&mut ui, C::Backspace { id: 1 });
+    assert_eq!(ui.get(1, 1).unwrap().text, "e\u{301}\r\n乙");
+    apply(&mut ui, C::Backspace { id: 1 });
+    apply(&mut ui, C::Backspace { id: 1 });
+    assert_eq!(ui.get(1, 1).unwrap().text, "乙");
+    apply(
+        &mut ui,
+        C::SetText {
+            id: 1,
+            text: "ab\r\n甲乙".into(),
+            font: Some("project-font".into()),
+        },
+    );
+    ui.prepare_text_editor(|_, _| Some(Metrics)).unwrap();
+    // Drag backwards from after 甲 on the second row to after a on the first.
+    ui.tick(
+        InputFrame {
+            pointer_x: 26,
+            pointer_y: 38,
+            buttons_down: buttons::MOUSE_LEFT,
+            buttons_pressed: buttons::MOUSE_LEFT,
+            ..Default::default()
+        },
+        [300, 300],
+    )
+    .unwrap();
+    pointer(&mut ui, 18, buttons::MOUSE_LEFT, 0);
+    pointer(&mut ui, 18, 0, 0);
+    apply(&mut ui, C::InsertText { text: "X".into() });
+    assert_eq!(ui.get(1, 1).unwrap().text, "aX乙");
+    ui.prepare_text_editor(|_, _| Some(Metrics)).unwrap();
+    assert!(ui.focused_editor_key(buttons::HOME, 0));
+    assert!(ui.focused_editor_key(buttons::RIGHT, buttons::SHIFT));
+    assert!(ui.focused_editor_key(buttons::DELETE, 0));
+    assert_eq!(ui.get(1, 1).unwrap().text, "X乙");
+}
 #[test]
 fn unicode_commits_backspace_programmatic_set_and_saved_state_are_shared() {
     let mut ui = UiSystem::default();

@@ -93,8 +93,21 @@ fn delayed_extraction_does_not_block_simulation_or_observe_later_mutations() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|e| e["name"] == "extract.ready")
+            .any(|e| e["name"] == "extract.layers")
     );
+}
+
+#[test]
+fn completed_extraction_is_available_on_the_first_poll() {
+    let (_t, mut rt) = runtime();
+    let mut pending = rt.schedule_render_snapshot().unwrap();
+    let pool = rt.assets.cpu_tasks();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while pool.stats().outstanding != 0 {
+        assert!(std::time::Instant::now() < deadline, "extraction workers did not finish");
+        std::thread::yield_now();
+    }
+    assert!(pending.poll(&rt).unwrap().is_some());
 }
 #[test]
 fn restored_world_rejects_a_pre_restore_snapshot() {

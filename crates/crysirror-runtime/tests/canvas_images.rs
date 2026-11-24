@@ -196,6 +196,7 @@ fn capture_pins_published_inputs_while_release_mutation_and_failed_presenter_rem
     rt.host
         .release_image_resource(owner, &path)
         .expect("releasing an owned retired path again is idempotent");
+    assert!(rt.assets.surface(owner, &path).is_some());
     submit(
         &mut rt,
         serde_json::json!({"canvases":[{"op":"clear","id":1,"color":[0,0,255,255]}]}),

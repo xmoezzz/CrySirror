@@ -45,6 +45,34 @@ fn bakes(r: &mut Renderer) -> u64 {
         .as_u64()
         .unwrap()
 }
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn rotated_bitmap_samples_the_clipped_source_before_transforming() {
+    let (_dir, mut rt, mut renderer) = fixture();
+    let matrix = [0.8660254, 0.5, -0.5, 0.8660254, 6.0, 0.0];
+    submit(&mut rt, json!({"canvases":[
+        {"op":"create","id":1,"width":12,"height":12},
+        {"op":"fill","id":1,"rect":[0,0,12,12],"color":[30,240,80,255],"replace":true},
+        {"op":"create","id":2,"width":12,"height":12},
+        {"op":"clear","id":2,"color":[0,0,0,0]},
+        {"op":"copy","source":1,"destination":2,"rect":[3,0,3,12],"position":[3,0],"opacity":255,"replace":true},
+        {"op":"create","id":3,"width":16,"height":16},
+        {"op":"clear","id":3,"color":[0,0,0,0]},
+        {"op":"transform_copy","source":2,"destination":3,"rect":[0,0,12,12],"matrix":matrix},
+        {"op":"present","id":3,"layer":10,"order":0}
+    ]}));
+    let sliced = capture(&mut rt, &mut renderer);
+    submit(&mut rt, json!({"canvases":[
+        {"op":"clear","id":2,"color":[0,0,0,0]},
+        {"op":"fill","id":2,"rect":[3,0,3,12],"color":[30,240,80,255],"replace":true},
+        {"op":"clear","id":3,"color":[0,0,0,0]},
+        {"op":"transform_copy","source":2,"destination":3,"rect":[0,0,12,12],"matrix":matrix}
+    ]}));
+    let reference = capture(&mut rt, &mut renderer);
+    assert!(reference.pixels().any(|p| p[1] > 180));
+    assert_eq!(sliced, reference);
+}
 #[test]
 #[ignore = "requires a real wgpu adapter; execute explicitly"]
 fn text_cell_save_restore_keeps_translucent_background_outside_the_cell() {
@@ -164,6 +192,62 @@ fn native_canvas_colour_copy_ignores_source_alpha_and_keeps_destination_alpha_an
     ]}));
     assert_eq!(capture(&mut rt,&mut r).get_pixel(3,3).0,copied,
         "direct colour-only draws must also preserve zero-alpha source RGB");
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn repeated_clipped_thumbnail_updates_keep_last_rgb_and_destination_alpha() {
+    let (_root, mut rt, mut r) = fixture();
+    submit(&mut rt, json!({"canvases":[
+        {"op":"create","id":1,"width":8,"height":8},
+        {"op":"create","id":2,"width":8,"height":8},
+        {"op":"clear","id":2,"color":[0,0,255,128]}
+    ]}));
+    for i in 0..90 {
+        let color = if i % 2 == 0 { [255,0,0,0] } else { [0,255,0,0] };
+        submit(&mut rt, json!({"canvases":[
+            {"op":"clear","id":1,"color":color},
+            {"op":"copy","source":1,"destination":2,"rect":[0,0,8,8],
+             "position":[0,0],"opacity":255,"clip":[2,2,4,4],"atop":"copy"}
+        ]}));
+    }
+    submit(&mut rt,json!({"canvases":[{"op":"present","id":2,"layer":10,"order":0}]}));
+    let image = capture(&mut rt, &mut r);
+    let center = image.get_pixel(3,3).0;
+    let outside = image.get_pixel(1,1).0;
+    assert!(center[0] <= 1 && center[1].abs_diff(188) <= 2 && center[2] <= 1 && center[3] == 128, "{center:?}");
+    assert!(outside[0] <= 1 && outside[1] <= 1 && outside[2].abs_diff(188) <= 2 && outside[3] == 128, "{outside:?}");
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn closing_a_scrolled_panel_freezes_the_visible_thumbnail() {
+    let (_root, mut rt, mut renderer) = fixture();
+    // The scroller has already frozen the thumbnail several times. Each
+    // update replaces only RGB in its own target, retaining the old alpha.
+    let mut tile = json!({"kind":"solid","color":[30,50,180,128]});
+    for (x, color) in [(0,[255,0,0,255]), (2,[0,255,0,255]), (4,[255,240,0,255])] {
+        tile = json!({"kind":"snapshot","size":[8,8],"layers":[
+            {"id":1,"rect":[0,0,8,8],"paint":{"kind":"solid","color":[0,0,0,0]}},
+            {"id":2,"parent":1,"order":[0,1],"rect":[0,0,8,8],"paint":tile},
+            {"id":3,"parent":1,"order":[0,2],"rect":[x,2,4,4],"blend":"atop_copy",
+             "paint":{"kind":"solid","color":color}}
+        ]});
+    }
+    submit(&mut rt, json!({"layers":[
+        {"op":"put","layer":{"id":1,"rect":[0,0,16,16],"paint":{"kind":"solid","color":[0,0,0,0]}}},
+        {"op":"put","layer":{"id":2,"parent":1,"rect":[2,1,8,8],"clip":[1,0,6,8],
+         "opacity":150,"paint":tile}}
+    ]}));
+    let visible = capture(&mut rt, &mut renderer);
+    assert!(visible.get_pixel(8,4)[3] > 30);
+    assert_eq!(visible.get_pixel(2,4)[3], 0);
+    submit(&mut rt, json!({"canvases":[
+        {"op":"create","id":3,"width":16,"height":16},
+        {"op":"copy_subtree","source":1,"destination":3,"rect":[0,0,16,16],"position":[0,0]},
+        {"op":"present","id":3,"layer":10,"order":1}
+    ],"layers":[{"op":"remove","id":1}]}));
+    assert_eq!(capture(&mut rt, &mut renderer), visible);
 }
 
 #[test]
@@ -396,8 +480,20 @@ fn only_registered_immutable_images_can_publish_and_pending_is_not_cached_blank(
     std::fs::write(root.path().join("assets/plain.png"), png([255; 4])).unwrap();
     // A plain project PNG is self-contained and pinned by content, so it may
     // enter a snapshot; unpublished engine names and dynamic surfaces may not.
-    r.set_engine_frame(vec![snapshot_image("plain.png")]).unwrap();
-    assert!(r.capture(&rt.host.scene, &mut rt.assets, [16, 16], [0; 4]).is_ok());
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        r.set_engine_frame(vec![snapshot_image("plain.png")]).unwrap();
+        let shot = r
+            .capture(&rt.host.scene, &mut rt.assets, [16, 16], [0; 4])
+            .unwrap();
+        if shot.get_pixel(1, 1).0 == [255; 4] {
+            assert_eq!(bakes(&mut r), 2);
+            break;
+        }
+        assert_eq!(bakes(&mut r), 1, "pending project image published a blank product");
+        assert!(Instant::now() < end, "project image never finished loading");
+        std::thread::yield_now();
+    }
     for forbidden in ["__crysirror/not-published.png", &dynamic] {
         r.set_engine_frame(vec![snapshot_image(forbidden)]).unwrap();
         assert!(
@@ -421,7 +517,9 @@ fn only_registered_immutable_images_can_publish_and_pending_is_not_cached_blank(
 #[test]
 #[ignore = "requires a real wgpu adapter and a system font; execute explicitly"]
 fn frozen_canvas_text_rasterizes_from_the_shared_font() {
-    let Ok(font) = std::fs::read("/System/Library/Fonts/Supplemental/Arial.ttf") else {
+    let path = std::env::var_os("CRYSIRROR_TEST_FONT")
+        .unwrap_or_else(|| "/System/Library/Fonts/Supplemental/Arial.ttf".into());
+    let Ok(font) = std::fs::read(path) else {
         eprintln!("no system font; skipped");
         return;
     };
@@ -457,6 +555,65 @@ fn bgra_presenter_materializes_rgba_snapshot_without_swapping_red_and_blue() {
     let layers=Arc::new(layers);
     let image=renderer.materialize_snapshot(&mut rt.assets,1,[2,2],&layers).unwrap().unwrap();
     assert!(image.pixels().all(|pixel|pixel.0==[255,0,0,255]));
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn same_size_snapshots_keep_independent_pixels_when_reusing_scratch() {
+    let (_root, mut rt, mut renderer) = fixture();
+    let mut commands = Vec::new();
+    for (id, x, color) in [(1, 0, [255, 0, 0, 255]), (2, 8, [0, 0, 255, 255])] {
+        commands.push(json!({"op":"put","layer":{
+            "id":id,"rect":[x,0,8,8],"paint":{"kind":"snapshot","size":[8,8],
+            "layers":[{"id":1,"rect":[0,0,8,8],"paint":{"kind":"solid","color":color}}]}
+        }}));
+    }
+    submit(&mut rt, json!({"layers":commands.clone()}));
+    let frame = capture(&mut rt, &mut renderer);
+    assert_eq!(frame.get_pixel(4, 4).0, [255, 0, 0, 255]);
+    assert_eq!(frame.get_pixel(12, 4).0, [0, 0, 255, 255]);
+    assert_eq!(bakes(&mut renderer), 2);
+
+    submit(&mut rt, json!({"layers":[{"op":"remove","id":1},{"op":"remove","id":2}]}));
+    assert!(capture(&mut rt, &mut renderer).pixels().all(|p| p.0 == [0; 4]));
+    submit(&mut rt, json!({"layers":commands}));
+    assert_eq!(capture(&mut rt, &mut renderer), frame);
+    assert_eq!(bakes(&mut renderer), 2, "retained cells should not rasterize again");
+}
+
+#[test]
+#[ignore = "requires a real wgpu adapter; execute explicitly"]
+fn repeated_portrait_pages_render_each_placement_beyond_the_old_expansion_limit() {
+    use crysirror_scene::layer::LayerSpec;
+    let (_root, mut runtime, mut renderer) = fixture();
+    let root: LayerSpec = serde_json::from_value(json!({
+        "id":1,"rect":[0,0,1,1],"paint":{"kind":"solid","color":[0,0,0,0]}
+    })).unwrap();
+    let mut parts = vec![root.clone()];
+    for id in 2..=2100 {
+        let mut part = root.clone();
+        part.id = id;
+        part.parent = Some(1);
+        part.visible = id == 2100;
+        part.paint = Paint::Solid { color:[255,0,0,255] };
+        parts.push(part);
+    }
+    let frozen = Paint::Snapshot { size:[1,1], layers:Arc::new(parts) };
+    let mut scene_root = root.clone();
+    scene_root.rect[2] = 9.;
+    let mut scene = vec![scene_root];
+    for x in 0..8 {
+        let mut placement = root.clone();
+        placement.id = 2+x;
+        placement.parent = Some(1);
+        placement.rect[0] = x as f32;
+        placement.paint = frozen.clone();
+        scene.push(placement);
+    }
+    let image = renderer.materialize_snapshot(&mut runtime.assets, 1, [9,1], &Arc::new(scene))
+        .unwrap().unwrap();
+    for x in 0..8 { assert_eq!(image.get_pixel(x,0).0, [255,0,0,255]); }
+    assert_eq!(image.get_pixel(8,0).0[3], 0);
 }
 
 #[test]

@@ -9,6 +9,7 @@ use crysirror_core::{
     state::TextRun,
 };
 use std::{collections::BTreeMap, sync::Arc};
+use outline_font::{font_arc, FontBacking};
 
 pub mod dynamic;
 pub mod legacy_width;
@@ -35,33 +36,7 @@ pub mod reveal;
 pub mod rich;
 pub mod sdf;
 pub mod decoration;
-
-/// One process-wide copy of each distinct font file (by content). Outline
-/// faces borrow it as `'static` data and shaping sources share the same
-/// `Arc`, so a file is resident once however many aliases, faces or text
-/// systems use it. `ab_glyph::FontVec` owned a private copy per face and
-/// callers kept their own bytes as well: a 7.8 MB Japanese TTC cost ~30 MB
-/// on PS Vita's 300 MiB heap, and a KiriKiri title's eight 3.8 MB fonts
-/// cost 61 MB. Font files are immutable; the number of entries is bounded
-/// by the distinct font files a process loads.
-fn intern(key: [u8; 32], make: impl FnOnce() -> Arc<[u8]>) -> &'static Arc<[u8]> {
-    use std::sync::{Mutex, OnceLock};
-    static FONTS: OnceLock<Mutex<std::collections::HashMap<[u8; 32], &'static Arc<[u8]>>>> = OnceLock::new();
-    let mut fonts = FONTS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
-    fonts.entry(key).or_insert_with(|| Box::leak(Box::new(make())))
-}
-/// The shared copy of `bytes`, copying them only when the file is new.
-pub(crate) fn intern_font(bytes: &[u8]) -> &'static Arc<[u8]> {
-    intern(*blake3::hash(bytes).as_bytes(), || Arc::from(bytes))
-}
-/// The shared copy of `bytes`, adopting the caller's buffer when new.
-pub(crate) fn intern_font_arc(bytes: Arc<[u8]>) -> &'static Arc<[u8]> {
-    let key = *blake3::hash(&bytes).as_bytes();
-    intern(key, || bytes)
-}
-pub(crate) fn font_arc(bytes: &'static [u8], face_index: u32) -> Result<FontArc, ab_glyph::InvalidFont> {
-    Ok(FontArc::new(ab_glyph::FontRef::try_from_slice_and_index(bytes, face_index)?))
-}
+mod outline_font;
 
 #[derive(Clone, Default)]
 pub struct TextSystem {
@@ -69,7 +44,7 @@ pub struct TextSystem {
     font_families: Arc<BTreeMap<String, Vec<String>>>,
     font_styles: Arc<BTreeMap<String,Option<crysirror_core::service::FontFaceStyle>>>,
     // Font bytes remain CPU resources, never project/save data or atlas output.
-    font_sources: Arc<BTreeMap<String, (Arc<[u8]>, u32)>>,
+    font_sources: Arc<BTreeMap<String, (Arc<FontBacking>, u32)>>,
     dynamic: dynamic::Catalog,
     scope: Option<crysirror_core::state::ClientId>,
 }
@@ -124,22 +99,16 @@ impl TextSystem {
         size: u16,
         text: &str,
     ) -> Result<Vec<crysirror_core::service::SimpleTextPlacement>> {
-        self.measure_simple(font, size as f32, text)?;
-        if let Some(face)=self.precomputed_face(font)? { return face.position_simple(text); }
-        let run = TextRun {
-            text: text.into(),
-            font: font.into(),
-            size_px: size,
-            bounds: crysirror_core::state::Rect {
-                x: 0,
-                y: 0,
-                width: 1,
-                height: size as u32 * 2,
-            },
-            color: crysirror_core::state::Color([255; 4]),
-            layout_profile: UNWRAPPED_TEXT_LAYOUT.into(),
-        };
-        let glyphs = self.positioned(&run)?;
+        ensure!((1..=512).contains(&size), "text metric size");
+        ensure!(
+            text.len() <= 1024 * 1024 && !text.contains(['\n', '\r']),
+            "single-line text metric limit"
+        );
+        if let Some(face) = self.precomputed_face(font)? {
+            face.check_size(f32::from(size))?;
+            return face.position_simple(text);
+        }
+        let glyphs = self.position_glyphs(font, size, text, false, [1, u32::from(size) * 2])?;
         Ok(text
             .chars()
             .filter(|c| *c != '\t')
@@ -203,11 +172,10 @@ impl TextSystem {
         let face=rustybuzz::Face::from_slice(&bytes, face_index).context("invalid shaping face/index")?;
         let families=dynamic::family_names(&face)?;
         let style=dynamic::face_style(&face);
-        let shared = intern_font(&bytes);
-        drop(bytes);
-        let font = font_arc(shared, face_index).map_err(|e| anyhow::anyhow!("font {alias}: {e}"))?;
+        let shared = FontBacking::new(bytes.into());
+        let font = font_arc(shared.clone(), face_index).map_err(|e| anyhow::anyhow!("font {alias}: {e}"))?;
         Arc::make_mut(&mut self.font_sources)
-            .insert(alias.into(), (shared.clone(), face_index));
+            .insert(alias.into(), (shared, face_index));
         Arc::make_mut(&mut self.fonts).insert(alias.into(), (font, digest));
         Arc::make_mut(&mut self.font_families).insert(alias.into(),families);
         Arc::make_mut(&mut self.font_styles).insert(alias.into(),style);
@@ -237,7 +205,7 @@ impl TextSystem {
         if self.fonts.contains_key(alias){ return Ok(None); }
         Ok(self.dynamic_face(alias)?.precomputed.clone())
     }
-    fn font_source(&self, alias: &str) -> Result<(Arc<[u8]>,u32)> {
+    fn font_source(&self, alias: &str) -> Result<(Arc<FontBacking>,u32)> {
         if let Some(source) = self.font_sources.get(alias) { return Ok(source.clone()); }
         let face = self.dynamic_face(alias)?;
         Ok((face.bytes.clone(), face.face_index))
@@ -271,15 +239,31 @@ impl TextSystem {
         self.key(text)?;
         Self::validate_surface(text.size_px, [text.bounds.width, text.bounds.height])?;
         ensure!(text.text.len() <= 1024 * 1024, "text exceeds 1 MiB");
-        let font = self.font(&text.font)?;
-        let size = f32::from(text.size_px);
+        self.position_glyphs(
+            &text.font,
+            text.size_px,
+            &text.text,
+            text.layout_profile == SIMPLE_TEXT_LAYOUT,
+            [text.bounds.width, text.bounds.height],
+        )
+    }
+    fn position_glyphs(
+        &self,
+        alias: &str,
+        size: u16,
+        text: &str,
+        wrap: bool,
+        bounds: [u32; 2],
+    ) -> Result<Vec<Glyph>> {
+        let font = self.font(alias)?;
+        let size = f32::from(size);
         let scaled = font.as_scaled(size);
         let line_height = (scaled.ascent() - scaled.descent() + scaled.line_gap()).max(1.);
         let mut x = 0.;
         let mut baseline = scaled.ascent();
         let mut previous = None;
         let mut glyphs = Vec::new();
-        for ch in text.text.chars() {
+        for ch in text.chars() {
             if ch == '\r' {
                 continue;
             }
@@ -297,16 +281,12 @@ impl TextSystem {
             let id = font.glyph_id(ch);
             ensure!(
                 id.0 != 0,
-                "font '{}' has no glyph for U+{:04X}",
-                text.font,
+                "font '{alias}' has no glyph for U+{:04X}",
                 ch as u32
             );
             let kern = previous.map(|p| scaled.kern(p, id)).unwrap_or(0.);
             let advance = scaled.h_advance(id);
-            if text.layout_profile == SIMPLE_TEXT_LAYOUT
-                && x > 0.
-                && x + kern + advance > text.bounds.width as f32
-            {
+            if wrap && x > 0. && x + kern + advance > bounds[0] as f32 {
                 x = 0.;
                 baseline += line_height;
                 previous = None;
@@ -314,7 +294,7 @@ impl TextSystem {
             if previous.is_some() {
                 x += kern;
             }
-            if baseline - scaled.ascent() >= text.bounds.height as f32 {
+            if baseline - scaled.ascent() >= bounds[1] as f32 {
                 break;
             }
             glyphs.push(Glyph {
@@ -656,6 +636,19 @@ mod tests {
         ] {
             assert_eq!(pixels.len(), 128 * 96 * 4);
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] > 0));
+        }
+        let unwrapped = TextRun {
+            text: "AV\tTo".into(),
+            layout_profile: UNWRAPPED_TEXT_LAYOUT.into(),
+            ..text
+        };
+        let positions = system
+            .position_simple("fixture", 24, &unwrapped.text)
+            .unwrap();
+        let reference = system.positioned(&unwrapped).unwrap();
+        assert_eq!(positions.len(), reference.len());
+        for (actual, expected) in positions.iter().zip(reference) {
+            assert_eq!(actual.baseline, [expected.position.x, expected.position.y]);
         }
         let mut invalid = glyphs;
         invalid[0].glyph_id = u32::MAX;

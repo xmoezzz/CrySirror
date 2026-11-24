@@ -227,7 +227,6 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
             error.with_stack_frame(self.stack_frame_for(&file, &decoded.object, 0))
         })?;
         let result = (|| {
-            let caller_args = args.clone();
             let global = self.runtime.global;
             // `tTJSInterCodeContext::FuncCall` runs a context entered with no
             // ObjThis on the global object only when it *is* the top-level
@@ -254,14 +253,10 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 Some(handle) => self.runtime.this_proxy(handle),
                 None => global,
             };
-            let mut frame = Frame::new(&decoded.object, args, this_obj, this_proxy)?;
+            let mut frame = Frame::new(&decoded.object, decoded.max_register, args, this_obj, this_proxy);
             if let Some(collapse_base) = decoded.object.func_decl_collapse_base {
                 let base = collapse_base as usize;
-                let rest = if caller_args.len() > base {
-                    caller_args[base..].to_vec()
-                } else {
-                    Vec::new()
-                };
+                let rest = frame.caller_args.get(base..).unwrap_or_default().to_vec();
                 let array = self.runtime.alloc_array_object(rest);
                 frame.set(-3 - collapse_base as i16, Variant::Object(array))?;
             }
@@ -294,17 +289,26 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
     }
 
     fn run_call_stack(&mut self, mut stack: Vec<CallFrame>, base_depth: usize) -> Result<Variant> {
+        let missing_frame = || TjsError::runtime("VM call stack completed without a value");
+        let Some(mut call_frame) = stack.pop() else {
+            self.runtime.call_depth = base_depth;
+            return Err(missing_frame());
+        };
+        // Keep the active frame in place across sequential instructions.
+        // Only calls, returns, suspension or exception unwinding need the
+        // caller stack; moving the full frame per opcode penalizes callbacks.
         let result = loop {
-            let Some(mut call_frame) = stack.pop() else {
-                break Err(TjsError::runtime("VM call stack completed without a value"));
-            };
             self.activate_call_frame(&call_frame);
             if call_frame.pc >= call_frame.instructions.len() {
                 let value = call_frame.frame.result.clone();
                 self.runtime.leave_call_frame();
                 match self.complete_call_value(value, call_frame.continuation, &mut stack) {
                     Ok(Some(value)) => break Ok(value),
-                    Ok(None) => continue,
+                    Ok(None) => {
+                        let Some(parent) = stack.pop() else { break Err(missing_frame()) };
+                        call_frame = parent;
+                        continue;
+                    }
                     Err(error) => break Err(error),
                 }
             }
@@ -370,10 +374,10 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                         if matches!(inst_opcode, 103 | 107 | 115) {
                             call_frame.pc = pc;
                         }
-                        self.merge_nested_suspend(&mut stack, call_frame);
+                        self.merge_nested_suspend(&mut stack, call_frame, pc);
                         break Ok(Variant::Void);
                     }
-                    stack.push(call_frame);
+                    continue;
                 }
                 Ok(Step::Return(value)) => {
                     self.runtime.leave_call_frame();
@@ -386,7 +390,8 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 Ok(Step::Call { frame, resume_pc }) => {
                     call_frame.pc = resume_pc;
                     stack.push(call_frame);
-                    stack.push(*frame);
+                    call_frame = *frame;
+                    continue;
                 }
                 Ok(Step::Suspend { resume_pc, dest }) => {
                     let object_name = call_frame
@@ -400,7 +405,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                     call_frame.pc = resume_pc;
                     stack.push(call_frame);
                     self.runtime.suspended_call =
-                        Some(SuspendedCallStack { stack, base_depth, resume_dest: dest });
+                        Some(SuspendedCallStack { stack, base_depth, resume_dest: dest, forward_return: false });
                     break Ok(Variant::Void);
                 }
                 Err(error) => {
@@ -416,7 +421,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                     // the call opcodes.
                     if self.runtime.suspended_call.is_some() && matches!(inst_opcode, 99..=102) {
                         call_frame.pc = pc;
-                        self.merge_nested_suspend(&mut stack, call_frame);
+                        self.merge_nested_suspend(&mut stack, call_frame, pc);
                         break Ok(Variant::Void);
                     }
                     if error.kind == TjsErrorKind::ResourcePending {
@@ -435,7 +440,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                         // exception.
                         stack.push(call_frame);
                         self.runtime.suspended_call =
-                            Some(SuspendedCallStack { stack, base_depth, resume_dest: None });
+                            Some(SuspendedCallStack { stack, base_depth, resume_dest: None, forward_return: false });
                         break Ok(Variant::Void);
                     }
                     // A debug-session quit must never become a catchable TJS
@@ -487,6 +492,8 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                     }
                 }
             }
+            let Some(parent) = stack.pop() else { break Err(missing_frame()) };
+            call_frame = parent;
         };
         if result.is_err() {
             self.runtime.call_depth = base_depth;
@@ -504,6 +511,17 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         // them (including errors from nested calls) are converted into
         // exception objects and execution resumes at the catch address.
         loop {
+            // An INV caller is parked at the instruction while its finalizer
+            // executes. Undo the guard on a failed finalizer. Window-owned
+            // items log the error and continue with the remaining siblings.
+            if let Some(pending) = call_frame.frame.invalidations.pop() {
+                self.runtime.heap[pending.object.0].invalidating = false;
+                if !call_frame.frame.invalidations.is_empty() {
+                    self.runtime.host_mut().log(&error.message);
+                    stack.push(call_frame);
+                    return Ok(());
+                }
+            }
             if let Some(entry) = call_frame.frame.entries.pop() {
                 // A script `throw` that crossed a frame boundary (or a native
                 // boundary such as a `missing` hook) still carries the thrown
@@ -646,6 +664,9 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
     }
 
     fn activate_call_frame(&mut self, frame: &CallFrame) {
+        if self.file_id == frame.file_id {
+            return;
+        }
         self.file_id = frame.file_id;
         self.file = Arc::clone(&frame.file);
         self.code_handles = Arc::clone(&frame.code_handles);
@@ -769,12 +790,17 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
         debugger.apply_action(action, key, depth)
     }
 
-    fn merge_nested_suspend(&mut self, stack: &mut Vec<CallFrame>, outer: CallFrame) {
+    fn merge_nested_suspend(&mut self, stack: &mut Vec<CallFrame>, outer: CallFrame, pc: usize) {
         let Some(mut suspended) = self.runtime.suspended_call.take() else {
             return;
         };
+        let forward = std::mem::take(&mut suspended.forward_return);
         if let Some(root) = suspended.stack.first_mut() {
-            root.continuation = Continuation::CallerRegister { dest: None };
+            let inst = &outer.instructions[pc];
+            let dest = if forward && matches!(inst.opcode, 99..=101) {
+                Some(inst.operands[0]).filter(|&r| r != 0)
+            } else { None };
+            root.continuation = Continuation::CallerRegister { dest };
         }
         // `stack` is ordered bottom-to-top and already contains callers of
         // `outer`; append the current frame and the nested suspended stack so
@@ -898,7 +924,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 let value = self.typeof_indirect(frame, inst, DispatchFlags::must_exist())?;
                 frame.set(inst.operands[0], value)?;
             }
-            86 | 87 => self.eval_operator(frame, inst.operands[0], inst.opcode == 86)?,
+            86 | 87 => return self.eval_operator(frame, inst.operands[0], inst.opcode == 86, next_pc),
             88 => {
                 let class_name = frame.get(inst.operands[1])?.to_tjs_string()?;
                 let value = self.instance_of(&frame.get(inst.operands[0])?, &class_name)?;
@@ -921,11 +947,7 @@ impl<'bc, 'rt, H: TjsHost + 'static> Vm<'bc, 'rt, H> {
                 frame.set(inst.operands[0], value)?;
             }
             93 => {
-                let value = match self.resolve_object(frame.get(inst.operands[0])?) {
-                    Ok(handle) => Variant::Integer(i64::from(self.invalidate_object(handle)?)),
-                    Err(_) => Variant::Integer(0),
-                };
-                frame.set(inst.operands[0], value)?;
+                return self.invalidate_instruction(frame, inst.operands[0], inst_index, next_pc);
             }
             94 => {
                 let value = match self.resolve_object(frame.get(inst.operands[0])?) {
@@ -1855,6 +1877,97 @@ mod tests {
         let resumed = runtime.resume_suspended().expect("resume");
         assert_eq!(resumed, Some(Variant::Integer(42)));
         assert!(!runtime.is_suspended());
+    }
+
+    #[test]
+    fn eval_writes_the_result_after_a_resource_wait_without_restarting() {
+        let file = compile_source_to_bytecode(
+            "parked-eval.tjs",
+            r#"
+            global.evaluations = 0;
+            function resolveDialog() {
+                global.evaluations++;
+                return probeResource();
+            }
+            var dialog = "resolveDialog()"!;
+            return dialog;
+            "#,
+        )
+        .unwrap();
+        let mut runtime = Runtime::new();
+        runtime.register_global_native(
+            "probeResource",
+            |rt: &mut Runtime, _, _| match rt.global_member("readyResource") {
+                Variant::Void => Err(TjsError::resource_pending("confirm.pimg")),
+                resource => Ok(resource),
+            },
+        );
+        assert_eq!(runtime.execute_file(&file).unwrap(), Variant::Void);
+        assert!(runtime.is_suspended());
+
+        let resource = Variant::String("confirm_localized.pimg".into());
+        runtime.set_global_member("readyResource", resource.clone());
+        assert_eq!(runtime.resume_suspended().unwrap(), Some(resource));
+        assert_eq!(runtime.global_member("evaluations"), Variant::Integer(1));
+        assert!(!runtime.is_suspended());
+    }
+
+    #[test]
+    fn invalidation_waits_for_finalizer_before_notifying_object_death() {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        fn wait(_: &mut Runtime, _: Option<ObjectHandle>, _: Vec<Variant>) -> Result<Variant> {
+            if CALLS.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(TjsError::resource_pending("draw while closing panel"))
+            } else {
+                Ok(Variant::Void)
+            }
+        }
+        let mut rt = Runtime::new();
+        rt.register_global_native("waitForPaint", wait);
+        let file = compile_source_to_bytecode("panel.tjs", r#"
+            global.count = 0;
+            class Panel {
+                function setInputReady() { global.count++; }
+                function finalize() { global.waitForPaint(); global.owner.notify(); }
+            }
+            class Owner { var panel; function notify() { panel.setInputReady(); } }
+            global.owner = new Owner();
+            owner.panel = new Panel();
+            var closing = owner.panel;
+            var result = invalidate closing;
+            owner.panel = void;
+            return result && !(isvalid closing) && count == 1;
+        "#).unwrap();
+        let id = rt.install_script_file(Arc::new(file));
+        Vm::new(id, &mut rt).unwrap().execute_top_level().unwrap();
+        assert!(rt.is_suspended());
+        assert_eq!(rt.resume_suspended().unwrap(), Some(Variant::Integer(1)));
+    }
+
+    #[test]
+    fn failed_resumed_finalizer_leaves_object_valid_and_can_be_retried() {
+        fn pause(rt: &mut Runtime, _: Option<ObjectHandle>, _: Vec<Variant>) -> Result<Variant> {
+            rt.request_suspend();
+            Ok(Variant::Void)
+        }
+        let mut rt = Runtime::new();
+        rt.register_global_native("pause", pause);
+        let file = compile_source_to_bytecode("retry-finalize.tjs", r#"
+            class Panel {
+                var attempts = 0;
+                function finalize() {
+                    attempts++;
+                    if (attempts == 1) { global.pause(); throw "test"; }
+                }
+            }
+            var panel = new Panel(), caught = 0;
+            try { invalidate panel; } catch(e) { caught = isvalid panel; }
+            var retry = invalidate panel;
+            return caught && retry && !(isvalid panel);
+        "#).unwrap();
+        rt.execute_file(&file).unwrap();
+        assert!(rt.is_suspended());
+        assert_eq!(rt.resume_suspended().unwrap(), Some(Variant::Integer(1)));
     }
 
     fn file_with_code(

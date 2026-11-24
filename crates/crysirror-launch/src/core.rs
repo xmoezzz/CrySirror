@@ -4,9 +4,15 @@
 //! (desktop window, offscreen, console) performs between ticks.
 use crate::detect::Plan;
 use anyhow::{bail, ensure, Context, Result};
+use crysirror_core::{
+    image_processing::RgbaImage,
+    service::HostServices,
+    state::ClientId,
+    Error,
+};
 use crysirror_runtime::{AdapterRegistry, Project, Runtime};
 use crysirror_wgpu::Renderer;
-use std::{io::Read, path::Path, time::{Duration, Instant}};
+use std::{io::Read, path::Path, sync::Arc, time::{Duration, Instant}};
 
 /// What a host drives: a plain runtime, or the engine App with
 /// behaviours/scripts (which owns the runtime).
@@ -184,7 +190,7 @@ pub fn bootstrap_interruptible(mut rt: Runtime, plan: &Plan, cancelled: impl Fn(
                 )
                 .with_context(|| format!("index archive {}", mount.source))?;
             let started = std::time::Instant::now();
-            let result = (|| -> Result<()> {
+            let result = (|| -> Result<bool> {
                 loop {
                     ensure!(!cancelled(), "native launch cancelled");
                     let status = cx
@@ -192,6 +198,10 @@ pub fn bootstrap_interruptible(mut rt: Runtime, plan: &Plan, cancelled: impl Fn(
                         .to_json();
                     match status["state"].as_str() {
                         Some("ready") => break,
+                        Some("failed") if mount.is_hxv4_companion() => {
+                            log::warn!("cannot index optional archive {}: {}", mount.source, status["error"]);
+                            return Ok(false);
+                        }
                         Some("failed") => bail!("archive {}: {}", mount.source, status["error"]),
                         Some("pending") => {}
                         _ => bail!("invalid resource completion state: {status}"),
@@ -211,12 +221,14 @@ pub fn bootstrap_interruptible(mut rt: Runtime, plan: &Plan, cancelled: impl Fn(
                     "mountDecode",
                     &[ticket.clone(), Value::Str(mount.target.clone()),Value::Bool(mount.fallback)],
                 )?;
-                Ok(())
+                Ok(true)
             })();
             let release = cx.call(resources, "cancelDecode", &[ticket]);
-            result?;
+            let mounted = result?;
             release?;
-            log::info!("mounted {} at {}", mount.source, mount.target);
+            if mounted {
+                log::info!("mounted {} at {}", mount.source, mount.target);
+            }
         }
         ensure!(!cancelled(), "native launch cancelled");
         engine.start()?;
@@ -247,24 +259,60 @@ pub fn load_fonts(rt: &mut Runtime, override_font: Option<&Path>) -> Result<()> 
 /// snapshot trees stop nesting. A request whose images are still loading is
 /// retried next frame.
 pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result<()> {
+    let profiler = rt.profiler.clone();
+    let frame = profiler.frame();
+    let _span = profiler.span(frame, "canvas.materialize");
     if rt.has_pending_target_images() {
+        let _span = profiler.span(frame, "canvas.target_readback");
         let canvas = rt.project.canvas;
         renderer.set_engine_frame(rt.host.engine.frame(canvas)?)?;
         renderer.flush_target_writes(&rt.host.scene,&mut rt.assets,canvas,rt.project.background)?;
         rt.prepare_target_images(|target,assets|renderer.render_target_readback(assets,target))?;
     }
     rt.prepare_frame_captures(|rt| {
+        let _span = profiler.span(frame, "canvas.frame_capture");
         let canvas = rt.project.canvas;
         renderer.set_engine_frame(rt.host.engine.frame(canvas)?)?;
         let image = renderer.capture(&rt.host.scene, &mut rt.assets, canvas, rt.project.background)?;
         Ok(image.into_raw())
     })?;
-    rt.prepare_canvas_images(|request,assets| renderer.snapshot_readback(assets,request.client,request.size,&request.layers))?;
-    for request in rt.host.engine.canvases.materialize_requests() {
-        let Some(image) = renderer.materialize_snapshot(&mut rt.assets, request.client, request.size, &request.layers)?
+    rt.prepare_canvas_images(|request,assets| {
+        let _span = profiler.span(frame, "canvas.region_readback");
+        renderer.snapshot_readback(assets,request.client,request.size,&request.layers)
+    })?;
+    for request in rt.host.engine.canvases.live_materialize_requests() {
+        let _span = profiler.span(frame, "canvas.compaction");
+        let image = profiler.scope(frame, || {
+            renderer.materialize_snapshot(&mut rt.assets, request.client, request.size, &request.layers)
+        })?;
+        let Some(image) = image
         else {
             continue;
         };
+        let _publish = profiler.span(frame, "canvas.compaction.publish");
+        let client = ClientId(request.client);
+        // A parked bitmap redraw often overwrites these pixels within a few
+        // ticks. Keep its compacted surface as a bounded resident image rather
+        // than encoding PNG on the presentation thread and decoding it again.
+        if rt.presentation_pending() {
+            let bytes = Arc::from(image.as_raw().as_slice());
+            let resource = Arc::new(RgbaImage::new(client, request.size, bytes)?);
+            match rt.host.publish_image_resource(client, request.surface, resource) {
+                Ok(image) => {
+                    let path = image.path.relative();
+                    let engine = &mut rt.host.engine;
+                    let resolved = engine.canvases.resolve_materialized(&request, path, &mut engine.layers);
+                    let retired = rt.host.release_image_resource(client, path);
+                    resolved?;
+                    retired?;
+                    continue;
+                }
+                // Keep the existing storage path when the resident-image
+                // budget is full. Both paths preserve the same frozen pixels.
+                Err(Error::Limit(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
         let mut png = Vec::new();
         image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
         // FNV-1a over the pixels names the immutable image.
@@ -275,13 +323,15 @@ pub fn materialize_canvases(renderer: &mut Renderer, rt: &mut Runtime) -> Result
             "__crysirror/canvas-{}-{}x{}-{hash:016x}.png",
             request.surface, request.size[0], request.size[1]
         );
-        let client = crysirror_core::state::ClientId(request.client);
         rt.assets.register_generated(client, &path, png)?;
         let engine = &mut rt.host.engine;
         engine.canvases.resolve_materialized(&request, &path, &mut engine.layers)?;
         log::debug!("canvas {} materialized as {path}", request.surface);
     }
-    renderer.advance_frame_histories(&mut rt.assets,rt.host.engine.layers.frame(rt.project.canvas)?,rt.project.canvas)?;
+    {
+        let _span = profiler.span(frame, "layers.transition_history");
+        renderer.advance_layer_histories(&mut rt.assets, &rt.host.engine.layers, rt.project.canvas)?;
+    }
     Ok(())
 }
 

@@ -86,7 +86,7 @@ const SCRIPTS_MEMBERS: &[&str] = &[
 /// Installs the ten reference `Scripts` members. Shared with `PackinOne.dll`,
 /// which compiles the same sub-plugin in: the bundle installs this one
 /// implementation, so both DLLs answer the shared members identically.
-pub fn install_scripts_ex(runtime: &mut Runtime<KrkrHost>) {
+pub fn install_scripts_ex(runtime: &mut Runtime<KrkrHost>) -> Result<()> {
     let scripts = match runtime.global_member("Scripts") {
         Variant::Object(handle) => handle,
         _ => {
@@ -114,13 +114,28 @@ pub fn install_scripts_ex(runtime: &mut Runtime<KrkrHost>) {
             "equalStructNumericLoose",
             scripts_equal_struct_numeric_loose,
         ),
-        ("foreach", scripts_foreach),
         ("getMD5HashString", scripts_get_md5_hash_string),
         ("clone", scripts_clone),
         ("rehash", scripts_rehash),
     ] {
         runtime.register_object_native(scripts, name, handler);
     }
+    // A callback can wait for a host resource. Its index and early-return
+    // value must survive that wait, just like the callback's own TJS frame.
+    let file = runtime.compile_source("Scripts.foreach", r#"
+        return function(callback, pairs, extra) {
+            var length = pairs.count;
+            for (var i = 0; i < length; i += 2) {
+                var result = callback(pairs[i], pairs[i + 1], extra*);
+                if (result !== void) return result;
+            }
+        };
+    "#)?;
+    let iterator = runtime.execute_file(&file)?;
+    runtime.register_object_native(scripts, "foreach", move |rt: &mut Runtime<KrkrHost>, _: Option<ObjectHandle>, args: Vec<Variant>| {
+        scripts_foreach(rt, &iterator, args)
+    });
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -394,7 +409,7 @@ fn equal_struct_objects(
 
 fn scripts_foreach(
     runtime: &mut Runtime<KrkrHost>,
-    this_obj: Option<ObjectHandle>,
+    iterator: &Variant,
     args: Vec<Variant>,
 ) -> Result<Variant> {
     if args.len() < 2 {
@@ -403,7 +418,6 @@ fn scripts_foreach(
     // CrySirror change: `functhis` falls back to the objthis krkr passes to
     // this static member, i.e. the calling script frame's `this`, not the
     // `Scripts` object the member was read from.
-    let _ = this_obj;
     let receiver = runtime
         .native_caller_this()
         .map(|handle| runtime.bound_this(handle).unwrap_or(handle));
@@ -431,15 +445,10 @@ fn scripts_foreach(
             .map(|(key, value)| (Variant::String(key), value))
             .collect(),
     };
-    for (key, value) in entries {
-        let mut call_args = vec![key, value];
-        call_args.extend(args.iter().skip(2).cloned());
-        let result = runtime.call_function(callback.clone(), call_args)?;
-        if !matches!(result, Variant::Void) {
-            return Ok(result);
-        }
-    }
-    Ok(Variant::Void)
+    let pairs = entries.into_iter().flat_map(|(key, value)| [key, value]).collect();
+    let pairs = Variant::Object(runtime.alloc_array_object(pairs));
+    let extra = Variant::Object(runtime.alloc_array_object(args.into_iter().skip(2).collect()));
+    runtime.tail_call_function(iterator.clone(), vec![callback, pairs, extra])
 }
 
 // ---------------------------------------------------------------------------

@@ -186,9 +186,15 @@ pub fn install(rt: &mut Rt) {
                         // A key the engine input frame does not carry reads as up.
                         .unwrap_or(0),
                 };
-                Ok(Variant::Integer(
-                    (rt.host().input.buttons_down & mask != 0) as i64,
-                ))
+                let down = if int(&a, 1, 1)? != 0 {
+                    rt.host().held_buttons & mask != 0
+                } else {
+                    let host = rt.host_mut();
+                    let pressed = host.pressed_since_query & mask != 0;
+                    host.pressed_since_query &= !mask;
+                    pressed
+                };
+                Ok(Variant::Integer(down as i64))
             })],
         );
     }

@@ -26,6 +26,80 @@ fn press(r: &mut Runtime, key: u64) {
 }
 
 #[test]
+fn system_confirm_waits_inside_nested_startup_and_resumes_with_the_answer() {
+    let (dir, mut r) = fixture(r#"
+Scripts.execStorage("first-run.tjs");
+Debug.message("startup finished");
+"#);
+    std::fs::write(dir.path().join("assets/first-run.tjs"), r#"
+var declined = System.confirm("First question", "Startup");
+var accepted = System.confirm("Second question");
+if (declined !== 0 || accepted !== 1) throw "wrong confirmation result";
+Debug.message("answers verified");
+"#).unwrap();
+    r.tick(0, InputFrame::default()).unwrap();
+    let dialog = r.host.engine.ui.dialogs.get(1).expect("startup dialog");
+    assert_eq!(dialog.title, "Startup");
+    assert_eq!(dialog.message, "First question");
+    assert_eq!(dialog.default, 0);
+    assert!(!r.presentation_pending());
+    assert!(!log(&r).contains("startup finished"));
+    press(&mut r, buttons::ESCAPE);
+    assert_eq!(r.host.engine.ui.dialogs.get(1).unwrap().message, "Second question");
+    press(&mut r, buttons::LEFT);
+    press(&mut r, buttons::ENTER);
+    assert!(r.host.engine.ui.dialogs.is_empty());
+    assert!(log(&r).contains("answers verified"), "{}", log(&r));
+    assert!(log(&r).contains("startup finished"), "{}", log(&r));
+}
+
+#[test]
+fn edit_template_dispatches_script_overrides_and_returns_text_only_on_ok() {
+    let (_dir, mut r) = fixture(r#"
+        Plugins.link("win32dialog.dll");
+        class Edit extends WIN32Dialog {
+            var answer, clicks=0;
+            function Edit() {
+                super.WIN32Dialog(null);
+                var h=new WIN32Dialog.Header(); h.store(%["title"=>"test"]);
+                var e=new WIN32Dialog.Items(); e.store(%["windowClass"=>129,"id"=>7]);
+                var a=new WIN32Dialog.Items(); a.store(%["windowClass"=>128,"id"=>1,"title"=>"OK"]);
+                var c=new WIN32Dialog.Items(); c.store(%["windowClass"=>128,"id"=>2,"title"=>"Cancel"]);
+                makeTemplate(h,e,a,c);
+            }
+            function onInit(m,w,l) {
+                setItemText(7,"old");
+                sendItemMessage(7,0xb1,0,-1);
+            }
+            function onCommand(m,w,l) {
+                clicks++;
+                if (w==1) answer=getItemText(7);
+                close(w);
+            }
+            function open() { var id=super.open();return id==1 ? answer : void; }
+        }
+        var d=new Edit();
+        var accepted=d.open(), cancelled=d.open();
+        if (accepted!=="备注" || cancelled!==void || d.clicks!=2) throw "dialog result";
+        Debug.message("edit-template-verified");
+    "#);
+    r.tick(0, InputFrame::default()).unwrap();
+    r.tick(16, InputFrame::default()).unwrap(); // publish onInit's initial text
+    let field = r.host.engine.ui.focus.expect("editor focused");
+    assert_eq!(r.host.engine.ui.get(field.owner, field.id).unwrap().text, "old");
+    let input = serde_json::from_value(json!({"ui":[{"op":"insert_text","text":"备注"}]})).unwrap();
+    r.host.engine.submit(crysirror_core::state::ClientId(field.owner), &input).unwrap();
+    // 640x480 canvas: the dialog's OK button is in the lower right of the panel.
+    let x = 552;
+    let y = 304;
+    r.tick(16, InputFrame { pointer_x:x,pointer_y:y,buttons_down:buttons::MOUSE_LEFT,buttons_pressed:buttons::MOUSE_LEFT,..Default::default() }).unwrap();
+    r.tick(16, InputFrame {pointer_x:x,pointer_y:y,..Default::default()}).unwrap();
+    for _ in 0..3 { r.tick(16,InputFrame::default()).unwrap(); }
+    press(&mut r,buttons::ESCAPE);
+    assert!(log(&r).contains("edit-template-verified"), "{}", log(&r));
+}
+
+#[test]
 fn message_box_suspends_until_an_engine_dialog_button_is_chosen() {
     let (_dir, mut r) = fixture(
         r#"

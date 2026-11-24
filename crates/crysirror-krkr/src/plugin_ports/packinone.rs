@@ -2,9 +2,8 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 // Behaviour notes: install is `install`; writes go through the adapter's
-// resumable atomic storage writes (`write_pack`); layer thumbnails are not
-// captured (the engine's layers have no CPU bitmap), so makeDataPackThumb
-// answers no thumbnail and logs it; KAGEX `kag.log` calls use the host log.
+// resumable atomic storage writes (`write_pack`). The shared image service
+// captures layer thumbnails before the bookmark body is written.
 //! PackinOne `tjsDataPack`: Scripts.loadDataPack / saveDataPack /
 //! makeDataPackThumb / makeDataPackDigest and Storages.saveOctet / loadOctet.
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -177,6 +176,9 @@ fn decode_data_pack(
     if let Some(pack) = reference_data_pack(bytes) {
         return decode_reference_data_pack(runtime, pack, storage_name);
     }
+    if let Some(pack) = embedded_bookmark_payload(bytes) {
+        return decode_reference_data_pack(runtime, &pack, storage_name);
+    }
     if is_plain_data_pack(bytes) {
         return decode_plain_data_pack(runtime, bytes, storage_name);
     }
@@ -284,10 +286,9 @@ fn is_plain_data_pack(bytes: &[u8]) -> bool {
 /// (`id`/`core`/`user`/`history`), `digest` is `calcThumbnailSize()`'s
 /// dictionary after `makeDataPackDigest` filled its `seed` (and carries
 /// `compress`/`cryptmode`/`iv`, set from `saveDataMode`), and `thumb` is
-/// `makeDataPackThumb`'s encoded image (or void). The file is the reference
-/// container — `[thumbnail image][16-byte header][iv][LZ4-framed and/or
-/// ChaCha-encrypted body]`, no offset footer: the image's own chunk structure
-/// ends the thumbnail and the body follows the header. The writer runs the
+/// `makeDataPackThumb`'s encoded image (or void). The pack header, IV and
+/// body live in JPEG APP11 or PNG tjSs chunks when a thumbnail is present.
+/// Without an image the file starts directly with the header. The writer runs the
 /// same chain the reference does (`FUN_10052090`): the body is serialized
 /// with the seeded checker, framed in raw LZ4 blocks when `compress` is set,
 /// then ChaCha-encrypted when `cryptmode` is set.
@@ -313,14 +314,13 @@ fn save_data_pack(
     if options.cryptmode != 0 {
         datapack_chacha_apply(options.cryptmode, options.seed, &options.iv, &mut body)?;
     }
-    let mut bytes = Vec::with_capacity(
-        thumb.as_ref().map_or(0, Vec::len) + ns0::NS0_HEADER_SIZE + options.iv.len() + body.len(),
-    );
-    if let Some(thumb) = &thumb {
-        bytes.extend_from_slice(thumb);
-    }
+    let mut bytes = Vec::with_capacity(ns0::NS0_HEADER_SIZE + options.iv.len() + body.len());
     append_data_pack_header(&mut bytes, &options);
     bytes.extend_from_slice(&body);
+    if let Some(thumb) = thumb {
+        bytes = embed_bookmark(&thumb, &bytes)
+            .ok_or_else(|| TjsError::runtime("invalid bookmark thumbnail"))?;
+    }
     write_pack(runtime, &name, bytes)?;
     Ok(Variant::Void)
 }
@@ -422,13 +422,7 @@ fn make_data_pack_thumb(
     let Some(layer) = args.first().and_then(|value| value.object_handle()) else {
         return Ok(Variant::Void);
     };
-    // CrySirror: no CPU bitmap of an engine layer; the save carries no
-    // leading image (the reference's own fallback when capture fails).
-    let _ = (layer, jpeg, quality);
-    runtime.host_mut().log(
-        "PackinOne.dll: makeDataPackThumb has no layer capture in CrySirror; saving without a thumbnail",
-    );
-    Ok(Variant::Void)
+    crate::image_api::capture_bookmark_thumbnail(runtime, layer, jpeg, quality)
 }
 
 /// `Scripts.makeDataPackDigest(subject, seed, key[, flag])`.
@@ -498,15 +492,13 @@ fn digest_seed(runtime: &Runtime<KrkrHost>, digest: Option<&Variant>) -> Option<
 /// The save path hands over `makeDataPackThumb`'s `Octet`; KAGEX's rewrite
 /// path passes the *file name* it is rewriting (object 476 →
 /// `saveDataPack(a0, a1, l0, a0)` in `rewriteBookMarkToFile`), which reuses
-/// the pack's existing thumbnail; a raw layer is accepted the same way
-/// `makeDataPackThumb` takes one (as a JPEG, the `saveThumbnail = 3` default).
+/// the pack's existing thumbnail. Scripts pass their layer through
+/// `makeDataPackThumb` before calling `saveDataPack`.
 fn pack_thumbnail(runtime: &mut Runtime<KrkrHost>, thumb: Option<&Variant>) -> Option<Vec<u8>> {
     match thumb {
         Some(Variant::Octet(bytes)) if !bytes.is_empty() => Some(bytes.clone()),
         Some(Variant::String(name)) => read_pack_thumbnail(runtime, name),
-        // CrySirror: a raw layer cannot be captured (see makeDataPackThumb).
-        Some(_) => None,
-        None => None,
+        _ => None,
     }
 }
 
@@ -991,9 +983,14 @@ fn datapack_lz4_deframe(framed: &[u8]) -> Result<Vec<u8>> {
             .ok_or_else(|| TjsError::runtime("LZ4 frame is truncated"))?;
         index += length;
         let start = out.len();
+        if start > crysirror_resource::krkr_pbd::MAX_PLAIN_BYTES - DATAPACK_LZ4_BLOCK {
+            return Err(TjsError::runtime("LZ4 data pack exceeds the decoded size limit"));
+        }
         out.resize(start + DATAPACK_LZ4_BLOCK, 0);
-        let written =
-            lz4_flex::block::decompress_into(block, &mut out[start..]).map_err(|error| {
+        let (previous, output) = out.split_at_mut(start);
+        let history = &previous[start.saturating_sub(64 * 1024)..];
+        let written = lz4_flex::block::decompress_into_with_dict(block, output, history)
+            .map_err(|error| {
                 TjsError::runtime(format!("LZ4 frame does not decompress: {error}"))
             })?;
         out.truncate(start + written);
@@ -1009,9 +1006,9 @@ fn datapack_lz4_deframe(framed: &[u8]) -> Result<Vec<u8>> {
 /// reference reads the file back through `JPGChunkStreamReader` /
 /// `PNGChunkStreamReader`, which stop exactly at the image's own end marker
 /// (`FUN_10050020` sniffs `TJS/`, `TJS\`, `\x89PNG` and `\xFF\xD8\xFF\xE0`).
-fn image_end(bytes: &[u8]) -> Option<usize> {
+pub(crate) fn image_end(bytes: &[u8]) -> Option<usize> {
     if bytes.starts_with(&[0xFF, 0xD8]) {
-        return jpeg_end(bytes);
+        return walk_jpeg(bytes, |_, _, _| Some(()));
     }
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return png_end(bytes);
@@ -1021,7 +1018,8 @@ fn image_end(bytes: &[u8]) -> Option<usize> {
 
 /// Walks JPEG markers to the EOI that ends the image. Entropy-coded data is
 /// skipped with its stuffing (`FF 00`) and restart markers respected.
-fn jpeg_end(bytes: &[u8]) -> Option<usize> {
+fn walk_jpeg(bytes: &[u8], mut segment: impl FnMut(usize, u8, &[u8]) -> Option<()>) -> Option<usize> {
+    if !bytes.starts_with(&[0xff, 0xd8]) { return None; }
     let mut index = 2;
     loop {
         if index + 2 > bytes.len() || bytes[index] != 0xFF {
@@ -1046,6 +1044,8 @@ fn jpeg_end(bytes: &[u8]) -> Option<usize> {
                     return None;
                 }
                 let length = usize::from(u16::from_be_bytes([bytes[index], bytes[index + 1]]));
+                if length < 2 { return None; }
+                segment(index - 2, marker, bytes.get(index + 2..index + length)?)?;
                 index += length;
                 loop {
                     if index + 1 >= bytes.len() {
@@ -1069,14 +1069,170 @@ fn jpeg_end(bytes: &[u8]) -> Option<usize> {
                 if length < 2 {
                     return None;
                 }
+                segment(index, marker, bytes.get(index + 4..index + 2 + length)?)?;
                 index += 2 + length;
             }
         }
     }
 }
 
+/// PackinOne JPEG bookmarks also store the pack *inside* the image, split
+/// across APP11 segments. The segment length includes a stuffed zero after
+/// each FF byte. Unstuff only the identified pack, never the thumbnail pixels.
+fn bookmark_chunks(
+    bytes: &[u8],
+    mut visit: impl FnMut(std::ops::Range<usize>, &[u8]) -> Option<()>,
+) -> Option<usize> {
+    let mut found = false;
+    let mut collecting = false;
+    let mut consider = |range, candidate: bool, chunk: &[u8]| {
+        if !candidate {
+            collecting = false;
+            return Some(());
+        }
+        if !collecting {
+            if found || !starts_with_ns0_magic(chunk) { return Some(()); }
+            found = true;
+            collecting = true;
+        }
+        visit(range, chunk)
+    };
+    if bytes.starts_with(&[0xff, 0xd8]) {
+        let end = walk_jpeg(bytes, |at, marker, data| {
+            consider(at..at + data.len() + 4, marker == 0xeb, data)
+        })?;
+        Some(end - 2)
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        let end = walk_png(bytes, |at, kind, data| {
+            consider(at..at + data.len() + 12, kind == b"tjSs", data)
+        })?;
+        Some(end - 12)
+    } else {
+        None
+    }
+}
+
+fn embedded_bookmark_payload(bytes: &[u8]) -> Option<Vec<u8>> {
+    let jpeg = bytes.starts_with(&[0xff, 0xd8]);
+    let mut pack = Vec::new();
+    bookmark_chunks(bytes, |_, chunk| {
+        let mut rest = chunk;
+        if jpeg {
+            while let Some(at) = rest.iter().position(|b| *b == 0xff) {
+                if rest.get(at + 1) != Some(&0) { return None; }
+                pack.extend_from_slice(&rest[..=at]);
+                rest = &rest[at + 2..];
+            }
+        }
+        pack.extend_from_slice(rest);
+        Some(())
+    })?;
+    (!pack.is_empty()).then_some(pack)
+}
+
+fn embed_bookmark(image: &[u8], pack: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    let terminator = bookmark_chunks(image, |old, _| {
+        out.extend_from_slice(image.get(from..old.start)?);
+        from = old.end;
+        Some(())
+    })?;
+    out.extend_from_slice(image.get(from..terminator)?);
+    let jpeg = image.starts_with(&[0xff, 0xd8]);
+    if jpeg {
+        for chunk in pack.chunks(16 * 1024) {
+            let len = chunk.len() + chunk.iter().filter(|&&b| b == 0xff).count() + 2;
+            out.extend_from_slice(&[0xff, 0xeb]);
+            out.extend_from_slice(&u16::try_from(len).ok()?.to_be_bytes());
+            for &byte in chunk {
+                out.push(byte);
+                if byte == 0xff { out.push(0); }
+            }
+        }
+    } else {
+        // The native PNG reader consumes a single tjSs record, even for
+        // packs that need several APP11 segments in a JPEG.
+        out.extend_from_slice(&u32::try_from(pack.len()).ok()?.to_be_bytes());
+        let start = out.len();
+        out.extend_from_slice(b"tjSs");
+        out.extend_from_slice(pack);
+        out.extend_from_slice(&crc32fast::hash(&out[start..]).to_be_bytes());
+    }
+    let end = terminator + if jpeg { 2 } else { 12 };
+    out.extend_from_slice(image.get(terminator..end)?);
+    Some(out)
+}
+
+#[cfg(test)]
+#[test]
+fn data_pack_blocks_can_reference_the_previous_block() {
+    let history: Vec<u8> = (0..4096).map(|i| ((i * 31 + i / 17) % 251) as u8).collect();
+    let next = &history[1180..3180];
+    let mut framed = datapack_lz4_frame(&history);
+    let second = lz4_flex::block::compress_with_dict(next, &history);
+    framed.extend_from_slice(&(second.len() as u16).to_le_bytes());
+    framed.extend_from_slice(&second);
+    assert_eq!(datapack_lz4_deframe(&framed).unwrap(), [history.as_slice(), next].concat());
+}
+
+#[cfg(test)]
+mod jpeg_bookmark_tests {
+    use super::{embed_bookmark, embedded_bookmark_payload, image_end};
+
+    #[test]
+    fn large_bookmarks_replace_old_chunks_and_keep_the_thumbnail() {
+        let surface = crysirror_image::ImageSurface {
+            width: 2, height: 1, rgba: vec![200, 19, 60, 255, 1, 215, 75, 255],
+        };
+        let mut first = b"TJS/ns0\0".to_vec();
+        first.resize(40_000, 0xff);
+        let second = b"TJS/4s0\0replacement";
+        for image in [crysirror_image::encode_jpeg(&surface, 90).unwrap(), crysirror_image::encode_png(&surface).unwrap()] {
+            let saved = embed_bookmark(&image, &first).unwrap();
+            assert_eq!(image_end(&saved), Some(saved.len()));
+            if saved.starts_with(b"\x89PNG") {
+                let mut sizes = Vec::new();
+                super::walk_png(&saved, |_, tag, bytes| {
+                    if tag == b"tjSs" { sizes.push(bytes.len()); }
+                    Some(())
+                }).unwrap();
+                assert_eq!(sizes, [first.len()]);
+            }
+            assert_eq!(embedded_bookmark_payload(&saved).unwrap(), first);
+            let rewritten = embed_bookmark(&saved, second).unwrap();
+            assert_eq!(embedded_bookmark_payload(&rewritten).unwrap(), second);
+            assert_eq!(rewritten, embed_bookmark(&image, second).unwrap());
+            assert_eq!(crysirror_image::decode_standard(&rewritten).unwrap(), crysirror_image::decode_standard(&image).unwrap());
+        }
+    }
+
+    #[test]
+    fn reads_only_the_stuffed_app11_pack_and_requires_a_complete_jpeg() {
+        let mut image = vec![0xff, 0xd8];
+        let mut append = |marker: u8, data: &[u8]| {
+            image.extend([0xff, marker]);
+            image.extend(((data.len() + 2) as u16).to_be_bytes());
+            image.extend(data);
+        };
+        append(0xe1, b"TJS/4s0\0metadata");
+        append(0xeb, b"TJS/4s0\0a\xff\0");
+        append(0xeb, b"b\xff\0c");
+        image.extend([0xff, 0xd9]);
+        assert_eq!(embedded_bookmark_payload(&image).unwrap(), b"TJS/4s0\0a\xffb\xffc");
+        assert!(embedded_bookmark_payload(&image[..image.len()-1]).is_none());
+        let at = image.iter().rposition(|b| *b == 0).unwrap();
+        image[at] = 1;
+        assert!(embedded_bookmark_payload(&image).is_none());
+    }
+}
+
 /// Walks the PNG chunk list to IEND.
 fn png_end(bytes: &[u8]) -> Option<usize> {
+    walk_png(bytes, |_, _, _| Some(()))
+}
+
+fn walk_png(bytes: &[u8], mut segment: impl FnMut(usize, &[u8], &[u8]) -> Option<()>) -> Option<usize> {
     let mut index = 8;
     loop {
         let length_bytes = bytes.get(index..index + 4)?;
@@ -1087,13 +1243,15 @@ fn png_end(bytes: &[u8]) -> Option<usize> {
             length_bytes[3],
         ]) as usize;
         let kind = bytes.get(index + 4..index + 8)?;
+        let start = index;
         index = index.checked_add(12)?.checked_add(length)?;
         if index > bytes.len() {
             return None;
         }
         if kind == b"IEND" {
-            return Some(index);
+            return (length == 0).then_some(index);
         }
+        segment(start, kind, &bytes[start + 8..index - 4])?;
     }
 }
 

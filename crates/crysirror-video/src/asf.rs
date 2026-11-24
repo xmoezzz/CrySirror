@@ -37,6 +37,21 @@ fn metadata(reader: &mut (impl Read + Seek)) -> Result<wmv_decoder::asf::AsfFile
     Ok(info)
 }
 
+fn supports_audio_tag(tag: u16) -> bool {
+    matches!(tag, 0x0160..=0x0162)
+}
+
+/// Probe whether an ASF declares audio and none of its audio tracks can be
+/// decoded. The caller can supply a bounded seekable header prefix.
+pub fn has_unsupported_audio(reader: &mut (impl Read + Seek)) -> Result<bool> {
+    if !is_asf(reader)? {
+        return Ok(false);
+    }
+    let info = metadata(reader)?;
+    Ok(!info.audio_streams.is_empty()
+        && !info.audio_streams.iter().any(|stream| supports_audio_tag(stream.format_tag)))
+}
+
 pub fn decode_video<R: Read + Seek>(
     reader: R,
     cancelled: impl FnMut() -> bool,
@@ -116,8 +131,9 @@ pub fn decode_audio<R: Read + Seek>(
     ensure!(
         info.audio_streams
             .iter()
-            .any(|a| matches!(a.format_tag, 0x0160..=0x0162)),
-        "ASF audio codec unsupported"
+            .any(|a| supports_audio_tag(a.format_tag)),
+        "ASF audio codec unsupported (format tag 0x{:04x})",
+        info.audio_streams[0].format_tag
     );
     let mut decoder =
         wmv_decoder::AsfWmaDecoder::open(reader).context("open engine WMA decoder")?;

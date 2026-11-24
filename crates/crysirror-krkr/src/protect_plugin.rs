@@ -22,7 +22,10 @@
 // Resource service and adapter Config. This facade keeps native call/order
 // semantics; archive parsing, filters and companion reads stay in Resources.
 use crate::natives::{Rt, methods, object_arg, string};
-use crysirror_resource::{compound::CompoundStorage, signature::RsaPssSha256Verifier};
+use crysirror_resource::{
+    compound::CompoundStorage,
+    signature::{RsaPssSha256Verifier, SignatureError},
+};
 use crysirror_tjs2::{
     Result, TjsError,
     runtime::{Closure, ObjectHandle, Variant},
@@ -270,14 +273,13 @@ fn check_signature(rt: &mut Rt, _: Option<ObjectHandle>, a: Vec<Variant>) -> Res
         }
     };
     let storage = rt.host().storage()?;
-    let resolve = |name: &str| {
-        storage
-            .resolve(name)
-            .ok_or_else(|| err(format!("System.checkSignature: {name}: file not found.")))
-    };
-    let (file_path, sig_path) = (resolve(&file)?, resolve(&sig)?);
     let verifier = RsaPssSha256Verifier::from_pkcs1_pem(p.signature_public_key.as_bytes())
         .map_err(|e| err(format!("System.checkSignature: {e}")))?;
+    // The native callback returns a failed verification when either storage
+    // is absent. Throwing here skips the game's own negative-result handler.
+    let (Some(file_path), Some(sig_path)) = (storage.resolve(&file), storage.resolve(&sig)) else {
+        return Ok(Variant::Integer(0));
+    };
     let blob = storage
         .read_limited(&sig_path, 16 * 1024)
         .map_err(|e| err(format!("{e:#}")))?;
@@ -286,9 +288,11 @@ fn check_signature(rt: &mut Rt, _: Option<ObjectHandle>, a: Vec<Variant>) -> Res
     let message = storage
         .read_limited(&file_path, 64 * 1024 * 1024)
         .map_err(|e| err(format!("{e:#}")))?;
-    let ok = verifier
-        .verify(&message, &blob)
-        .map_err(|e| err(format!("System.checkSignature: {e}")))?;
+    let ok = match verifier.verify(&message, &blob) {
+        Ok(ok) => ok,
+        Err(SignatureError::InvalidSignatureBlob) => false,
+        Err(e) => return Err(err(format!("System.checkSignature: {e}"))),
+    };
     Ok(Variant::Integer(ok as i64))
 }
 
@@ -314,6 +318,9 @@ fn parse_archive_index(rt: &mut Rt, _: Option<ObjectHandle>, a: Vec<Variant>) ->
 
 fn exists_exact(rt: &mut Rt, _: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
     let name = string(&a, 0, "Storages.isExistentStorageNoSearchNoNormalize")?;
+    if crate::psbfile_plugin::is_uri(&name) {
+        return Ok(Variant::Integer(crate::psbfile_plugin::exists(rt, &name)? as i64));
+    }
     Ok(Variant::Integer(
         rt.host().storage()?.exists_exact(&name) as i64,
     ))
@@ -347,7 +354,9 @@ fn install_media_class(rt: &mut Rt, storages: ObjectHandle) {
                 let h = media_this(rt, t).ok();
                 if h.is_some() && rt.host().protect.media == h {
                     rt.host_mut().protect.media = None;
-                    rt.host_mut().storage_mut()?.compound = None;
+                    let storage = rt.host_mut().storage_mut()?;
+                    storage.clear_archive_names();
+                    storage.compound = None;
                 }
                 Ok(Variant::Void)
             }),
@@ -472,6 +481,7 @@ fn construct(rt: &mut Rt, h: ObjectHandle, a: Vec<Variant>) -> Result<()> {
     }
     let compound = CompoundStorage::new(&media, &state.token).map_err(err)?;
     let storage = rt.host_mut().storage_mut()?;
+    storage.clear_archive_names();
     storage.compound = Some((kind, compound));
     storage.hashed_root = p.hashed_root.clone();
     rt.host_mut().protect.media = Some(h);
@@ -490,9 +500,9 @@ fn with_media<T>(
     rt: &mut Rt,
     f: impl FnOnce(&mut CompoundStorage) -> anyhow::Result<T>,
 ) -> Result<T> {
-    let (_, media) = rt
-        .host_mut()
-        .storage_mut()?
+    let storage = rt.host_mut().storage_mut()?;
+    storage.clear_archive_names();
+    let (_, media) = storage
         .compound
         .as_mut()
         .ok_or_else(|| err("CompoundStorageMedia: media not registered"))?;

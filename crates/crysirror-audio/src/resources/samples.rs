@@ -1,14 +1,14 @@
 //! Source bytes stay behind a retained, budgeted engine resource lease. The
-//! initial supported domain is RIFF PCM8/16 mono/stereo; compressed codecs are
-//! explicit unsupported rather than a fabricated original bit depth.
+//! source-layout path preserves RIFF PCM8/16 mono/stereo. Visualization reads
+//! use an independent engine decoder and return signed stereo PCM.
 use super::*;
 use crysirror_core::{
-    Error,
     service::{
         AudioSampleFormat, AudioSampleQuery, AudioSampleReceipt, AudioSampleRequest,
         AudioSampleState,
     },
     state::ClientId,
+    Error,
 };
 struct Query {
     task: crysirror_tasks::Task<AudioSampleReceipt>,
@@ -56,13 +56,7 @@ impl AudioResources {
         request: AudioSampleRequest,
         pool: &TaskPool,
     ) -> Result<Box<dyn AudioSampleQuery>> {
-        ensure!(
-            request.max_bytes <= 1024 * 1024,
-            "audio source sample read budget"
-        );
-        let sound = self.capture(client, resource)?;
-        let mut charge = Charge::new(self.budget.clone(), request.max_bytes as usize * 2 + 8192)?;
-        let task = pool.spawn(move |cancel| {
+        self.sample_query(client, resource, request, pool, |sound, request, cancel| {
             let bytes = &sound.snapshot.bytes;
             let (format, start, len) = pcm_layout(bytes)?;
             cancel.check()?;
@@ -72,17 +66,66 @@ impl AudioResources {
                 request.start_frame <= available,
                 "audio sample position beyond source"
             );
-            let frames = ((u64::from(request.max_bytes) / align)
-                .min(available - request.start_frame)) as u32;
+            let frames =
+                (u64::from(request.max_bytes) / align).min(available - request.start_frame);
             let offset = start + (request.start_frame * align) as usize;
-            let size = frames as usize * align as usize;
+            let size = (frames * align) as usize;
+            Ok((format, frames as u32, bytes[offset..offset + size].to_vec()))
+        })
+    }
+
+    pub fn begin_visual_samples(
+        &self,
+        client: u32,
+        resource: AudioResourceHandle,
+        request: AudioSampleRequest,
+        pool: &TaskPool,
+    ) -> Result<Box<dyn AudioSampleQuery>> {
+        let decoder_budget = self.budget.clone();
+        self.sample_query(
+            client,
+            resource,
+            request,
+            pool,
+            move |sound, request, cancel| {
+                let _scratch = Charge::new(decoder_budget, SCRATCH_BYTES)?;
+                let mut source = sound.open()?;
+                read_visual_window(&mut *source, request, &|| cancel.check())
+            },
+        )
+    }
+
+    fn sample_query(
+        &self,
+        client: u32,
+        resource: AudioResourceHandle,
+        request: AudioSampleRequest,
+        pool: &TaskPool,
+        read: impl FnOnce(
+                &Arc<PreparedSound>,
+                AudioSampleRequest,
+                &Cancellation,
+            ) -> Result<(AudioSampleFormat, u32, Vec<u8>)>
+            + Send
+            + 'static,
+    ) -> Result<Box<dyn AudioSampleQuery>> {
+        ensure!(
+            request.max_bytes <= 1024 * 1024,
+            "audio source sample read budget"
+        );
+        let sound = self.capture(client, resource)?;
+        let mut charge = Charge::new(self.budget.clone(), request.max_bytes as usize * 2 + 8192)?;
+        let task = pool.spawn(move |cancel| {
+            cancel.check()?;
+            let (format, frames, bytes) = read(&sound, request, &cancel)?;
+            let size = bytes.len();
             let mut result = AudioSampleReceipt::new(
                 ClientId(client),
                 resource,
                 format,
                 request.start_frame,
                 frames,
-                bytes[offset..offset + size].to_vec(),
+                bytes,
             )
             .map_err(|e| anyhow::anyhow!("{e}"))?;
             // The copied output and its clones retain the reservation until
@@ -98,6 +141,43 @@ impl AudioResources {
             failure: None,
         }))
     }
+}
+
+fn read_visual_window(
+    source: &mut dyn AudioSource,
+    request: AudioSampleRequest,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<(AudioSampleFormat, u32, Vec<u8>)> {
+    let format = AudioSampleFormat {
+        sample_rate: source.sample_rate(),
+        channels: 2,
+        bits_per_sample: 16,
+    };
+    let budget = request.max_bytes as usize / 4;
+    let mut bytes = Vec::with_capacity(budget * 4);
+    if budget != 0
+        && source
+            .frame_count()
+            .is_none_or(|end| request.start_frame < end)
+    {
+        if request.start_frame != 0 {
+            source.seek(request.start_frame)?;
+        }
+        let mut block = [[0.0; 2]; 256];
+        while bytes.len() / 4 < budget {
+            check()?;
+            let count = block.len().min(budget - bytes.len() / 4);
+            let n = source.read(&mut block[..count])?;
+            ensure!(n <= count, "decoder exceeded visualization window");
+            if n == 0 {
+                break;
+            }
+            for sample in block[..n].iter().flatten() {
+                bytes.extend_from_slice(&((*sample * 32768.0).round() as i16).to_le_bytes());
+            }
+        }
+    }
+    Ok((format, (bytes.len() / 4) as u32, bytes))
 }
 fn pcm_layout(bytes: &[u8]) -> Result<(AudioSampleFormat, usize, usize)> {
     ensure!(
@@ -162,6 +242,68 @@ fn pcm_layout(bytes: &[u8]) -> Result<(AudioSampleFormat, usize, usize)> {
 mod tests {
     use super::*;
     #[test]
+    fn short_prepared_pcm_rewinds_shares_storage_and_keeps_independent_cursors() {
+        let budget = Arc::new(AtomicUsize::new(0));
+        let snapshot = Snapshot { bytes: vec![], _charge: Charge::new(budget.clone(), 0).unwrap() };
+        let frames = vec![[0.25, -0.25], [0.5, -0.5], [0., 0.]];
+        let mut measured = decoder::open_pcm(crysirror_core::service::PcmAudio::new(8000, frames.clone()).unwrap());
+        measured.seek(3).unwrap();
+        let pcm = prepare_short_pcm(&mut *measured, Some(3), &snapshot, &Cancellation::default()).unwrap().unwrap();
+        let mut a = decoder::open_pcm(pcm.clone());
+        let mut b = decoder::open_pcm(pcm);
+        a.seek(1).unwrap();
+        let mut sample = [[0.;2]];
+        a.read(&mut sample).unwrap();
+        assert_eq!(sample[0], frames[1]);
+        b.read(&mut sample).unwrap();
+        assert_eq!(sample[0], frames[0]);
+        assert_eq!(budget.load(Ordering::Acquire), 24);
+        drop((a,b));
+        assert_eq!(budget.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn visualization_reads_real_ogg_samples_at_the_requested_cursor() {
+        let encoded: Arc<[u8]> = include_bytes!("../../tests/fixtures/tone.ogg")
+            .as_slice()
+            .into();
+        let mut reference = decoder::Stream::from_bytes(encoded.clone(), Some("ogg")).unwrap();
+        let mut decoded = [[0.0; 2]; 96];
+        assert_eq!(reference.read(&mut decoded).unwrap(), 96);
+        let expected: Vec<_> = decoded[32..]
+            .iter()
+            .flatten()
+            .flat_map(|s| ((*s * 32768.0).round() as i16).to_le_bytes())
+            .collect();
+        assert!(expected.iter().any(|b| *b != 0));
+        let mut source = decoder::Stream::from_bytes(encoded, Some("ogg")).unwrap();
+        let (fmt, frames, bytes) = read_visual_window(
+            &mut source,
+            AudioSampleRequest {
+                start_frame: 32,
+                max_bytes: 64 * 4 + 3,
+            },
+            &|| Ok(()),
+        )
+        .unwrap();
+        assert_eq!((fmt.channels, fmt.bits_per_sample, frames), (2, 16, 64));
+        assert_eq!(bytes, expected);
+        let end = source.frame_count().unwrap();
+        assert_eq!(
+            read_visual_window(
+                &mut source,
+                AudioSampleRequest {
+                    start_frame: end,
+                    max_bytes: 32
+                },
+                &|| Ok(())
+            )
+            .unwrap()
+            .1,
+            0
+        );
+    }
+    #[test]
     fn source_layout_preserves_depth_and_channels() {
         for (channels, bits) in [(1, 8), (2, 16)] {
             let spec = crysirror_resource::WaveSpec {
@@ -211,6 +353,7 @@ mod lifetime_tests {
             handle,
             Arc::new(PreparedSound {
                 snapshot,
+                short_pcm: None,
                 extension: Some("wav".into()),
                 frame_limit: None,
                 info: AudioResourceInfo {
@@ -223,19 +366,17 @@ mod lifetime_tests {
             }),
         );
         let pool = TaskPool::new("source-pcm-test", 1, 4).unwrap();
-        assert!(
-            resources
-                .begin_samples(
-                    8,
-                    handle,
-                    AudioSampleRequest {
-                        start_frame: 0,
-                        max_bytes: 4
-                    },
-                    &pool
-                )
-                .is_err()
-        );
+        assert!(resources
+            .begin_samples(
+                8,
+                handle,
+                AudioSampleRequest {
+                    start_frame: 0,
+                    max_bytes: 4
+                },
+                &pool
+            )
+            .is_err());
         let mut query = resources
             .begin_samples(
                 7,

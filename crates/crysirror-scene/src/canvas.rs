@@ -13,6 +13,8 @@ use std::{
 };
 mod image_dependencies;
 pub mod paging;
+mod flat_region;
+pub(crate) use flat_region::flatten_snapshot;
 mod sample;
 /// Per-client surface budget; native layer trees keep one surface per layer.
 pub const MAX_SURFACES: usize = crysirror_core::service::MAX_CANVAS_SURFACES_PER_CLIENT;
@@ -29,6 +31,15 @@ pub struct MaterializeRequest {
     pub surface: u32,
     pub size: [u32; 2],
     pub layers: Arc<Vec<LayerSpec>>,
+}
+
+fn references_compaction(nodes: &[CanvasNode], target: &Arc<Vec<LayerSpec>>) -> bool {
+    nodes.iter().any(|node| match node {
+        CanvasNode::Group { nodes, .. } => references_compaction(nodes, target),
+        CanvasNode::Draw { layer } => {
+            matches!(&layer.paint, Paint::Snapshot { layers, .. } if Arc::ptr_eq(layers, target))
+        }
+    })
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -413,7 +424,6 @@ impl CanvasSystem {
         commands: &[CanvasCommand],
         layers: &mut LayerSystem,
     ) -> Result<()> {
-        ensure!(commands.len() <= 4096, "canvas batch limit");
         // Surfaces are copy-on-write, so staging clones only the touched
         // ones; layer changes are journaled by one layer transaction.
         let mut next = self.clone();
@@ -421,12 +431,14 @@ impl CanvasSystem {
         *self = next;
         Ok(())
     }
-    fn apply_commands(
+    /// The caller owns the staged canvas and the enclosing layer transaction.
+    pub(super) fn apply_commands(
         &mut self,
         c: ClientId,
         commands: &[CanvasCommand],
         next_layers: &mut LayerSystem,
     ) -> Result<()> {
+        ensure!(commands.len() <= 4096, "canvas batch limit");
         let next = self;
         let mut changed = false;
         let mut dirty_sources = BTreeSet::new();
@@ -702,11 +714,10 @@ impl CanvasSystem {
                         "canvas copy replace with atop"
                     );
                     let source_id = *source;
-                    let source = next
-                        .surface(c, *source)
+                    let source = next.clients.get(&c.0).and_then(|surfaces| surfaces.get(source))
                         .context("copy source absent")?
                         .clone();
-                    let dst = next.get_mut(c, *destination)?;
+                    let dst = next.surface(c, *destination).context("copy destination absent")?;
                     let offset = [position[0] - rect[0], position[1] - rect[1]];
                     let Some(clip) =
                         intersect(*rect, [0., 0., source.width as f32, source.height as f32])
@@ -771,7 +782,7 @@ impl CanvasSystem {
                     }
                     let source_revision =
                         next.revisions.get(&(c.0, source_id)).copied().unwrap_or(0);
-                    let dst = next.get_mut(c, *destination)?;
+                    let dst = next.surface(c, *destination).context("copy destination absent")?;
                     if *destination != source_id && !*replace {
                         provenance = Some(Provenance {
                             source: source_id,
@@ -788,8 +799,11 @@ impl CanvasSystem {
                         && dst.width == source.width
                         && dst.height == source.height
                     {
-                        dst.nodes = source.nodes;
+                        // A complete copy shares the same frozen pixels until
+                        // either surface is written. Bindings live outside it.
+                        next.clients.get_mut(&c.0).unwrap().insert(*destination, source);
                     } else {
+                        let dst = next.get_mut(c, *destination)?;
                         if *replace {
                             // Region replace: keep the previous content only
                             // outside the destination region (as up to four
@@ -862,8 +876,7 @@ impl CanvasSystem {
                         "skewed canvas transform copy is not supported"
                     );
                     let rotate = mb.atan2(ma);
-                    let source = next
-                        .surface(c, *source)
+                    let source = next.clients.get(&c.0).and_then(|surfaces| surfaces.get(source))
                         .context("copy source absent")?
                         .clone();
                     let Some(local) =
@@ -894,21 +907,30 @@ impl CanvasSystem {
                     let Some(bounds) = bounds else {
                         continue;
                     };
+                    let quarter = (rotate / std::f32::consts::FRAC_PI_2).round()
+                        * std::f32::consts::FRAC_PI_2;
+                    let oblique = (rotate - quarter).abs() > 1e-4;
                     if *replace {
-                        let quarter = (rotate / std::f32::consts::FRAC_PI_2).round()
-                            * std::f32::consts::FRAC_PI_2;
                         ensure!(
-                            (rotate - quarter).abs() <= 1e-4,
+                            !oblique,
                             "replace through a non-axis-aligned canvas transform requires a region render-target API"
                         );
                         let full = [0., 0., dst.width as f32, dst.height as f32];
                         dst.nodes = exclude_region(std::mem::take(&mut dst.nodes), full, bounds);
                     }
+                    // A bitmap copy samples the source after its own clips and
+                    // blending. A rotated source clip cannot be represented by
+                    // the axis-aligned scissors used to present layer groups.
+                    let nodes = if oblique {
+                        rotated_source_pages(&source, local, *matrix, bounds, [dst.width, dst.height])?
+                    } else {
+                        clip_to_band(&source.nodes, local, false)
+                    };
                     let group = CanvasNode::Group {
                         offset: [tx, ty],
                         clip: local,
                         opacity: 255,
-                        nodes: clip_to_band(&source.nodes, local, false),
+                        nodes,
                         rotate,
                         scale: [sx, sy],
                     };
@@ -1265,6 +1287,19 @@ impl CanvasSystem {
     pub fn materialize_requests(&self) -> Vec<MaterializeRequest> {
         self.materialize.values().cloned().collect()
     }
+    /// Clear requests superseded by a later write in the same host tick.
+    /// Copies still referring to the same generation keep the request alive.
+    pub fn live_materialize_requests(&mut self) -> Vec<MaterializeRequest> {
+        let clients = &self.clients;
+        self.materialize.retain(|(owner, _), request| {
+            clients.get(owner).is_some_and(|surfaces| {
+                surfaces.values().any(|surface| {
+                    references_compaction(&surface.nodes, &request.layers)
+                })
+            })
+        });
+        self.materialize_requests()
+    }
     /// Replace every draw of the frozen `layers` snapshot (in any surface of
     /// the client, including copies of it) with the published `asset` image
     /// of identical pixels, and refresh affected presentations.
@@ -1313,8 +1348,7 @@ impl CanvasSystem {
         let mut touched = BTreeSet::new();
         for id in ids {
             let hit = next.surface(c, id).is_some_and(|s| {
-                let mut probe = s.nodes.clone();
-                replace(&mut probe, &request.layers, asset)
+                references_compaction(&s.nodes, &request.layers)
             });
             if hit {
                 let s = next.get_mut(c, id)?;
@@ -1367,6 +1401,22 @@ impl CanvasSystem {
         }
     }
     fn rebuild(
+        &mut self,
+        c: ClientId,
+        layers: &mut LayerSystem,
+        dirty_sources: &BTreeSet<u32>,
+        dirty_presentations: &BTreeSet<u32>,
+    ) -> Result<()> {
+        if dirty_sources.is_empty() && dirty_presentations.is_empty() {
+            self.prune_missing_parents(c, layers);
+            return Ok(());
+        }
+        layers.rebuild_presentations(|layers| {
+            self.rebuild_presentations(c, layers, dirty_sources, dirty_presentations)
+        })
+    }
+
+    fn rebuild_presentations(
         &mut self,
         c: ClientId,
         layers: &mut LayerSystem,
@@ -1448,7 +1498,7 @@ impl CanvasSystem {
                     &mut commands,
                 )?;
                 layers
-                    .apply_batch(c, &commands)
+                    .apply_presentation_batch(c, &commands)
                     .context("paged isolated Canvas presentation")?;
                 self.presentations
                     .get_mut(&c.0)
@@ -1481,7 +1531,7 @@ impl CanvasSystem {
                     preserve_presentation_root(previous_root.as_ref(), draw, explicit_placement);
                 commands.push(LayerCommand::Put { layer: draw });
                 layers
-                    .apply_batch(c, &commands)
+                    .apply_presentation_batch(c, &commands)
                     .context("isolated canvas presentation")?;
                 self.presentations
                     .get_mut(&c.0)
@@ -1520,7 +1570,7 @@ impl CanvasSystem {
                 &mut ids,
                 &mut commands,
             )?;
-            layers.apply_batch(c, &commands).with_context(|| {
+            layers.apply_presentation_batch(c, &commands).with_context(|| {
                 fn stats(nodes: &[CanvasNode], depth: usize) -> (usize, usize) {
                     nodes.iter().fold((0, depth), |(n, d), node| match node {
                         CanvasNode::Group { nodes, .. } => {
@@ -1943,6 +1993,42 @@ fn draw_atop(
     s.nodes.push(CanvasNode::Draw { layer: draw });
     Ok(())
 }
+fn rotated_source_pages(
+    src: &CanvasSurface, local: [f32; 4], matrix: [f32; 6], bounds: [f32; 4], dst: [u32; 2],
+) -> Result<Vec<CanvasNode>> {
+    let Some([x, y, w, h]) = intersect(bounds, [0., 0., dst[0] as f32, dst[1] as f32]) else {
+        return Ok(Vec::new());
+    };
+    let [a, b, c, d, tx, ty] = matrix;
+    let det = a * d - b * c;
+    let mut min = [f32::INFINITY; 2];
+    let mut max = [f32::NEG_INFINITY; 2];
+    for (x, y) in [(x,y), (x+w,y), (x,y+h), (x+w,y+h)] {
+        let point = [(d*(x-tx)-c*(y-ty))/det, (a*(y-ty)-b*(x-tx))/det];
+        for axis in 0..2 {
+            min[axis] = min[axis].min(point[axis]);
+            max[axis] = max[axis].max(point[axis]);
+        }
+    }
+    let Some(area) = intersect(local, [min[0]-1., min[1]-1., max[0]-min[0]+2., max[1]-min[1]+2.]) else {
+        return Ok(Vec::new());
+    };
+    let left = area[0].floor() as u32;
+    let top = area[1].floor() as u32;
+    let right = ((area[0]+area[2]).ceil() as u32).min(src.width);
+    let bottom = ((area[1]+area[3]).ceil() as u32).min(src.height);
+    let mut draws = Vec::new();
+    for page in paging::pages([left, top, right-left, bottom-top], [src.width, src.height])? {
+        let Some(rect) = intersect(local, page.region.map(|v| v as f32)) else { continue };
+        let [cx, cy, cw, ch] = page.capture.map(|v| v as f32);
+        let (paint, _) = region_paint(&src.nodes, [cx, cy, cw, ch])?;
+        let mut layer = spec(0, rect, paint);
+        layer.uv = Some([(rect[0]-cx)/cw, (rect[1]-cy)/ch, (rect[0]+rect[2]-cx)/cw, (rect[1]+rect[3]-cy)/ch]);
+        draws.push(CanvasNode::Draw { layer });
+    }
+    Ok(draws)
+}
+
 fn page_nodes(nodes: &[CanvasNode], size: [u32; 2]) -> Result<Vec<CanvasNode>> {
     let mut out = Vec::new();
     let mut count = 0usize;
@@ -1977,12 +2063,29 @@ fn region_paint(nodes: &[CanvasNode], region: [f32; 4]) -> Result<(Paint, [f32; 
     ];
     let mut layers = vec![spec(1, root, Paint::Solid { color: [0; 4] })];
     let mut next_id = 1;
-    snapshot_specs(nodes, 1, &mut next_id, &mut layers)?;
-    let paint = Paint::Snapshot {
-        size,
-        layers: layers.into(),
+    let paint = if snapshot_specs(nodes, 1, &mut next_id, &mut layers, Some(region), true) {
+        let candidate = Paint::Snapshot { size, layers: layers.into() };
+        if candidate.validate().is_ok() { Some(candidate) } else { None }
+    } else { None };
+    let paint = match paint {
+        Some(paint) => paint,
+        None => {
+            // Inlining can exceed either the node or the parent-depth limit.
+            // Keep the already-frozen pages as images. Fold only successive
+            // translated bitmap clips, whose intersection is one bitmap clip.
+            let mut reduced = Vec::new();
+            fold_copy_clips(nodes, None, &mut reduced);
+            let mut layers = vec![spec(1, root, Paint::Solid { color: [0; 4] })];
+            let mut next_id = 1;
+            ensure!(snapshot_specs(&reduced, 1, &mut next_id, &mut layers, Some(region), false),
+                "canvas snapshot node budget");
+            let paint = Paint::Snapshot { size, layers: layers.into() };
+            match paint.validate() {
+                Ok(()) => paint,
+                Err(error) => flat_region::flatten(nodes, region, size).ok_or(error)?,
+            }
+        }
     };
-    paint.validate()?;
     Ok((
         paint,
         [
@@ -1992,6 +2095,32 @@ fn region_paint(nodes: &[CanvasNode], region: [f32; 4]) -> Result<(Paint, [f32; 
             region[3] / size[1] as f32,
         ],
     ))
+}
+
+fn fold_copy_clips(nodes: &[CanvasNode], parent: Option<([f32; 2], [f32; 4])>, out: &mut Vec<CanvasNode>) {
+    for node in nodes {
+        match node {
+        CanvasNode::Group { offset, clip, opacity: 255, rotate, scale, nodes } if *rotate == 0. && *scale == [1., 1.] => {
+            let (offset, clip) = if let Some((outer, bounds)) = parent {
+                let local = [bounds[0] - offset[0], bounds[1] - offset[1], bounds[2], bounds[3]];
+                let Some(clip) = intersect(local, *clip) else { continue };
+                ([outer[0] + offset[0], outer[1] + offset[1]], clip)
+            } else { (*offset, *clip) };
+            fold_copy_clips(nodes, Some((offset, clip)), out);
+        }
+        _ => if let Some((offset, clip)) = parent {
+            if let Some(CanvasNode::Group { offset: last, clip: bounds, opacity: 255, rotate, scale, nodes }) = out.last_mut() {
+                if *last == offset && *bounds == clip && *rotate == 0. && *scale == [1., 1.] {
+                    nodes.push(node.clone());
+                    continue;
+                }
+            }
+            out.push(CanvasNode::Group { offset, clip, opacity: 255, rotate: 0., scale: [1., 1.], nodes: vec![node.clone()] });
+        } else {
+            out.push(node.clone());
+        }
+        }
+    }
 }
 /// A region snapshot made by this module (full-surface frozen tree shown
 /// through a pixel crop equal to its rect): inlinable as a clipped subtree.
@@ -2027,6 +2156,10 @@ fn region_snapshot(layer: &LayerSpec) -> Option<&[LayerSpec]> {
         // Inlining changes render-target coordinates. Keep clips inside
         // their immutable snapshot target rather than silently rebasing them.
         && layers.iter().all(|node|node.viewport_clip.is_none())
+        // The page is inlined as one contiguous painter range. Leave pages
+        // with a different internal ordering or dynamic order policy isolated.
+        && layers.windows(2).all(|w| (w[0].order, w[0].id) <= (w[1].order, w[1].id))
+        && layers.iter().all(|node| node.tie_order.is_none() && node.transform.geometry_order.is_none())
         && layer.filter.is_none()
         && matches!(layer.blend, crate::layer::Blend::Normal)
         //Inlining removes the outer draw. Every transform component must
@@ -2041,24 +2174,48 @@ fn snapshot_specs(
     parent: u32,
     next_id: &mut u32,
     out: &mut Vec<LayerSpec>,
-) -> Result<()> {
-    for (i, node) in nodes.iter().enumerate() {
+    visible_region: Option<[f32; 4]>,
+    inline_regions: bool,
+) -> bool {
+    for node in nodes {
+        // A page or pixel readback only needs groups whose clip reaches it.
+        // Work in the group's own coordinates after a translation. For other
+        // transforms retain the subtree rather than guessing its inverse clip.
+        let mut child_region = None;
+        if let (Some(region), CanvasNode::Group { offset, clip, rotate, scale, .. }) = (visible_region, node) {
+            if *rotate == 0. && *scale == [1., 1.] {
+                let local = [region[0] - offset[0], region[1] - offset[1], region[2], region[3]];
+                child_region = intersect(local, *clip);
+                if child_region.is_none() { continue; }
+            }
+        }
         *next_id += 1;
-        ensure!(*next_id <= 4096, "canvas snapshot node budget");
+        if *next_id > 4096 { return false; }
         let id = *next_id;
         if let CanvasNode::Draw { layer } = node {
-            if let Some(inner) = region_snapshot(layer) {
+            if let Some(inner) = region_snapshot(layer).filter(|inner| {
+                inline_regions
+                    && (inner.iter().all(|child| child.blend == Blend::Normal)
+                        // A destination-dependent blend can be inlined only
+                        // while the target is still clear. In a later draw it
+                        // would read the outer canvas instead of its own alpha.
+                        || out.iter().all(|prior| {
+                            prior.blend == Blend::Normal
+                                && matches!(prior.paint, Paint::Solid { color } if color[3] == 0)
+                        }))
+            }) {
                 // Inline instead of nesting: remap ids, hang the frozen root
                 // under `parent`, clipped to the region it showed.
                 let mut map = std::collections::BTreeMap::new();
                 for l in inner {
                     *next_id += 1;
-                    ensure!(*next_id <= 4096, "canvas snapshot node budget");
+                    if *next_id > 4096 { return false; }
                     map.insert(l.id, *next_id);
                 }
                 for l in inner {
                     let mut l = l.clone();
                     l.id = map[&l.id];
+                    l.order = [0, l.id as i32];
                     match l.parent {
                         Some(p) => l.parent = Some(map[&p]),
                         None => {
@@ -2066,7 +2223,6 @@ fn snapshot_specs(
                             l.rect[0] = 0.;
                             l.rect[1] = 0.;
                             l.parent = Some(parent);
-                            l.order = [0, i as i32];
                             l.clip = Some(layer.rect);
                         }
                     }
@@ -2100,14 +2256,94 @@ fn snapshot_specs(
         };
         s.id = id;
         s.parent = Some(parent);
-        s.order = [0, i as i32];
+        // Layer ordering is global even when clips use a parent hierarchy.
+        // A later copy must paint after *all* leaves of the preceding group.
+        s.order = [0, id as i32];
         out.push(s);
-        if let CanvasNode::Group { nodes, .. } = node {
-            snapshot_specs(nodes, id, next_id, out)?;
+        if let CanvasNode::Group { nodes, rotate, scale, .. } = node {
+            let inline_children = inline_regions && *rotate == 0. && *scale == [1., 1.];
+            if !snapshot_specs(nodes, id, next_id, out, child_region, inline_children) {
+                return false;
+            }
         }
     }
-    Ok(())
+    true
 }
+
+#[cfg(test)]
+mod region_snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn keep_alpha_snapshot_stays_isolated_over_an_existing_draw() {
+        let rect = [0., 0., 10., 10.];
+        let solid = |color| CanvasNode::Draw { layer: spec(0, rect, Paint::Solid { color }) };
+        let mut recolor = spec(0, rect, Paint::Solid { color: [255; 4] });
+        recolor.blend = Blend::AtopCopy;
+        let (paint, uv) = region_paint(
+            &[solid([0, 0, 0, 100]), CanvasNode::Draw { layer: recolor }],
+            rect,
+        ).unwrap();
+        let mut isolated = spec(0, rect, paint);
+        isolated.uv = Some(uv);
+        let (paint, _) = region_paint(
+            &[solid([0, 0, 0, 255]), CanvasNode::Draw { layer: isolated }],
+            rect,
+        ).unwrap();
+        let Paint::Snapshot { layers, .. } = paint else { panic!("outer snapshot") };
+        assert!(layers.iter().any(|layer| matches!(layer.paint, Paint::Snapshot { .. })));
+        assert!(layers.iter().all(|layer| layer.blend == Blend::Normal));
+    }
+    #[test]
+    fn deep_copy_chain_preserves_the_intersection_and_translation() {
+        let rect = [0., 0., 128., 8.];
+        let mut node = CanvasNode::Draw { layer: spec(0, rect, Paint::Solid { color: [255; 4] }) };
+        for _ in 0..40 {
+            node = CanvasNode::Group {
+                offset: [1., 0.], clip: rect, opacity: 255, rotate: 0., scale: [1., 1.],
+                nodes: vec![node],
+            };
+        }
+        let (Paint::Snapshot { layers, .. }, _) = region_paint(&[node], [0., 0., 170., 8.]).unwrap()
+            else { panic!("expected a snapshot") };
+        assert_eq!(layers.len(), 3);
+        assert_eq!(layers[1].rect[..2], [40., 0.]);
+        assert_eq!(layers[1].clip, Some([0., 0., 89., 8.]));
+        assert_eq!(layers[2].parent, Some(layers[1].id));
+    }
+
+    #[test]
+    fn readback_counts_only_translated_groups_whose_clip_reaches_the_region() {
+        let draw = CanvasNode::Draw {
+            layer: spec(0, [0., 0., 1., 1.], Paint::Solid { color: [50, 60, 70, 255] }),
+        };
+        let groups: Vec<_> = (0..4096).map(|x| CanvasNode::Group {
+            offset: [x as f32, 0.], clip: [0., 0., 1., 1.], opacity: 255,
+            nodes: vec![draw.clone()], rotate: 0., scale: [1., 1.],
+        }).collect();
+        let (Paint::Snapshot { layers, .. }, _) = region_paint(&groups, [4095., 0., 1., 1.]).unwrap()
+            else { panic!("expected region snapshot") };
+        assert_eq!(layers.len(), 3); // local root, the intersecting group, and its pixel
+        assert_eq!(layers[1].rect[0], 4095.);
+        assert_eq!(layers[2].parent, Some(layers[1].id));
+    }
+
+    #[test]
+    fn readback_keeps_two_valid_pages_when_their_flattened_draws_do_not_fit() {
+        let rect = [0., 0., 2., 2.];
+        let draw = CanvasNode::Draw { layer: spec(0, rect, Paint::Solid { color: [64; 4] }) };
+        let (page, uv) = region_paint(&vec![draw; 2100], rect).unwrap();
+        let mut page = spec(0, rect, page);
+        page.uv = Some(uv);
+        assert!(region_snapshot(&page).is_some());
+        let draws = vec![CanvasNode::Draw { layer: page }; 2];
+        let (Paint::Snapshot { layers, .. }, _) = region_paint(&draws, rect).unwrap()
+            else { panic!("expected region snapshot") };
+        assert_eq!(layers.len(), 3);
+        assert!(layers[1..].iter().all(|s| matches!(s.paint, Paint::Snapshot { .. })));
+    }
+}
+
 fn emit(
     nodes: &[CanvasNode],
     parent: u32,

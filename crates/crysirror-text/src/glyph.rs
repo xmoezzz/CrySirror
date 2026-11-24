@@ -28,6 +28,17 @@ pub struct GlyphMetrics {
     pub advance: f32,
 }
 impl TextSystem {
+    pub fn outline_em_metrics(&self, alias: &str, em: f32) -> Result<crysirror_core::service::OutlineEmMetrics> {
+        let line_height = self.line_height_for_em(alias, em)?;
+        let font = self.font(alias)?;
+        let (bytes, index) = self.font_source(alias)?;
+        let face = rustybuzz::ttf_parser::Face::parse(&bytes, index).context("outline font face")?;
+        let ascent = font.as_scaled(line_height).ascent();
+        let typographic_ascent = face.typographic_ascender().filter(|v| *v > 0)
+            .map_or(ascent, |v| em * f32::from(v) / f32::from(face.units_per_em()));
+        Ok(crysirror_core::service::OutlineEmMetrics { line_height, ascent, typographic_ascent })
+    }
+
     pub fn line_height_for_em(&self, font: &str, em: f32) -> Result<f32> {
         ensure!(em.is_finite() && em > 0. && em <= 512., "font em size");
         ensure!(

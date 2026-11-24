@@ -424,7 +424,8 @@ pub fn install(rt: &mut Rt) {
                 },
                 |rt, this, v| {
                     let h = this_of(rt, this, "MenuItem.visible")?;
-                    state_mut(rt, h)?.visible = v.is_truthy();
+                    let visible = v.is_truthy();
+                    if state(rt, h)?.visible != visible { state_mut(rt, h)?.visible = visible; }
                     Ok(())
                 },
             ),
@@ -436,7 +437,8 @@ pub fn install(rt: &mut Rt) {
                 },
                 |rt, this, v| {
                     let h = this_of(rt, this, "MenuItem.enabled")?;
-                    state_mut(rt, h)?.enabled = v.is_truthy();
+                    let enabled = v.is_truthy();
+                    if state(rt, h)?.enabled != enabled { state_mut(rt, h)?.enabled = enabled; }
                     Ok(())
                 },
             ),

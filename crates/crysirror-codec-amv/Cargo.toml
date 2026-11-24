@@ -22,6 +22,7 @@ files = []
 
 [dependencies]
 anyhow.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 serde.workspace = true
 serde_json.workspace = true
 

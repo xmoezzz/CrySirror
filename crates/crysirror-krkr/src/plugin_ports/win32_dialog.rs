@@ -1,16 +1,11 @@
 // Copyright (c) 2026 CrySirror contributors.
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
-// Behaviour notes: wrapper replaced by `install`; `open` shows nothing and
-// answers 0; `messageBox` uses the engine dialog service.
-//! No-op stub of the KRKR plugin `win32dialog.dll` (wtnbgo/win32dialog).
-//!
-//! Surface-compatible only: every class, method, property and constant the
-//! real plugin registers is present, but no Win32 dialog is ever created and
-//! all queries return zero/empty values. `open()` reports the modeless result
-//! (0) immediately, `messageBox` pretends the default button was pressed and
-//! `chooseColor` reports cancellation, so scripts that merely probe the API
-//! keep running. Real dialog interaction is out of scope for the stub.
+//! KiriKiri win32dialog.dll facade (wtnbgo/win32dialog). Message boxes and
+//! modal text-edit templates use shared engine widgets. The script owns
+//! initialization, command callbacks, close decisions and its result object.
+//! An open without a template retains the no-window result. Other native
+//! window facilities retain their individually documented restrictions.
 //!
 //! Every member the reference registers with `Method(...)` carries its
 //! parameter count as ncbind's `ArgsCount` — `ncbNativeClassMethod`'s
@@ -67,15 +62,17 @@ pub fn install(runtime: &mut Runtime<KrkrHost>) {
 }
 
 fn install_win32dialog(runtime: &mut Runtime<KrkrHost>) {
-    let class = runtime.alloc_native_constructor(
+    let class = crate::natives::native_class(runtime, "WIN32Dialog",
         |runtime: &mut Runtime<KrkrHost>, this_obj: Option<ObjectHandle>, args: Vec<Variant>| {
-            let instance = bound_instance(runtime, this_obj, "WIN32Dialog");
-            install_dialog_members(runtime, instance);
-            runtime.set_object_member(instance, "owner", args.first().cloned().unwrap_or_default());
-            Ok(Variant::Object(instance))
+            // Keep the instance's script overrides (notably open and close).
+            // The base implementations are already registered on the class.
+            let instance = crate::natives::this_of(runtime, this_obj, "WIN32Dialog")?;
+            if let Some(owner) = args.first().filter(|v| v.object_handle().is_some()) {
+                runtime.set_object_member(instance, "owner", owner.clone());
+            }
+            Ok(Variant::Void)
         },
     );
-    runtime.add_object_class_info(class, "WIN32Dialog");
     install_dialog_members(runtime, class);
     install_dialog_statics(runtime, class);
     install_subclasses(runtime, class);
@@ -113,30 +110,23 @@ fn install_dialog_members(runtime: &mut Runtime<KrkrHost>, handle: ObjectHandle)
     // `sendItemMessage(id, msg, wp?, lp?)` (`:529`); each returns
     // `TJS_E_BADPARAMCOUNT` below its own count. `open(window?)` has no such
     // check — it treats the argument as optional (`:602-607`).
-    for name in ["loadResource", "makeTemplate"] {
-        runtime.register_object_native_with_arg_count(
-            handle,
-            name,
-            NativeArgCount::AtLeast(1),
-            native_void,
-        );
-    }
-    for name in ["setItemBitmap", "sendItemMessage"] {
-        runtime.register_object_native_with_arg_count(
-            handle,
-            name,
-            NativeArgCount::AtLeast(2),
-            zero,
-        );
-    }
-    // No template dialog is shown (owner decision): `open` answers 0, the
-    // result of a dialog dismissed without a choice, and logs once per
-    // runtime so the missing dialog is visible in the log.
-    runtime.register_object_native(handle, "open", |rt: &mut Runtime<KrkrHost>, _, _| {
+    runtime.register_object_native_with_arg_count(handle, "loadResource", NativeArgCount::AtLeast(1), native_void);
+    runtime.register_object_native_with_arg_count(handle, "makeTemplate", NativeArgCount::AtLeast(1),
+        crate::edit_dialog::make_template);
+    runtime.register_object_native_with_arg_count(handle,"setItemBitmap",NativeArgCount::AtLeast(2),zero);
+    runtime.register_object_native_with_arg_count(handle,"sendItemMessage",NativeArgCount::AtLeast(2),
+        crate::edit_dialog::send_item_message);
+    // A configured edit template parks the caller. A template-less probe
+    // keeps the previous no-window result.
+    runtime.register_object_native(handle, "open", |rt: &mut Runtime<KrkrHost>, this, _| {
+        let h = crate::natives::this_of(rt, this, "WIN32Dialog.open")?;
+        if rt.object_member(h, "__hasDialogTemplate").is_truthy() {
+            return crate::edit_dialog::open_template(rt, h);
+        }
         let global = rt.global_handle();
         if !matches!(rt.object_member(global, "__win32dialog_logged"), Variant::Integer(1)) {
             rt.set_object_member(global, "__win32dialog_logged", Variant::Integer(1));
-            rt.host_mut().push_log("WIN32Dialog.open: template dialogs are not shown; answering 0".into());
+            rt.host_mut().push_log("WIN32Dialog.open: no installed template; answering 0".into());
         }
         Ok(Variant::Integer(0))
     });
@@ -147,7 +137,6 @@ fn install_dialog_members(runtime: &mut Runtime<KrkrHost>, handle: ObjectHandle)
     // (`:845`), and the `setScrollInfo(id, pos?, min?, max?, page?)` raw
     // callback, whose handler checks `num < 1` (`:1001-1002`).
     for name in [
-        "close",
         "show",
         "setItemFocus",
         "setMessageResult",
@@ -160,6 +149,7 @@ fn install_dialog_members(runtime: &mut Runtime<KrkrHost>, handle: ObjectHandle)
             native_void,
         );
     }
+    runtime.register_object_native_with_arg_count(handle, "close", NativeArgCount::AtLeast(1), crate::edit_dialog::close_template);
     // One argument, zero answer: `tjs_int64 GetItem(int id) const` (`:415`),
     // `int GetItemID(tjs_int64 hwnd)` (`:416`), `int GetItemInt(int id)`
     // (`:430`), `bool GetItemEnabled(int id)` (`:461`), `long
@@ -202,14 +192,8 @@ fn install_dialog_members(runtime: &mut Runtime<KrkrHost>, handle: ObjectHandle)
     );
     // One argument, string answer: `VarT GetItemClassName(int id)` (`:400`)
     // and `StringT GetItemText(int id)` (`:441`).
-    for name in ["getItemClassName", "getItemText"] {
-        runtime.register_object_native_with_arg_count(
-            handle,
-            name,
-            NativeArgCount::AtLeast(1),
-            empty_string,
-        );
-    }
+    runtime.register_object_native_with_arg_count(handle, "getItemClassName", NativeArgCount::AtLeast(1), empty_string);
+    runtime.register_object_native_with_arg_count(handle, "getItemText", NativeArgCount::AtLeast(1), crate::edit_dialog::get_item_text);
     // Two arguments: `void SetItemInt(int id, int value)` (`:437`), `void
     // SetItemText(int id, NameT string)` (`:451`), `void SetItemEnabled(int
     // id, bool en)` (`:458`), `void SetSize(int w, int h)` (`:493`),
@@ -217,7 +201,6 @@ fn install_dialog_members(runtime: &mut Runtime<KrkrHost>, handle: ObjectHandle)
     // NotifyAccessor *acc)` default stub (`:635`).
     for name in [
         "setItemInt",
-        "setItemText",
         "setItemEnabled",
         "setSize",
         "setPos",
@@ -230,6 +213,7 @@ fn install_dialog_members(runtime: &mut Runtime<KrkrHost>, handle: ObjectHandle)
             native_void,
         );
     }
+    runtime.register_object_native_with_arg_count(handle, "setItemText", NativeArgCount::AtLeast(2), crate::edit_dialog::set_item_text);
     // Two arguments, zero answer: `long GetItemLong(int id, int index)`
     // (`:418`), `bool InvalidateRect(VarT vrect, bool erase)` (`:593`),
     // `tjs_int64 DeleteTabItem(int tabid, VarT pos)` (`:935`), `tjs_int
@@ -446,7 +430,7 @@ fn message_box(
         (1, "OK"), (2, "キャンセル"), (3, "中止"), (4, "再試行"), (5, "無視"),
         (6, "はい"), (7, "いいえ"), (10, "再実行"), (11, "続行"),
     );
-    let (buttons, escape): (Vec<(i64, &str)>, Option<i64>) = match kind & 0xF {
+    let (buttons, escape): (Vec<(u32, &str)>, Option<u32>) = match kind & 0xF {
         0 => (vec![ok], Some(1)),
         1 => (vec![ok, cancel], Some(2)),
         2 => (vec![abort, retry, ignore], None),
@@ -466,47 +450,18 @@ fn message_box(
     }
     // MB_DEFBUTTON1..4; an index past the last button selects the first.
     let default = buttons.get(((kind >> 8) & 0xF) as usize).unwrap_or(&buttons[0]).0;
-    if !rt.host().can_suspend {
-        return Err(crate::natives::unsupported(&format!("{M} in this callback"), "a resumable TJS boundary"));
-    }
-    let host = rt.host_mut();
-    if host.dialog_pending.is_some() {
-        return Err(TjsError::runtime(format!("{M}: a message box is already open")));
-    }
-    host.dialog_serial = host.dialog_serial % 65535 + 1;
-    let id = host.dialog_serial;
-    let spec = serde_json::json!({
-        "id": id, "title": caption, "message": message, "default": default, "cancel": escape,
-        "buttons": buttons.iter().map(|(id, label)| serde_json::json!({"id": id, "label": label})).collect::<Vec<_>>(),
-        "font": host.font,
-    });
-    host.ui_op(serde_json::json!({"op": "open_dialog", "dialog": spec}));
-    host.dialog_pending = Some(id);
-    rt.request_suspend();
-    // Replaced by the chosen button's id when the caller resumes.
-    Ok(Variant::Integer(0))
-}
-
-/// Resume a caller waiting in `messageBox` once its dialog has a result.
-/// `Ok(false)` while it is still open.
-pub fn poll(
-    rt: &mut Runtime<KrkrHost>,
-    host: &mut dyn crysirror_core::service::HostServices,
-    client: crysirror_core::state::ClientId,
-) -> anyhow::Result<bool> {
-    let Some(id) = rt.host().dialog_pending else {
-        return Ok(true);
+    use crysirror_scene::ui::dialog::{DialogButton, DialogSpec};
+    let dialog = DialogSpec {
+        id: 0,
+        title: caption,
+        message,
+        default,
+        cancel: escape,
+        buttons: buttons.into_iter().map(|(id, label)| DialogButton { id, label: label.into() }).collect(),
+        font: rt.host().font.clone(),
+        text_size: 24,
     };
-    let bytes = host
-        .query_engine(client, crysirror_core::service::EngineQuery::DialogEvents)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let events: Vec<crysirror_scene::ui::UiEvent> = serde_json::from_slice(&bytes)?;
-    let Some(event) = events.iter().find(|e| e.widget.id == id) else {
-        return Ok(false);
-    };
-    rt.host_mut().dialog_pending = None;
-    rt.set_resume_value(Variant::Integer(event.value as i64));
-    Ok(true)
+    crate::message_dialog::open(rt, M, dialog)
 }
 
 // -------------------------------------------------------------
@@ -560,7 +515,7 @@ fn install_header_members(runtime: &mut Runtime<KrkrHost>, handle: ObjectHandle)
         handle,
         "store",
         NativeArgCount::AtLeast(1),
-        native_void,
+        crate::edit_dialog::store_part,
     );
     runtime.set_object_member(handle, "dlgItems", Variant::Integer(0));
 }
@@ -571,7 +526,7 @@ fn install_items_members(runtime: &mut Runtime<KrkrHost>, handle: ObjectHandle) 
         handle,
         "store",
         NativeArgCount::AtLeast(1),
-        native_void,
+        crate::edit_dialog::store_part,
     );
 }
 

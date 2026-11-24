@@ -135,8 +135,11 @@ pub fn install_fstat(rt: &mut Rt) {
             ("atime", info.accessed_ms),
         ] {
             if let Some(millis) = millis {
-                let date =
-                    rt.call_function(rt.global_member("Date"), vec![Variant::Integer(millis)])?;
+                // A numeric argument to the TJS constructor is a calendar
+                // year. File timestamps use the Date.setTime milliseconds ABI.
+                let date = rt.call_function(rt.global_member("Date"), Vec::new())?;
+                let handle = date.object_handle().ok_or_else(|| error("Date object expected"))?;
+                rt.call_object_method(handle, "setTime", vec![Variant::Integer(millis)])?;
                 rt.set_object_member(dict, key, date);
             }
         }
@@ -196,7 +199,6 @@ pub fn install_fstat(rt: &mut Rt) {
         "resetFileAttributes",
         "getFileAttributes",
         "selectDirectory",
-        "copyFile",
         "copyFileNoNormalize",
         "getDisplayName",
         "getMD5HashString",

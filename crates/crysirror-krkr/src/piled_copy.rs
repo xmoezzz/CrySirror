@@ -33,7 +33,7 @@ pub(crate) fn copy(rt: &mut Rt, this: Option<ObjectHandle>, args: Vec<Variant>) 
         need_int(&args, 5, "piledCopy")?,
         need_int(&args, 6, "piledCopy")?,
     ];
-    let [dx, dy, sx, sy, width, height] = values;
+    let [_, _, _, _, width, height] = values;
     let dest = checked_layer(rt, destination)?.clone();
     let src = checked_layer(rt, source)?.clone();
     if !dest.has_image {
@@ -70,9 +70,25 @@ pub(crate) fn copy(rt: &mut Rt, this: Option<ObjectHandle>, args: Vec<Variant>) 
         && src.image_top == 0
         && src.image_width == src.width
         && src.image_height == src.height;
-    if !raw_image {
-        before_completion(rt, source, &mut BTreeSet::new())?;
+    if raw_image {
+        return finish_copy(rt, destination, source, values, true);
     }
+    let [run, take_paint, push_children, finish] = completion_functions(rt)?;
+    let coordinates = rt.alloc_array_object(values.into_iter().map(Variant::Integer).collect());
+    let args = [take_paint, push_children, finish, destination, source, coordinates]
+        .map(Variant::Object)
+        .to_vec();
+    rt.tail_call_function(Variant::Object(run), args)
+}
+
+fn finish_copy(
+    rt: &mut Rt,
+    destination: ObjectHandle,
+    source: ObjectHandle,
+    values: [i64; 6],
+    raw_image: bool,
+) -> Result<Variant> {
+    let [dx, dy, sx, sy, width, height] = values;
     checked_layer(rt, destination)?;
     checked_layer(rt, source)?;
     // An opaque (ltOpaque) source's stored alpha is not displayed by krkrz.
@@ -211,26 +227,72 @@ fn intersects(src: &LayerState, dst: &LayerState, v: [i64; 6]) -> bool {
     (dx + l - sx).max(0).max(cl) < (dx + r - sx).min(dst.image_width as i128).min(cl + cw)
         && (dy + t - sy).max(0).max(ct) < (dy + b - sy).min(dst.image_height as i128).min(ct + ch)
 }
-fn before_completion(rt: &mut Rt, h: ObjectHandle, visited: &mut BTreeSet<usize>) -> Result<()> {
-    if !visited.insert(h.0) {
-        return Err(TjsError::runtime("piledCopy completion cycle"));
+fn completion_functions(rt: &mut Rt) -> Result<[ObjectHandle; 4]> {
+    if let Some(functions) = rt.host().piled_copy_completion {
+        return Ok(functions);
     }
-    checked_layer(rt, h)?;
-    if rt.object_member(h, "__lp_callOnPaint").is_truthy() {
-        rt.set_object_member(h, "__lp_callOnPaint", Variant::Integer(0));
-        if has_member(rt, h, "onPaint") {
-            let suspend = rt.host().can_suspend;
-            rt.host_mut().can_suspend = false;
-            let result = rt.call_object_method(h, "onPaint", vec![]);
-            rt.host_mut().can_suspend = suspend;
-            result?;
+
+    // Keep the traversal in TJS frames. An onPaint can submit an image job,
+    // so the copy must stay on the caller's stack until the last paint returns.
+    let script = rt.compile_source("Layer.piledCopy completion", r#"
+        return function(takePaint, pushChildren, finish, destination, source, values) {
+            var pending = [source], visited = %[];
+            while (pending.count > 0) {
+                var layer = pending.pop();
+                if (takePaint(layer, visited)) layer.onPaint();
+                pushChildren(layer, pending);
+            }
+            return finish(destination, source, values);
+        };
+    "#)?;
+    let run = rt.execute_file(&script)?.object_handle()
+        .ok_or_else(|| TjsError::runtime("piledCopy completion function missing"))?;
+    let take_paint = rt.alloc_native_function(|rt: &mut Rt, _, args: Vec<Variant>| {
+        let [Variant::Object(layer), Variant::Object(visited)] = args.as_slice() else {
+            return Err(TjsError::bad_param_count());
+        };
+        let (layer, visited) = (*layer, *visited);
+        checked_layer(rt, layer)?;
+        let key = layer.0.to_string();
+        if rt.object_member(visited, &key).is_truthy() {
+            return Err(TjsError::runtime("piledCopy completion cycle"));
         }
-    }
-    let children = checked_layer(rt, h)?.children.clone();
-    for child in children {
-        before_completion(rt, ObjectHandle(child), visited)?;
-    }
-    Ok(())
+        rt.set_object_member(visited, key, Variant::Integer(1));
+        if !rt.object_member(layer, "__lp_callOnPaint").is_truthy() {
+            return Ok(Variant::Integer(0));
+        }
+        rt.set_object_member(layer, "__lp_callOnPaint", Variant::Integer(0));
+        Ok(Variant::Integer(has_member(rt, layer, "onPaint") as i64))
+    });
+    let push_children = rt.alloc_native_function(|rt: &mut Rt, _, args: Vec<Variant>| {
+        let [Variant::Object(layer), Variant::Object(pending)] = args.as_slice() else {
+            return Err(TjsError::bad_param_count());
+        };
+        // Paint is allowed to add, remove or reorder children.
+        for id in checked_layer(rt, *layer)?.children.clone().into_iter().rev() {
+            rt.array_push(*pending, Variant::Object(ObjectHandle(id)));
+        }
+        Ok(Variant::Void)
+    });
+    let finish = rt.alloc_native_function(|rt: &mut Rt, _, args: Vec<Variant>| {
+        crate::image_api::before_bitmap_call(rt)?;
+        let [Variant::Object(destination), Variant::Object(source), Variant::Object(coordinates)] =
+            args.as_slice()
+        else {
+            return Err(TjsError::bad_param_count());
+        };
+        let Some(coordinates) = rt.array_elements(*coordinates) else {
+            return Err(TjsError::runtime("piledCopy completion coordinates missing"));
+        };
+        let mut values = [0; 6];
+        for (index, value) in values.iter_mut().enumerate() {
+            *value = need_int(coordinates, index, "piledCopy")?;
+        }
+        finish_copy(rt, *destination, *source, values, false)
+    });
+    let functions = [run, take_paint, push_children, finish];
+    rt.host_mut().piled_copy_completion = Some(functions);
+    Ok(functions)
 }
 fn validate_visible_profile(
     rt: &Rt,
@@ -258,7 +320,7 @@ fn validate_visible_profile(
         // loadImages/convertType/AlphaMovie; the shared source-over operation
         // therefore represents both native display types without a second
         // compositor or reinterpreting straight RGB as additive RGB.
-        2 | 12 => {}
+        2 | 12 | 17 => {} // Alpha, canonical add-alpha and shared Photoshop screen.
         1 if root => {}
         1 if layer.full_alpha == Some(255)
             && layer.image_left <= 0
@@ -275,7 +337,7 @@ fn validate_visible_profile(
         _ => {
             return Err(unsupported(
                 &format!("Layer.piledCopy source type={kind}"),
-                "normal-alpha or proven opaque source content",
+                "normal-alpha, Photoshop screen or proven opaque source content",
             ));
         }
     }

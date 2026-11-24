@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. A copy is available at https://mozilla.org/MPL/2.0/.
 use crate::{
-    assets::Assets,
+    assets::{Assets, ImageFacts, ImagePreparation, is_tlg},
     model::{Action, ClientSpec, Project},
     script::ScriptVm,
     storage::RuntimeStorage,
@@ -147,6 +147,7 @@ pub struct SharedHost {
     image_dimensions: BTreeMap<(ClientId, String), ([u32; 2], bool)>,
     image_tasks: crysirror_tasks::TaskPool,
     image_memory: Arc<std::sync::atomic::AtomicUsize>,
+    image_preparation: ImagePreparation,
     pub(crate) pattern_owner: Arc<()>,
     pub(crate) scene_checkpoint_epochs: BTreeMap<ClientId, Arc<()>>,
     pub(crate) canvas_images: crate::canvas_images::Broker,
@@ -950,6 +951,10 @@ impl HostServices for SharedHost {
     fn begin_audio_samples(&mut self,client:ClientId,resource:crysirror_core::service::AudioResourceHandle,request:crysirror_core::service::AudioSampleRequest)->crysirror_core::Result<Box<dyn crysirror_core::service::AudioSampleQuery>>{
         if !self.clients.contains(&client){return Err(Error::NotFound);}
         self.channel_audio.resources.begin_samples(client.0,resource,request,&self.image_tasks).map_err(|e|Error::Io(format!("audio source samples: {e:#}")))
+    }
+    fn begin_audio_visual_samples(&mut self,client:ClientId,resource:crysirror_core::service::AudioResourceHandle,request:crysirror_core::service::AudioSampleRequest)->crysirror_core::Result<Box<dyn crysirror_core::service::AudioSampleQuery>>{
+        if !self.clients.contains(&client){return Err(Error::NotFound);}
+        self.channel_audio.resources.begin_visual_samples(client.0,resource,request,&self.image_tasks).map_err(|e|Error::Io(format!("audio visualization samples: {e:#}")))
     }
     fn audio_resource_info(
         &self,
@@ -1985,9 +1990,12 @@ impl HostServices for SharedHost {
             storage: self.fs.storage(client)?,
             decoders: self.decoders.clone(),
             sizes: std::sync::Mutex::new(BTreeMap::new()),
+            pending_metadata: std::sync::Mutex::new(None),
+            synchronous_tlg: std::sync::Mutex::new(None),
             owner: client,
             tasks: self.image_tasks.clone(),
             memory: self.image_memory.clone(),
+            prepared: self.image_preparation.clone(),
         }))
     }
     fn text_measurement(
@@ -2104,6 +2112,9 @@ impl crysirror_core::service::FileSystem for RestoreResources<'_> {
 impl HostServices for RestoreResources<'_> {
     fn begin_spectrum_graph(&mut self,client:ClientId,source:Option<crysirror_core::service::AudioResourceHandle>,position:u64,destination:crysirror_core::image_processing::ImageInput,spec:crysirror_core::service::SpectrumGraphSpec,state:crysirror_core::service::SpectrumGraphState)->crysirror_core::Result<crysirror_core::service::SpectrumGraphJob>{
         self.source.begin_spectrum_graph(client,source,position,destination,spec,state)
+    }
+    fn begin_audio_visual_samples(&mut self,client:ClientId,resource:crysirror_core::service::AudioResourceHandle,request:crysirror_core::service::AudioSampleRequest)->crysirror_core::Result<Box<dyn crysirror_core::service::AudioSampleQuery>>{
+        self.source.begin_audio_visual_samples(client,resource,request)
     }
 
     fn mounted_media(&mut self, client: ClientId) -> crysirror_core::Result<crysirror_core::service::MountedMediaCatalog> {
@@ -2524,7 +2535,8 @@ impl Runtime {
                 keyboard_locks: Default::default(),
                 mesh_frame_history: None,
                 image_tasks: assets.cpu_tasks(),
-                image_memory: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                image_memory: assets.image_memory(),
+                image_preparation: assets.image_preparation(),
                 pattern_owner: Arc::new(()),
                 scene_checkpoint_epochs: BTreeMap::new(),
                 canvas_images: crate::canvas_images::Broker::new(assets.store_id()),
@@ -2768,6 +2780,7 @@ impl Runtime {
             .checked_add(1)
             .context("input observation revision overflow")?;
         self.host.engine.ui.pointer_window_focused = self.host.window_focused;
+        self.prepare_text_editor()?;
         let consumed = {
             let _span = self.profiler.span(profile_frame, "world.physics_ui");
             let physics = &mut self.physics;
@@ -2831,13 +2844,16 @@ impl Runtime {
                 continue;
             }
             let budget = s.vm.instruction_budget().clamp(1, 100_000);
-            s.yielded = core(s.vm.step(&mut self.host, input, budget))
-                .with_context(|| format!("VM {}", s.name))?;
+            s.yielded = self.profiler.scope(profile_frame, || {
+                core(s.vm.step(&mut self.host, input, budget))
+                    .with_context(|| format!("VM {}", s.name))
+            })?;
         }
         if let Some(size) = self.host.pending_canvas_size.take() {
             self.project.canvas = size;
         }
         drop(vm_span);
+        self.prepare_text_editor()?;
         self.poll_original_save_restore_requests()?;
         let _outputs = self.profiler.span(profile_frame, "media.publish_audio");
         for (client, path, bytes) in std::mem::take(&mut self.host.generated) {
@@ -3042,6 +3058,18 @@ impl Runtime {
             }
         }
         handled
+    }
+    fn prepare_text_editor(&mut self) -> Result<()> {
+        let text = &self.host.text;
+        self.host.engine.ui.prepare_text_editor(|owner, alias| {
+            let view = text.for_client(ClientId(owner));
+            view.font_digest(alias).ok().map(|_| view)
+        })
+    }
+    /// Dispatch an editing key after measuring any text committed since the last frame.
+    pub fn focused_editor_key(&mut self, key: u64, modifiers: u64) -> Result<bool> {
+        self.prepare_text_editor()?;
+        Ok(self.host.engine.ui.focused_editor_key(key, modifiers))
     }
     pub fn now_ms(&self) -> u64 {
         self.host.clock_ms
@@ -4123,7 +4151,60 @@ struct SharedImageMetadata {
     memory: Arc<std::sync::atomic::AtomicUsize>,
     storage: Arc<dyn crysirror_core::service::ClientStorage>,
     decoders: crysirror_image::DecoderRegistry,
-    sizes: std::sync::Mutex<BTreeMap<String, ([u32; 2], bool, [u8; 32])>>,
+    prepared: ImagePreparation,
+    sizes: std::sync::Mutex<BTreeMap<String, ImageFacts>>,
+    pending_metadata: std::sync::Mutex<Option<(String, crysirror_tasks::Task<ImageFacts>)>>,
+    synchronous_tlg: std::sync::Mutex<Option<(u64, String, ImageFacts)>>,
+}
+fn read_image_facts(
+    asset: &str, storage: &dyn crysirror_core::service::ClientStorage,
+    decoders: &crysirror_image::DecoderRegistry, cx: Option<&crysirror_resource::DecodeContext>,
+    memory: &Arc<std::sync::atomic::AtomicUsize>,
+) -> crysirror_core::Result<ImageFacts> {
+    let path = VfsPath::new(crysirror_core::path::Mount::Asset, asset)?;
+    let bytes = storage.read(&path)?;
+    let decoded_bytes = match crysirror_image::encoded_dimensions_hint(&bytes) {
+        Some([w, h]) => crysirror_image::rgba_len(w, h).map_err(|e| Error::Io(e.to_string()))?,
+        None => crysirror_image::MAX_DECODED_BYTES,
+    };
+    let scratch = decoded_bytes.checked_mul(2).and_then(|n| n.checked_add(bytes.len()))
+        .ok_or(Error::Limit("image metadata working set"))?;
+    let _charge = crate::image_processing::Charge::new(memory.clone(), scratch)?;
+    let source = |name: &str| storage.read(&VfsPath::new(crysirror_core::path::Mount::Asset, name)?);
+    let image = decoders.decode_with(asset, &bytes, Some(&source), cx, None)
+        .map_err(|e| Error::Io(e.to_string()))?;
+    Ok(([image.width, image.height], image.rgba.chunks_exact(4).all(|p| p[3] == 255), *blake3::hash(&bytes).as_bytes()))
+}
+impl SharedImageMetadata {
+    fn tlg_facts(&self, asset: &str) -> crysirror_core::Result<ImageFacts> {
+        match self.prepared.facts(self.owner, asset, &self.decoders, true) {
+            Ok(Some(facts)) => Ok(facts),
+            Ok(None) => Err(Error::Invalid("synchronous TLG metadata was not ready")),
+            Err(Error::Limit("TLG metadata preparation capacity")) => {
+                // Callbacks that cannot yield still need the original size
+                // lookup when the async asset queue is saturated.
+                let (revision, storage) = self.prepared.scoped_storage(self.owner).ok_or(Error::NotFound)?;
+                let mut cached = self.synchronous_tlg.lock()
+                    .map_err(|_| Error::Io("image metadata lock".into()))?;
+                if let Some((saved, path, facts)) = &*cached {
+                    if *saved == revision && path == asset {
+                        return Ok(*facts);
+                    }
+                }
+                let facts = read_image_facts(asset, &*storage, &self.decoders, None, &self.memory)?;
+                *cached = Some((revision, asset.to_owned(), facts));
+                Ok(facts)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn cache_facts(&self, name: String, facts: ImageFacts) -> crysirror_core::Result<()> {
+        let mut sizes = self.sizes.lock().map_err(|_| Error::Io("image metadata lock".into()))?;
+        if sizes.len() >= 4096 { sizes.clear(); }
+        sizes.insert(name, facts);
+        Ok(())
+    }
 }
 impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
     fn begin_region_map(
@@ -4252,6 +4333,9 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
         )
     }
     fn fingerprint(&self, asset: &str) -> crysirror_core::Result<[u8; 32]> {
+        if is_tlg(asset) {
+            return Ok(self.tlg_facts(asset)?.2);
+        }
         self.size(asset)?;
         self.sizes
             .lock()
@@ -4278,6 +4362,9 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
     }
 
     fn opaque(&self, asset: &str) -> crysirror_core::Result<bool> {
+        if is_tlg(asset) {
+            return Ok(self.tlg_facts(asset)?.1);
+        }
         self.size(asset)?;
         self.sizes
             .lock()
@@ -4286,36 +4373,52 @@ impl crysirror_core::service::ImageMetadata for SharedImageMetadata {
             .map(|v| v.1)
             .ok_or(Error::NotFound)
     }
-    fn size(&self, asset: &str) -> crysirror_core::Result<[u32; 2]> {
-        let mut sizes = self
-            .sizes
-            .lock()
-            .map_err(|_| Error::Io("image metadata lock".into()))?;
-        if let Some(size) = sizes.get(asset) {
-            return Ok(size.0);
+    fn prepare_metadata(&self, asset: &str) -> crysirror_core::Result<bool> {
+        if is_tlg(asset) {
+            return Ok(self.prepared.facts(self.owner, asset, &self.decoders, false)?.is_some());
         }
-        let path = VfsPath::new(crysirror_core::path::Mount::Asset, asset)?;
-        let bytes = self.storage.read(&path)?;
-        let source = |name: &str| {
-            self.storage
-                .read(&VfsPath::new(crysirror_core::path::Mount::Asset, name)?)
+        if self.sizes.lock().map_err(|_| Error::Io("image metadata lock".into()))?.contains_key(asset) {
+            return Ok(true);
+        }
+        let mut pending = self.pending_metadata.lock().map_err(|_| Error::Io("metadata task lock".into()))?;
+        if let Some((_, job)) = pending.as_mut() {
+            let result = job.try_take();
+            if matches!(result, Ok(None)) { return Ok(false); }
+            let (name, _) = pending.take().unwrap();
+            let requested = name == asset;
+            match result {
+                Ok(Some(facts)) => self.cache_facts(name, facts)?,
+                Err(error) if requested => return Err(Error::Io(error.to_string())),
+                _ => {}
+            }
+            if requested { return Ok(true); }
+        }
+        let (name, storage, decoders, memory, owner) =
+            (asset.to_owned(), self.storage.clone(), self.decoders.clone(), self.memory.clone(), self.owner);
+        let permit = match self.tasks.reserve() {
+            Ok(permit) => permit,
+            Err(error) if error.is::<crysirror_tasks::CapacityExceeded>() => return Ok(false),
+            Err(error) => return Err(Error::Io(error.to_string())),
         };
-        let image = self
-            .decoders
-            .decode_with(asset, &bytes, Some(&source), None, None)
-            .map_err(|e| Error::Io(e.to_string()))?;
-        if sizes.len() >= 4096 {
-            sizes.clear();
+        let job = permit.spawn(move |cancel| {
+            cancel.check()?;
+            let cx = crysirror_resource::DecodeContext::new(owner).with_cancellation(cancel.clone());
+            let facts = read_image_facts(&name, &*storage, &decoders, Some(&cx), &memory)?;
+            cancel.check()?;
+            Ok(facts)
+        }).map_err(|e| Error::Io(e.to_string()))?;
+        *pending = Some((asset.to_owned(), job));
+        Ok(false)
+    }
+    fn size(&self, asset: &str) -> crysirror_core::Result<[u32; 2]> {
+        if is_tlg(asset) {
+            return Ok(self.tlg_facts(asset)?.0);
         }
-        let opaque = image.rgba.chunks_exact(4).all(|p| p[3] == 255);
-        sizes.insert(
-            asset.to_owned(),
-            (
-                [image.width, image.height],
-                opaque,
-                *blake3::hash(&bytes).as_bytes(),
-            ),
-        );
-        Ok([image.width, image.height])
+        if let Some(facts) = self.sizes.lock().map_err(|_| Error::Io("image metadata lock".into()))?.get(asset) {
+            return Ok(facts.0);
+        }
+        let facts = read_image_facts(asset,&*self.storage,&self.decoders,None,&self.memory)?;
+        self.cache_facts(asset.to_owned(), facts)?;
+        Ok(facts.0)
     }
 }

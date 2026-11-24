@@ -110,7 +110,9 @@ class __SliceLoader {
 		return loadSlicedImage(storage, sh, sliced, extra);
 	}
 	function loadSlicedImage(storage, sliceHeight, layers, key) {
-		var parent = sliceTarget;
+		// Scripts also call this helper with their own destination layers.
+		// The first target supplies the window for the temporary source.
+		var parent = layers.count > 0 ? layers[0] : sliceTarget;
 		var temp = new global.Layer(parent.window, parent);
 		var tags;
 		try {

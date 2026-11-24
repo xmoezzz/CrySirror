@@ -48,6 +48,7 @@ pub(crate) fn install(rt: &mut Rt) {
     if let Some(layer) = rt.global_member("Layer").object_handle() {
         rt.register_object_native_with_arg_count(layer, "fetchImageSize", NativeArgCount::AtLeast(1), |rt: &mut Rt, _, a: Vec<Variant>| {
             let name = string(&a, 0, "Layer.fetchImageSize")?;
+            rt.host_mut().before_image_work()?;
             let storage = rt.host().storage()?;
             let path = storage
                 .resolve_with(&name, &[".png", ".bmp", ".jpg", ".jpeg", ".tlg", ".webp"])

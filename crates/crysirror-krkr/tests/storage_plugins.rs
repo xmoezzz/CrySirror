@@ -91,7 +91,7 @@ fn fstat_metadata_listing_and_explicit_unsupported_operations() {
         if(Storages.dirlist("savedata/")[0]!="check.cfu")throw new Exception("save root");
         var fail=false;try{Storages.dirlist("missing/");}catch(e){fail=true;}if(!fail)throw new Exception("missing directory");
         fail=false;try{Storages.fstat("../outside");}catch(e){fail=true;}if(!fail)throw new Exception("metadata escaped");
-        fail=false;try{Storages.copyFile("folder/tiny.bin","savedata/copy.bin");}catch(e){fail=true;}if(!fail)throw new Exception("fake mutation");
+        fail=false;try{Storages.copyFileNoNormalize("folder/tiny.bin","savedata/copy.bin");}catch(e){fail=true;}if(!fail)throw new Exception("unsupported copy succeeded");
         Debug.message("storage-stat-complete");
     "#,
     );
@@ -99,6 +99,29 @@ fn fstat_metadata_listing_and_explicit_unsupported_operations() {
     std::fs::create_dir_all(dir.path().join("assets/empty")).unwrap();
     std::fs::write(dir.path().join("assets/folder/tiny.bin"), b"abc").unwrap();
     finish(&mut runtime, "storage-stat-complete");
+}
+
+#[test]
+fn fstat_copies_and_rotates_files_only_into_the_save_mount() {
+    let (dir, mut runtime) = fixture(r#"
+        Plugins.link("fstat.dll");
+        if(!Storages.copyFile("first.bin","savedata/quick_01.jpg"))throw new Exception("first save copy");
+        if(!Storages.copyFile("second.bin","savedata/quick_02.jpg"))throw new Exception("second save copy");
+        if(!Storages.copyFile("file://./savedata//quick_01.jpg","file://./savedata//quick_02.jpg",0))throw new Exception("save rotation");
+        if(Storages.copyFile("savedata/missing.jpg","savedata/quick_02.jpg"))throw new Exception("missing source");
+        if(Storages.copyFile("savedata/quick_01.jpg","second.bin"))throw new Exception("asset write");
+        var fail=false;try{Storages.copyFile("savedata/quick_01.jpg","savedata/../outside");}catch(e){fail=true;}if(!fail)throw new Exception("save path escaped");
+        Debug.message("copy-complete");
+    "#);
+    std::fs::write(dir.path().join("assets/first.bin"), b"first").unwrap();
+    std::fs::write(dir.path().join("assets/second.bin"), b"second").unwrap();
+    finish(&mut runtime, "copy-complete");
+    let storage = runtime.host.storage(ClientId(1)).unwrap();
+    for name in ["quick_01.jpg", "quick_02.jpg"] {
+        let path = VfsPath::new(Mount::Save, name).unwrap();
+        assert_eq!(storage.read(&path).unwrap(), b"first");
+    }
+    assert_eq!(std::fs::read(dir.path().join("assets/second.bin")).unwrap(), b"second");
 }
 
 #[test]

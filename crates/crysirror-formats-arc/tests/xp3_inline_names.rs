@@ -4,7 +4,7 @@ use crysirror_core::{
     state::ClientId,
 };
 use crysirror_formats_arc::Xp3;
-use crysirror_resource::{read_all, ArchiveFormat, DecodeContext};
+use crysirror_resource::{read_all, ArchiveFormat, ArchiveMount, DecodeContext};
 use std::sync::Arc;
 fn chunk(tag: &[u8; 4], body: &[u8]) -> Vec<u8> {
     let mut out = tag.to_vec();
@@ -103,6 +103,54 @@ fn malformed_mismatched_and_dangling_inline_names_fail_visibly() {
         archive(b"Yuzu", "../outside", "../outside", 0x11223344, &[], false),
     ] {
         assert!(open(b).is_err());
+    }
+}
+
+#[test]
+fn legacy_name_table_distinguishes_equal_adler_records_and_prefers_the_token_over_a_decoy() {
+    const HASH: u32 = 0x11223344;
+    let mut xp3 = b"XP3\r\n \n\x1a\x8bg\x01".to_vec();
+    xp3.extend(0u64.to_le_bytes());
+    xp3.extend(b"decoyab");
+    let offset = xp3.len() as u64;
+    xp3[11..19].copy_from_slice(&offset.to_le_bytes());
+
+    // Names are announced before any File chunks, with the same Adler value.
+    let first = "5b4d4c00648c6b38ad46cebe6039fbed";
+    let second = "d09b15e74c06935873a0d5706d086018";
+    let mut index = Vec::new();
+    for name in ["startup.tjs", "scene/Test.tjs"] {
+        let mut body = HASH.to_le_bytes().to_vec();
+        body.extend((name.encode_utf16().count() as u16).to_le_bytes());
+        body.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
+        index.extend(chunk(b"hnfn", &body));
+    }
+    for (name, at, size) in [("startup.tjs", 19u64, 5u64), (first, 24, 1), (second, 25, 1)] {
+        let mut info = 0u32.to_le_bytes().to_vec();
+        info.extend(size.to_le_bytes());
+        info.extend(size.to_le_bytes());
+        info.extend((name.encode_utf16().count() as u16).to_le_bytes());
+        info.extend(name.encode_utf16().flat_map(u16::to_le_bytes));
+        let mut segment = 0u32.to_le_bytes().to_vec();
+        segment.extend(at.to_le_bytes());
+        segment.extend(size.to_le_bytes());
+        segment.extend(size.to_le_bytes());
+        let mut file = chunk(b"info", &info);
+        file.extend(chunk(b"segm", &segment));
+        let checksum = if at == 19 { 1 } else { HASH };
+        file.extend(chunk(b"adlr", &checksum.to_le_bytes()));
+        index.extend(chunk(b"File", &file));
+    }
+    xp3.push(0);
+    xp3.extend((index.len() as u64).to_le_bytes());
+    xp3.extend(index);
+
+    let archive = open(xp3).unwrap();
+    assert_eq!(archive.entries().len(), 2);
+    let cx = DecodeContext::new(ClientId(1));
+    let mount = ArchiveMount::new(archive, cx).unwrap();
+    for (name, expected) in [("scene/Test.tjs", b"a"), ("startup.tjs", b"b"), (second, b"b")] {
+        assert_eq!(read_all(mount.open_entry(name).unwrap().as_ref(), 10).unwrap(), expected);
     }
 }
 

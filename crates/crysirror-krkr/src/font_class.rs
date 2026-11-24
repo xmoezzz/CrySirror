@@ -27,24 +27,41 @@ pub(super) fn initialize(rt: &mut Rt, font: ObjectHandle) {
             let font = this_of(rt, t, "Font.getGlyphDrawRect")?;
             let text = string(&a, 0, "Font.getGlyphDrawRect")?;
             let size = font_metric_size(rt, font)?;
-            let alias = crate::font_resources::alias(rt, font)?;
-            let mapped = crate::font_resources::is_mapped(rt, font)?;
-            let bold = !mapped && rt.resolve_object_member(font, "bold")?.is_truthy();
-            let underline = !mapped && rt.resolve_object_member(font, "underline")?.is_truthy();
-            let strikeout = !mapped && rt.resolve_object_member(font, "strikeout")?.is_truthy();
-            let bounds = rt
+            let runs = crate::font_resources::text_runs(rt, font, size, &text)?;
+            let styled = ["bold", "underline", "strikeout"].map(|name| font_property(rt, font, name).is_truthy());
+            let measurement = rt
                 .host()
                 .text_measurement
                 .as_ref()
-                .ok_or_else(|| TjsError::runtime("text measurement absent"))?
-                .ink_bounds_simple(&alias, size as f32, &text, bold, underline, strikeout)
-                .map_err(|e| TjsError::runtime(e.to_string()))?;
-            let angle = rt.resolve_object_member(font, "angle")?.to_integer()?;
+                .ok_or_else(|| TjsError::runtime("text measurement absent"))?;
+            let mut bounds = None::<[i32; 4]>;
+            let mut pen = 0.0f32;
+            let run_count = runs.len();
+            for (i, run) in runs.into_iter().enumerate() {
+                let [bold, underline, strikeout] = if run.mapped { [false; 3] } else { styled };
+                let px = f32::from(run.raster.draw);
+                let ink = measurement.ink_bounds_simple(&run.alias, px, run.text, bold, underline, strikeout)
+                    .map_err(|e| TjsError::runtime(e.to_string()))?;
+                if ink != [0; 4] {
+                    let x = pen.round() as i32;
+                    let y = run.raster.offset_y;
+                    let next = [ink[0] + x, ink[1] + y, ink[2] + x, ink[3] + y];
+                    bounds = Some(bounds.map_or(next, |previous| [
+                        previous[0].min(next[0]), previous[1].min(next[1]),
+                        previous[2].max(next[2]), previous[3].max(next[3]),
+                    ]));
+                }
+                if i + 1 < run_count {
+                    pen += measurement.measure_simple(&run.alias, px, run.text)
+                        .map_err(|e| TjsError::runtime(e.to_string()))?.advance;
+                }
+            }
+            let angle = font_property(rt, font, "angle").to_integer()?;
             let bounds = crysirror_text::decoration::rotate_bounds(
-                bounds,
+                bounds.unwrap_or([0; 4]),
                 -(angle.rem_euclid(3600) as f64) / 10.,
             );
-            Ok(native_extra::rect(rt, bounds))
+            crate::native_rect::from_bounds(rt, bounds)
         },
     );
     rt.register_object_native_with_arg_count(
@@ -140,7 +157,7 @@ pub(super) fn initialize(rt: &mut Rt, font: ObjectHandle) {
             NativeArgCount::AtLeast(1),
             move |rt: &mut Rt, this: Option<ObjectHandle>, args: Vec<Variant>| {
                 let font = this_of(rt, this, name)?;
-                let angle = rt.resolve_object_member(font, "angle")?.to_integer()?;
+                let angle = font_property(rt, font, "angle").to_integer()?;
                 let angle = (angle.rem_euclid(3600) as f64) * std::f64::consts::PI / 1800.;
                 let extent = if width {
                     font_text_width(rt, Some(font), args)?.to_integer()? as f64

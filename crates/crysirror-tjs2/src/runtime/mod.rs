@@ -339,6 +339,7 @@ pub struct Runtime<H: TjsHost = NoHost> {
     /// `this` of the script frame that issued the current call (krkr passes
     /// it as objthis to static native members such as scriptsEx functions).
     pub(crate) native_caller_this: Option<ObjectHandle>,
+    native_result_needed: bool,
     pub(crate) suspended_call: Option<SuspendedCallStack>,
     pub(crate) parked_calls: Vec<SuspendedCallStack>,
     /// CrySirror addition: the result a suspended native call returns when
@@ -365,7 +366,8 @@ pub(crate) struct ScriptFile {
 
 #[derive(Clone, Debug)]
 pub(crate) struct DecodedScriptObject {
-    pub object: CodeObject,
+    pub object: Arc<CodeObject>,
+    pub max_register: u32,
     pub instructions: Arc<[Instruction]>,
     pub offset_to_index: Arc<BTreeMap<usize, usize>>,
     /// Precomputed sequential-next and branch-target indices for
@@ -407,6 +409,7 @@ impl<H: TjsHost + 'static> Runtime<H> {
             max_call_depth: 1024,
             suspend_requested: false,
             native_caller_this: None,
+            native_result_needed: true,
             suspended_call: None,
             parked_calls: Vec::new(),
             resume_value: None,
@@ -1282,6 +1285,15 @@ impl<H: TjsHost + 'static> Runtime<H> {
         self.native_caller_this
     }
 
+    /// Whether the active native call received a result slot from its caller.
+    pub fn native_result_needed(&self) -> bool {
+        self.native_result_needed
+    }
+
+    pub(crate) fn set_native_result_needed(&mut self, needed: bool) -> bool {
+        std::mem::replace(&mut self.native_result_needed, needed)
+    }
+
     pub fn request_suspend(&mut self) {
         self.suspend_requested = true;
     }
@@ -1450,6 +1462,16 @@ impl<H: TjsHost + 'static> Runtime<H> {
         let file_id = self.call_context_file_id();
         let mut vm = Vm::new(file_id, self)?;
         vm.call_function(callee, args)
+    }
+
+    /// Delegate a native method's entire result to a script function, including
+    /// the return value produced after a host-resource wait.
+    pub fn tail_call_function(&mut self, callee: Variant, args: Vec<Variant>) -> Result<Variant> {
+        let value = self.call_function(callee, args)?;
+        if let Some(stack) = &mut self.suspended_call {
+            stack.forward_return = true;
+        }
+        Ok(value)
     }
 
     /// Gives an exception that escaped a VM call to the TJS
@@ -1736,7 +1758,8 @@ impl<H: TjsHost + 'static> Runtime<H> {
             .collect::<BTreeMap<_, _>>();
         let jump = JumpTable::build(&instructions, &offset_to_index);
         let decoded = DecodedScriptObject {
-            object,
+            max_register: object.effective_max_frame_count(&instructions),
+            object: Arc::new(object),
             instructions,
             offset_to_index: Arc::new(offset_to_index),
             jump: Arc::new(jump),

@@ -89,27 +89,53 @@ const PLAYER_METHODS: &[&str] = &[
 
 struct Resource {
     model: Arc<MotionModel>,
-    textures: Vec<String>,
     /// This model's share of the client texture budget, returned when the
     /// last manager entry, player or draw job drops it.
-    _budget: TextureLease,
+    textures: TextureLease,
 }
 /// Live motion texture bytes/count of one client.
 #[derive(Default)]
 struct TextureLedger {
     bytes: std::sync::atomic::AtomicU64,
     count: std::sync::atomic::AtomicU64,
+    retired: std::sync::Mutex<Vec<String>>,
 }
 struct TextureLease {
     ledger: Arc<TextureLedger>,
     bytes: u64,
     count: u64,
+    paths: Vec<String>,
 }
 impl Drop for TextureLease {
     fn drop(&mut self) {
         use std::sync::atomic::Ordering::AcqRel;
+        self.ledger.retired.lock().unwrap_or_else(|e| e.into_inner()).append(&mut self.paths);
         self.ledger.bytes.fetch_sub(self.bytes, AcqRel);
         self.ledger.count.fetch_sub(self.count, AcqRel);
+    }
+}
+
+#[cfg(test)]
+mod texture_lease_tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn texture_publications_retire_only_after_the_last_model_owner() {
+        let motion = State::default();
+        motion.textures.count.store(1, Ordering::Relaxed);
+        motion.textures.bytes.store(4, Ordering::Relaxed);
+        let manager = Arc::new(TextureLease {
+            ledger: motion.textures.clone(), bytes: 4, count: 1,
+            paths: vec!["__image_resource/1-2".into()],
+        });
+        let draw_job = manager.clone();
+        drop(manager);
+        assert!(motion.take_retired_textures().is_empty());
+        drop(draw_job);
+        assert_eq!(motion.take_retired_textures(), ["__image_resource/1-2"]);
+        assert!(motion.take_retired_textures().is_empty());
+        assert_eq!(motion.textures.bytes.load(Ordering::Relaxed), 0);
     }
 }
 struct Loaded {
@@ -167,6 +193,9 @@ pub struct State {
     cancelled_load: bool,
 }
 impl State {
+    pub(crate) fn take_retired_textures(&self) -> Vec<String> {
+        std::mem::take(&mut *self.textures.retired.lock().unwrap_or_else(|e| e.into_inner()))
+    }
     pub(crate) fn has_frame(&self, layer: usize) -> bool {
         self.pending_frame(layer) || self.published.contains(&layer)
     }
@@ -865,8 +894,7 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                 }
                 ledger.bytes.fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
                 ledger.count.fetch_add(count, std::sync::atomic::Ordering::AcqRel);
-                let lease = TextureLease { ledger, bytes, count };
-                let mut textures = Vec::new();
+                let mut textures = TextureLease { ledger, bytes, count, paths: Vec::new() };
                 for texture in model.textures() {
                     let counter = rt.host().motion.next_texture;
                     let slot = 0x5000_0000u32
@@ -882,7 +910,7 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                         [texture.width, texture.height],
                         texture.rgba.clone(),
                     )?;
-                    textures.push(
+                    textures.paths.push(
                         host.publish_image_resource(client, slot, Arc::new(image))?
                             .path
                             .relative()
@@ -922,7 +950,7 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                         pending.name,
                         Loaded {
                             refs: 1,
-                            resource: Arc::new(Resource { model, textures, _budget: lease }),
+                            resource: Arc::new(Resource { model, textures }),
                         },
                     );
             }
@@ -954,7 +982,7 @@ pub fn poll(rt: &mut Rt, host: &mut dyn HostServices, client: ClientId) -> anyho
                 p.step = Some((job.key.clone(), step.scene));
             }
             let mut frame = step.frame;
-            frame.textures = job.resource.textures.clone();
+            frame.textures = job.resource.textures.paths.clone();
             frame.validate()?;
             let layer = rt
                 .host()

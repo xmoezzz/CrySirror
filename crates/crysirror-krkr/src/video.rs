@@ -159,14 +159,36 @@ fn set_status_async(rt: &mut Rt, h: ObjectHandle, status: Status) -> Result<()> 
     post(rt, h, Some(status.name()), None)
 }
 
+/// KiriKiri movie quality selectors can ship a same-stem MPEG low-quality
+/// copy. Preserve the requested movie when the engine supports its audio.
+fn compatible_movie(storage: &crate::storage::Storage, name: &str, primary: &str) -> Option<String> {
+    let (stem, extension) = name.rsplit_once('.')?;
+    if !extension.eq_ignore_ascii_case("wmv") {
+        return None;
+    }
+    let sibling = storage.resolve(&format!("{stem}_sd.mpg"))?;
+    let head = storage.read_prefix(&sibling, 4).ok()?;
+    if !head.starts_with(&[0, 0, 1, 0xba]) && !head.starts_with(&[0, 0, 1, 0xb3]) {
+        return None;
+    }
+    let header = storage.read_prefix(primary, 64 * 1024).ok()?;
+    let unsupported = crysirror_video::asf::has_unsupported_audio(
+        &mut std::io::Cursor::new(header),
+    ).ok()?;
+    unsupported.then_some(sibling)
+}
+
 fn open(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
     let h = this_of(rt, t, "VideoOverlay.open")?;
     let name = string(&a, 0, "VideoOverlay.open")?;
-    let path = rt
-        .host()
-        .storage()?
+    let storage = rt.host().storage()?;
+    let mut path = storage
         .resolve(&name)
         .ok_or_else(|| TjsError::runtime(format!("video storage absent: {name}")))?;
+    if let Some(sibling) = compatible_movie(storage, &name, &path) {
+        rt.host_mut().log.push(format!("VideoOverlay: unsupported ASF audio in {path}; using {sibling}"));
+        path = sibling;
+    }
     if active(overlay(rt, h, "VideoOverlay.open")?) {
         rt.host_mut().videos.requests.push_back(Request::Stop(h.0));
     }

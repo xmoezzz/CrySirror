@@ -115,3 +115,35 @@ fn old_completion_cannot_discard_a_newer_materialization_request() {
     };
     assert!(matches!(&layer.paint,Paint::Image { asset,.. } if asset=="__crysirror/current.png"));
 }
+
+#[test]
+fn a_copied_compaction_is_live_until_the_copy_is_cleared() {
+    let (mut canvases, mut layers) = fixture();
+    let client = ClientId(1);
+    canvases
+        .apply_batch(client, &vec![draw(); COMPACT_NODES + 1], &mut layers)
+        .unwrap();
+    let frozen = canvases.live_materialize_requests().pop().unwrap();
+    canvases.apply_batch(client, &[
+        C::Copy {
+            source: 1,
+            destination: 2,
+            rect: [0., 0., 8., 8.],
+            position: [0., 0.],
+            opacity: 255,
+            replace: true,
+            clip: None,
+            atop: None,
+        },
+        C::Clear { id: 1, color: [0; 4] },
+    ], &mut layers).unwrap();
+    let pending = canvases.live_materialize_requests();
+    assert_eq!(pending.len(), 1);
+    assert!(std::sync::Arc::ptr_eq(&pending[0].layers, &frozen.layers));
+
+    canvases
+        .apply_batch(client, &[C::Clear { id: 2, color: [0; 4] }], &mut layers)
+        .unwrap();
+    assert!(canvases.live_materialize_requests().is_empty());
+    assert!(canvases.materialize_requests().is_empty());
+}

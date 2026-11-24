@@ -51,9 +51,17 @@ pub struct RegionMap {
     size: [u32; 2],
     operations: Vec<Operation>,
 }
+
+// A sparse interaction map may span a wide sprite strip. Preserve the
+// previous maximum area as dense label reads can materialize the whole map.
+fn valid_map_size([w, h]: [u32; 2]) -> bool {
+    (1..=16_384).contains(&w) && (1..=16_384).contains(&h)
+        && u64::from(w) * u64::from(h) <= 8192 * 8192
+}
+
 impl RegionMap {
     pub fn new(client: u32, size: [u32; 2]) -> Result<Self> {
-        if client == 0 || size.iter().any(|v| *v == 0 || *v > 8192) {
+        if client == 0 || !valid_map_size(size) {
             return Err(Error::Invalid("region map identity/dimensions"));
         }
         Ok(Self {
@@ -279,8 +287,8 @@ pub fn clip_region_copy(
     destination: [i64; 2],
     clip: Option<[i64; 4]>,
 ) -> Result<Option<([i64; 4], [i64; 2])>> {
-    if destination_size.iter().any(|v| *v == 0 || *v > 8192)
-        || source_size.is_some_and(|s| s.iter().any(|v| *v == 0 || *v > 8192))
+    if !valid_map_size(destination_size)
+        || source_size.is_some_and(|size| !valid_map_size(size))
         || source
             .iter()
             .chain(destination.iter())
@@ -331,6 +339,17 @@ pub trait RegionMapQuery: Send {
 #[cfg(test)]
 mod copy_tests {
     use super::*;
+    #[test]
+    fn narrow_strips_accept_wide_coordinates_and_retain_the_area_limit() {
+        let mut source = RegionMap::new(1, [9984, 100]).unwrap();
+        source.fill(1, [9983, 0, 1, 1], 47).unwrap();
+        let mut cell = RegionMap::new(1, [1, 1]).unwrap();
+        cell.copy_from(1, &source, [9983, 0, 1, 1], [0, 0], None).unwrap();
+        assert_eq!(cell.get(1, [0, 0]).unwrap(), 47);
+        assert!(source.resize(1, [16_384, 8192]).is_err());
+        assert_eq!(source.size(), [9984, 100]);
+    }
+
     #[test]
     fn scoped_region_copy_clips_preserves_zero_holes_and_snapshots_overlap() {
         let mut source = RegionMap::new(1, [4, 2]).unwrap();

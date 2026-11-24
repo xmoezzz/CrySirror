@@ -364,3 +364,31 @@ fn external_crossfade_progress_comes_only_from_the_client() {
         .unwrap();
     assert!(layers.apply_batch(ClientId(1), &[L::SetCrossfadeElapsed { id: 10, elapsed_ms: 5 }]).is_err());
 }
+
+#[test]
+fn crossfade_keeps_the_screen_blend_inside_its_endpoint() {
+    use crysirror_scene::layer::{Blend, LayerCommand as L};
+    let client = ClientId(1);
+    let specs: Vec<crysirror_scene::LayerSpec> = serde_json::from_value(json!([
+        {"id":1,"rect":[0,0,16,16],"paint":{"kind":"solid","color":[50,100,150,255]}},
+        {"id":2,"rect":[0,0,16,16],"visible":false,"paint":{"kind":"solid","color":[80,90,100,255]}},
+        {"id":3,"parent":2,"rect":[0,0,16,16],"blend":"atop_screen",
+         "paint":{"kind":"solid","color":[240,0,0,128]}}
+    ])).unwrap();
+    let mut layers = LayerSystem::default();
+    layers.install(client, &specs).unwrap();
+    layers.apply_batch(client, &[L::BeginCrossfade {
+        id: 1,
+        source: 2,
+        duration_ms: 100,
+        rule: None,
+        external: false,
+    }]).unwrap();
+    layers.tick(50);
+    let output = layers.frame([16, 16]).unwrap();
+    let frame = output.iter().find_map(|p| p.composite.as_ref()).unwrap();
+    assert_eq!(frame.progress, 0.5);
+    assert!(frame.after.iter().any(|p| p.id == 3 && p.blend == Blend::AtopScreen));
+    assert!(layers.apply_batch(client, &[L::SetBlend { id: 2, blend: Blend::AtopScreen }]).is_err());
+    assert!(layers.apply_batch(client, &[L::SetBlend { id: 3, blend: Blend::Multiply }]).is_err());
+}

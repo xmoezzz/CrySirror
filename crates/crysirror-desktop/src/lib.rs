@@ -105,6 +105,10 @@ enum Command {
     Library {
         /// Folder holding one subfolder per installed game.
         root: PathBuf,
+        /// List explicitly selected games as NAME=PATH; repeat for more games.
+        /// Relative paths are resolved within ROOT.
+        #[arg(long = "entry", value_parser = parse_library_entry)]
+        entries: Vec<LibraryEntry>,
         #[arg(long)]
         data_dir: Option<PathBuf>,
         /// Font for the launcher and games (default: a system CJK font).
@@ -453,9 +457,13 @@ fn play(options: PlayOptions) -> Result<()> {
         .name("crysirror-detect".into())
         .spawn(move || -> Result<_> {
             let mut dir = source_path::SourcePath::from_input(&input)?;
-            if dir.metadata()?.is_file() { dir = dir.parent().context("game file without a folder")?; }
+            let entry = if dir.metadata()?.is_file() {
+                let name = dir.file_name().and_then(|s| s.to_str()).map(str::to_owned);
+                dir = dir.parent().context("game file without a folder")?;
+                name
+            } else { None };
             let dir = dir.canonicalize().context("game source directory")?;
-            let plan = detect::detect_source(&dir)?;
+            let plan = detect::detect_source_with_entry(&dir, entry.as_deref())?;
             Ok((dir, plan))
         })
         .context("spawn engine detection worker")?
@@ -576,10 +584,30 @@ fn play(options: PlayOptions) -> Result<()> {
         },
     )
 }
+#[derive(Clone)]
+struct LibraryEntry {
+    name: String,
+    path: PathBuf,
+}
+
+fn parse_library_entry(value: &str) -> std::result::Result<LibraryEntry, String> {
+    let (name, path) = value.split_once('=').ok_or("expected NAME=PATH")?;
+    if name.trim().is_empty() || path.trim().is_empty() {
+        return Err("library entry needs both a name and a path".into());
+    }
+    Ok(LibraryEntry { name: name.trim().into(), path: PathBuf::from(path) })
+}
+
 /// The shared library launcher (crysirror-launch `library`) as a desktop
 /// supervisor. winit allows one event loop per process, so the launcher and
 /// each game run as child processes of this binary (`run` / `play`).
-fn library(root: &Path, data_dir: Option<PathBuf>, font: Option<PathBuf>, no_audio: bool) -> Result<()> {
+fn library(
+    root: &Path,
+    explicit: Vec<LibraryEntry>,
+    data_dir: Option<PathBuf>,
+    font: Option<PathBuf>,
+    no_audio: bool,
+) -> Result<()> {
     use crysirror_library::library;
     let base = data_dir.unwrap_or_else(|| state_dir_base().join("CrySirror"));
     let font = font.or_else(crysirror_launch::detect::system_font);
@@ -587,15 +615,42 @@ fn library(root: &Path, data_dir: Option<PathBuf>, font: Option<PathBuf>, no_aud
     let exe = std::env::current_exe()?;
     let project_dir = base.join("launcher");
     let state = base.join("launcher-state");
+    let mut pinned = Vec::with_capacity(explicit.len());
+    let mut names = std::collections::BTreeSet::new();
+    for entry in explicit {
+        anyhow::ensure!(names.insert(entry.name.clone()), "duplicate library entry {}", entry.name);
+        let path = root.join(entry.path);
+        let meta = path.metadata().with_context(|| format!("library entry {}", path.display()))?;
+        let dir = if meta.is_file() {
+            path.parent().context("library entry file without a folder")?
+        } else {
+            anyhow::ensure!(meta.is_dir(), "library entry is neither a directory nor a file");
+            &path
+        };
+        let mut card = library::Entry::folder(dir, Some(&base.join("covers")));
+        card.id.clone_from(&entry.name);
+        card.name = entry.name;
+        pinned.push((card, path));
+    }
     loop {
-        let mut games: Vec<PathBuf> = std::fs::read_dir(root)
-            .with_context(|| format!("list {}", root.display()))?
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.is_dir() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
-            .collect();
-        games.sort();
-        let entries: Vec<library::Entry> = games.iter().map(|dir| library::Entry::folder(dir, Some(&base.join("covers")))).collect();
+        let discovered;
+        let games = if pinned.is_empty() {
+            let mut dirs: Vec<_> = std::fs::read_dir(root)
+                .with_context(|| format!("list {}", root.display()))?
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir() && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
+                .collect();
+            dirs.sort();
+            discovered = dirs.into_iter().map(|dir| {
+                let card = library::Entry::folder(&dir, Some(&base.join("covers")));
+                (card, dir)
+            }).collect::<Vec<_>>();
+            &discovered
+        } else {
+            &pinned
+        };
+        let entries: Vec<_> = games.iter().map(|(entry, _)| entry.clone()).collect();
         let style = library::Style {
             confirm: "Enter",
             cross: false,
@@ -611,9 +666,10 @@ fn library(root: &Path, data_dir: Option<PathBuf>, font: Option<PathBuf>, no_aud
         let status = launcher.status().context("start the launcher")?;
         anyhow::ensure!(status.success(), "launcher exited with {status}");
         let Some(id) = library::take_choice(&state) else { return Ok(()) };
-        let Some(dir) = games.iter().find(|g| g.file_name().is_some_and(|n| n.to_string_lossy() == id)) else { continue };
+        let Some((_, path)) = games.iter().find(|(entry, _)| entry.id == id) else { continue };
+        log::info!("launching library entry {} from {}", id, path.display());
         let mut game = std::process::Command::new(&exe);
-        game.arg("play").arg(dir);
+        game.arg("play").arg(path);
         if let Some(font) = &font {
             game.arg("--font").arg(font);
         }
@@ -622,7 +678,7 @@ fn library(root: &Path, data_dir: Option<PathBuf>, font: Option<PathBuf>, no_aud
         }
         let status = game.status().context("start the game")?;
         if !status.success() {
-            log::warn!("{} exited with {status}", dir.display());
+            log::warn!("{} exited with {status}", path.display());
         }
     }
 }
@@ -636,7 +692,7 @@ fn run() -> Result<()> {
         .unwrap_or(Command::Play(PlayOptions::default()));
     match command {
         Command::Play(options) => play(options),
-        Command::Library { root, data_dir, font, no_audio } => library(&root, data_dir, font, no_audio),
+        Command::Library { root, entries, data_dir, font, no_audio } => library(&root, entries, data_dir, font, no_audio),
         Command::Run {
             project,
             data_dir,

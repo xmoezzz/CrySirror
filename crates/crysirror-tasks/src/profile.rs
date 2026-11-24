@@ -2,6 +2,7 @@
 //! Bounded CPU spans and independently clocked GPU duration samples.
 use serde::Serialize;
 use std::{
+    cell::RefCell,
     collections::VecDeque,
     sync::{
         Arc, Mutex,
@@ -12,6 +13,28 @@ use std::{
 use web_time::Instant;
 
 const MAX_SAMPLES: usize = 8192;
+thread_local! {
+    static ACTIVE: RefCell<Option<(Profiler, u64)>> = const { RefCell::new(None) };
+}
+
+struct ProfileScope(Option<(Profiler, u64)>);
+impl Drop for ProfileScope {
+    fn drop(&mut self) {
+        ACTIVE.with(|active| {
+            active.replace(self.0.take());
+        });
+    }
+}
+
+/// Span within the current owner-thread profile scope, if one is active.
+pub fn span_current(name: &'static str) -> Option<Span> {
+    ACTIVE.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .map(|(profiler, frame)| profiler.span(*frame, name))
+    })
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct Sample {
     pub frame: u64,
@@ -39,6 +62,11 @@ impl Default for Profiler {
     }
 }
 impl Profiler {
+    /// Attach native service spans to this frame on the current thread.
+    pub fn scope<T>(&self, frame: u64, run: impl FnOnce() -> T) -> T {
+        let _scope = ProfileScope(ACTIVE.with(|active| active.replace(Some((self.clone(), frame)))));
+        run()
+    }
     pub fn begin_frame(&self) -> u64 {
         self.0.frame.fetch_add(1, Ordering::Relaxed) + 1
     }
@@ -136,6 +164,22 @@ impl Drop for Span {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owner_scope_restores_the_prior_frame() {
+        let p = Profiler::default();
+        assert!(span_current("outside").is_none());
+        p.scope(1, || {
+            drop(span_current("first"));
+            p.scope(2, || drop(span_current("nested")));
+            drop(span_current("last"));
+        });
+        assert!(span_current("outside").is_none());
+        let trace = p.chrome_trace();
+        let frames: Vec<_> = trace["traceEvents"].as_array().unwrap().iter()
+            .map(|event| event["args"]["frame"].as_u64().unwrap()).collect();
+        assert_eq!(frames, [1, 2, 1]);
+    }
     #[test]
     fn bounded_samples_and_separate_gpu_clock_are_visible() {
         let p = Profiler::default();

@@ -1,5 +1,13 @@
 # API change log
 
+## `54baf5ebf50648f1` (2026-11-24) — KiriKiri compatibility
+
+- `Ui.setTextSelection(id, start, end)` enables caret editing in an owned field. Offsets are UTF-16 code units. End `-1` extends to the end and start `-1` collapses at the caret. Insertion replaces the selection, and backspace deletes it or the preceding grapheme. Plain fields retain append and scalar deletion. Rust matches over `UiCommand` must handle `SetTextSelection`.
+- `ImageEffect.hsl_modulate` accepts an optional `rect` in image pixels `[x, y, width, height]`. Existing JSON without it still modulates the whole image. Rust constructors can pass `rect: None` for that behavior.
+- KiriKiri adapter configuration accepts an optional `launcher_overlay` with an ordered list of session-local XP3 overrides. The launcher resolves it with `detect_source_with_entry`. Existing directory callers can continue using `detect_source`.
+
+The previous upstream fingerprint was `9640ededc06f0fce`.
+
 ## `9640ededc06f0fce` (2026-11-24) — filmic tonemap
 
 `Environment.tonemap` accepts `filmic`: Hable's curve as published for Uncharted 2 (GDC 2010), with a fixed 2× exposure bias and white point 11.2. Existing environments keep their tonemap. Rust callers with exhaustive `Tonemap` matches need the new arm. The previous fingerprint was `01a2119f5ee7031e`.

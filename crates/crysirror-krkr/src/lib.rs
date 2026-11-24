@@ -37,6 +37,9 @@ mod native_mouse;
 mod plugins;
 mod sound;
 mod save_struct;
+mod edit_dialog;
+mod message_dialog;
+mod native_rect;
 mod video;
 mod pointer;
 mod tooltip;
@@ -50,6 +53,7 @@ mod image_api;
 mod json_plugin;
 
 mod draw_plugin;
+mod d2d_view;
 
 mod protect_plugin;
 

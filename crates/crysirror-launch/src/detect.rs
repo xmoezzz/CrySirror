@@ -54,6 +54,16 @@ pub struct ArchiveMount {
     pub options: Value,
 }
 
+// The bootstrap script selects its active revision and domains at runtime.
+// A sibling discovered by extension can be an unused or unsupported pack.
+const HXV4_COMPANION_PROFILE: &str = "hxv4-companion";
+
+impl ArchiveMount {
+    pub(crate) fn is_hxv4_companion(&self) -> bool {
+        self.options["profile"].as_str() == Some(HXV4_COMPANION_PROFILE)
+    }
+}
+
 /// File names in `dir`, as found.
 fn listing(dir: &SourcePath) -> Result<Vec<String>> {
     let mut names: Vec<String> = dir.read_dir()
@@ -107,7 +117,17 @@ pub fn detect(dir: &Path) -> Result<Plan> {
 }
 
 pub fn detect_source(dir: &SourcePath) -> Result<Plan> {
-    let mut plan = detect_layout(dir)?;
+    detect_source_with_entry(dir, None)
+}
+
+/// Preserve a file explicitly selected by the host. Directory discovery keeps
+/// the existing ranking. The selected entry must belong to this directory.
+pub fn detect_source_with_entry(dir: &SourcePath, entry: Option<&str>) -> Result<Plan> {
+    let explicit_exe = entry.filter(|s| s.to_ascii_lowercase().ends_with(".exe"));
+    if let Some(entry) = explicit_exe {
+        ensure!(!entry.contains(['/', '\\', ':']) && !entry.contains('\0'), "invalid executable name");
+    }
+    let mut plan = detect_layout(dir, explicit_exe)?;
     // Original engines clear the game screen to black before their first
     // draw; the authored-project default is a demo colour.
     if plan.project.get("background").is_none() {
@@ -123,6 +143,11 @@ pub fn detect_source(dir: &SourcePath) -> Result<Plan> {
     let scoped = |path: &str| if prefix.is_empty() { path.to_owned() } else { format!("{prefix}/{path}") };
     let detector = crysirror_resource::sniff::FileDetector::new()?;
     let mut inputs = std::collections::BTreeSet::new();
+    if plan.engine == "KiriKiri" {
+        if let Some(entry) = explicit_exe {
+            inputs.insert(scoped(entry));
+        }
+    }
     for mount in &plan.mounts {
         inputs.insert(scoped(&mount.source));
     }
@@ -174,7 +199,7 @@ pub fn detect_source(dir: &SourcePath) -> Result<Plan> {
     Ok(plan)
 }
 
-fn detect_layout(dir: &SourcePath) -> Result<Plan> {
+fn detect_layout(dir: &SourcePath, explicit_exe: Option<&str>) -> Result<Plan> {
     let names = listing(dir)?;
     let name = dir
         .file_name()
@@ -222,7 +247,7 @@ fn detect_layout(dir: &SourcePath) -> Result<Plan> {
     if find(&names, "data.xp3").is_some() || find(&names, "arc").is_some() {
         let archives = krkr_probe::with_archive_directory(dir, &names)?;
         if krkr_probe::startup_archive(&archives).is_some() {
-            return krkr(dir, &archives, &name);
+            return krkr(dir, &archives, &name, explicit_exe);
         }
     }
     if find(&names, "gameexe.ini").is_some() && find(&names, "seen.txt").is_some() {
@@ -459,14 +484,98 @@ fn voice_packs_in(dir: &SourcePath, root: &SourcePath, folders: &[SourcePath]) -
     Ok(packs.into_iter().map(|(source, format)| ArchiveMount { fallback:false, target: source.clone(), source, options: json!({"format":format}) }).collect())
 }
 
-fn krkr(dir: &SourcePath, names: &[String], name: &str) -> Result<Plan> {
+struct KrkrEntry {
+    executable: String,
+    overlay: Option<crysirror_krkr::storage::LauncherOverlay>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KrkrPatchManifest {
+    game_executable_file: String,
+    #[serde(default)]
+    patch_archives: Vec<String>,
+    #[serde(default)]
+    patch_protocols: Vec<String>,
+    #[serde(default)]
+    patch_no_protocol: bool,
+}
+
+fn krkr_entry(dir: &SourcePath, names: &[String], entry: Option<&str>) -> Result<KrkrEntry> {
+    let Some(entry) = entry else {
+        let executable = main_exe(dir, names).context("KiriKiri game without an executable")?;
+        return Ok(KrkrEntry { executable, overlay: None });
+    };
+    let selected = find(names, entry).context("selected KiriKiri executable missing")?;
+    let root = dir.canonicalize()?;
+    let scoped_file = |name: &str| -> Result<SourcePath> {
+        let file = root.join(name).canonicalize()?;
+        ensure!(file.starts_with(&root) && file.is_file(), "KiriKiri entry outside game directory");
+        Ok(file)
+    };
+    let selected_file = scoped_file(selected)?;
+    if let Some(manifest) = find(names, "KrkrPatch.json") {
+        // Identify the launcher before consulting its manifest. A second
+        // standalone game EXE in the directory remains selectable on its own.
+        use std::io::Read;
+        let mut prefix = Vec::new();
+        crate::source_path::SourceFile::open(selected_file)?.take(1024 * 1024).read_to_end(&mut prefix)?;
+        let manifest_name = b"KrkrPatch.json";
+        let utf16: Vec<u8> = manifest_name.iter().flat_map(|&c| [c, 0]).collect();
+        if prefix.starts_with(b"MZ") && [manifest_name.as_slice(), utf16.as_slice()].iter()
+            .any(|needle| prefix.windows(needle.len()).any(|s| s.eq_ignore_ascii_case(needle))) {
+            scoped_file(manifest)?;
+            let bytes = read_bounded(dir, manifest, 64 * 1024)?;
+            let config: KrkrPatchManifest = serde_json::from_slice(
+                bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes),
+            ).with_context(|| format!("parse {manifest}"))?;
+            let runtime = &config.game_executable_file;
+            ensure!(runtime.to_ascii_lowercase().ends_with(".exe") && !runtime.contains(['/', '\\', ':', '\0']), "invalid launcher runtime name");
+            let runtime = find(names, runtime).context("launcher runtime executable missing")?;
+            scoped_file(runtime)?;
+            log::info!("KiriKiri selected launcher {selected}; runtime {runtime}");
+            let overlay = if config.patch_archives.is_empty() {
+                None
+            } else {
+                let protocols = config.patch_protocols.iter().map(|protocol| {
+                    protocol.strip_suffix("://").map(str::to_ascii_lowercase)
+                        .with_context(|| format!("invalid KiriKiri launcher protocol: {protocol}"))
+                }).collect::<Result<Vec<_>>>()?;
+                let mut overlay = crysirror_krkr::storage::LauncherOverlay {
+                    archives: config.patch_archives,
+                    protocols,
+                    no_protocol: config.patch_no_protocol,
+                };
+                overlay.validate()?;
+                for archive in &mut overlay.archives {
+                    let file = find(names, archive).with_context(|| format!("KiriKiri launcher XP3 `{archive}` is missing"))?;
+                    scoped_file(file)?;
+                    archive.clone_from(file);
+                }
+                Some(overlay)
+            };
+            return Ok(KrkrEntry { executable: runtime.to_owned(), overlay });
+        }
+    }
+    log::info!("KiriKiri selected runtime {selected}");
+    Ok(KrkrEntry { executable: selected.to_owned(), overlay: None })
+}
+
+fn krkr(dir: &SourcePath, names: &[String], name: &str, explicit_exe: Option<&str>) -> Result<Plan> {
     use krkr_probe::*;
-    let exe = main_exe(dir, names).context("KiriKiri game without an executable")?;
+    let KrkrEntry { executable: exe, overlay } = krkr_entry(dir, names, explicit_exe)?;
     let tpm = filter_modules(dir, names);
     // Profiles in order of evidence; the first that opens data.xp3 and
     // finds its startup wins.
     let mut tried = Vec::new();
-    let mut candidates = vec![Protection::ArchiveFilter];
+    let mut candidates = Vec::new();
+    if let Some(profile) = find(names, "crysirror-nana.local.json") {
+        let setup_file = exe.rsplit_once('.')
+            .and_then(|(stem, _)| find(names, &format!("{stem}.key")))
+            .filter(|name| dir.join(name).is_file()).cloned();
+        candidates.push(Protection::Nana { profile: profile.clone(), setup_file });
+    }
+    candidates.push(Protection::ArchiveFilter);
     if !tpm.is_empty() {
         candidates.push(Protection::AdlerXor {
             modules: tpm.clone(),
@@ -503,7 +612,15 @@ fn krkr(dir: &SourcePath, names: &[String], name: &str) -> Result<Plan> {
                     }
                 };
                 match canvas(dir, &exe, &archive, &protection) {
-                    Ok(canvas) => return Ok(plan(dir, names, name, &exe, protection, canvas)),
+                    Ok(canvas) => {
+                        let archives: Vec<_> = with_ext(names, "xp3")
+                            .filter(|n| !dir.join(n).is_dir()).cloned().collect();
+                        let mut plan = plan(&archives, name, &exe, protection, canvas)?;
+                        if let Some(overlay) = overlay {
+                            configure_krkr_overlay(&mut plan, overlay)?;
+                        }
+                        return Ok(plan);
+                    }
                     Err(e) => tried.push(format!("{} canvas: {e:#}", protection.label())),
                 }
             },
@@ -514,6 +631,25 @@ fn krkr(dir: &SourcePath, names: &[String], name: &str) -> Result<Plan> {
         "KiriKiri startup detection failed (archive protection or initial canvas):\n  {}",
         tried.join("\n  ")
     )
+}
+
+fn configure_krkr_overlay(
+    plan: &mut Plan,
+    overlay: crysirror_krkr::storage::LauncherOverlay,
+) -> Result<()> {
+    let profile = "launcher-overlay";
+    for archive in &overlay.archives {
+        let mount = plan.mounts.iter_mut().find(|mount| &mount.source == archive)
+            .with_context(|| format!("missing KiriKiri launcher mount for `{archive}`"))?;
+        // Explicit launcher archives are ordinary XP3. An HXV4 companion
+        // profile would leak the base executable's protection into this mount.
+        mount.options["profile"] = json!(profile);
+    }
+    let limits = plan.profiles["game"]["limits"].clone();
+    plan.profiles.insert(profile.into(), json!({ "limits": limits }));
+    log::info!("KiriKiri launcher override archives (first match wins): {}", overlay.archives.join(", "));
+    plan.project["clients"][0]["config"]["launcher_overlay"] = serde_json::to_value(overlay)?;
+    Ok(())
 }
 
 
@@ -627,6 +763,7 @@ mod krkr_probe {
     pub enum Protection {
         ArchiveFilter,
         Hxv4,
+        Nana { profile: String, setup_file: Option<String> },
         Cxdec { modules: Vec<String>, setup: bool },
         AdlerXor { modules: Vec<String> },
         HashFoldXor { key_bias: Option<u8>, zero_key: Option<u8> },
@@ -637,6 +774,7 @@ mod krkr_probe {
             match self {
                 Self::ArchiveFilter => "archive-authenticated XP3 filter",
                 Self::Hxv4 => "HXV4",
+                Self::Nana { .. } => "Nana (local dls profile)",
                 Self::HashFoldXor { .. } => "checksum-authenticated folded Adler XOR",
                 Self::AdlerXor { .. } => "rotating Adler XOR",
                 Self::Cxdec { modules, setup: false } if modules.len() > 1 => "CXDEC (combined modules)",
@@ -669,6 +807,11 @@ mod krkr_probe {
                 let startup = opened.find("startup.tjs").context("missing KiriKiri startup script")?;
                 opened.archive.open(startup, &opened.context)?;
                 return Ok(self.clone());
+            }
+
+            if matches!(self, Self::Nana { setup_file: Some(_), .. }) {
+                ensure!(opened.find("__cxdec/protection.json").is_some(),
+                    "Nana startup input has no matching archive bootstrap");
             }
             if let Self::Cxdec{modules,setup:true}=self {
                 // The format publishes a bootstrap only for setupArchiveData
@@ -706,6 +849,11 @@ mod krkr_probe {
                 } => json!({"cxdec_modules": modules,
                     "cxdec_bootstrap_profile": "__cxdec/protection.json"}),
                 Self::Cxdec { modules, .. } => json!({"cxdec_modules": modules}),
+                Self::Nana { profile, setup_file: Some(setup_file) } => json!({
+                    "cxdec_nana_profile": profile, "cxdec_nana_setup_file": setup_file,
+                    "cxdec_bootstrap_profile": "__cxdec/protection.json",
+                }),
+                Self::Nana { profile, setup_file: None } => json!({"cxdec_nana_profile": profile}),
                 Self::ArchiveFilter | Self::Plain => json!({}),
             }
         }
@@ -761,8 +909,13 @@ mod krkr_probe {
     struct Companions(SourcePath);
     impl DependencyResolver for Companions {
         fn open(&self, path: &str) -> anyhow::Result<Arc<dyn AssetReader>> {
-            let file = self.0.join(path).canonicalize()?;
-            ensure!(file.starts_with(self.0.canonicalize()?), "XP3 companion escapes game folder");
+            anyhow::ensure!(
+                !path.split(['/', '\\']).any(|s| s == ".."),
+                "companion escapes the game folder"
+            );
+            let root = self.0.canonicalize()?;
+            let file = root.join(path).canonicalize()?;
+            ensure!(file.starts_with(&root) && file.is_file(), "companion escapes the game folder");
             Ok(Arc::new(File(Mutex::new(crate::source_path::SourceFile::open(file)?))))
         }
     }
@@ -950,14 +1103,12 @@ mod krkr_probe {
     }
 
     pub fn plan(
-        dir: &SourcePath,
         names: &[String],
         name: &str,
         exe: &str,
         protection: Protection,
         canvas: [u32; 2],
-    ) -> Plan {
-        let _ = dir;
+    ) -> Result<Plan> {
         // Ordinary player launches select the game's own production path.
         // Without this explicit native option, some packed titles compile
         // DEBUG=1 and lazily open Win32-only developer consoles during play.
@@ -969,7 +1120,7 @@ mod krkr_probe {
                 config["bootstrap_profile"] = "__bootstrap/protection.json".into();
                 config.as_object_mut().unwrap().remove("executable");
             }
-            Protection::Cxdec { setup: true, .. } => {
+            Protection::Cxdec { setup: true, .. } | Protection::Nana { setup_file: Some(_), .. } => {
                 config["startup"] = "startup.tjs".into();
                 config["bootstrap_profile"] = "__cxdec/protection.json".into();
             }
@@ -980,28 +1131,40 @@ mod krkr_probe {
         let data = startup_archive(names)
             .cloned()
             .unwrap_or_else(|| "data.xp3".into());
-        let mut mounts = vec![(data.clone(), String::new())];
-        if !matches!(protection, Protection::Hxv4) {
-            for x in with_ext(names, "xp3").filter(|n| **n != data) {
-                let stem = x[..x.len() - 4].to_ascii_lowercase();
-                mounts.push((x.clone(), format!("__xp3/{stem}")));
-            }
+        let mut companions = with_ext(names, "xp3").filter(|n| **n != data).peekable();
+        let mut profiles = std::collections::BTreeMap::new();
+        let companion_profile = if matches!(protection, Protection::Hxv4) && companions.peek().is_some() {
+            let mut companion = profile.clone();
+            companion["parameters"]["kirikiri/xp3"] = json!({
+                "hxv4_executable": exe, "hxv4_hashed_root": "__hxv4",
+            });
+            profiles.insert(HXV4_COMPANION_PROFILE.into(), companion);
+            HXV4_COMPANION_PROFILE
+        } else {
+            "game"
+        };
+        profiles.insert("game".into(), profile);
+        let mut mounts = vec![ArchiveMount {
+            source: data.clone(), target: String::new(), fallback: false,
+            options: json!({"format":"kirikiri/xp3","profile":"game"}),
+        }];
+        let mut points = std::collections::BTreeSet::new();
+        for source in companions {
+            ensure!(mounts.len() < crysirror_runtime::vfs::MAX_PROVIDER_MOUNTS, "KiriKiri archive mount limit");
+            let stem = source[..source.len() - 4].to_ascii_lowercase();
+            ensure!(stem != "data" && points.insert(stem.clone()), "ambiguous KiriKiri archive: {source}");
+            mounts.push(ArchiveMount {
+                source: source.clone(), target: format!("__xp3/{stem}"), fallback: false,
+                options: json!({"format":"kirikiri/xp3","profile":companion_profile}),
+            });
         }
-        Plan {
+        Ok(Plan {
             engine: "KiriKiri",
             project: project(name, canvas, "krkr", config),
             evidence: Vec::new(),
-            profiles: [("game".into(), profile)].into(),
-            mounts: mounts
-                .into_iter()
-                .map(|(source, target)| ArchiveMount {
-                    fallback:false,
-                    source,
-                    target,
-                    options: json!({"format":"kirikiri/xp3","profile":"game"}),
-                })
-                .collect(),
-        }
+            profiles,
+            mounts,
+        })
     }
 }
 
@@ -1297,7 +1460,28 @@ pub fn system_font() -> Option<PathBuf> {
 }
 
 #[cfg(test)]
+#[path = "detect/krkr_overlay_tests.rs"]
+mod krkr_overlay_tests;
+
+#[cfg(test)]
 mod tests {
+    #[test]
+    fn explicit_krkr_entry_uses_its_manifest_only_for_the_launcher() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = super::SourcePath::local(temp.path());
+        let names = ["play.exe", "runtime.exe", "another.exe", "KrkrPatch.json"].map(String::from);
+        let mut stub = b"MZ".to_vec();
+        stub.extend("KrkrPatch.json".encode_utf16().flat_map(u16::to_le_bytes));
+        std::fs::write(temp.path().join("play.exe"), stub).unwrap();
+        std::fs::write(temp.path().join("runtime.exe"), b"MZruntime").unwrap();
+        std::fs::write(temp.path().join("another.exe"), b"MZanother").unwrap();
+        let manifest = temp.path().join("KrkrPatch.json");
+        std::fs::write(&manifest, r#"{"gameExecutableFile":"runtime.exe"}"#).unwrap();
+        assert_eq!(super::krkr_entry(&dir, &names, Some("play.exe")).unwrap().executable, "runtime.exe");
+        assert_eq!(super::krkr_entry(&dir, &names, Some("another.exe")).unwrap().executable, "another.exe");
+        std::fs::write(&manifest, r#"{"gameExecutableFile":"../other.exe"}"#).unwrap();
+        assert!(super::krkr_entry(&dir, &names, Some("play.exe")).is_err());
+    }
     use super::*;
 
     #[test]
@@ -1512,9 +1696,9 @@ mod tests {
     fn arc_startup_and_sibling_keep_their_native_container_paths() {
         let names = vec!["arc/data.xp3".to_owned(), "arc/fgimage.xp3".to_owned()];
         let plan = krkr_probe::plan(
-            &SourcePath::local("."), &names, "authored", "game.exe",
+            &names, "authored", "game.exe",
             krkr_probe::Protection::ArchiveFilter, [640, 480],
-        );
+        ).unwrap();
         assert_eq!(plan.mounts[0].source, "arc/data.xp3");
         assert_eq!(plan.mounts[0].target, "");
         assert_eq!(plan.mounts[1].source, "arc/fgimage.xp3");
@@ -1522,16 +1706,54 @@ mod tests {
     }
 
     #[test]
-    fn installed_player_selects_native_production_mode_before_game_scripts() {
-        let names = vec!["data.xp3".to_owned()];
+    fn hxv4_companions_keep_the_bootstrap_and_root_on_data_only() {
+        let names = ["DATA.XP3", "Voice.Xp3", "patch@r10.xp3", "game.exe"].map(String::from);
         let plan = krkr_probe::plan(
-            &SourcePath::local("."),
+            &names, "authored", "game.exe",
+            krkr_probe::Protection::Hxv4, [640, 480],
+        ).unwrap();
+        let mounts: Vec<_> = plan.mounts.iter()
+            .map(|m| (m.source.as_str(), m.target.as_str())).collect();
+        assert_eq!(mounts, [
+            ("DATA.XP3", ""), ("Voice.Xp3", "__xp3/voice"), ("patch@r10.xp3", "__xp3/patch@r10"),
+        ]);
+        for (index, mount) in plan.mounts.iter().enumerate() {
+            assert_eq!(mount.is_hxv4_companion(), index != 0);
+            let profile = &plan.profiles[mount.options["profile"].as_str().unwrap()];
+            let params = &profile["parameters"]["kirikiri/xp3"];
+            assert_eq!(params["hxv4_executable"], "game.exe");
+            assert_eq!(params["hxv4_hashed_root"], "__hxv4");
+            assert_eq!(params.get("hxv4_startup_target").is_some(), index == 0);
+            assert_eq!(params.get("hxv4_bootstrap_profile").is_some(), index == 0);
+        }
+    }
+
+    #[test]
+    fn krkr_archive_plans_reject_collisions_and_provider_overflow() {
+        let ambiguous = ["data.xp3", "Voice.xp3", "voice.XP3"].map(String::from);
+        let make_plan = |names: &[String]| {
+            krkr_probe::plan(names, "authored", "game.exe", krkr_probe::Protection::Hxv4, [640, 480])
+        };
+        assert!(make_plan(&ambiguous).unwrap_err().to_string().contains("ambiguous"));
+        let mut names = vec!["data.xp3".into()];
+        names.extend((1..crysirror_runtime::vfs::MAX_PROVIDER_MOUNTS).map(|i| format!("voice{i}.xp3")));
+        assert!(make_plan(&names).is_ok());
+        names.push("excess.xp3".into());
+        assert!(make_plan(&names).unwrap_err().to_string().contains("mount limit"));
+    }
+
+    #[test]
+    fn installed_player_selects_native_production_mode_before_game_scripts() {
+        let names = vec!["data.xp3".to_owned(), "voice.xp3".to_owned()];
+        let plan = krkr_probe::plan(
             &names,
             "authored",
             "game.exe",
             krkr_probe::Protection::Plain,
             [640, 480],
-        );
+        ).unwrap();
+        assert_eq!(plan.mounts.len(), 2);
+        assert!(plan.mounts.iter().all(|m| m.options["profile"] == "game" && !m.is_hxv4_companion()));
         assert_eq!(
             plan.project["clients"][0]["config"]["arguments"],
             json!({"-debugwin":"no"})

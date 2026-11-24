@@ -45,9 +45,12 @@ generator evidence, fails the archive open.
 2. Content: candidates come from the module that is coherently tied to the
    generator (dispatch orders, Cabbage seed, Prefix8 words) plus the
    script-derived mask/offset/control table, otherwise from a bounded
-   (4096) cross-module combination. Up to 32 (then 128) smallest protected
-   entries whose raw bytes do not already match `adlr` must all be restored;
-   exactly one behaviourally distinct profile may remain, else the open fails.
+   (4096) cross-module combination. Test up to 32 of the smallest protected
+   entries whose raw bytes do not already match `adlr`, then up to 128 if
+   multiple candidates remain. When their effective filter boundaries differ,
+   stream additional entries that cover those boundaries. Limit the total
+   witness bytes and transform work. Exactly one behaviourally distinct
+   profile must remain for protected content, or the open fails.
 3. Every protected entry is checksum-verified again (64 KiB passes, original
    and decoded Adler) before a reader is published; ranged reads apply the
    same transform at logical offsets. Offsets above 32 bits fail.
@@ -56,6 +59,20 @@ CrySirror delta to upstream: the Prefix8 wrapper's two XOR words are profile
 parameters recovered from immediates or from `.rdata` values a static
 `mov r,[src]; mov [global],r` copies into the globals the key expansion reads.
 Upstream's fixed `0x55555555/0xaaaaaaaa` pair fails on such modules.
+
+## Nana startup input
+
+The Nana `$` bootstrap obtains the first line of the executable's sibling
+`.key` through `Array.load` and passes that string to `Storages.setupArchiveData`.
+The observed initializer takes the exact UTF-16LE units, derives a 4,096-byte
+SHAKE256 table, and hashes the same input with SipHash-2-4 keyed by the first
+16 bytes of that table. The low digest word determines the filter mask and
+offset. The first six words of the table are XORed alternately with the low
+and high digest words to populate the name-stream state. The numeric
+procedure differs from the legacy BLAKE2s derivation above. The adapter's
+startup callback still accepts the single verified string and completes
+without an external wait. The format reader checks the supplied startup input
+against the mounted archive profile before publishing that callback contract.
 
 ## Validation (kept separate)
 

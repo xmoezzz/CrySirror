@@ -46,7 +46,7 @@ impl Renderer {
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("client coverage binding"),
-                    layout: &self.coverage_layout,
+                    layout: &self.draw_pipelines.coverage_layout,
                     entries: &[wgpu::BindGroupEntry {
                         binding: 0,
                         resource: wgpu::BindingResource::TextureView(&view),

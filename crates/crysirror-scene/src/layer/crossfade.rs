@@ -45,6 +45,16 @@ pub struct CompositeFrame {
     pub rule: Option<(RuleWipe, [f32; 4])>,
 }
 impl LayerSystem {
+    /// Static blur transitions must capture their endpoints even when the
+    /// host skips a presentation. Other transitions use the live scene.
+    pub fn frozen_subtree_inputs(&self) -> impl Iterator<Item = (u32, u32, u64)> + '_ {
+        self.crossfades.iter().flat_map(|(&client, fades)| {
+            fades.iter().filter_map(move |(&id, fade)| {
+                matches!(fade.effect, Some(SubtreeTransitionEffect::Blur { dynamic: false, .. }))
+                    .then_some((client, id, fade.serial))
+            })
+        })
+    }
     pub fn crossfade(&self, client: ClientId, id: u32) -> Option<&SubtreeCrossfade> {
         self.crossfades.get(&client.0)?.get(&id)
     }
@@ -188,10 +198,17 @@ impl LayerSystem {
                     *id == fade.source || !bb.contains(id),
                     "crossfade source contains destination"
                 );
+                ensure!(
+                    a.blend == Blend::Normal && b.blend == Blend::Normal,
+                    "crossfade root blend"
+                );
+                // Each endpoint composites into its own transparent target.
+                // A screen child can read that endpoint's backdrop and keep
+                // its alpha before the two completed inputs are interpolated.
                 for child in aa.union(&bb) {
                     ensure!(
-                        owner[child].blend == Blend::Normal,
-                        "isolated crossfade requires normal subtree blends"
+                        matches!(owner[child].blend, Blend::Normal | Blend::AtopScreen),
+                        "unsupported blend in isolated crossfade subtree"
                     );
                 }
                 for (&other, f) in fades {

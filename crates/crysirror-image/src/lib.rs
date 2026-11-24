@@ -192,6 +192,7 @@ mod tlg_size_tests {
         let mut wrapped = b"TLG0.0\0sds\x1a\0\0\0\0".to_vec();
         wrapped.extend(&tlg5);
         assert_eq!(super::tlg_size(&wrapped), Some([7, 9]));
+        assert_eq!(super::encoded_dimensions_hint(&wrapped), Some([7, 9]));
         assert_eq!(super::tlg_size(b"\x89PNG"), None);
     }
 }
@@ -425,6 +426,9 @@ pub mod packed_pixels;
 /// formats return None so the caller retains its conservative byte cap.
 /// Call on an I/O/CPU worker: parsing a container header can seek internally.
 pub fn encoded_dimensions_hint(bytes: &[u8]) -> Option<[u32; 2]> {
+    if let Some([w, h]) = tlg_size(bytes) {
+        return (w > 0 && h > 0).then_some([w, h]);
+    }
     // Tiled QLIE DPNG: signature, version, tile count, then canvas width/height
     // (crysirror-formats-arc qlie/dpng). Without this, admission falls back
     // to the maximum decoded size and over-reserves shared decode memory.

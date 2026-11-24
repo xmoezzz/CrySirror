@@ -108,7 +108,7 @@ fn mesh_history_is_gpu_resident_scoped_and_advances_once_per_declaration() {
     assert_eq!(captured.as_raw(), &rgba);
     assert!(rgba
         .chunks_exact(4)
-        .all(|p| p[0].abs_diff(188) <= 1 && p[1] == 0 && p[2] == 0 && p[3] == 255));
+        .all(|p| p[0].abs_diff(188) <= 1 && p[1] == 0 && p[2] == 0 && p[3] == 255), "captured history pixels: {rgba:?}");
     renderer
         .advance_frame_histories(&mut rt.assets, vec![next], [4, 2])
         .unwrap();

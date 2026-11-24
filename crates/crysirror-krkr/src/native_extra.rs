@@ -203,9 +203,7 @@ pub(crate) fn sync_attention(rt: &mut Rt) -> Result<()> {
         }
         let x = i32::try_from(point[0]).map_err(|_| TjsError::runtime("attention x"))?;
         let y = i32::try_from(point[1]).map_err(|_| TjsError::runtime("attention y"))?;
-        let height = rt
-            .resolve_object_member(h, "font")?
-            .object_handle()
+        let height = layer_font(rt, h).ok()
             .and_then(|font| rt.resolve_object_member(font, "height").ok())
             .and_then(|v| v.to_integer().ok())
             .unwrap_or(24)
@@ -351,7 +349,7 @@ pub(super) fn nine_patch(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) 
         input,
         vec![json!({"kind":"nine_patch","width":output[0],"height":output[1]})],
     )?;
-    Ok(rect(rt, layout.margins))
+    crate::native_rect::from_bounds(rt, layout.margins)
 }
 pub(super) fn draw_glyph(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) -> Result<Variant> {
     let h = this_of(rt, t, "Layer.drawGlyph")?;
@@ -411,20 +409,18 @@ pub(super) fn draw_glyph(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) 
     if opacity == 0 {
         return Ok(Variant::Void);
     }
-    let font = rt
-        .resolve_object_member(h, "font")?
-        .object_handle()
-        .ok_or_else(|| TjsError::runtime("Layer.font absent"))?;
+    let font = layer_font(rt, h)?;
     let size = font_size(rt, font)?;
     let alias = crate::font_resources::alias(rt, font)?;
+    let raster = crate::font_resources::raster_size(rt, font, &alias, size)?;
     let ascent = rt
         .host()
         .text_measurement
         .as_ref()
         .ok_or_else(|| TjsError::runtime("text measurement absent"))?
-        .measure_simple(&alias, size as f32, "")
+        .measure_simple(&alias, f32::from(raster.draw), "")
         .map_err(|e| TjsError::runtime(e.to_string()))?
-        .ascent as i64;
+        .ascent.round() as i64 + i64::from(raster.offset_y);
     let dx = x
         .checked_add(origin[0])
         .ok_or_else(|| TjsError::runtime("glyph x overflow"))?;
@@ -495,37 +491,6 @@ pub(super) fn draw_glyph(rt: &mut Rt, t: Option<ObjectHandle>, a: Vec<Variant>) 
         math,
     });
     crate::image_api::queue_chain(rt, h, input, vec![])
-}
-pub(super) fn rect(rt: &mut Rt, bounds: [i32; 4]) -> Variant {
-    let h = rt.alloc_ordinary_object();
-    rt.add_object_class_info(h, "Rect");
-    for (key, value) in ["left", "top", "right", "bottom"].into_iter().zip(bounds) {
-        rt.set_object_member(h, key, Variant::Integer(value as i64));
-    }
-    for (name, a, b) in [("width", "left", "right"), ("height", "top", "bottom")] {
-        rt.register_object_native_property(
-            h,
-            name,
-            move |rt: &mut Rt, t| {
-                let h = this_of(rt, t, "Rect extent")?;
-                Ok(Variant::Integer(
-                    rt.resolve_object_member(h, b)?.to_integer()?
-                        - rt.resolve_object_member(h, a)?.to_integer()?,
-                ))
-            },
-            move |rt: &mut Rt, t, v| {
-                let h = this_of(rt, t, "Rect extent")?;
-                let end = rt
-                    .resolve_object_member(h, a)?
-                    .to_integer()?
-                    .checked_add(v.to_integer()?)
-                    .ok_or_else(|| TjsError::runtime("Rect extent overflow"))?;
-                rt.set_object_member(h, b, Variant::Integer(end));
-                Ok(())
-            },
-        );
-    }
-    Variant::self_bound(h)
 }
 pub(super) fn install_window(rt: &mut Rt, h: ObjectHandle) {
     methods(

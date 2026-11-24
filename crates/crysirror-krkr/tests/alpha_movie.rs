@@ -49,6 +49,8 @@ try { m.open("bad.amv"); } catch (e) { Debug.message("open failed: " + e.message
 #[ignore = "needs CRYSIRROR_AMV_SAMPLE (a local .amv file)"]
 fn local_sample_plays_through_shared_media() {
     let bytes = std::fs::read(std::env::var_os("CRYSIRROR_AMV_SAMPLE").unwrap()).unwrap();
+    let info = crysirror_video::amv::info(&mut std::io::Cursor::new(&bytes)).unwrap();
+    assert!(info.frames > 1, "the playback sample must contain multiple pictures");
     let (_d, mut r) = runtime(
         &[("op.amv", bytes)],
         r#"
@@ -62,7 +64,8 @@ m.play();
 global.last = -1;
 System.addContinuousHandler(function(tick) {
     var f = m.showNextImage(target);
-    if (f >= 0 && f \ 30 != global.last \ 30) Debug.message("frame " + f + " layer " + target.imageWidth + "x" + target.imageHeight);
+    if (f >= 0 && global.last < 0) Debug.message("picture size " + target.imageWidth + "x" + target.imageHeight);
+    if (f > 0 && global.last <= 0) Debug.message("picture advanced");
     if (f >= 0) global.last = f;
 });
 "#,
@@ -73,7 +76,78 @@ System.addContinuousHandler(function(tick) {
     }
     let log = log(&r);
     assert!(log.contains("info "), "{log}");
-    assert!(log.contains("frame 30 layer 800x600"), "{log}");
-    assert!(log.contains("frame 120 layer"), "picture index never advanced: {log}");
+    assert!(log.contains(&format!("picture size {}x{}", info.width, info.height)), "{log}");
+    assert!(log.contains("picture advanced"), "picture index never advanced: {log}");
     println!("{log}");
+}
+
+#[test]
+#[ignore = "needs CRYSIRROR_AMV_SAMPLE (a local .amv file)"]
+fn copied_alpha_movie_picture_outlives_the_movie_and_is_reclaimed_after_the_copy() {
+    use crysirror_core::{service::buttons, state::ClientId};
+    use crysirror_scene::{canvas::CanvasNode, layer::Paint};
+    let bytes = std::fs::read(std::env::var_os("CRYSIRROR_AMV_SAMPLE").unwrap()).unwrap();
+    let (_dir, mut runtime) = runtime(
+        &[("movie.amv", bytes)],
+        r#"
+        Plugins.link("AlphaMovie.dll");
+        var w=new Window(), root=new Layer(w,null), target=new Layer(w,root), saved=new Layer(w,root);
+        var movie=new AlphaMovie();
+        movie.open("movie.amv");movie.play();
+        var phase=0;
+        System.addContinuousHandler(function(tick) {
+            var index=movie.showNextImage(target);
+            if(phase==0 && index>=2) {
+                saved.setImageSize(target.imageWidth,target.imageHeight);
+                saved.setSizeToImageSize();
+                saved.piledCopy(0,0,target,0,0,target.imageWidth,target.imageHeight);
+                phase=1;
+                Debug.message("movie-copy-ready");
+            } else if(phase==1 && index>=8) {
+                invalidate movie;
+                movie=new AlphaMovie();movie.open("movie.amv");movie.play();
+                phase=2;
+            } else if(phase==2 && index>=2) {
+                phase=3;
+                Debug.message("movie-reopened");
+            } else if(phase==3 && System.getKeyState(65)) {
+                invalidate saved;
+                phase=4;
+                Debug.message("movie-copy-released");
+            }
+        });
+        "#,
+    );
+    let owner = ClientId(1);
+    let asset = |runtime: &Runtime, slot| {
+        let surface = runtime.host.engine.canvases.surface(owner, slot).unwrap();
+        let [CanvasNode::Draw { layer }] = surface.nodes.as_slice() else {
+            panic!("expected one Canvas draw");
+        };
+        let Paint::Image { asset, .. } = &layer.paint else { panic!("expected a movie picture") };
+        asset.clone()
+    };
+    let advance = |runtime: &mut Runtime, marker, input| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        while !log(runtime).contains(marker) {
+            runtime.tick(17, input).unwrap();
+            assert!(std::time::Instant::now()<deadline, "waiting for {marker}: {}", log(runtime));
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    };
+    advance(&mut runtime, "movie-copy-ready", InputFrame::default());
+    let saved_asset = asset(&runtime, 3);
+    assert!(saved_asset.starts_with("__image_resource/"));
+    let saved_pixels = runtime.assets.surface(owner, &saved_asset).unwrap().rgba;
+
+    advance(&mut runtime, "movie-reopened", InputFrame::default());
+    assert_ne!(asset(&runtime, 2), saved_asset);
+    assert_eq!(runtime.assets.surface(owner, &saved_asset).unwrap().rgba, saved_pixels);
+
+    advance(&mut runtime, "movie-copy-released", InputFrame {
+        buttons_down: buttons::KEY_A,
+        buttons_pressed: buttons::KEY_A,
+        ..InputFrame::default()
+    });
+    assert!(runtime.assets.surface(owner, &saved_asset).is_none());
 }
