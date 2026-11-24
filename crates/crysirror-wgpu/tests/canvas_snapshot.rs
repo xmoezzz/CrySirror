@@ -480,8 +480,20 @@ fn only_registered_immutable_images_can_publish_and_pending_is_not_cached_blank(
     std::fs::write(root.path().join("assets/plain.png"), png([255; 4])).unwrap();
     // A plain project PNG is self-contained and pinned by content, so it may
     // enter a snapshot; unpublished engine names and dynamic surfaces may not.
-    r.set_engine_frame(vec![snapshot_image("plain.png")]).unwrap();
-    assert!(r.capture(&rt.host.scene, &mut rt.assets, [16, 16], [0; 4]).is_ok());
+    let end = Instant::now() + Duration::from_secs(10);
+    loop {
+        r.set_engine_frame(vec![snapshot_image("plain.png")]).unwrap();
+        let shot = r
+            .capture(&rt.host.scene, &mut rt.assets, [16, 16], [0; 4])
+            .unwrap();
+        if shot.get_pixel(1, 1).0 == [255; 4] {
+            assert_eq!(bakes(&mut r), 2);
+            break;
+        }
+        assert_eq!(bakes(&mut r), 1, "pending project image published a blank product");
+        assert!(Instant::now() < end, "project image never finished loading");
+        std::thread::yield_now();
+    }
     for forbidden in ["__crysirror/not-published.png", &dynamic] {
         r.set_engine_frame(vec![snapshot_image(forbidden)]).unwrap();
         assert!(
