@@ -813,6 +813,29 @@ impl World for Stage {
         self.speech_requests.retain(|(s, _)| *s != speaker);
         self.speech_stops.push(speaker);
     }
+    /// The explosion's particle group (named like the explosion type) at
+    /// the frame and a camera shake scaled by distance; damage and
+    /// physics impulses are not applied.
+    fn spawn_explosion(&mut self, kind: u32, position: [f32; 3], rotation: [f32; 4]) {
+        self.log(format!("explosion {kind:#010x} at {position:?}"));
+        World::spawn_particles(self, kind, position, rotation);
+        let near = self.camera_eye.map_or(f32::INFINITY, |e| glam::Vec3::from_array(e).distance(glam::Vec3::from_array(position)));
+        if near < 40. {
+            World::camera_shake(self, crate::ss::object_natives::Shake::Procedural { amount: (1. - near / 40.) * 2. });
+        }
+    }
+    fn message(&mut self, id: u32) {
+        self.log(format!("message {id:#010x}"));
+    }
+    /// Hides every spawned breakable (process type `Breakable`).
+    fn kill_all_breakables(&mut self) {
+        let breakables: Vec<u32> = self.spawners.iter().filter(|(_, s)| s.process_type == 0x8b7d_e21a).map(|(n, _)| *n).collect();
+        for name in breakables {
+            if self.visible.contains(&name) {
+                World::kill(self, name);
+            }
+        }
+    }
     fn nav_block(&mut self, name: u32, block: bool) -> bool {
         let Some((p, _)) = World::locator(self, name) else { return false };
         self.navigation.set_blocked(glam::Vec3::from_array(p), block);

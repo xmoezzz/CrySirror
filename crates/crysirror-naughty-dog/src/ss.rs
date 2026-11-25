@@ -33,6 +33,8 @@ pub mod object_natives;
 pub mod sound_natives;
 #[path = "ss_vehicle.rs"]
 pub mod vehicle_natives;
+#[path = "ss_misc.rs"]
+pub mod misc_natives;
 
 /// A script setting override (`sub_15F480`): its value and the frame it
 /// expires after.
@@ -201,6 +203,11 @@ pub trait World {
         false
     }
     fn stop_speaking(&mut self, _speaker: u32) {}
+    /// An explosion of `kind` at a frame.
+    fn spawn_explosion(&mut self, _kind: u32, _position: [f32; 3], _rotation: [f32; 4]) {}
+    /// Show text `id` as an on-screen message.
+    fn message(&mut self, _id: u32) {}
+    fn kill_all_breakables(&mut self) {}
     /// The vehicles (tanks, helicopters) by object name.
     fn vehicles(&mut self) -> Option<&mut crate::vehicle::Vehicles> {
         None
@@ -411,6 +418,8 @@ pub struct Inner {
     /// The game difficulty (`sub_57040`, profile +0x1DE0): 0 easy, 1
     /// normal, 2 hard, 3 crushing.
     pub difficulty: u32,
+    /// Game state natives write (journal, HUD, weather, ropes, …).
+    pub game: misc_natives::GameState,
 }
 
 pub struct Runtime {
@@ -499,6 +508,7 @@ impl Runtime {
                 task_graphs: Vec::new(),
                 task_menu_dirty: false,
                 difficulty: 1,
+                game: misc_natives::GameState { journal_page: -1, ..Default::default() },
             },
         }
     }
@@ -933,6 +943,9 @@ impl Natives for Ctx<'_> {
             return Ok(reply);
         }
         if let Some(reply) = self.vehicle_native(dc, name, a, n)? {
+            return Ok(reply);
+        }
+        if let Some(reply) = self.misc_native(dc, name, a, n)? {
             return Ok(reply);
         }
         match name {
