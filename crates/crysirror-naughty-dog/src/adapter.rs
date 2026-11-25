@@ -249,6 +249,8 @@ struct Stage {
     npc_spawners: HashSet<u32>,
     /// NPCs that died; their spawners keep the killed flag.
     npc_dead: HashSet<u32>,
+    /// The live NPCs' agent state (the NPC manager's objects).
+    agents: crate::npc::Agents,
     /// Splines of the loaded levels by name `StringId`.
     splines: HashMap<u32, crate::nav::Spline>,
     /// Nav meshes of the loaded levels.
@@ -483,6 +485,38 @@ impl Stage {
         self.lights = lights;
     }
 
+    /// Keep one agent per live NPC: created at its current locator when
+    /// the NPC spawns, dropped when it dies or despawns.
+    fn sync_agents(&mut self) {
+        let live: Vec<u32> = self.npc_spawners.iter().copied().filter(|n| self.npc(*n) == Some(false)).collect();
+        self.agents.agents.retain(|name, _| live.contains(name));
+        for name in live {
+            if !self.agents.agents.contains_key(&name) {
+                if let Some((p, q)) = World::locator(self, name) {
+                    self.agents.agents.insert(name, crate::npc::Agent::new(p, q));
+                }
+            }
+        }
+    }
+
+    /// Step the agents' orders and move their objects.
+    fn step_agents(&mut self, seconds: f32) {
+        self.sync_agents();
+        let before: Vec<(u32, [f32; 3], f32)> = self.agents.agents.iter().map(|(n, a)| (*n, a.position, a.yaw)).collect();
+        self.agents.step(seconds);
+        for (name, position, yaw) in before {
+            let Some(agent) = self.agents.get(name) else { continue };
+            if agent.position == position && agent.yaw == yaw {
+                continue;
+            }
+            let (t, q) = (glam::Vec3::from_array(agent.position), glam::Quat::from_rotation_y(agent.yaw));
+            self.poses.insert(name, glam::Mat4::from_rotation_translation(q, t));
+            for e in self.entities.get(&name).into_iter().flatten() {
+                self.ops.push(json!({"op": "set_transform", "id": e, "transform": {"translation": t.to_array(), "rotation_degrees": [0.0, agent.yaw.to_degrees(), 0.0], "scale": [1.0, 1.0, 1.0]}}));
+            }
+        }
+    }
+
     fn log(&mut self, line: String) {
         if self.log.len() >= MAX_LOG {
             self.log.remove(0);
@@ -632,6 +666,28 @@ impl World for Stage {
         if let Some(light) = self.lights.remove(&name).filter(|light| light.published.is_some()) {
             self.ops.push(json!({"op": "despawn", "id": light.id}));
         }
+    }
+    fn object_type(&self, name: u32) -> Option<u32> {
+        self.spawners.get(&name).map(|s| s.process_type)
+    }
+    fn agents(&mut self) -> Option<&mut crate::npc::Agents> {
+        self.sync_agents();
+        Some(&mut self.agents)
+    }
+    fn agents_ref(&self) -> Option<&crate::npc::Agents> {
+        Some(&self.agents)
+    }
+    fn nav_path(&self, from: [f32; 3], to: [f32; 3]) -> Option<Vec<[f32; 3]>> {
+        let path = self.navigation.path(glam::Vec3::from_array(from), glam::Vec3::from_array(to))?;
+        Some(path.into_iter().map(|p| p.to_array()).collect())
+    }
+    fn closest_cover(&self, point: [f32; 3], threat: Option<[f32; 3]>) -> Option<[f32; 3]> {
+        let point = glam::Vec3::from_array(point);
+        self.cover.iter()
+            // Cover faces into its wall: a threat must lie beyond it.
+            .filter(|c| threat.is_none_or(|t| (glam::Vec3::from_array(t) - c.position).dot(c.direction) > 0.))
+            .min_by(|a, b| a.position.distance_squared(point).total_cmp(&b.position.distance_squared(point)))
+            .map(|c| c.position.to_array())
     }
     fn spline_at(&self, spline: u32, distance: f32) -> Option<([f32; 3], [f32; 3])> {
         let s = self.splines.get(&spline)?;
@@ -1237,6 +1293,7 @@ impl NaughtyDogVm {
         session.stage.spawners.clear();
         session.stage.npc_spawners.clear();
         session.stage.npc_dead.clear();
+        session.stage.agents = Default::default();
         session.stage.splines.clear();
         for (_, light) in session.stage.lights.drain() {
             if light.published.is_some() {
@@ -2938,6 +2995,7 @@ impl NaughtyDogVm {
                 }
             }
         }
+        session.stage.step_agents(seconds as f32);
         // Region enter/exit scripts for the player (`sub_115828`).
         if session.player.is_some() {
             let player = sid("player");

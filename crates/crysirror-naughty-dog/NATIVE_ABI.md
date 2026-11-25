@@ -236,3 +236,33 @@ Render-settings regions belong to the `camera` category (0x89335b6e) and are tes
 |---|---|---|
 | `spline-locator-at-distance` | 0x1666f8 | `(spline, distance)`: a locator at the point facing along the tangent |
 | `spline-distance-locator` / `spline-distance-spawner` | 0x165be0 | `(spline, locator/spawner)`: arc distance of the closest point (sampled here) |
+
+## NPC agents
+
+The NPC natives (PPU 0x221000–0x22E200, `src/ss_npc.rs`) look the NPC up in
+the NPC manager (`sub_1E2968`, live NPCs only); without a name they use the
+calling process. Failures print the original message and return 0. State
+lives in `src/npc.rs`:
+
+| Native | Native field / rule |
+| --- | --- |
+| `npc-set-accuracy-multiplier` | Npc +0x26E4 (default 1.0); returns 1 when found |
+| `npc-enable-shooting` / `npc-set-shot-damage-multiplier` / `npc-set-zone-update-method` / `npc-disable-flinch` | `m_pConfiguration` (+0x2660): +0x30 bit 29 = shooting disabled, +0x38 float, +0xCC word, word 0 bit 58 cleared |
+| `npc-add-skill` / `npc-remove-skill` | configuration +0x20 bit mask |
+| `npc-set-in-combat` / `npc-set-preoccupied` / `npc-in-combat?` | `m_pKnowledge` (+0x2664) state +0x1450: 4 combat, 1 preoccupied (`sub_1D6580`, `sub_1BB62C`) |
+| `npc-override-contact-status` | argument 0/1/2 → contact status 1/2/3 (`sub_1D6748`) |
+| `npc-prefer-target` | knowledge +0x1190 |
+| `npc-set-demeanor` | 1 and 2 select those demeanours, others 0 (`sub_1A3EE4`) |
+| `npc-set-zone-*` | two 32-byte zones at Npc +0x2680: radius +0, y-threshold +4 (absolute values); a marker spawner's tags 0xA28A21EC/0xAC43B6DD apply when ≥ 0 and set update method 3 |
+| `npc-set-can-die` / `npc-set-can-be-hit` | health component (+0x15C) vtable +0x4C; can-be-hit also sends `ignore-all-fire-no-blood` with the inverted flag |
+| `npc-set-ignore` / `npc-mark-as-defunct` | targeting bit 14 / Npc +0x1858 bit 42 |
+| `set-object-faction` | factions 0–11; others are invalid (`sub_85A40`) |
+| `npc-is-player-in-front?` | player within 2 m and unit offset · forward ≥ 0.5 |
+| `broadcast-event-to-npcs` | event and arguments to every manager slot's process |
+| `npc-move-to-spawner` (npc spawner [motion] [goal]) | motion 0 walk, 2 sprint, else run (codes 1/5/3); goal 1 stop-and-face, 2 continue, else stop; the spawner's 0xA28A21EC tag is the arrival radius |
+| `npc-move-to` (npc point [motion]) | run by default; both fail "off the nav mesh" without a nav path |
+| `npc-turn-to`, `wait-npc-bind`, `npc-unbind`, `npc-use-scripted-ap`, `wait-npc-leave-scripted-ap`, `npc-use-closest-cover` | orders of the scripted skill (skill 2, `sub_2A10B0`); the AP spawner must be of type `action-pack` |
+
+The `wait-` forms suspend the track until the order completes. Speeds,
+turn rate and the immediate bind are not native (the skill moves by clip
+root motion).

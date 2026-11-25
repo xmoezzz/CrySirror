@@ -23,6 +23,9 @@ use crate::task::Graph;
 use anyhow::{Context, Result, ensure};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
+#[path = "ss_npc.rs"]
+mod npc_natives;
+
 pub const KIND_BEGIN: u32 = 0;
 pub const KIND_END: u32 = 1;
 pub const KIND_EVENT: u32 = 2;
@@ -174,6 +177,27 @@ pub trait World {
     fn set_water_offset(&mut self, _name: u32, _offset: [f32; 3]) -> bool {
         false
     }
+    /// The object type (process type) of spawner `name`.
+    fn object_type(&self, _name: u32) -> Option<u32> {
+        None
+    }
+    /// The live NPC agents (the NPC manager, `sub_1E2968`).
+    fn agents(&mut self) -> Option<&mut crate::npc::Agents> {
+        None
+    }
+    fn agents_ref(&self) -> Option<&crate::npc::Agents> {
+        None
+    }
+    /// Corners of a navigation path from `from` to `to` ending at `to`;
+    /// `None` when either point is off the nav meshes.
+    fn nav_path(&self, _from: [f32; 3], _to: [f32; 3]) -> Option<Vec<[f32; 3]>> {
+        None
+    }
+    /// The cover point nearest `point` (facing away from `threat` when
+    /// given).
+    fn closest_cover(&self, _point: [f32; 3], _threat: Option<[f32; 3]>) -> Option<[f32; 3]> {
+        None
+    }
     /// Position and unit tangent of spline `spline` at arc distance
     /// `distance` (`sub_35A20`).
     fn spline_at(&self, _spline: u32, _distance: f32) -> Option<([f32; 3], [f32; 3])> {
@@ -207,6 +231,9 @@ enum Wait {
     Var { process: usize, var: u32, value: u32 },
     /// Until the script animation of an object ends.
     Animation(u32),
+    /// Until NPC `name`'s scripted-skill order completes (or the NPC is
+    /// gone).
+    Npc(u32),
 }
 
 struct Track {
@@ -452,7 +479,7 @@ impl Runtime {
             Wait::Signal(s) => self.inner.signals.contains(s),
             Wait::Var { process, var, value } => self.inner.procs.get(*process).is_none_or(|p| p.vars.get(var).copied().unwrap_or(0) == *value),
             // Resolved against the world in `run_track`.
-            Wait::Animation(_) => false,
+            Wait::Animation(_) | Wait::Npc(_) => false,
         }
     }
 
@@ -462,6 +489,7 @@ impl Runtime {
             let t = &self.inner.procs[i].groups[gi].tracks[ti];
             let done = match t.wait {
                 Wait::Animation(object) => world.animation_phase(object).is_none(),
+                Wait::Npc(name) => world.agents_ref().and_then(|a| a.get(name)).is_none_or(|a| a.order.is_none()),
                 ref w => self.wait_done(w, now),
             };
             if !done {
@@ -714,6 +742,9 @@ impl Natives for Ctx<'_> {
         if trace_natives().is_some_and(|f| name.contains(f.as_str())) {
             let proc = self.proc.map(|p| (self.inner.procs[p].name, self.inner.procs[p].state.unwrap_or(0)));
             eprintln!("[native {now:.2}] {proc:08x?}: ({name} {:08x?})", &a[..n.min(MAX_ARGS)]);
+        }
+        if let Some(reply) = self.npc_native(dc, name, a, n)? {
+            return Ok(reply);
         }
         match name {
             // (add-load-module 'name 'script): the host loads the module
@@ -1250,6 +1281,33 @@ impl Natives for Ctx<'_> {
             "task-subnode-active?" => {
                 let (Some(current), Some(at)) = (self.inner.task, self.inner.tasks.nodes.iter().enumerate().find_map(|(i, nd)| nd.subnodes.iter().position(|s| s.address == a[0]).map(|j| (i, j)))) else { return b(false) };
                 b(at == current)
+            }
+            // (camera-fade-out name): the named camera object fades out of
+            // the blend (`sub_3564E0`); the shared camera releases it.
+            "camera-fade-out" => {
+                let camera = if n > 0 { a[0] } else { self.proc.map_or(0, |p| self.inner.procs[p].name) };
+                self.world.camera_disable(Some(camera));
+                ok(0)
+            }
+            // The guarded natives above with missing or null arguments
+            // print the original message and return 0.
+            "add-dynamic-light" | "update-dynamic-light" | "add-dynamic-light-joint" | "set-dynamic-light-color" | "remove-dynamic-light"
+            | "spline-distance-locator" | "spline-distance-spawner" | "spline-locator-at-distance" | "is-on-screen?" | "set-water-offset"
+            | "spawn-particles-at-locator" | "spawn-particles-at-joint" | "spawn-particles-attached" | "kill-particles"
+            | "set-single-shader-instance-param" | "set-shader-instance-param" | "stat-value?" | "increment-stat" | "increment-task-stat"
+            | "increment-stat-difficulty" | "reset-stat" | "player-in-region?" | "object-in-region?" | "set-visible" | "object-on-object?"
+            | "for-group" | "group-and" | "group-or" | "group-is-member-symbol?" | "group-random" | "lerp-scale" | "part-module-loaded?"
+            | "npc-group-alive-count" | "npc-group-dead-count" | "npc-group-find-first-alive" | "npc-mark-as-defunct" => {
+                let detail = match name {
+                    "add-dynamic-light" | "update-dynamic-light" if n > 2 => "boundframe not specified",
+                    "spline-distance-locator" | "spline-distance-spawner" if n > 1 => "NULL or empty spline name.",
+                    "is-on-screen?" => "passed NULL location.",
+                    "set-water-offset" if n > 1 => "NULL offset vector",
+                    "spawn-particles-at-locator" => "Expected two args: (effect-name string) (where locator)",
+                    _ => "not enough arguments",
+                };
+                self.inner.error(format!("{name}: {detail}"));
+                ok(0)
             }
             _ => {
                 *self.inner.missing.entry(name).or_default() += 1;

@@ -47,6 +47,7 @@ struct Stub {
     time: f64,
     spawners: HashMap<u32, scene::SpawnerRecord>,
     spawned: std::collections::HashSet<u32>,
+    agents: crysirror_naughty_dog::npc::Agents,
 }
 impl World for Stub {
     fn now(&self) -> f64 {
@@ -62,10 +63,28 @@ impl World for Stub {
         self.spawned.contains(&name)
     }
     fn spawn(&mut self, name: u32) -> bool {
-        self.spawners.contains_key(&name) && self.spawned.insert(name)
+        let Some(s) = self.spawners.get(&name) else { return false };
+        if s.process_type == sid("Soldier") {
+            self.agents.agents.insert(name, crysirror_naughty_dog::npc::Agent::new(s.position, s.rotation));
+        }
+        self.spawned.insert(name)
     }
     fn kill(&mut self, name: u32) -> bool {
+        self.agents.agents.remove(&name);
         self.spawned.remove(&name)
+    }
+    fn object_type(&self, name: u32) -> Option<u32> {
+        self.spawners.get(&name).map(|s| s.process_type)
+    }
+    fn agents(&mut self) -> Option<&mut crysirror_naughty_dog::npc::Agents> {
+        Some(&mut self.agents)
+    }
+    fn agents_ref(&self) -> Option<&crysirror_naughty_dog::npc::Agents> {
+        Some(&self.agents)
+    }
+    /// No nav meshes are loaded headless: a straight path.
+    fn nav_path(&self, from: [f32; 3], to: [f32; 3]) -> Option<Vec<[f32; 3]>> {
+        Some(vec![from, to])
     }
     fn locator(&self, name: u32) -> Option<([f32; 3], [f32; 4])> {
         self.spawners.get(&name).map(|s| (s.position, s.rotation))
@@ -149,6 +168,7 @@ fn all_tasks(modules: &Modules, paks: &ArchiveMount, all: &std::collections::BTr
         let mut fault = None;
         for f in 0..frames {
             world.time = f64::from(f) / 30.;
+            world.agents.step(1. / 30.);
             if let Err(e) = game.rt.tick(&mut world).and_then(|_| game.load_requested(modules, &mut world)) {
                 fault = Some(format!("{e:#}"));
                 break;
@@ -165,7 +185,7 @@ fn all_tasks(modules: &Modules, paks: &ArchiveMount, all: &std::collections::BTr
     let mut missing: Vec<_> = missing.into_iter().collect();
     missing.sort_by(|a, b| b.1.cmp(&a.1));
     println!("{} tasks, {total_procs} processes, {faults} VM faults/errors; {} unimplemented natives called:", names.len(), missing.len());
-    for (n, c) in missing.iter().take(80) {
+    for (n, c) in missing.iter().take(200) {
         println!("  {c:8} {n}");
     }
     Ok(())
@@ -237,6 +257,7 @@ fn main() -> Result<()> {
     println!("packages {} spawners {} processes {started}; modules now {}", packages.len(), records.len(), game.loaded.len());
     for f in 0..frames {
         world.time = f64::from(f) / 30.;
+        world.agents.step(1. / 30.);
         game.rt.tick(&mut world)?;
         game.load_requested(&modules, &mut world)?;
     }
