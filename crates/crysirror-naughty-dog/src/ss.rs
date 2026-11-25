@@ -415,6 +415,8 @@ pub struct Inner {
     pub settings: HashMap<u32, Setting>,
     /// The player's weapons and their ammo (-1: the weapon's full load).
     pub weapons: BTreeMap<u32, i32>,
+    /// A save was requested (`auto-save-game`).
+    pub save_requested: bool,
     /// The weapon the player holds (the last given).
     pub current_weapon: Option<u32>,
     /// Prone settings record chosen by `player-set-prone-mode`.
@@ -516,6 +518,7 @@ impl Runtime {
                 weapons: BTreeMap::new(),
                 prone: None,
                 current_weapon: None,
+                save_requested: false,
                 now: 0.,
                 disc: None,
                 fma: false,
@@ -794,6 +797,12 @@ impl Runtime {
 }
 
 impl Inner {
+    pub fn stats_snapshot(&self) -> Vec<((u32, u32), i32)> {
+        self.stats.iter().map(|(k, v)| (*k, *v)).collect()
+    }
+    pub fn restore_stats(&mut self, stats: &[((u32, u32), i32)]) {
+        self.stats = stats.iter().copied().collect();
+    }
     fn error(&mut self, message: String) {
         if self.errors.len() < MAX_ERRORS {
             self.errors.push(message);

@@ -1202,6 +1202,8 @@ struct Session {
     gun_weapon: Option<u32>,
     death: Option<f32>,
     combat_rng: u32,
+    /// A progress save exists (shows Continue).
+    has_save: bool,
     /// The Scream banks of `sound1/banks.psarc`.
     banks: crate::sound::Banks,
     /// Sound preparations in flight (host tickets).
@@ -1387,7 +1389,12 @@ enum Ui {
 /// (multiplayer, saves) are drawn dimmed.
 enum MenuAction {
     Page(&'static str),
-    NewGame,
+    /// Start the story at a difficulty (0 easy, 1 normal, 2 hard, 3
+    /// crushing, 4 very easy; the profile index for very easy is
+    /// inferred).
+    NewGame(u32),
+    /// Continue from the saved checkpoint.
+    Continue,
     None,
 }
 
@@ -1396,7 +1403,12 @@ fn menu_action(button: &str) -> MenuAction {
         "BUTTON_TITLE_START" => MenuAction::Page("PAGE_NEWPROFILE"),
         "BUTTON_NEWGAME" => MenuAction::Page("PAGE_NEWGAME"),
         "BUTTON_OPTIONS" => MenuAction::Page("PAGE_OPTIONS"),
-        b if b.starts_with("BUTTON_NEWGAME_") => MenuAction::NewGame,
+        "BUTTON_CONTINUE" | "BUTTON_LOADGAME" => MenuAction::Continue,
+        "BUTTON_NEWGAME_EASY" => MenuAction::NewGame(0),
+        "BUTTON_NEWGAME_HARD" => MenuAction::NewGame(2),
+        "BUTTON_NEWGAME_ULTRAHARD" => MenuAction::NewGame(3),
+        "BUTTON_NEWGAME_ULTRAEASY" => MenuAction::NewGame(4),
+        b if b.starts_with("BUTTON_NEWGAME_") => MenuAction::NewGame(1),
         _ => MenuAction::None,
     }
 }
@@ -1505,6 +1517,7 @@ impl NaughtyDogVm {
             player_clips: HashMap::new(),
             characters: Vec::new(),
             speech: None,
+            has_save: false,
             player_health: Default::default(),
             player_gun: Default::default(),
             gun_weapon: None,
@@ -1557,6 +1570,7 @@ impl NaughtyDogVm {
                 Ok(c) => session.stage.combat = Some(Arc::new(c)),
                 Err(e) => session.stage.log(format!("combat tables: {e:#}")),
             }
+            session.has_save = VfsPath::new(Mount::Save, crate::save::PATH).ok().and_then(|p| host.read(self.client, &p).ok()).is_some_and(|b| crate::save::Progress::from_bytes(&b).is_ok());
             match crate::game::ModuleSource::read(&modules, "audio").and_then(|b| crate::sound::SoundTable::parse(&b)) {
                 Ok(t) => session.stage.sounds = Some(Arc::new(t)),
                 Err(e) => session.stage.log(format!("audio.bin: {e:#}")),
@@ -2336,7 +2350,7 @@ impl NaughtyDogVm {
                         out[1] = text(UI_LAYER + 1, [128, 650, 1100, 40], &session.text(t), [200, 200, 200, 255], 14);
                     }
                 }
-                let visible: Vec<&crate::menu::Button> = page.buttons.iter().filter(|b| b.condition == 0).collect();
+                let visible: Vec<&crate::menu::Button> = page.buttons.iter().filter(|b| b.condition == 0 || (session.has_save && matches!(b.name.as_str(), "BUTTON_CONTINUE" | "BUTTON_LOADGAME"))).collect();
                 for (i, button) in visible.iter().enumerate().take(UI_LAYERS as usize - 2) {
                     let on = i == *selected;
                     let enabled = !matches!(menu_action(&button.name), MenuAction::None);
@@ -3801,7 +3815,7 @@ impl NaughtyDogVm {
             }
             Some(Ui::Menu { stack, selected }) => {
                 let page = stack.last().and_then(|i| session.menu_pages.get(*i));
-                let visible: Vec<String> = page.map(|p| p.buttons.iter().filter(|b| b.condition == 0).map(|b| b.name.clone()).collect()).unwrap_or_default();
+                let visible: Vec<String> = page.map(|p| p.buttons.iter().filter(|b| b.condition == 0 || (session.has_save && matches!(b.name.as_str(), "BUTTON_CONTINUE" | "BUTTON_LOADGAME"))).map(|b| b.name.clone()).collect()).unwrap_or_default();
                 let n = visible.len().max(1);
                 if pressed(b::DOWN) {
                     *selected = (*selected + 1) % n;
@@ -3822,15 +3836,30 @@ impl NaughtyDogVm {
                             if let Some(i) = session.menu_pages.iter().position(|p| p.name == target) {
                                 stack.push(i);
                                 // The difficulty page opens on Normal.
-                                *selected = session.menu_pages[i].buttons.iter().filter(|b| b.condition == 0).position(|b| b.name.ends_with("_NORMAL")).unwrap_or(0);
+                                *selected = session.menu_pages[i].buttons.iter().filter(|b| b.condition == 0 || (session.has_save && matches!(b.name.as_str(), "BUTTON_CONTINUE" | "BUTTON_LOADGAME"))).position(|b| b.name.ends_with("_NORMAL")).unwrap_or(0);
                                 ui_changed = true;
                             }
                         }
-                        Some(MenuAction::NewGame) => {
+                        Some(MenuAction::NewGame(difficulty)) => {
                             session.ui = None;
                             ui_changed = true;
-                            if let Some(game) = session.game.as_ref() {
+                            if let Some(game) = session.game.as_mut() {
+                                game.rt.inner.difficulty = difficulty;
                                 change = game.story_task().and_then(|t| game.rt.inner.tasks.find(sid(&t)));
+                            }
+                        }
+                        Some(MenuAction::Continue) => {
+                            let path = VfsPath::new(Mount::Save, crate::save::PATH);
+                            let saved = path.ok().and_then(|p| host.read(self.client, &p).ok()).and_then(|b| crate::save::Progress::from_bytes(&b).ok());
+                            if let (Some(progress), Some(game)) = (saved, session.game.as_mut()) {
+                                match progress.restore(&mut game.rt) {
+                                    Ok(task) => {
+                                        session.ui = None;
+                                        ui_changed = true;
+                                        change = task;
+                                    }
+                                    Err(e) => session.stage.log(format!("continue: {e:#}")),
+                                }
                             }
                         }
                         Some(MenuAction::None) | None => {}
@@ -3870,8 +3899,33 @@ impl NaughtyDogVm {
         host.submit_engine(self.client, 1, &serde_json::to_vec(&json!({"layers": layers, "world": world}))?)?;
         if let Some(at) = change {
             self.change_task(host, session, at)?;
+            // Every story task start is a checkpoint.
+            let story = session.plan.as_ref().is_some_and(|p| !p.menu) && session.movie.is_none() && session.ui.is_none();
+            if story {
+                if let Some(g) = session.game.as_mut() {
+                    g.rt.inner.save_requested = true;
+                }
+            }
+        }
+        if session.game.as_ref().is_some_and(|g| g.rt.inner.save_requested) {
+            self.write_save(host, session);
         }
         Ok(())
+    }
+
+    /// Write the checkpoint (`crate::save`).
+    fn write_save(&self, host: &mut dyn HostServices, session: &mut Session) {
+        let Some(game) = session.game.as_mut() else { return };
+        game.rt.inner.save_requested = false;
+        let bytes = crate::save::Progress::capture(&game.rt).to_bytes();
+        let written = bytes.map_err(|e| format!("{e:#}")).and_then(|b| {
+            let path = VfsPath::new(Mount::Save, crate::save::PATH).map_err(|e| e.to_string())?;
+            host.write_atomic(self.client, &path, &b).map_err(|e| e.to_string())
+        });
+        match written {
+            Ok(()) => session.has_save = true,
+            Err(e) => session.stage.log(format!("save: {e}")),
+        }
     }
 }
 

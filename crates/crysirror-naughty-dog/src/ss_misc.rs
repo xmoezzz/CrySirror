@@ -270,6 +270,14 @@ impl Ctx<'_> {
                 self.inner.prints.push(text);
                 ok(0)
             }
+            // (auto-save-game): write a checkpoint.
+            "auto-save-game" => {
+                self.inner.save_requested = true;
+                ok(0)
+            }
+            // (is-difficulty-very-easy?): the profile's very-easy level
+            // (index 4 here).
+            "is-difficulty-very-easy?" => ok(u32::from(self.inner.difficulty == 4)),
             // (set-render-settings name [name blend]): apply a record at
             // priority 140 (`sub_12A7D0`) or blend two (`sub_127BA4`); 1
             // when the records exist. (set-render-settings-defaults) drops

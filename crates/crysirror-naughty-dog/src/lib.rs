@@ -31,6 +31,7 @@ pub mod probes;
 pub mod region;
 pub mod render_settings;
 pub mod rsx;
+pub mod save;
 pub mod scene;
 pub mod skeleton;
 pub mod sound;
