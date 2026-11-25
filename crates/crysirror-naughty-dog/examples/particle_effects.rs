@@ -18,7 +18,7 @@ fn main() -> Result<()> {
             if args.get(1).is_some_and(|f| f != "--check" && !e.name.contains(f.as_str())) {
                 continue;
             }
-            let (spec, frame) = crysirror_naughty_dog::particle::emitter(e, &e.name, &placement, None, crysirror_vfx::BlendMode::Additive, 1);
+            let (spec, frame) = crysirror_naughty_dog::particle::emitter(e, &e.name, &placement, None, crysirror_vfx::BlendMode::Additive, 0., 1);
             let system = crysirror_vfx::SystemSpec { emitters: vec![spec.clone()], ..Default::default() };
             if let Err(err) = system.compile() {
                 println!("{group:08x} {}: does not compile: {err:#} (life {:?} size {:?} rotation {:?} colour {:?} rate {:?} shape {:?})", e.name, spec.initialize.lifetime, spec.initialize.size, spec.initialize.rotation, spec.initialize.color, spec.spawn.rate, spec.initialize.shape);

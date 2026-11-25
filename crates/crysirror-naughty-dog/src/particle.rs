@@ -379,6 +379,10 @@ pub struct ParticleMaterial {
     /// Pass 0's colour blend factors (pass data +0x20, `u16` source and
     /// destination in GL enumerants: 1 ONE, 0x303 ONE_MINUS_SRC_ALPHA).
     pub blend: (u16, u16),
+    /// Soft-particle distance: the fragment program divides the scene
+    /// depth difference by `g_fDepthBlend` (`DIV_SAT`; 0.5 m on
+    /// `godrays-fog`).
+    pub depth_blend: Option<f32>,
 }
 
 pub fn materials(p: &crate::mesh::Loaded, payload: usize) -> Result<HashMap<u32, ParticleMaterial>> {
@@ -390,7 +394,8 @@ pub fn materials(p: &crate::mesh::Loaded, payload: usize) -> Result<HashMap<u32,
         let Ok(m) = p.ptr(array + 4 * i) else { continue };
         let Ok(material) = crate::mesh::material(p, m) else { continue };
         let data = p.ptr(p.ptr(m + 0x10)?).and_then(|pass| p.ptr(pass + 0x10))?;
-        out.insert(p.u32(m + 0x18)?, ParticleMaterial { name: material.name, samplers: material.samplers, blend: (p.u16(data + 0x20)?, p.u16(data + 0x22)?) });
+        let depth_blend = crate::rsx::material_constant(p, data, "g_fDepthBlend").ok().flatten().map(|v| v[0]).filter(|v| v.is_finite() && *v > 0.);
+        out.insert(p.u32(m + 0x18)?, ParticleMaterial { name: material.name, samplers: material.samplers, blend: (p.u16(data + 0x20)?, p.u16(data + 0x22)?), depth_blend });
     }
     Ok(out)
 }
@@ -439,7 +444,7 @@ const LIFE_KEYS: usize = 16;
 const MAX_LIFE: f32 = 3600.;
 
 /// The shared emitter for `effect` at `placement` and its world transform.
-pub fn emitter(effect: &Effect, id: &str, placement: &Placement, texture: Option<(String, u32)>, blend: crysirror_vfx::BlendMode, seed: u32) -> (crysirror_vfx::EmitterSpec, Mat4) {
+pub fn emitter(effect: &Effect, id: &str, placement: &Placement, texture: Option<(String, u32)>, blend: crysirror_vfx::BlendMode, soft_distance: f32, seed: u32) -> (crysirror_vfx::EmitterSpec, Mat4) {
     use crysirror_vfx::{Burst, ColorCurve, ColorKey, EmitterSpec, FacingMode, InitSpec, Interpolation, Module, RenderSpec, SpawnShape, SpawnSpec, Vec2Curve, Vec2Key};
     let seeds = (0..SAMPLES).map(|i| (i as u16).wrapping_mul(0x9e37).wrapping_add(0x7f4a));
     let born: Vec<Particle> = seeds.map(|s| effect.birth(s)).collect();
@@ -528,7 +533,7 @@ pub fn emitter(effect: &Effect, id: &str, placement: &Placement, texture: Option
         spawn,
         initialize: InitSpec { shape, lifetime, speed: [0., 0.], color, size, rotation, ..Default::default() },
         update,
-        render: RenderSpec::Sprite { texture, columns, rows: 1, frames: 1, fps: 0., soft_distance: 0., blend, facing },
+        render: RenderSpec::Sprite { texture, columns, rows: 1, frames: 1, fps: 0., soft_distance, blend, facing },
         ..Default::default()
     };
     let frame = Mat4::from_rotation_translation(placement.rotation, placement.position) * Mat4::from_translation(offset * scale);

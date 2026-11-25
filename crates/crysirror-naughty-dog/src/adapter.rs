@@ -1684,7 +1684,6 @@ impl NaughtyDogVm {
                 None => session.particle_materials = Some(HashMap::new()),
             }
         }
-        let task = session.game.is_some();
         let mut presented = 0;
         for s in spawners {
             let property = |name: &str| s.properties.iter().find(|(k, _)| *k == sid(name)).map(|(_, v)| v.clone());
@@ -1710,13 +1709,18 @@ impl NaughtyDogVm {
                 sprite_scale: float("sprite-scale", 1.),
                 effect_scale: vector("effect-scale").map_or(glam::Vec3::ONE, glam::Vec3::from_array),
             };
-            let visible = !task || s.flags & NO_AUTO_BIRTH == 0;
+            // The particle manager births particle spawners from their
+            // `particle-group` tag each frame (`sub_76BC28` → `sub_761B30`),
+            // without the spawner process, so `noAutoBirth` does not hold
+            // them back; scripts can still hide them.
+            let visible = true;
             for (k, emitter) in emitters.iter().enumerate() {
                 let Some(effect) = session.particles.effects.get(emitter) else { continue };
                 let material = session.particle_materials.as_ref().and_then(|m| m.get(&effect.material));
                 let texture = material.and_then(|m| m.samplers.first()).and_then(|id| session.particle_textures.get(id).cloned().flatten());
                 let blend = material.map_or(crysirror_vfx::BlendMode::Additive, |m| crate::particle::blend(m.blend));
-                let (spec, frame) = crate::particle::emitter(effect, &effect.name, &placement, texture, blend, sid(&s.name) ^ k as u32);
+                let soft = material.and_then(|m| m.depth_blend).unwrap_or(0.);
+                let (spec, frame) = crate::particle::emitter(effect, &effect.name, &placement, texture, blend, soft, sid(&s.name) ^ k as u32);
                 let system = crysirror_vfx::SystemSpec { emitters: vec![spec], ..Default::default() };
                 let (scale, rotation, translation) = frame.to_scale_rotation_translation();
                 let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);

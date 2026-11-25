@@ -404,6 +404,39 @@ pub fn pass_parameters(p: &Loaded, data: usize) -> Result<Vec<(String, [f32; 4])
     Ok(out)
 }
 
+/// A material-constant binding's value: class low half 0x0002 holds an
+/// offset into the pass constant block (+0x1c), like 0x0102 (the
+/// `godrays-fog` material's `g_fDepthBlend` 0.5 at offset 0,
+/// `g_fTransparencyFogScroll` (0, 0.075, 0, 0.35) at 0x10).
+pub fn material_constant(p: &Loaded, data: usize, wanted: &str) -> Result<Option<[f32; 4]>> {
+    let names = binding_names(p, data)?;
+    let Some(r) = names.iter().position(|n| n == wanted) else { return Ok(None) };
+    let at = p.ptr(data + 0x14)? + 16 * r;
+    if !matches!(p.u32(at + 4)? & 0xffff, 0x0002 | 0x0102) {
+        return Ok(None);
+    }
+    let base = p.ptr(data + 0x1c)? + p.u32(at + 8)? as usize;
+    Ok(Some([p.f32(base)?, p.f32(base + 4)?, p.f32(base + 8)?, p.f32(base + 12)?]))
+}
+
+/// The names of every parameter binding of a pass (`{u16 register, u16,
+/// u32 class, u32 value, u32 name}` at pass data +0x14).
+pub fn binding_names(p: &Loaded, data: usize) -> Result<Vec<String>> {
+    let n = (p.u32(data + 8)? & 0xffff) as usize;
+    ensure!(n <= 256, "ND parameter binding count");
+    let table = p.ptr(data + 0x14)?;
+    let pages: Vec<usize> = (0..p.directory.page_count).filter_map(|i| p.u32(44 + 12 * i).ok().map(|v| v as usize)).collect();
+    let page = pages.iter().copied().filter(|s| *s <= table).max().context("ND binding table page")?;
+    (0..n)
+        .map(|r| {
+            let name = p.u32(table + 16 * r + 12)? as usize;
+            let bytes = p.data.get(page + name..).unwrap_or_default();
+            let end = bytes.iter().take(128).position(|b| *b == 0).unwrap_or(0);
+            Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
