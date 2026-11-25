@@ -266,3 +266,21 @@ lives in `src/npc.rs`:
 The `wait-` forms suspend the track until the order completes. Speeds,
 turn rate and the immediate bind are not native (the skill moves by clip
 root motion).
+
+## Player and utility natives
+
+| Native | Native rule |
+| --- | --- |
+| `player-disable-brutal-melee`, `set-player-invincible`, `player-force-light-combo-tutorial`, `set-player-infinite-ammo` | script settings (`sub_15F480`/`sub_15F8AC`, priority 100) ids 0x8E83AE5A, 0xA7065A6C, 0x089305A1 and the variable at 0xF5041A; an override lives 9 frames after each call (`sub_15E628`), so scripts repeat them per frame. `Runtime::setting` reads them |
+| `player-has-weapon?` / `give-player-weapon` (weapon [ammo]) | the inventory at player +0x388 (`sub_2CE6D0`); ammo −1 is the weapon's full load; giving a held weapon only sets its ammo |
+| `player-in-state?` | asks the player process (event 0x27807427) for its state class; the controller reports `Normal`, `Falling`, `Edge`, `EdgeClimbUp` or `JumpAcross` |
+| `player-in-combat?` | the global combat flag (`sub_7E8748`); here any NPC in knowledge state 4 |
+| `kill-player-no-anim` ([ragdoll] [death-cam] [delay]) | defaults false, true, 1/15 s; returns 1 with a player |
+| `player-set-prone-mode` | the prone settings record (player +0x2190) |
+| `get-joint-angle-diff-from-bindpose` | degrees (× 57.29578) between a joint's local and bind rotations |
+| `jump` (label) | sets the track's next entry to the label's (`sub_7DACBC`); the lambda continues |
+| `wait-until-frame` (frame) | waits until frame/30 s after the state began |
+| `group-count` / `group-at` | entity groups; the built-in groups 0x37665F0E, 0xFE8E71E9 (type 0x88DBCF2F), 0x49E5675B (Villager), 0x1A4EB1EF (0xD86D38AA), 0xAB7A1939 (Soldier) and 0x26D8AC33 (all) count live NPCs (`sub_A0E58`) |
+| `string<-string-id` / `print-symbol` | the `StringId` table name; ids it lacks read `(#f)`, a null id `(null)` |
+| `get-difficulty` | the profile's difficulty (+0x1DE0; 2 in multiplayer); 1 by default |
+| `random-integer` (n) | ⌊random-float × n⌋ |

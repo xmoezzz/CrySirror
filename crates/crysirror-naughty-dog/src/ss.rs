@@ -25,6 +25,16 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 #[path = "ss_npc.rs"]
 mod npc_natives;
+#[path = "ss_player.rs"]
+pub mod player_natives;
+
+/// A script setting override (`sub_15F480`): its value and the frame it
+/// expires after.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Setting {
+    pub value: u32,
+    pub until: u64,
+}
 
 pub const KIND_BEGIN: u32 = 0;
 pub const KIND_END: u32 = 1;
@@ -177,6 +187,20 @@ pub trait World {
     fn set_water_offset(&mut self, _name: u32, _offset: [f32; 3]) -> bool {
         false
     }
+    /// The id of the object the player carries.
+    fn player_carried(&self) -> Option<u32> {
+        None
+    }
+    /// The player process's native state class (`StringId`).
+    fn player_state(&self) -> Option<u32> {
+        None
+    }
+    fn kill_player(&mut self, _ragdoll: bool, _death_camera: bool, _delay: f32) {}
+    /// Angle (radians) between a joint's current local rotation and its
+    /// bind rotation; `None` when the object has no such joint.
+    fn joint_bind_angle(&self, _object: u32, _joint: u32) -> Option<f32> {
+        None
+    }
     /// The object type (process type) of spawner `name`.
     fn object_type(&self, _name: u32) -> Option<u32> {
         None
@@ -242,6 +266,8 @@ struct Track {
     next: u32,
     thread: Option<Thread>,
     wait: Wait,
+    /// A `jump` made by the suspended lambda.
+    jump: Option<u32>,
 }
 
 struct Group {
@@ -262,6 +288,8 @@ pub struct Process {
     events: VecDeque<(u32, Vec<u32>)>,
     pending_go: Option<u32>,
     pub dead: bool,
+    /// When the current state began (`wait-until-frame` counts from it).
+    pub state_start: f64,
 }
 
 /// Runtime state outside the DC memory (so natives can borrow both).
@@ -289,6 +317,20 @@ pub struct Inner {
     rng: u32,
     /// Game statistics by `(stat, qualifier)` (`stat-value?`).
     stats: HashMap<(u32, u32), i32>,
+    /// Names of `StringId`s the runtime has seen (natives' names, loaded
+    /// symbols), for `string<-string-id`.
+    pub names: HashMap<u32, String>,
+    /// Script setting overrides by setting id.
+    pub settings: HashMap<u32, Setting>,
+    /// The player's weapons and their ammo (-1: the weapon's full load).
+    pub weapons: BTreeMap<u32, i32>,
+    /// Prone settings record chosen by `player-set-prone-mode`.
+    pub prone: Option<u32>,
+    /// World time at the last tick.
+    now: f64,
+    /// The game difficulty (`sub_57040`, profile +0x1DE0): 0 easy, 1
+    /// normal, 2 hard, 3 crushing.
+    pub difficulty: u32,
 }
 
 pub struct Runtime {
@@ -302,6 +344,10 @@ struct Ctx<'a> {
     world: &'a mut dyn World,
     proc: Option<usize>,
     wait: Wait,
+    /// The running track's `(label, lambda)` pairs and count.
+    track: Option<(u32, u32)>,
+    /// Entry index a `jump` continues the track at.
+    jump: Option<u32>,
 }
 
 fn state_by_name(dc: &Dc, script: u32, name: u32) -> Result<Option<u32>> {
@@ -336,7 +382,7 @@ fn group(dc: &Dc, kind: u32, event: u32, args: Vec<u32>, g: u32) -> Result<Group
     let tracks = (0..n)
         .map(|i| {
             let t = tracks + 12 * i;
-            Ok(Track { lambdas: dc.mem.u32(t + 8)?, count: dc.mem.u32(t + 4)?, next: 0, thread: None, wait: Wait::None })
+            Ok(Track { lambdas: dc.mem.u32(t + 8)?, count: dc.mem.u32(t + 4)?, next: 0, thread: None, wait: Wait::None, jump: None })
         })
         .collect::<Result<_>>()?;
     Ok(Group { kind, event, args, tracks })
@@ -363,13 +409,19 @@ impl Runtime {
                 movement: [0; 2],
                 rng: 0x2545_f491,
                 stats: HashMap::new(),
+                names: NATIVES.iter().map(|(n, _)| (sid(n), (*n).to_owned())).collect(),
+                settings: HashMap::new(),
+                weapons: BTreeMap::new(),
+                prone: None,
+                now: 0.,
+                difficulty: 1,
             },
         }
     }
 
     #[cfg(test)]
     pub(crate) fn call_for_test(&mut self, world: &mut dyn World, name: &str, args: &[u32]) -> Result<u32> {
-        let mut ctx = Ctx { inner: &mut self.inner, world, proc: None, wait: Wait::None };
+        let mut ctx = Ctx { inner: &mut self.inner, world, proc: None, wait: Wait::None, track: None, jump: None };
         let id = ctx.lookup(sid(name)).context("test native id")?;
         let mut padded = [0; MAX_ARGS];
         padded[..args.len()].copy_from_slice(args);
@@ -381,7 +433,7 @@ impl Runtime {
     /// completion outside any process. A suspension is an error.
     pub fn run_lambda(&mut self, world: &mut dyn World, lambda: u32, args: &[u32]) -> Result<u32> {
         let mut t = Thread::new(&self.dc, lambda, args)?;
-        let mut ctx = Ctx { inner: &mut self.inner, world, proc: None, wait: Wait::None };
+        let mut ctx = Ctx { inner: &mut self.inner, world, proc: None, wait: Wait::None, track: None, jump: None };
         match t.run(&mut self.dc, &mut ctx)? {
             Outcome::Returned(v) => Ok(v),
             other => anyhow::bail!("top-level lambda ended with {other:?}"),
@@ -390,11 +442,12 @@ impl Runtime {
 
     /// Start a process running the state script named `script`.
     pub fn spawn(&mut self, name: u32, script: u32, spawner: Option<u32>) -> Result<usize> {
+        let world_now = self.inner.now;
         let addr = *self.dc.symbols.get(&script).with_context(|| format!("state script {script:#010x} is not loaded"))?;
         ensure!(self.dc.mem.type_of(addr)? == TYPE_STATE_SCRIPT, "{script:#010x} is not a state-script");
         let initial = self.dc.mem.u32(addr + 8)?;
         let state = state_by_name(&self.dc, addr, initial)?.or(state_by_name(&self.dc, addr, 0)?);
-        let mut p = Process { name, script: addr, spawner, state: None, vars: HashMap::new(), groups: Vec::new(), events: VecDeque::new(), pending_go: None, dead: false };
+        let mut p = Process { name, script: addr, spawner, state: None, vars: HashMap::new(), groups: Vec::new(), events: VecDeque::new(), pending_go: None, dead: false, state_start: world_now };
         if let Some(s) = state {
             p.state = Some(s);
             if let Some(g) = block(&self.dc, s, KIND_BEGIN, 0)? {
@@ -408,6 +461,9 @@ impl Runtime {
     /// Advance every process by one frame.
     pub fn tick(&mut self, world: &mut dyn World) -> Result<()> {
         self.inner.frame += 1;
+        self.inner.now = world.now();
+        let frame = self.inner.frame;
+        self.inner.settings.retain(|_, s| s.until >= frame);
         let mut i = 0;
         while i < self.inner.procs.len() {
             self.step_process(world, i)?;
@@ -519,9 +575,15 @@ impl Runtime {
                     }
                 }
             };
-            let mut ctx = Ctx { inner: &mut self.inner, world, proc: Some(i), wait: Wait::None };
+            let pairs = {
+                let t = &self.inner.procs[i].groups[gi].tracks[ti];
+                (t.lambdas, t.count)
+            };
+            let mut ctx = Ctx { inner: &mut self.inner, world, proc: Some(i), wait: Wait::None, track: Some(pairs), jump: None };
             let outcome = thread.run(&mut self.dc, &mut ctx);
             let wait = std::mem::replace(&mut ctx.wait, Wait::None);
+            let jump = ctx.jump.take();
+            let frame = self.inner.frame;
             let outcome = match outcome {
                 Ok(o) => o,
                 Err(e) => {
@@ -531,16 +593,24 @@ impl Runtime {
             };
             let Some(track) = self.inner.procs.get_mut(i).and_then(|p| p.groups.get_mut(gi)).and_then(|g| g.tracks.get_mut(ti)) else { return Ok(()) };
             match outcome {
+                // After a `jump` the track continues at the label's entry
+                // (`sub_7DACBC` stores entry − 1; the runner advances).
+                // A backward jump waits for the next frame: loops whose
+                // waits complete at once here would otherwise spin.
                 Outcome::Returned(_) => {
-                    track.next += 1;
-                    track.wait = Wait::None;
+                    let jump = jump.or(track.jump.take());
+                    let current = track.next;
+                    track.next = jump.unwrap_or(current + 1);
+                    track.wait = if jump.is_some_and(|k| k <= current) { Wait::Frame(frame + 1) } else { Wait::None };
                 }
                 Outcome::Suspended => {
+                    track.jump = jump.or(track.jump.take());
                     track.thread = Some(thread);
                     track.wait = wait;
                     return Ok(());
                 }
                 Outcome::Aborted => {
+                    track.jump = None;
                     track.next = track.count;
                     return Ok(());
                 }
@@ -563,9 +633,11 @@ impl Runtime {
                 self.run_groups(world, i)?;
             }
         }
+        let now = world.now();
         let p = &mut self.inner.procs[i];
         p.groups.clear();
         p.state = Some(target);
+        p.state_start = now;
         if let Some(g) = block(&self.dc, target, KIND_BEGIN, 0)? {
             self.inner.procs[i].groups.push(group(&self.dc, KIND_BEGIN, 0, Vec::new(), g)?);
         }
@@ -591,6 +663,11 @@ impl Runtime {
     }
 
     /// Native names called but not implemented, with call counts.
+    /// A live script setting override.
+    pub fn setting(&self, id: u32) -> Option<u32> {
+        self.inner.settings.get(&id).filter(|s| s.until >= self.inner.frame).map(|s| s.value)
+    }
+
     pub fn missing(&self) -> &BTreeMap<&'static str, u32> {
         &self.inner.missing
     }
@@ -673,6 +750,20 @@ impl Ctx<'_> {
     }
 }
 
+/// The NPC manager's built-in groups (`sub_A0E58`): `Some(None)` counts
+/// every NPC, `Some(Some(type))` those of one process type.
+fn builtin_group(group: u32) -> Option<Option<u32>> {
+    match group {
+        0x3766_5f0e => Some(Some(0x88db_cf2f)), // all-mercs
+        0xfe8e_71e9 => Some(Some(0x88db_cf2f)),
+        0x49e5_675b => Some(Some(0x7726_a8bc)), // all-villagers: Villager
+        0x1a4e_b1ef => Some(Some(0xd86d_38aa)),
+        0x26d8_ac33 => Some(None),
+        0xab7a_1939 => Some(Some(0xfd2c_9c09)),
+        _ => None,
+    }
+}
+
 /// `ND_TRACE_NATIVES=substring` prints matching native calls (diagnostic).
 fn trace_natives() -> Option<&'static String> {
     static FILTER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
@@ -744,6 +835,9 @@ impl Natives for Ctx<'_> {
             eprintln!("[native {now:.2}] {proc:08x?}: ({name} {:08x?})", &a[..n.min(MAX_ARGS)]);
         }
         if let Some(reply) = self.npc_native(dc, name, a, n)? {
+            return Ok(reply);
+        }
+        if let Some(reply) = self.player_native(dc, name, a, n)? {
             return Ok(reply);
         }
         match name {
@@ -829,7 +923,7 @@ impl Natives for Ctx<'_> {
                 }
                 let initial = dc.mem.u32(addr + 8)?;
                 let state = state_by_name(dc, addr, initial)?.or(state_by_name(dc, addr, 0)?);
-                let mut p = Process { name: a[0], script: addr, spawner: None, state, vars: HashMap::new(), groups: Vec::new(), events: VecDeque::new(), pending_go: None, dead: false };
+                let mut p = Process { name: a[0], script: addr, spawner: None, state, vars: HashMap::new(), groups: Vec::new(), events: VecDeque::new(), pending_go: None, dead: false, state_start: now };
                 if let Some(s) = state {
                     if let Some(g) = block(dc, s, KIND_BEGIN, 0)? {
                         p.groups.push(group(dc, KIND_BEGIN, 0, Vec::new(), g)?);
@@ -1282,6 +1376,153 @@ impl Natives for Ctx<'_> {
                 let (Some(current), Some(at)) = (self.inner.task, self.inner.tasks.nodes.iter().enumerate().find_map(|(i, nd)| nd.subnodes.iter().position(|s| s.address == a[0]).map(|j| (i, j)))) else { return b(false) };
                 b(at == current)
             }
+            // (jump label): continue the current track at the entry
+            // labelled `label` (`sub_7D4678`).
+            "jump" => {
+                if n == 0 {
+                    self.inner.error("jump: not enough arguments".into());
+                    return ok(0);
+                }
+                let Some((pairs, count)) = self.track.filter(|_| self.proc.is_some()) else {
+                    self.inner.error("jump: Called outside state script context - ignored".into());
+                    return ok(0);
+                };
+                if a[0] == 0 {
+                    self.inner.error("jump: Null or empty label name".into());
+                    return ok(0);
+                }
+                for k in 0..count {
+                    if dc.mem.u32(pairs + 8 * k)? == a[0] {
+                        self.jump = Some(k);
+                        return ok(1);
+                    }
+                }
+                self.inner.error(format!("jump: Unable to jump to non-existent label {:#010x}", a[0]));
+                ok(0)
+            }
+            // (wait-until-frame frame): until `frame`/30 s into the state
+            // (`sub_7D63B8`).
+            "wait-until-frame" => {
+                if n == 0 {
+                    self.inner.error("wait-until-frame: Expected at least one argument: (abs-frame int32)".into());
+                    return ok(0);
+                }
+                let Some(p) = self.proc else { return ok(1) };
+                let at = self.inner.procs[p].state_start + f64::from(a[0] as i32 as f32 * FRAME_SECONDS);
+                if now >= at {
+                    return ok(1);
+                }
+                let (value, status) = self.suspend(Wait::Until(at));
+                Ok((value, status))
+            }
+            // (tag-string tag): the calling process's spawner string tag
+            // as a script string (`sub_7C9B24`).
+            "tag-string" => {
+                if n != 1 {
+                    self.inner.error("tag-string: expected one argument".into());
+                    return ok(0);
+                }
+                if self.proc.is_none() {
+                    self.inner.error("tag-string: Called outside state script context - ignored".into());
+                    return ok(0);
+                }
+                match self.tag(a[0]) {
+                    Some(Property::Str(text)) => ok(dc.mem.alloc_str(&text)?),
+                    _ => ok(0),
+                }
+            }
+            // (string<-string-id id): the id's name from the `StringId`
+            // table (`sub_84A2EC`); names the table lacks read "(#f)".
+            "string<-string-id" => {
+                let text = if n == 0 || a[0] == 0 { "(null)".to_owned() } else { self.inner.names.get(&a[0]).cloned().unwrap_or_else(|| "(#f)".into()) };
+                ok(dc.mem.alloc_str(&text)?)
+            }
+            "print-symbol" => {
+                let id = if n > 0 { a[0] } else { 0 };
+                let text = format!("print-symbol: {} ({id})", self.inner.names.get(&id).map_or("(#f)", String::as_str));
+                self.world.print(&text);
+                self.inner.prints.push(text);
+                ok(0)
+            }
+            "print-float" => {
+                let text = format!("print-float: {:4.2}", if n > 0 { Self::arg_f(a, 0) } else { 0. });
+                self.world.print(&text);
+                self.inner.prints.push(text);
+                ok(0)
+            }
+            // (ss-error format args…): a script error with up to two
+            // arguments substituted (`sub_AC6504`).
+            "ss-error" => {
+                let format = if n > 0 && a[0] != 0 { dc.mem.cstr(a[0]).unwrap_or_default() } else { String::new() };
+                let mut text = String::new();
+                let mut args = a[1..n.clamp(1, 3)].iter();
+                let mut chars = format.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '%' && chars.peek().is_some_and(|c| *c != '%') {
+                        let spec = chars.next().unwrap_or('d');
+                        let v = args.next().copied().unwrap_or(0);
+                        match spec {
+                            's' => text.push_str(&dc.mem.cstr(v).unwrap_or_default()),
+                            'f' | 'g' => text.push_str(&f32::from_bits(v).to_string()),
+                            'x' => text.push_str(&format!("{v:x}")),
+                            _ => text.push_str(&(v as i32).to_string()),
+                        }
+                    } else if c == '%' {
+                        chars.next();
+                        text.push('%');
+                    } else {
+                        text.push(c);
+                    }
+                }
+                self.inner.error(text);
+                ok(0)
+            }
+            // (make-vector3 x y z): a heap vector, components default 0.
+            "make-vector3" => {
+                let at = dc.mem.alloc(12)?;
+                for k in 0..3 {
+                    dc.mem.write_u32(at + 4 * k as u32, if n > k { a[k] } else { 0 })?;
+                }
+                ok(at)
+            }
+            // (random-integer n): ⌊random-float × n⌋.
+            "random-integer" => {
+                if n == 0 {
+                    self.inner.error("random-integer: Expected at least one argument - returning zero always".into());
+                    return ok(0);
+                }
+                let r = (self.next_random() >> 8) as f32 / (1u32 << 24) as f32;
+                ok((r * a[0] as i32 as f32).floor() as i32 as u32)
+            }
+            // (group-count group) / (group-at group index): entity groups;
+            // the built-in groups count live NPCs by type (`sub_A0E58`).
+            "group-count" | "group-at" => {
+                let group = if n > 0 { a[0] } else { self.proc.map_or(0, |p| self.inner.procs[p].name) };
+                if name == "group-count" {
+                    if let Some(kind) = builtin_group(group) {
+                        let count = self.world.agents_ref().map_or(0, |x| x.agents.keys().filter(|k| kind.is_none_or(|t| self.world.object_type(**k) == Some(t))).count());
+                        return ok(count as u32);
+                    }
+                }
+                let known = dc.symbols.get(&group).is_some_and(|g| dc.mem.type_of(*g).ok() == Some(sid("entity-group")));
+                if !known {
+                    self.inner.error(format!("group-count: Unknown group {group:#010x}"));
+                    return ok(0);
+                }
+                let members = Self::group_members(dc, group)?;
+                if name == "group-count" {
+                    return ok(members.len() as u32);
+                }
+                let index = if n > 1 { a[1] as i32 } else { -1 };
+                match usize::try_from(index).ok().and_then(|i| members.get(i)) {
+                    Some(m) => ok(*m),
+                    None => {
+                        self.inner.error(format!("group-count: {group:#010x} Index out of bounds {index}"));
+                        ok(0)
+                    }
+                }
+            }
+            "get-difficulty" => ok(self.inner.difficulty),
             // (camera-fade-out name): the named camera object fades out of
             // the blend (`sub_3564E0`); the shared camera releases it.
             "camera-fade-out" => {

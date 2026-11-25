@@ -161,7 +161,7 @@ fn all_tasks(modules: &Modules, paks: &ArchiveMount, all: &std::collections::BTr
         for r in &records {
             world.spawners.insert(sid(&r.name), r.clone());
             if r.flags & 0x4000_0000 == 0 {
-                world.spawned.insert(sid(&r.name));
+                world.spawn(sid(&r.name));
             }
         }
         let started = game.start(modules, &mut world, &records)?;

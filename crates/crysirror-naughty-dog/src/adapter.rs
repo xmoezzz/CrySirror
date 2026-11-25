@@ -251,6 +251,10 @@ struct Stage {
     npc_dead: HashSet<u32>,
     /// The live NPCs' agent state (the NPC manager's objects).
     agents: crate::npc::Agents,
+    /// The player's native state class (`player-in-state?`).
+    player_state: Option<u32>,
+    /// `kill-player-no-anim` requested: ragdoll, death camera, delay.
+    player_killed: Option<(bool, bool, f32)>,
     /// Splines of the loaded levels by name `StringId`.
     splines: HashMap<u32, crate::nav::Spline>,
     /// Nav meshes of the loaded levels.
@@ -669,6 +673,20 @@ impl World for Stage {
     }
     fn object_type(&self, name: u32) -> Option<u32> {
         self.spawners.get(&name).map(|s| s.process_type)
+    }
+    fn player_state(&self) -> Option<u32> {
+        self.player_state
+    }
+    fn kill_player(&mut self, ragdoll: bool, death_camera: bool, delay: f32) {
+        self.log(format!("kill-player-no-anim ragdoll={ragdoll} death-cam={death_camera} delay={delay}"));
+        self.player_killed = Some((ragdoll, death_camera, delay));
+        self.controls = Some(false);
+    }
+    /// Objects present their bind pose outside script clips, whose
+    /// evaluated joints the stage does not keep: a known joint is at its
+    /// bind rotation.
+    fn joint_bind_angle(&self, object: u32, joint: u32) -> Option<f32> {
+        self.joints.get(&object)?.get(&joint).map(|_| 0.)
     }
     fn agents(&mut self) -> Option<&mut crate::npc::Agents> {
         self.sync_agents();
@@ -2977,6 +2995,17 @@ impl NaughtyDogVm {
             }
             world.push(camera);
         }
+        session.stage.player_state = session.player.as_ref().map(|p| {
+            let mode = p.anim.as_ref().zip(session.anim_table.as_ref()).map_or(crate::player::Mode::Ground, |(a, t)| a.mode(t));
+            let class = match mode {
+                crate::player::Mode::Ground if p.air_top.is_some() => "Falling",
+                crate::player::Mode::Ground => "Normal",
+                crate::player::Mode::Hang => "Edge",
+                crate::player::Mode::Climb => "EdgeClimbUp",
+                crate::player::Mode::Leap => "JumpAcross",
+            };
+            sid(class)
+        });
         session.stage.player_locator = session.player.as_ref().map(|p| (p.position, glam::Quat::from_rotation_y(p.yaw).to_array()));
         session.stage.player_support = session.player.as_ref().and_then(|p| p.platform.map(|(b, _)| b).or(p.grip.and_then(|g| g.body)));
         if let Some((graph, table)) = session.npc_anim.as_mut() {
