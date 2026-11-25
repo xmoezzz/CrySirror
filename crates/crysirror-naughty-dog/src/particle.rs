@@ -26,9 +26,11 @@
 //! results become the shared emitter's birth ranges and colour-over-life
 //! curve, and the shared CPU simulation moves and draws the particles.
 //! Not reproduced (SATD-nd-retail-runtime): per-particle random sizes (the
-//! sample mean is used), the random atlas frame (frame 0), the emitter
-//! shapes' speed and spread terms and the force nodes (particles do not
-//! move), and the godray shader's scrolling fog-texture modulation.
+//! sample mean is used), the random atlas frame (frame 0), the volume
+//! shape's per-particle outward/around-axis directions (approximated by
+//! their dominant direction), force nodes of kinds 4, 6 and 7, and the
+//! godray shader's fog-texture term (it reaches only alpha, which the
+//! additive blend ignores).
 use crate::dc::{Dc, sid};
 use anyhow::{Result, ensure};
 use glam::{Mat4, Quat, Vec3};
@@ -106,6 +108,47 @@ pub enum Shape {
     Volume { kind: u8, offset: Vec3, size: Vec3 },
 }
 
+/// Birth velocity terms of the emitter shape (Maya emitter attributes,
+/// exported field by field). Point shape (kind 0, `#1d9d708e`): +0x04 mode
+/// (0 omni, 1 directional), +0x30 direction, +0x40 speed, +0x44 speed
+/// random, +0x48 spread (fraction of 180°). Volume shape (kind 1,
+/// `#aee75cf5`): +0x40 direction, +0x50 speed (a multiplier of the terms
+/// that follow), +0x54 speed random, +0x58 away-from-centre, +0x5c
+/// away-from-axis, +0x60 along-axis, +0x64 around-axis, +0x68 random
+/// direction. Fields may be curve or ramp references (`sub_FE8`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Launch {
+    pub speed: f32,
+    pub speed_random: f32,
+    pub direction: Vec3,
+    /// Point shape: spread as a fraction of 180°; 1 for omni.
+    pub spread: f32,
+    /// Volume shape terms.
+    pub away_from_center: f32,
+    pub away_from_axis: f32,
+    pub along_axis: f32,
+    pub around_axis: f32,
+    pub random_direction: f32,
+}
+
+/// A force node (+0xf0.., the first +0x9f; Maya fields): `{kind, 0,
+/// magnitude +0x8, …, max distance +0x10 (−1 unlimited), position +0x20,
+/// …, direction or frequency +0x50}`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Field {
+    /// Kind 2: drag of `magnitude`.
+    Drag(f32),
+    /// Kind 3: gravity along `direction`.
+    Gravity { magnitude: f32, direction: Vec3 },
+    /// Kind 8: turbulence of `magnitude` and `frequency`.
+    Turbulence { magnitude: f32, frequency: f32 },
+    /// Kind 5: a radial field about `position` within `max_distance`.
+    Radial { magnitude: f32, position: Vec3, max_distance: f32 },
+    /// Kinds 0, 1 (the always-first `{1, 1.0}` node), 4, 6, 7: not
+    /// mapped.
+    Other(u32),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effect {
     pub name: String,
@@ -123,6 +166,8 @@ pub struct Effect {
     /// Raw +0xc8 parameter.
     pub emission: f32,
     pub shape: Shape,
+    pub launch: Launch,
+    pub fields: Vec<Field>,
 }
 
 /// Per-particle state of the interpreter.
@@ -353,7 +398,41 @@ fn effect(dc: &Dc, p: u32) -> Result<Option<Effect>> {
     } else {
         Shape::Volume { kind: u8_at(dc, sh + 4)?, offset: vec3(dc, sh + 0x10)?, size: vec3(dc, sh + 0x30)? }
     };
+    let launch = if m.u32(sh)? == 0 {
+        let omni = u8_at(dc, sh + 4)? == 0;
+        Launch { speed: m.f32(sh + 0x40)?, speed_random: m.f32(sh + 0x44)?, direction: vec3(dc, sh + 0x30)?, spread: if omni { 1. } else { m.f32(sh + 0x48)? }, ..Default::default() }
+    } else {
+        let f = |o: u32| m.f32(sh + o);
+        Launch {
+            speed: f(0x50)?,
+            speed_random: f(0x54)?,
+            direction: vec3(dc, sh + 0x40)?,
+            spread: 0.,
+            away_from_center: f(0x58)?,
+            away_from_axis: f(0x5c)?,
+            along_axis: f(0x60)?,
+            around_axis: f(0x64)?,
+            random_direction: f(0x68)?,
+        }
+    };
+    let mut fields = Vec::new();
+    for k in 0..u32::from(u8_at(dc, p + 0x9f)?).min(7) {
+        let q = m.u32(p + 0xf0 + 4 * k)?;
+        if q == 0 {
+            continue;
+        }
+        let magnitude = m.f32(q + 8)?;
+        fields.push(match m.u32(q)? {
+            2 => Field::Drag(magnitude),
+            3 => Field::Gravity { magnitude, direction: vec3(dc, q + 0x50)? },
+            8 => Field::Turbulence { magnitude, frequency: m.f32(q + 0x50)? },
+            5 => Field::Radial { magnitude, position: vec3(dc, q + 0x20)?, max_distance: m.f32(q + 0x10)? },
+            other => Field::Other(other),
+        });
+    }
     Ok(Some(Effect {
+        launch,
+        fields,
         name: m.cstr(m.u32(p + 0x10)?).unwrap_or_default(),
         flags: m.u32(p + 0x44)?,
         orientation: u8_at(dc, p + 0x4c)?,
@@ -519,6 +598,33 @@ pub fn emitter(effect: &Effect, id: &str, placement: &Placement, texture: Option
         let rate = rate.min(1000.);
         (SpawnSpec { rate: rate.into(), bursts: vec![], duration: period, looping: true, burst_looping: true, auto_start: true }, ((rate * lifetime[1] * 1.25) as u32 + 4).clamp(1, 16384))
     };
+    // Birth velocity: the shape's speed terms (the volume terms by their
+    // dominant direction) and the force nodes as shared modules.
+    let l = &effect.launch;
+    let p0 = |v: f32| effect.param(v, 0.);
+    let (speed_scale, speed_random) = (p0(l.speed), p0(l.speed_random).abs());
+    let (direction, spread, base) = match &effect.shape {
+        Shape::Point { .. } => (l.direction, p0(l.spread).clamp(0., 1.) * 180., speed_scale),
+        Shape::Volume { .. } => {
+            let (away, along, random) = (p0(l.away_from_center) + p0(l.away_from_axis), p0(l.along_axis), p0(l.random_direction));
+            // Outward and random terms point anywhere; along-axis is +Y.
+            if along.abs() >= away.abs() + random.abs() { (Vec3::Y * along.signum(), 0., speed_scale * along.abs()) } else { (Vec3::Y, 180., speed_scale * (away.abs() + random.abs())) }
+        }
+    };
+    let speed = [(base - speed_random * 0.5).max(0.), base.max(0.) + speed_random * 0.5];
+    let direction = direction.try_normalize().unwrap_or(Vec3::Y);
+    for f in &effect.fields {
+        match *f {
+            Field::Drag(m) if p0(m) > 0. => update.insert(0, crysirror_vfx::Module::Drag { coefficient: p0(m).into() }),
+            Field::Gravity { magnitude, direction } => {
+                let a = direction.try_normalize().unwrap_or(-Vec3::Y) * p0(magnitude);
+                update.insert(0, crysirror_vfx::Module::Acceleration { value: a.to_array().into() });
+            }
+            Field::Turbulence { magnitude, frequency } if p0(magnitude) != 0. => update.insert(0, crysirror_vfx::Module::CurlNoise { strength: p0(magnitude).abs().into(), frequency: p0(frequency).abs().max(0.01).into() }),
+            Field::Radial { magnitude, position, max_distance } if p0(magnitude) != 0. => update.insert(0, crysirror_vfx::Module::Attractor { point: position.to_array().into(), strength: (-p0(magnitude)).into(), radius: (if max_distance > 0. { max_distance } else { 1000. }).into() }),
+            _ => {}
+        }
+    }
     let facing = match effect.orientation {
         1 => FacingMode::Axis { axis: [0., 1., 0.] },
         2..=4 => FacingMode::Velocity,
@@ -531,7 +637,7 @@ pub fn emitter(effect: &Effect, id: &str, placement: &Placement, texture: Option
         seed,
         capacity,
         spawn,
-        initialize: InitSpec { shape, lifetime, speed: [0., 0.], color, size, rotation, ..Default::default() },
+        initialize: InitSpec { shape, lifetime, speed, direction: direction.to_array().into(), spread_degrees: spread, color, size, rotation, ..Default::default() },
         update,
         render: RenderSpec::Sprite { texture, columns, rows: 1, frames: 1, fps: 0., soft_distance, blend, facing },
         ..Default::default()
@@ -556,6 +662,33 @@ mod tests {
     }
 
     #[test]
+    fn launch_and_fields_become_shared_motion() {
+        let e = Effect {
+            name: "dust".into(),
+            flags: 0,
+            orientation: 0,
+            material: 0,
+            slots: HashMap::new(),
+            constants: vec![],
+            curves: vec![],
+            ramps: vec![],
+            spawn: vec![],
+            update: vec![],
+            emission: 10.,
+            shape: Shape::Point { offset: Vec3::ZERO, life: Life::Fixed(2.) },
+            launch: Launch { speed: 2., speed_random: 1., direction: Vec3::Y, spread: 0.25, ..Default::default() },
+            fields: vec![Field::Drag(3.), Field::Gravity { magnitude: 0.5, direction: Vec3::new(0., -1., 0.) }, Field::Other(1)],
+        };
+        let placement = Placement { position: Vec3::ZERO, rotation: Quat::IDENTITY, color: [1.; 3], alpha: 1., sprite_scale: 1., effect_scale: Vec3::ONE };
+        let (spec, _) = emitter(&e, "dust", &placement, None, crysirror_vfx::BlendMode::Additive, 0., 1);
+        assert_eq!(spec.initialize.speed, [1.5, 2.5]);
+        assert_eq!(spec.initialize.spread_degrees, 45.);
+        assert!(spec.update.iter().any(|m| matches!(m, crysirror_vfx::Module::Drag { .. })));
+        assert!(spec.update.iter().any(|m| matches!(m, crysirror_vfx::Module::Acceleration { value } if *value == [0., -0.5, 0.].into())));
+        crysirror_vfx::SystemSpec { emitters: vec![spec], ..Default::default() }.compile().unwrap();
+    }
+
+    #[test]
     fn program_random_repeats_per_particle() {
         // r0 = 1, r1 = 3, r2 = rand(r0, r1), attr[0] = r2.
         let e = Effect {
@@ -571,6 +704,8 @@ mod tests {
             update: vec![],
             emission: 0.,
             shape: Shape::Point { offset: Vec3::ZERO, life: Life::Infinite },
+            launch: Launch::default(),
+            fields: vec![],
         };
         let a = e.birth(1234);
         let b = e.birth(1234);

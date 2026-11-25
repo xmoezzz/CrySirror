@@ -34,6 +34,20 @@ fn main() -> Result<()> {
                     println!("  colour over life {:?}", curve.keys.iter().map(|k| (k.time, k.value)).collect::<Vec<_>>());
                 }
             }
+            // Motion probe: position and velocity at birth and after the
+            // update program at ages 0.5 s and 1 s.
+            let probe = |p: &crysirror_naughty_dog::particle::Particle, n: &str| e.slot(n).and_then(|s| p.attrs.get(s)).copied().unwrap_or(f32::NAN);
+            let vec = |p: &crysirror_naughty_dog::particle::Particle, k: &str| [probe(p, &format!("{k}X")), probe(p, &format!("{k}Y")), probe(p, &format!("{k}Z"))];
+            for seed in [1u16, 777] {
+                let born = e.birth(seed);
+                let mut at = Vec::new();
+                for age in [0.5f32, 1.] {
+                    let mut q = born.clone();
+                    e.run(&e.update, &mut q, crysirror_naughty_dog::particle::Clock { age, effect_time: age, dt: 1. / 30. });
+                    at.push((age, vec(&q, "pos"), vec(&q, "vel")));
+                }
+                println!("  motion seed {seed}: born pos {:?} vel {:?}; {:?}", vec(&born, "pos"), vec(&born, "vel"), at);
+            }
             println!("  frame x {:?} y {:?} t {:?}", frame.x_axis.truncate(), frame.y_axis.truncate(), frame.w_axis.truncate());
         }
     }
