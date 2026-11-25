@@ -31,6 +31,8 @@ pub mod player_natives;
 pub mod object_natives;
 #[path = "ss_sound.rs"]
 pub mod sound_natives;
+#[path = "ss_vehicle.rs"]
+pub mod vehicle_natives;
 
 /// A script setting override (`sub_15F480`): its value and the frame it
 /// expires after.
@@ -199,6 +201,13 @@ pub trait World {
         false
     }
     fn stop_speaking(&mut self, _speaker: u32) {}
+    /// The vehicles (tanks, helicopters) by object name.
+    fn vehicles(&mut self) -> Option<&mut crate::vehicle::Vehicles> {
+        None
+    }
+    fn vehicles_ref(&self) -> Option<&crate::vehicle::Vehicles> {
+        None
+    }
     /// Start sound `id`; returns its handle (0 when nothing plays).
     fn play_sound(&mut self, _id: u32, _at: sound_natives::SoundAt, _volume: f32, _pitch: f32) -> u32 {
         0
@@ -320,6 +329,8 @@ enum Wait {
     Npc(u32),
     /// Until `speaker` stops speaking.
     Speech(u32),
+    /// Until vehicle `name`'s order completes.
+    Vehicle(u32),
 }
 
 struct Track {
@@ -608,7 +619,7 @@ impl Runtime {
             Wait::Signal(s) => self.inner.signals.contains(s),
             Wait::Var { process, var, value } => self.inner.procs.get(*process).is_none_or(|p| p.vars.get(var).copied().unwrap_or(0) == *value),
             // Resolved against the world in `run_track`.
-            Wait::Animation(_) | Wait::Npc(_) | Wait::Speech(_) => false,
+            Wait::Animation(_) | Wait::Npc(_) | Wait::Speech(_) | Wait::Vehicle(_) => false,
         }
     }
 
@@ -619,6 +630,7 @@ impl Runtime {
             let done = match t.wait {
                 Wait::Animation(object) => world.animation_phase(object).is_none(),
                 Wait::Speech(speaker) => !world.speaking(speaker),
+                Wait::Vehicle(name) => world.vehicles_ref().and_then(|v| v.vehicles.get(&name)).is_none_or(|v| v.order.is_none()),
                 Wait::Npc(name) => world.agents_ref().and_then(|a| a.get(name)).is_none_or(|a| a.order.is_none()),
                 ref w => self.wait_done(w, now),
             };
@@ -918,6 +930,9 @@ impl Natives for Ctx<'_> {
             return Ok(reply);
         }
         if let Some(reply) = self.sound_native(dc, name, a, n)? {
+            return Ok(reply);
+        }
+        if let Some(reply) = self.vehicle_native(dc, name, a, n)? {
             return Ok(reply);
         }
         match name {

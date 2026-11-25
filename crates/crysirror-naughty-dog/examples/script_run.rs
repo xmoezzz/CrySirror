@@ -48,6 +48,7 @@ struct Stub {
     spawners: HashMap<u32, scene::SpawnerRecord>,
     spawned: std::collections::HashSet<u32>,
     agents: crysirror_naughty_dog::npc::Agents,
+    vehicles: crysirror_naughty_dog::vehicle::Vehicles,
 }
 impl World for Stub {
     fn now(&self) -> f64 {
@@ -81,6 +82,12 @@ impl World for Stub {
     }
     fn agents_ref(&self) -> Option<&crysirror_naughty_dog::npc::Agents> {
         Some(&self.agents)
+    }
+    fn vehicles(&mut self) -> Option<&mut crysirror_naughty_dog::vehicle::Vehicles> {
+        Some(&mut self.vehicles)
+    }
+    fn vehicles_ref(&self) -> Option<&crysirror_naughty_dog::vehicle::Vehicles> {
+        Some(&self.vehicles)
     }
     /// No nav meshes are loaded headless: a straight path.
     fn nav_path(&self, from: [f32; 3], to: [f32; 3]) -> Option<Vec<[f32; 3]>> {
@@ -172,6 +179,9 @@ fn all_tasks(modules: &Modules, paks: &ArchiveMount, all: &std::collections::BTr
         for f in 0..frames {
             world.time = f64::from(f) / 30.;
             world.agents.step(1. / 30.);
+            for v in world.vehicles.vehicles.values_mut() {
+                v.step(1. / 30., &|_| None, &|_, _| None);
+            }
             if let Err(e) = game.rt.tick(&mut world).and_then(|_| game.load_requested(modules, &mut world)) {
                 fault = Some(format!("{e:#}"));
                 break;

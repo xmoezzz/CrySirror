@@ -295,6 +295,8 @@ struct Stage {
     inactive_splines: HashSet<u32>,
     /// A camera shake: amplitude (metres) and its start.
     shake: Option<(f32, f64)>,
+    /// Tanks and helicopters scripts command.
+    vehicles: crate::vehicle::Vehicles,
     /// The player's native state class (`player-in-state?`).
     player_state: Option<u32>,
     /// `kill-player-no-anim` requested: ragdoll, death camera, delay.
@@ -556,6 +558,25 @@ impl Stage {
                 }
             }
         }
+    }
+
+    /// Step the vehicles' orders and move their objects.
+    fn step_vehicles(&mut self, seconds: f32) {
+        let mut vehicles = std::mem::take(&mut self.vehicles);
+        for (&name, v) in &mut vehicles.vehicles {
+            let before = (v.position, v.yaw);
+            let locate = |o: u32| World::locator(self, o).map(|(p, _)| p);
+            let spline = |s: u32, d: f32| World::spline_at(self, s, d).map(|(p, _)| (p, self.splines.get(&s).map_or(0., |s| s.length())));
+            v.step(seconds, &locate, &spline);
+            if (v.position, v.yaw) != before {
+                let q = glam::Quat::from_rotation_y(v.yaw);
+                self.poses.insert(name, glam::Mat4::from_rotation_translation(q, glam::Vec3::from_array(v.position)));
+                for e in self.entities.get(&name).into_iter().flatten() {
+                    self.ops.push(json!({"op": "set_transform", "id": e, "transform": {"translation": v.position, "rotation_degrees": [0.0, v.yaw.to_degrees(), 0.0], "scale": [1.0, 1.0, 1.0]}}));
+                }
+            }
+        }
+        self.vehicles = vehicles;
     }
 
     /// Step the agents' orders and move their objects.
@@ -893,6 +914,12 @@ impl World for Stage {
     }
     fn agents_ref(&self) -> Option<&crate::npc::Agents> {
         Some(&self.agents)
+    }
+    fn vehicles(&mut self) -> Option<&mut crate::vehicle::Vehicles> {
+        Some(&mut self.vehicles)
+    }
+    fn vehicles_ref(&self) -> Option<&crate::vehicle::Vehicles> {
+        Some(&self.vehicles)
     }
     fn nav_path(&self, from: [f32; 3], to: [f32; 3]) -> Option<Vec<[f32; 3]>> {
         let path = self.navigation.path(glam::Vec3::from_array(from), glam::Vec3::from_array(to))?;
@@ -1550,6 +1577,7 @@ impl NaughtyDogVm {
         session.stage.npc_spawners.clear();
         session.stage.npc_dead.clear();
         session.stage.agents = Default::default();
+        session.stage.vehicles = Default::default();
         session.stage.splines.clear();
         for (_, light) in session.stage.lights.drain() {
             if light.published.is_some() {
@@ -3416,6 +3444,7 @@ impl NaughtyDogVm {
             }
         }
         session.stage.step_agents(seconds as f32);
+        session.stage.step_vehicles(seconds as f32);
         // Region enter/exit scripts for the player (`sub_115828`).
         if session.player.is_some() {
             let player = sid("player");

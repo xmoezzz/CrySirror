@@ -40,7 +40,7 @@ impl Ctx<'_> {
     fn object_arg(&self, a: &[u32; MAX_ARGS], n: usize, i: usize) -> u32 {
         if n > i { self.object(a[i]) } else { self.object(sid("self")) }
     }
-    fn frame(dc: &Dc, at: u32) -> Result<([f32; 3], [f32; 4])> {
+    pub(super) fn frame(dc: &Dc, at: u32) -> Result<([f32; 3], [f32; 4])> {
         let f = |k: u32| dc.mem.f32(at + 4 * k);
         let q = [f(4)?, f(5)?, f(6)?, f(7)?];
         Ok(([f(0)?, f(1)?, f(2)?], if q.iter().all(|v| *v == 0.) { [0., 0., 0., 1.] } else { q }))
