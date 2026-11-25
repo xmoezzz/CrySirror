@@ -284,3 +284,21 @@ root motion).
 | `string<-string-id` / `print-symbol` | the `StringId` table name; ids it lacks read `(#f)`, a null id `(null)` |
 | `get-difficulty` | the profile's difficulty (+0x1DE0; 2 in multiplayer); 1 by default |
 | `random-integer` (n) | ⌊random-float × n⌋ |
+
+## Object natives
+
+`src/ss_object.rs`. A process name stands for its spawner and `self` for the caller's.
+
+| Native | Native rule |
+| --- | --- |
+| `wait-spawn-entity`, `spawn-entity-at` (name locator), `wait-spawn-entity-at` | `sub_150008`; spawning completes in the frame here, so the wait forms do not suspend |
+| `entity-auto-spawn-once` | the spawner spawns once (`sub_7E5CC`); 1 when it exists |
+| `select-best-schema-spawner` (spawner index) | the existing spawners named by tag 0x618B27B8 (hard/crushing lists 0xD25696B0/0x931A2C11 only in multiplayer), `index` modulo their count |
+| `make-inert` | the caller's object stops (vtable +0x94): no collision, no script clip |
+| `look-at-object` (character target attach [blend]) / `clear-look-at` | 1 when both objects exist |
+| `set-mesh-visible` (object mesh on?) | exactly three arguments |
+| `camera-shake` (type amount [name]) | 0x94F866AC stops shakes, 0xCF489DC4 a procedural shake (`sub_36611C`), `grenade-shake` plays camera clip 0x7F36E1FE (`sub_3669C8`) |
+| `set-collision-layer` | the layer index of the name (`sub_377F48`) |
+| `get-object-health` | breakables 0x8B7DE21A: hit points / maximum; characters: health component vtable +0x3C; `RailVehicle`: +0x1B4 |
+| `set-animation-speed` (object speed [layer 6]) | event 0xAF4A1F1F; the played clip time stays continuous |
+| `spline-activate` (spline on?) | flag bit 61 marks the spline inactive; 1 when found |

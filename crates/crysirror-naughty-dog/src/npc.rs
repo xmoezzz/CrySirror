@@ -169,6 +169,9 @@ pub struct Agent {
     pub ap: Option<u32>,
     /// Current ground speed (presentation).
     pub speed: f32,
+    /// Health fraction (`get-object-health`: health component vtable
+    /// +0x3C).
+    pub health: f32,
 }
 
 impl Agent {
@@ -196,6 +199,7 @@ impl Agent {
             order: None,
             ap: None,
             speed: 0.,
+            health: 1.,
         }
     }
 

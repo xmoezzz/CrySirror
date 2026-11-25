@@ -27,6 +27,8 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 mod npc_natives;
 #[path = "ss_player.rs"]
 pub mod player_natives;
+#[path = "ss_object.rs"]
+pub mod object_natives;
 
 /// A script setting override (`sub_15F480`): its value and the frame it
 /// expires after.
@@ -185,6 +187,39 @@ pub trait World {
     /// Move water object `name` to its spawner plus `offset`. False when
     /// unknown.
     fn set_water_offset(&mut self, _name: u32, _offset: [f32; 3]) -> bool {
+        false
+    }
+    /// Every value spawner `spawner` has for tag `prop`.
+    fn properties(&self, spawner: u32, prop: u32) -> Vec<Property> {
+        self.property(spawner, prop).into_iter().collect()
+    }
+    /// Move spawned object `name` to a frame.
+    fn place(&mut self, _name: u32, _position: [f32; 3], _rotation: [f32; 4]) {}
+    /// Stop object `name` acting; false when unknown.
+    fn make_inert(&mut self, _name: u32) -> bool {
+        false
+    }
+    /// Point `character`'s head at `(target, attach point, blend)`, or
+    /// stop (`None`).
+    fn look_at(&mut self, _character: u32, _target: Option<(u32, u32, u32)>) {}
+    fn set_mesh_visible(&mut self, _object: u32, _mesh: u32, _visible: bool) -> bool {
+        false
+    }
+    fn camera_shake(&mut self, _shake: object_natives::Shake) {}
+    fn set_collision_layer(&mut self, _object: u32, _layer: u32) -> bool {
+        false
+    }
+    /// Health fraction of a breakable or rail vehicle.
+    fn object_health(&self, _object: u32) -> Option<f32> {
+        None
+    }
+    fn player_health(&self) -> f32 {
+        1.
+    }
+    fn set_animation_speed(&mut self, _object: u32, _speed: f32) -> bool {
+        false
+    }
+    fn activate_spline(&mut self, _spline: u32, _active: bool) -> bool {
         false
     }
     /// The id of the object the player carries.
@@ -838,6 +873,9 @@ impl Natives for Ctx<'_> {
             return Ok(reply);
         }
         if let Some(reply) = self.player_native(dc, name, a, n)? {
+            return Ok(reply);
+        }
+        if let Some(reply) = self.object_native(dc, name, a, n)? {
             return Ok(reply);
         }
         match name {

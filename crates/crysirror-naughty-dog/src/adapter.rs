@@ -251,6 +251,20 @@ struct Stage {
     npc_dead: HashSet<u32>,
     /// The live NPCs' agent state (the NPC manager's objects).
     agents: crate::npc::Agents,
+    /// Objects made inert (no collision, no script animation).
+    inert: HashSet<u32>,
+    /// Look-at targets by character: target, attach point, blend.
+    look_at: HashMap<u32, (u32, u32, u32)>,
+    /// Sub-meshes scripts hid, by object.
+    hidden_meshes: HashMap<u32, HashSet<u32>>,
+    /// Collision layers scripts set, by object.
+    collision_layers: HashMap<u32, u32>,
+    /// Animation rates by object (`set-animation-speed`).
+    animation_speeds: HashMap<u32, f32>,
+    /// Splines scripts deactivated.
+    inactive_splines: HashSet<u32>,
+    /// A camera shake: amplitude (metres) and its start.
+    shake: Option<(f32, f64)>,
     /// The player's native state class (`player-in-state?`).
     player_state: Option<u32>,
     /// `kill-player-no-anim` requested: ragdoll, death camera, delay.
@@ -346,6 +360,17 @@ struct ScriptAnimation {
     root: Option<(Vec<(glam::Vec3, glam::Quat)>, f32, glam::Mat4)>,
     /// The clip could not be found or decoded: the animation ends at once.
     failed: bool,
+    /// Playback rate (`set-animation-speed`) since `start`, and the clip
+    /// seconds played before it.
+    speed: f32,
+    base: f32,
+}
+
+impl ScriptAnimation {
+    /// Clip seconds played at `now`.
+    fn elapsed(&self, now: f64) -> f32 {
+        self.base + (now - self.start) as f32 * self.speed
+    }
 }
 
 /// Default blend time of script animations without a blend option.
@@ -677,6 +702,90 @@ impl World for Stage {
     fn player_state(&self) -> Option<u32> {
         self.player_state
     }
+    fn properties(&self, spawner: u32, prop: u32) -> Vec<Property> {
+        self.spawners.get(&spawner).map(|s| s.properties.iter().filter(|(k, _)| *k == prop).map(|(_, v)| v.clone()).collect()).unwrap_or_default()
+    }
+    fn place(&mut self, name: u32, position: [f32; 3], rotation: [f32; 4]) {
+        let q = glam::Quat::from_array(rotation).normalize();
+        let t = glam::Vec3::from_array(position);
+        self.poses.insert(name, glam::Mat4::from_rotation_translation(q, t));
+        if let Some(agent) = self.agents.get_mut(name) {
+            agent.position = position;
+            let f = q * glam::Vec3::Z;
+            agent.yaw = f.x.atan2(f.z);
+        }
+        let (x, y, z) = q.to_euler(glam::EulerRot::XYZ);
+        for e in self.entities.get(&name).into_iter().flatten() {
+            self.ops.push(json!({"op": "set_transform", "id": e, "transform": {"translation": position, "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": [1.0, 1.0, 1.0]}}));
+        }
+    }
+    fn make_inert(&mut self, name: u32) -> bool {
+        if !self.entities.contains_key(&name) && !self.spawners.contains_key(&name) {
+            return false;
+        }
+        self.inert.insert(name);
+        self.animations.remove(&name);
+        true
+    }
+    fn look_at(&mut self, character: u32, target: Option<(u32, u32, u32)>) {
+        match target {
+            Some(t) => self.look_at.insert(character, t),
+            None => self.look_at.remove(&character),
+        };
+    }
+    /// Recorded per object; the shared scene has no per-node visibility
+    /// for the entity's model, so the mesh stays drawn.
+    fn set_mesh_visible(&mut self, object: u32, mesh: u32, visible: bool) -> bool {
+        if !self.entities.contains_key(&object) {
+            return false;
+        }
+        let hidden = self.hidden_meshes.entry(object).or_default();
+        if visible { hidden.remove(&mesh) } else { hidden.insert(mesh) };
+        true
+    }
+    fn camera_shake(&mut self, shake: crate::ss::object_natives::Shake) {
+        use crate::ss::object_natives::{GRENADE_SHAKE_CLIP, Shake};
+        match shake {
+            Shake::Stop => self.shake = None,
+            // Amplitude of the procedural shake (not native: the shake
+            // record's parameters are runtime-built by `sub_364890`).
+            Shake::Procedural { amount } => self.shake = Some((0.05 * amount.clamp(0., 10.), self.now)),
+            Shake::Grenade { amount } => {
+                if amount > 0. {
+                    World::camera_animation(self, GRENADE_SHAKE_CLIP, GRENADE_SHAKE_CLIP, 0.);
+                }
+            }
+        }
+    }
+    fn set_collision_layer(&mut self, object: u32, layer: u32) -> bool {
+        if !self.entities.contains_key(&object) {
+            return false;
+        }
+        self.collision_layers.insert(object, layer);
+        true
+    }
+    fn set_animation_speed(&mut self, object: u32, speed: f32) -> bool {
+        if !self.entities.contains_key(&object) && object != sid("player") {
+            return false;
+        }
+        let speed = if speed.is_finite() { speed.max(0.) } else { 1. };
+        self.animation_speeds.insert(object, speed);
+        let now = self.now;
+        if let Some(a) = self.animations.get_mut(&object) {
+            // Keep the played time continuous across the change.
+            a.base = a.elapsed(now);
+            a.start = now;
+            a.speed = speed;
+        }
+        true
+    }
+    fn activate_spline(&mut self, spline: u32, active: bool) -> bool {
+        if !self.splines.contains_key(&spline) {
+            return false;
+        }
+        if active { self.inactive_splines.remove(&spline) } else { self.inactive_splines.insert(spline) };
+        true
+    }
     fn kill_player(&mut self, ragdoll: bool, death_camera: bool, delay: f32) {
         self.log(format!("kill-player-no-anim ragdoll={ragdoll} death-cam={death_camera} delay={delay}"));
         self.player_killed = Some((ragdoll, death_camera, delay));
@@ -784,7 +893,7 @@ impl World for Stage {
             return false;
         }
         self.held.remove(&object);
-        self.animations.insert(object, ScriptAnimation { clip, options: options.clone(), start: self.now, duration: None, source: None, root: None, failed: false });
+        self.animations.insert(object, ScriptAnimation { clip, options: options.clone(), start: self.now, duration: None, source: None, root: None, failed: false, speed: self.animation_speeds.get(&object).copied().unwrap_or(1.), base: 0. });
         true
     }
     fn animation_phase(&self, object: u32) -> Option<f32> {
@@ -795,7 +904,7 @@ impl World for Stage {
         match a.duration {
             None => Some(0.),
             Some(d) => {
-                let t = (self.now - a.start) as f32;
+                let t = a.elapsed(self.now);
                 (t < d).then(|| if d > 0. { t / d } else { 1. })
             }
         }
@@ -2080,6 +2189,26 @@ impl NaughtyDogVm {
         Ok(())
     }
 
+    /// Offset the camera by the procedural shake: a decaying sum of
+    /// sinusoids over 0.6 s (the native shake curves are runtime-built).
+    fn shake_camera(session: &mut Session, camera: &mut serde_json::Value) {
+        const SHAKE_SECONDS: f32 = 0.6;
+        let Some((amplitude, start)) = session.stage.shake else { return };
+        let t = (session.stage.now - start) as f32;
+        if t >= SHAKE_SECONDS {
+            session.stage.shake = None;
+            return;
+        }
+        let k = amplitude * (1. - t / SHAKE_SECONDS).powi(2);
+        let offset = glam::Vec3::new((t * 71.).sin() + 0.5 * (t * 113.).sin(), (t * 89.).sin(), (t * 97.).cos() * 0.5) * k;
+        for key in ["eye", "target"] {
+            if let Some(a) = camera["camera"][key].as_array() {
+                let v = glam::Vec3::from_array([0, 1, 2].map(|i| a.get(i).and_then(|v| v.as_f64()).unwrap_or(0.) as f32)) + offset;
+                camera["camera"][key] = json!(v.to_array());
+            }
+        }
+    }
+
     /// Queue the shared emitters of an effect group's descriptors at
     /// `placement` under `owner` (a spawner or script handle); returns how
     /// many were placed.
@@ -2210,6 +2339,7 @@ impl NaughtyDogVm {
                     a.duration = Some(lib.seconds);
                     a.source = Some((lib.asset.clone(), lib.name.clone()));
                     a.start = session.stage.now;
+                    a.base = 0.;
                     // Clip space in the world: the locator stands where the
                     // clip's `apReference` starts; without one, the root
                     // starts where the entity stands.
@@ -2242,7 +2372,7 @@ impl NaughtyDogVm {
                 }
                 continue;
             };
-            let t = (now - a.start) as f32;
+            let t = a.elapsed(now);
             if t >= d {
                 finished.push(*object);
                 let entities = Self::animation_entities(session, *object);
@@ -2976,6 +3106,7 @@ impl NaughtyDogVm {
                 None => Self::follow(p, &session.ground, seconds),
             };
             Self::animate_camera(session, &mut camera);
+            Self::shake_camera(session, &mut camera);
             let eye = camera["camera"]["eye"].as_array().map(|a| [0, 1, 2].map(|k| a.get(k).and_then(|v| v.as_f64()).unwrap_or(0.) as f32));
             // Crossing into another render-settings region changes the
             // environment.
@@ -3063,7 +3194,7 @@ impl NaughtyDogVm {
         session.stage.publish_lights();
         // Props collide while spawned.
         for (name, ids) in &session.stage.entities {
-            let on = session.stage.visible.contains(name);
+            let on = session.stage.visible.contains(name) && !session.stage.inert.contains(name);
             for id in ids {
                 session.ground.enable_body(*id, on);
             }

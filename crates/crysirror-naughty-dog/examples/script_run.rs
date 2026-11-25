@@ -92,6 +92,9 @@ impl World for Stub {
     fn property(&self, spawner: u32, prop: u32) -> Option<Property> {
         self.spawners.get(&spawner)?.properties.iter().find(|(k, _)| *k == prop).map(|(_, v)| v.clone())
     }
+    fn properties(&self, spawner: u32, prop: u32) -> Vec<Property> {
+        self.spawners.get(&spawner).map(|s| s.properties.iter().filter(|(k, _)| *k == prop).map(|(_, v)| v.clone()).collect()).unwrap_or_default()
+    }
     fn fade(&mut self, color: [f32; 3], alpha: f32, seconds: f32) {
         println!("  [fade] {color:?} {alpha} over {seconds}s");
     }
