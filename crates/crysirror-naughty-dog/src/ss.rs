@@ -203,6 +203,13 @@ pub trait World {
         false
     }
     fn stop_speaking(&mut self, _speaker: u32) {}
+    /// The script's render-settings record (and a second one with its
+    /// blend), or `None` for the regions' choice.
+    fn set_render_settings(&mut self, _choice: Option<(u32, Option<(u32, f32)>)>) {}
+    /// Seconds of the current frame.
+    fn frame_seconds(&self) -> f32 {
+        FRAME_SECONDS
+    }
     /// An explosion of `kind` at a frame.
     fn spawn_explosion(&mut self, _kind: u32, _position: [f32; 3], _rotation: [f32; 4]) {}
     /// Show text `id` as an on-screen message.
@@ -354,6 +361,8 @@ struct Group {
     kind: u32,
     event: u32,
     args: Vec<u32>,
+    /// The process that sent the event (`event-sender`).
+    sender: Option<u32>,
     tracks: Vec<Track>,
 }
 
@@ -365,7 +374,7 @@ pub struct Process {
     pub state: Option<u32>,
     pub vars: HashMap<u32, u32>,
     groups: Vec<Group>,
-    events: VecDeque<(u32, Vec<u32>)>,
+    events: VecDeque<(u32, Vec<u32>, Option<u32>)>,
     pending_go: Option<u32>,
     pub dead: bool,
     /// When the current state began (`wait-until-frame` counts from it).
@@ -474,7 +483,7 @@ fn group(dc: &Dc, kind: u32, event: u32, args: Vec<u32>, g: u32) -> Result<Group
             Ok(Track { lambdas: dc.mem.u32(t + 8)?, count: dc.mem.u32(t + 4)?, next: 0, thread: None, wait: Wait::None, jump: None })
         })
         .collect::<Result<_>>()?;
-    Ok(Group { kind, event, args, tracks })
+    Ok(Group { kind, event, args, sender: None, tracks })
 }
 
 impl Runtime {
@@ -571,10 +580,11 @@ impl Runtime {
             return Ok(());
         }
         // Events queued for this process start their handler groups.
-        while let Some((event, args)) = self.inner.procs[i].events.pop_front() {
+        while let Some((event, args, sender)) = self.inner.procs[i].events.pop_front() {
             if let Some(state) = self.inner.procs[i].state {
                 if let Some(g) = block(&self.dc, state, KIND_EVENT, event)? {
-                    let g = group(&self.dc, KIND_EVENT, event, args, g)?;
+                    let mut g = group(&self.dc, KIND_EVENT, event, args, g)?;
+                    g.sender = sender;
                     self.inner.procs[i].groups.retain(|x| !(x.kind == KIND_EVENT && x.event == event));
                     self.inner.procs[i].groups.push(g);
                 }
@@ -840,7 +850,8 @@ impl Ctx<'_> {
         if event == sid("go") {
             self.inner.procs[p].pending_go = args.first().copied();
         } else {
-            self.inner.procs[p].events.push_back((event, args));
+            let sender = self.proc.map(|q| self.inner.procs[q].name);
+            self.inner.procs[p].events.push_back((event, args, sender));
         }
         1
     }

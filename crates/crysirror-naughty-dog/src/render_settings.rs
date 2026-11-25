@@ -113,3 +113,47 @@ pub fn read(dc: &Dc, name: u32) -> Result<Option<RenderSettings>> {
         },
     }))
 }
+
+fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)
+}
+
+impl RenderSettings {
+    /// Field-wise blend toward `other` (`set-render-settings a b t`,
+    /// `sub_127BA4`).
+    pub fn blend(&self, other: &Self, t: f32) -> Self {
+        let m = |a: f32, b: f32| a + (b - a) * t;
+        let (a, b) = (&self.tonemap, &other.tonemap);
+        let (fa, fb) = (&self.fog, &other.fog);
+        Self {
+            ambient_scale: m(self.ambient_scale, other.ambient_scale),
+            tint: mix3(self.tint, other.tint, t),
+            ambient: mix3(self.ambient, other.ambient, t),
+            light_scale: mix3(self.light_scale, other.light_scale, t),
+            shadow_colour: mix3(self.shadow_colour, other.shadow_colour, t),
+            fog: Fog {
+                colour: mix3(fa.colour, fb.colour, t),
+                multiplier: m(fa.multiplier, fb.multiplier),
+                distance_start: m(fa.distance_start, fb.distance_start),
+                distance_range: m(fa.distance_range, fb.distance_range),
+                height_start: m(fa.height_start, fb.height_start),
+                height_range: m(fa.height_range, fb.height_range),
+                density: m(fa.density, fb.density),
+            },
+            tonemap: Tonemap {
+                light_range: [m(a.light_range[0], b.light_range[0]), m(a.light_range[1], b.light_range[1])],
+                manual_exposure: m(a.manual_exposure, b.manual_exposure),
+                adaption_time: m(a.adaption_time, b.adaption_time),
+                set_point: m(a.set_point, b.set_point),
+                white: m(a.white, b.white),
+                shoulder: m(a.shoulder, b.shoulder),
+                linear: m(a.linear, b.linear),
+                angle: m(a.angle, b.angle),
+                toe: m(a.toe, b.toe),
+                toe_numerator: m(a.toe_numerator, b.toe_numerator),
+                toe_denominator: m(a.toe_denominator, b.toe_denominator),
+                exposure_bias: m(a.exposure_bias, b.exposure_bias),
+            },
+        }
+    }
+}

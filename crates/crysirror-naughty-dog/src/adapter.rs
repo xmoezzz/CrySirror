@@ -295,6 +295,10 @@ struct Stage {
     inactive_splines: HashSet<u32>,
     /// A camera shake: amplitude (metres) and its start.
     shake: Option<(f32, f64)>,
+    /// The render-settings record scripts chose (`set-render-settings`).
+    render_override: Option<(u32, Option<(u32, f32)>)>,
+    /// Seconds of the frame being run.
+    frame_seconds: f32,
     /// Tanks and helicopters scripts command.
     vehicles: crate::vehicle::Vehicles,
     /// The player's native state class (`player-in-state?`).
@@ -823,6 +827,12 @@ impl World for Stage {
         if near < 40. {
             World::camera_shake(self, crate::ss::object_natives::Shake::Procedural { amount: (1. - near / 40.) * 2. });
         }
+    }
+    fn set_render_settings(&mut self, choice: Option<(u32, Option<(u32, f32)>)>) {
+        self.render_override = choice;
+    }
+    fn frame_seconds(&self) -> f32 {
+        if self.frame_seconds > 0. { self.frame_seconds } else { 1. / 30. }
     }
     fn message(&mut self, id: u32) {
         self.log(format!("message {id:#010x}"));
@@ -1854,6 +1864,9 @@ impl NaughtyDogVm {
     /// Regions choosing their record by script lambda (`train-wreck`) are
     /// not evaluated.
     fn render_settings_name(session: &Session) -> Option<u32> {
+        if let Some((a, b)) = session.stage.render_override {
+            return Some(a ^ b.map_or(0, |(b, t)| b.rotate_left(7) ^ t.to_bits()));
+        }
         let regions = &session.stage.regions;
         let eye = session.stage.camera_eye?;
         regions.iter().find(|(r, _, _)| r.render_settings.is_some() && session.stage.holds_point(r, eye)).and_then(|(r, _, _)| r.render_settings)
@@ -1861,6 +1874,14 @@ impl NaughtyDogVm {
 
     fn render_settings(session: &Session) -> Option<crate::render_settings::RenderSettings> {
         let dc = &session.game.as_ref()?.rt.dc;
+        // A script's record (priority 140) wins over the regions'.
+        if let Some((a, b)) = session.stage.render_override {
+            let first = crate::render_settings::read(dc, a).ok().flatten()?;
+            return Some(match b.and_then(|(b, t)| crate::render_settings::read(dc, b).ok().flatten().map(|s| (s, t))) {
+                Some((second, t)) => first.blend(&second, t.clamp(0., 1.)),
+                None => first,
+            });
+        }
         let regions = &session.stage.regions;
         // Render-settings regions are `camera` regions: tested at the
         // camera (the eye of the last presented camera).
@@ -3466,6 +3487,7 @@ impl NaughtyDogVm {
                 }
             }
         }
+        session.stage.frame_seconds = seconds as f32;
         session.stage.step_agents(seconds as f32);
         session.stage.step_vehicles(seconds as f32);
         // Region enter/exit scripts for the player (`sub_115828`).
