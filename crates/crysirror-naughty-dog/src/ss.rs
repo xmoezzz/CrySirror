@@ -210,6 +210,9 @@ pub trait World {
     fn frame_seconds(&self) -> f32 {
         FRAME_SECONDS
     }
+    /// Show HUD element `name` (`display-button-hud`) for this frame;
+    /// `None` hides the hint element (`hide-hint`).
+    fn display_hud(&mut self, _name: Option<u32>) {}
     /// An explosion of `kind` at a frame.
     fn spawn_explosion(&mut self, _kind: u32, _position: [f32; 3], _rotation: [f32; 4]) {}
     /// Show text `id` as an on-screen message.

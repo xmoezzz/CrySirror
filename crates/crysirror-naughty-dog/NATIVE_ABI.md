@@ -344,3 +344,7 @@ The debug printer `sub_62EC50` names the feature flag bits. Edges: `EdgeNoSwing`
 ## Water
 
 `WATER_DATA` package items (`src/water.rs`): +0x4 count, +0x8 records of 0x70 bytes: +0x1C surface plane normal, +0x28 plane constant (`n·p = d`), +0x2C bounding box minimum, +0x38 maximum. `dig-02-ship-water` holds six bodies (the first level at y = −103.5, the second tilted, normal (0.038, 0.999, −0.0096)).
+
+## HUD
+
+`hud-settings.bin` holds 32 `hud-button` records (`src/hud.rs`): `{x, y, w, h}` floats on the 1280×720 screen, +0x28 a text catalog key (`EXPLOSIVE_1`, `HINT_HOLD`, `OBJECTIVE`, …), +0x30/+0x34 text offset, +0x38 RGBA colour, +0x48 an array of material paths (`general/hud/buttons/circle-button-pulse-small/Default`). The materials are in `pak22/hud.pak` (`MATERIAL_TABLE_1`, lowercase `…/default`): pass 0 holds a colour texture and a grey mask. `display-button-hud` (element) shows an element (`sub_8A26D0`); `hide-hint` clears the hint and sets script setting 0x01827BE9 (`sub_14209C`).

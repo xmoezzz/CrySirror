@@ -57,6 +57,9 @@ const UI_LAYER: u32 = 0x4e44_0010;
 const MENU_LEVEL: &str = "menu-temple";
 /// Front-end layers: logo, title and up to ten buttons.
 const UI_LAYERS: u32 = 12;
+/// HUD layers: damage tint, ammo, then an image and a text per element.
+const HUD_LAYER: u32 = 0x4e44_0200;
+const HUD_ELEMENTS: u32 = 8;
 /// The world assigns the first video the first video surface slot.
 const MOVIE_SURFACE: &str = "__surface/1000";
 /// World videos are read whole (`crysirror_runtime::vfs::MAX_FILE`).
@@ -301,6 +304,8 @@ struct Stage {
     frame_seconds: f32,
     /// Weapons, archetypes and damage (`crate::combat`).
     combat: Option<Arc<crate::combat::CombatData>>,
+    /// HUD elements scripts show, until when (`display-button-hud`).
+    hud_active: HashMap<u32, f64>,
     /// Water bodies of the loaded packages.
     water: Vec<crate::water::Water>,
     /// Tanks and helicopters scripts command.
@@ -875,6 +880,17 @@ impl World for Stage {
     fn frame_seconds(&self) -> f32 {
         if self.frame_seconds > 0. { self.frame_seconds } else { 1. / 30. }
     }
+    fn display_hud(&mut self, name: Option<u32>) {
+        match name {
+            // Repeated by scripts each frame: held a few frames.
+            Some(n) => {
+                self.hud_active.insert(n, self.now + 0.3);
+            }
+            None => {
+                self.hud_active.remove(&sid("*hud-hint*"));
+            }
+        }
+    }
     fn message(&mut self, id: u32) {
         self.log(format!("message {id:#010x}"));
     }
@@ -1204,6 +1220,13 @@ struct Session {
     gun_weapon: Option<u32>,
     death: Option<f32>,
     combat_rng: u32,
+    /// HUD element definitions (`hud-settings.bin`), the HUD package's
+    /// materials and textures, uploaded images by path and the last HUD
+    /// presented.
+    hud_defs: HashMap<u32, crate::hud::HudButton>,
+    hud_pak: Option<(Arc<crysirror_core::service::MemoryAssetReader>, Directory, HashMap<String, (u32, Option<u32>)>)>,
+    hud_images: HashMap<String, Option<(String, u32, u32)>>,
+    hud_shown: String,
     /// A progress save exists (shows Continue).
     has_save: bool,
     /// The Scream banks of `sound1/banks.psarc`.
@@ -1520,6 +1543,10 @@ impl NaughtyDogVm {
             characters: Vec::new(),
             speech: None,
             has_save: false,
+            hud_defs: HashMap::new(),
+            hud_pak: None,
+            hud_images: HashMap::new(),
+            hud_shown: String::new(),
             player_health: Default::default(),
             player_gun: Default::default(),
             gun_weapon: None,
@@ -1572,6 +1599,10 @@ impl NaughtyDogVm {
                 Ok(c) => session.stage.combat = Some(Arc::new(c)),
                 Err(e) => session.stage.log(format!("combat tables: {e:#}")),
             }
+            session.hud_defs = crate::game::ModuleSource::read(&modules, "hud-settings").and_then(|b| crate::hud::parse(&b)).unwrap_or_else(|e| {
+                session.stage.log(format!("hud-settings.bin: {e:#}"));
+                HashMap::new()
+            });
             session.has_save = VfsPath::new(Mount::Save, crate::save::PATH).ok().and_then(|p| host.read(self.client, &p).ok()).is_some_and(|b| crate::save::Progress::from_bytes(&b).is_ok());
             match crate::game::ModuleSource::read(&modules, "audio").and_then(|b| crate::sound::SoundTable::parse(&b)) {
                 Ok(t) => session.stage.sounds = Some(Arc::new(t)),
@@ -3968,6 +3999,7 @@ impl NaughtyDogVm {
             let [r, g, b] = st.fade_color;
             layers.push(json!({"op": "set_solid_color", "id": FADE_LAYER, "color": [r, g, b, (st.fade * 255.).round() as u8]}));
         }
+        self.hud_layers(host, session, &mut layers);
         host.submit_engine(self.client, 1, &serde_json::to_vec(&json!({"layers": layers, "world": world}))?)?;
         if let Some(at) = change {
             self.change_task(host, session, at)?;
@@ -3983,6 +4015,102 @@ impl NaughtyDogVm {
             self.write_save(host, session);
         }
         Ok(())
+    }
+
+    /// A HUD image (material path `…/Default`) from `hud.pak`: the colour
+    /// texture with the material's second texture as alpha.
+    fn hud_image(&self, host: &mut dyn HostServices, session: &mut Session, path: &str) -> Option<(String, u32, u32)> {
+        if let Some(found) = session.hud_images.get(path) {
+            return found.clone();
+        }
+        if session.hud_pak.is_none() {
+            let loaded = (|| -> Result<_> {
+                let path = package_path(&session.mount, "hud").context("no hud package")?;
+                let reader = Arc::new(crysirror_core::service::MemoryAssetReader(read_all(session.mount.open(&path)?.as_ref(), PACKAGE_LIMIT)?.into()));
+                let directory = Directory::read(reader.as_ref())?;
+                let loaded = crate::mesh::Loaded::read(reader.as_ref(), PACKAGE_LIMIT)?;
+                let materials = crate::hud::materials(&loaded, &directory)?;
+                Ok((reader, directory, materials))
+            })();
+            match loaded {
+                Ok(h) => session.hud_pak = Some(h),
+                Err(e) => {
+                    session.stage.log(format!("hud.pak: {e:#}"));
+                    session.hud_images.insert(path.to_owned(), None);
+                    return None;
+                }
+            }
+        }
+        let (reader, directory, materials) = session.hud_pak.as_ref()?;
+        let image = (|| -> Result<Option<(String, u32, u32)>> {
+            let Some(&(color, mask)) = materials.get(&path.to_lowercase()) else { return Ok(None) };
+            let desc = |id: u32| directory.items.iter().filter(|i| i.kind == "VRAM_DESC").filter_map(|i| crate::texture::VramDesc::read(reader.as_ref(), i.payload_offset).ok()).find(|d| d.id == id);
+            let Some(c) = desc(color) else { return Ok(None) };
+            let mut img = c.decode(reader.as_ref(), directory.texture_base)?;
+            if let Some(a) = mask.and_then(desc).map(|d| d.decode(reader.as_ref(), directory.texture_base)).transpose()? {
+                if a.width == img.width && a.height == img.height {
+                    for (px, m) in img.rgba.chunks_exact_mut(4).zip(a.rgba.chunks_exact(4)) {
+                        px[3] = m[0];
+                    }
+                }
+            }
+            session.next_model += 1;
+            let asset = host.upload_rgba(self.client, 0x4e48_0000 + session.next_model, img.width, img.height, &img.rgba)?;
+            Ok(Some((asset.relative().to_string(), img.width, img.height)))
+        })();
+        let image = image.unwrap_or_else(|e| {
+            session.stage.log(format!("hud image {path}: {e:#}"));
+            None
+        });
+        session.hud_images.insert(path.to_owned(), image.clone());
+        image
+    }
+
+    /// The HUD: a red tint for lost health, the held weapon's ammo and
+    /// the elements scripts show. Sent only when it changes.
+    fn hud_layers(&self, host: &mut dyn HostServices, session: &mut Session, layers: &mut Vec<serde_json::Value>) {
+        let now = session.stage.now;
+        session.stage.hud_active.retain(|_, until| *until >= now);
+        let hidden = session.game.as_ref().is_some_and(|g| g.rt.inner.game.hud_hidden) || session.player.is_none();
+        let health = session.player_health.value / crate::combat::PLAYER_HEALTH;
+        let ammo = session.game.as_ref().and_then(|g| g.rt.inner.current_weapon).map(|_| session.player_gun.ammo);
+        let mut active: Vec<u32> = if hidden { Vec::new() } else { session.stage.hud_active.keys().copied().filter(|k| session.hud_defs.contains_key(k)).collect() };
+        active.sort_unstable();
+        active.truncate(HUD_ELEMENTS as usize);
+        let tint = if hidden { 0 } else { ((1. - health).clamp(0., 1.) * 140.) as u8 };
+        let signature = format!("{tint} {ammo:?} {active:?}");
+        if signature == session.hud_shown {
+            return;
+        }
+        session.hud_shown = signature;
+        let clear = |id: u32| json!({"op": "put", "layer": {"id": id, "rect": [0, 0, 1, 1], "paint": {"kind": "solid", "color": [0, 0, 0, 0]}}});
+        let text = |id: u32, rect: [i32; 4], line: &str, color: [u8; 4], size: u16| json!({"op": "put", "layer": {"id": id, "rect": rect, "paint": {"kind": "text", "text": line, "font": "default", "size": size, "color": color, "layout": crysirror_core::service::SIMPLE_TEXT_LAYOUT}}});
+        layers.push(json!({"op": "put", "layer": {"id": HUD_LAYER, "rect": [0, 0, SCREEN[0], SCREEN[1]], "paint": {"kind": "solid", "color": [150, 0, 0, tint]}}}));
+        layers.push(match ammo.filter(|_| !hidden) {
+            Some(a) => text(HUD_LAYER + 1, [SCREEN[0] as i32 - 220, SCREEN[1] as i32 - 80, 180, 50], &format!("{a}"), [240, 235, 220, 255], 32),
+            None => clear(HUD_LAYER + 1),
+        });
+        for k in 0..HUD_ELEMENTS {
+            let (img_id, text_id) = (HUD_LAYER + 2 + 2 * k, HUD_LAYER + 3 + 2 * k);
+            let Some(def) = active.get(k as usize).and_then(|n| session.hud_defs.get(n)).cloned() else {
+                layers.push(clear(img_id));
+                layers.push(clear(text_id));
+                continue;
+            };
+            let rect = def.rect.map(|v| v.round() as i32);
+            let image = def.images.first().and_then(|p| self.hud_image(host, session, p));
+            layers.push(match image {
+                Some((asset, _, _)) => json!({"op": "put", "layer": {"id": img_id, "rect": rect, "paint": {"kind": "image", "asset": asset}}}),
+                None => clear(img_id),
+            });
+            layers.push(match &def.text {
+                Some(key) => {
+                    let c = def.color.map(|v| (v.clamp(0., 1.) * 255.) as u8);
+                    text(text_id, [rect[0] + def.text_offset[0] as i32, rect[1] + def.text_offset[1] as i32, 400, 40], &session.text(key), c, 24)
+                }
+                None => clear(text_id),
+            });
+        }
     }
 
     /// Write the checkpoint (`crate::save`).

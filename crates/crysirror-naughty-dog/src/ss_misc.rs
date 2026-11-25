@@ -270,6 +270,18 @@ impl Ctx<'_> {
                 self.inner.prints.push(text);
                 ok(0)
             }
+            // (display-button-hud element): show a `hud-settings` element
+            // (`sub_8A26D0`); scripts repeat it while it should show.
+            "display-button-hud" if n > 0 => {
+                self.world.display_hud(Some(a[0]));
+                ok(0)
+            }
+            // (hide-hint): clears the hint element and its setting
+            // 0x018279E9 (`sub_14209C`).
+            "hide-hint" => {
+                self.world.display_hud(None);
+                ok(0)
+            }
             // (auto-save-game): write a checkpoint.
             "auto-save-game" => {
                 self.inner.save_requested = true;
