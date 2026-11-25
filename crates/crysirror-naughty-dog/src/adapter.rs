@@ -246,6 +246,12 @@ struct Stage {
     npc_spawners: HashSet<u32>,
     /// NPCs that died; their spawners keep the killed flag.
     npc_dead: HashSet<u32>,
+    /// Splines of the loaded levels by name `StringId`.
+    splines: HashMap<u32, crate::nav::Spline>,
+    /// Nav meshes of the loaded levels.
+    navigation: crate::nav::Navigation,
+    /// Cover points derived from the levels' corners.
+    cover: Vec<crate::nav::Cover>,
 }
 
 struct CameraAnimation {
@@ -319,6 +325,16 @@ impl Stage {
         r.contains_local(local)
     }
 
+    /// The transform carrying a spline's stored (level-frame) points with
+    /// its parent: `parent now · parent spawner⁻¹`.
+    fn spline_frame(&self, spline: &crate::nav::Spline) -> glam::Mat4 {
+        let Some(parent) = spline.parent else { return glam::Mat4::IDENTITY };
+        let (Some((t, q)), Some(s)) = (World::locator(self, parent), self.spawners.get(&parent)) else { return glam::Mat4::IDENTITY };
+        let now = glam::Mat4::from_rotation_translation(glam::Quat::from_array(q).normalize(), glam::Vec3::from_array(t));
+        let placed = glam::Mat4::from_rotation_translation(glam::Quat::from_array(s.rotation).normalize(), glam::Vec3::from_array(s.position));
+        now * placed.inverse()
+    }
+
     fn set_visible(&mut self, name: u32, visible: bool) -> bool {
         let Some(ids) = self.entities.get(&name) else { return false };
         for id in ids {
@@ -365,6 +381,16 @@ impl World for Stage {
     }
     fn npc_alive_count(&self) -> u32 {
         self.npc_spawners.iter().filter(|n| self.npc(**n) == Some(false)).count() as u32
+    }
+    fn spline_at(&self, spline: u32, distance: f32) -> Option<([f32; 3], [f32; 3])> {
+        let s = self.splines.get(&spline)?;
+        let (p, t) = s.at(distance);
+        let m = self.spline_frame(s);
+        Some((m.transform_point3(p).to_array(), m.transform_vector3(t).to_array()))
+    }
+    fn spline_distance(&self, spline: u32, point: [f32; 3]) -> Option<f32> {
+        let s = self.splines.get(&spline)?;
+        Some(s.closest_distance(self.spline_frame(s).inverse().transform_point3(glam::Vec3::from_array(point))))
     }
     fn locator(&self, name: u32) -> Option<([f32; 3], [f32; 4])> {
         if name == sid("player") {
@@ -937,6 +963,9 @@ impl NaughtyDogVm {
         session.stage.spawners.clear();
         session.stage.npc_spawners.clear();
         session.stage.npc_dead.clear();
+        session.stage.splines.clear();
+        session.stage.navigation.clear();
+        session.stage.cover.clear();
         session.stage.entities.clear();
         session.npcs.clear();
         session.stage.animations.clear();
@@ -1069,6 +1098,15 @@ impl NaughtyDogVm {
                     session.ground.add_collision(&native.triangles);
                 }
                 session.ground.add_edges(&native.features.edges);
+                session.stage.cover.extend(native.features.corners.iter().filter_map(crate::nav::cover));
+                match crate::nav::nav_meshes(&loaded, &directory) {
+                    Ok(meshes) => meshes.into_iter().for_each(|m| session.stage.navigation.add(m)),
+                    Err(e) => session.stage.log(format!("{package_name}: nav meshes: {e:#}")),
+                }
+                match crate::nav::splines(&loaded, &directory) {
+                    Ok(splines) => session.stage.splines.extend(splines.into_iter().map(|s| (s.id, s))),
+                    Err(e) => session.stage.log(format!("{package_name}: splines: {e:#}")),
+                }
                 for item in directory.items.iter().filter(|i| i.kind == "REGION_TREE") {
                     match crate::trigger::regions(&loaded, item.payload_offset as usize) {
                         Ok(regions) => {

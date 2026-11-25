@@ -110,6 +110,15 @@ pub trait World {
     fn npc_alive_count(&self) -> u32 {
         0
     }
+    /// Position and unit tangent of spline `spline` at arc distance
+    /// `distance` (`sub_35A20`).
+    fn spline_at(&self, _spline: u32, _distance: f32) -> Option<([f32; 3], [f32; 3])> {
+        None
+    }
+    /// Arc distance along spline `spline` of its point closest to `point`.
+    fn spline_distance(&self, _spline: u32, _point: [f32; 3]) -> Option<f32> {
+        None
+    }
 }
 
 /// Options of `(animate object clip key value …)`. The keys seen in the
@@ -928,6 +937,32 @@ impl Natives for Ctx<'_> {
                     dc.mem.write_u32(at + 4 * k as u32, v.to_bits())?;
                 }
                 ok(at)
+            }
+            // (spline-locator-at-distance spline distance): a locator at the
+            // point, facing along the tangent (`sub_1666F8`).
+            "spline-locator-at-distance" if n > 1 => {
+                let Some((pos, tangent)) = self.world.spline_at(a[0], Self::arg_f(a, 1)) else {
+                    self.inner.error(format!("{name}: no spline {:#010x}", a[0]));
+                    return ok(0);
+                };
+                let forward = glam::Vec3::from_array(tangent);
+                let rot = glam::Quat::from_rotation_arc(glam::Vec3::Z, forward.normalize_or(glam::Vec3::Z));
+                let at = dc.mem.alloc(32)?;
+                for (k, v) in pos.iter().chain(&[1.]).chain(&rot.to_array()).enumerate() {
+                    dc.mem.write_u32(at + 4 * k as u32, v.to_bits())?;
+                }
+                ok(at)
+            }
+            // (spline-distance-locator spline locator) /
+            // (spline-distance-spawner spline spawner): arc distance of the
+            // closest point (`sub_165BE0` → `sub_37224`).
+            "spline-distance-locator" | "spline-distance-spawner" if n > 1 && a[1] != 0 => {
+                let point = if name == "spline-distance-locator" {
+                    Some([dc.mem.f32(a[1])?, dc.mem.f32(a[1] + 4)?, dc.mem.f32(a[1] + 8)?])
+                } else {
+                    self.world.locator(a[1]).map(|(p, _)| p)
+                };
+                ok(point.and_then(|p| self.world.spline_distance(a[0], p)).unwrap_or(0.).to_bits())
             }
             "get-spawner-locator" | "get-spawner-position" => {
                 let Some((pos, rot)) = self.world.locator(a[0]) else {
