@@ -229,6 +229,17 @@ impl Ctx<'_> {
                 }
                 ok(0)
             }
+            // (stop-animating object [layer 6] [blend]): event 0xD9CB0A6D
+            // ends the object's script animation.
+            "stop-animating" => {
+                if n == 0 || a[0] == 0 {
+                    self.inner.error("stop-animating: NULL or empty object name.".into());
+                    return ok(0);
+                }
+                let who = self.object(a[0]);
+                self.world.stop_animation(who);
+                ok(0)
+            }
             // (spline-activate spline on?): bit 61 of the spline's flags
             // marks it inactive.
             "spline-activate" => {

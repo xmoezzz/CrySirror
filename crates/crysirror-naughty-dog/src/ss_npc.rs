@@ -532,6 +532,30 @@ impl Ctx<'_> {
                 }
                 ok(1)
             }
+            // (npc-set-patrol-route npc route [start]): walk the route's
+            // spline while unaware.
+            "npc-set-patrol-route" => {
+                let who = self.arg_or_self(a, n, 0);
+                let route = self.arg_or_self(a, n, 1);
+                let start = if n > 2 { a[2] as i32 } else { -1 };
+                let distance = if start > 0 { self.world.spline_distance(route, self.world.locator(who).map_or([0.; 3], |l| l.0)).unwrap_or(0.) } else { 0. };
+                if let Some(agent) = self.agent(who) {
+                    agent.patrol = (route != 0).then_some((route, distance, 1.));
+                }
+                ok(0)
+            }
+            // (npc-stop npc): stop the current motion (`sub_1A5F90`).
+            "npc-stop" => {
+                let who = self.arg_or_self(a, n, 0);
+                match self.agent(who) {
+                    Some(agent) => {
+                        agent.order = None;
+                        agent.patrol = None;
+                        ok(1)
+                    }
+                    None => Ok(self.missing_npc(name, who)),
+                }
+            }
             _ => Ok(None),
         }
     }

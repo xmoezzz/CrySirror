@@ -602,6 +602,31 @@ impl Stage {
         self.sync_agents();
         let before: Vec<(u32, [f32; 3], f32)> = self.agents.agents.iter().map(|(n, a)| (*n, a.position, a.yaw)).collect();
         self.agents.step(seconds);
+        // Patrols: unaware agents without an order walk their route's
+        // spline back and forth at walking speed.
+        let walk = crate::npc::Motion::Walk.speed() * seconds.clamp(0., 0.25);
+        let patrols: Vec<(u32, u32, f32, f32)> = self.agents.agents.iter()
+            .filter(|(_, a)| a.order.is_none() && a.bound.is_none() && !a.in_combat())
+            .filter_map(|(n, a)| a.patrol.map(|(r, d, dir)| (*n, r, d, dir)))
+            .collect();
+        for (name, route, distance, dir) in patrols {
+            let Some(length) = self.splines.get(&route).map(|s| s.length()) else { continue };
+            let (mut d, mut dir) = (distance + walk * dir, dir);
+            if d >= length || d <= 0. {
+                dir = -dir;
+                d = d.clamp(0., length);
+            }
+            let Some((p, t)) = World::spline_at(self, route, d) else { continue };
+            if let Some(a) = self.agents.get_mut(name) {
+                a.position = p;
+                let f = glam::Vec3::from_array(t) * dir;
+                if f.x * f.x + f.z * f.z > 1e-6 {
+                    a.yaw = f.x.atan2(f.z);
+                }
+                a.speed = crate::npc::Motion::Walk.speed();
+                a.patrol = Some((route, d, dir));
+            }
+        }
         for (name, position, yaw) in before {
             let Some(agent) = self.agents.get(name) else { continue };
             if agent.position == position && agent.yaw == yaw {
@@ -921,6 +946,9 @@ impl World for Stage {
         }
         self.collision_layers.insert(object, layer);
         true
+    }
+    fn stop_animation(&mut self, object: u32) {
+        self.animations.remove(&object);
     }
     fn set_animation_speed(&mut self, object: u32, speed: f32) -> bool {
         if !self.entities.contains_key(&object) && object != sid("player") {
@@ -1261,14 +1289,30 @@ const GLOBAL_PART_MODULES: &[&str] = &["particle-u2-base", "particle-u2-gamepart
 /// An NPC entity presented by the `anim-npc` state machine.
 struct Npc {
     entity: u32,
+    /// The spawner (agent) name.
+    name: u32,
     animator: crate::player::Animator,
     sets: Vec<u32>,
     rig: String,
 }
 
-/// NPC states presented without AI: the ambient idle (the state the
-/// demeanour and move natives would leave is not modelled).
+/// The NPC's initial state: the ambient idle.
 const NPC_STATES: &[&str] = &["s_ambient-idle"];
+
+/// The `anim-npc` locomotion state of an agent:
+/// `s_{ambient|aware}[-gunout]-{idle|walk|run|sprint}` by knowledge,
+/// demeanour and ground speed.
+fn npc_state(agent: &crate::npc::Agent) -> String {
+    let mood = if agent.in_combat() || agent.demeanor == 2 { "aware" } else { "ambient" };
+    let gun = if agent.in_combat() || agent.demeanor >= 1 { "-gunout" } else { "" };
+    let motion = match agent.speed {
+        s if s <= 0.05 => "idle",
+        s if s < 2.5 => "walk",
+        s if s < 4.5 => "run",
+        _ => "sprint",
+    };
+    format!("s_{mood}{gun}-{motion}")
+}
 
 /// Packages holding the player rig's clips: `proto.pak` and the hurt
 /// movement types of `anim-proto-hurt.pak`.
@@ -2610,6 +2654,19 @@ impl NaughtyDogVm {
             if sees {
                 let r = Self::combat_random(session);
                 let mut draw = || r;
+                // On first sight, cover within 15 m that faces the player.
+                if !agent.took_cover && agent.bound.is_none() && agent.order.is_none() && agent.ap.is_none() {
+                    let here = agent.position;
+                    let cover = World::closest_cover(&session.stage, here, Some(chest.to_array()))
+                        .filter(|c| glam::Vec3::from_array(*c).distance(glam::Vec3::from_array(here)) < 15.);
+                    let path = cover.and_then(|c| World::nav_path(&session.stage, here, c));
+                    if let Some(a) = session.stage.agents.get_mut(name) {
+                        a.took_cover = true;
+                        if let Some(path) = path {
+                            a.order = Some(crate::npc::Order::Cover { path });
+                        }
+                    }
+                }
                 if let Some(a) = session.stage.agents.get_mut(name) {
                     a.knowledge = crate::npc::KNOWLEDGE_COMBAT;
                     if a.order.is_none() {
@@ -3655,6 +3712,17 @@ impl NaughtyDogVm {
         if let Some((graph, table)) = session.npc_anim.as_mut() {
             for npc in &mut session.npcs {
                 let Some(clips) = session.npc_clips.get(&npc.rig) else { continue };
+                // The locomotion state for the agent's awareness and speed.
+                if let Some(agent) = session.stage.agents.get(npc.name) {
+                    let target = sid(&npc_state(agent));
+                    if npc.animator.machine.state != target && table.get(target).is_some() {
+                        let m = &mut npc.animator.machine;
+                        m.previous = Some((m.state, m.time));
+                        m.state = target;
+                        m.time = 0.;
+                        m.fade = 0.25;
+                    }
+                }
                 let before = npc.animator.machine.state;
                 let sets = &session.anim_sets;
                 let chain = &npc.sets;
@@ -3957,7 +4025,7 @@ impl NaughtyDogVm {
             let driven = npc_key.as_ref().filter(|k| session.npc_clips.get(*k).is_some_and(|c| !c.is_empty()) && session.npc_anim.is_some());
             if let Some(key) = driven {
                 let machine = crate::anim_state::Machine { state: sid(NPC_STATES[0]), time: 0., previous: None, fade: 0. };
-                session.npcs.push(Npc { entity: id, animator: crate::player::Animator::new(machine), sets: npc_sets.clone(), rig: key.clone() });
+                session.npcs.push(Npc { entity: id, name: sid(&s.name), animator: crate::player::Animator::new(machine), sets: npc_sets.clone(), rig: key.clone() });
                 session.stage.npc_spawners.insert(sid(&s.name));
             } else if let (Some(clip), Some(source)) = (&idle, &library) {
                 world.push(json!({"op": "set_animation", "id": id, "animation": {"layers": [{"clip": clip, "source": source, "looping": true}]}}));

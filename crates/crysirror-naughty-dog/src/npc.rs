@@ -177,6 +177,11 @@ pub struct Agent {
     pub hit_points: f32,
     pub max_hit_points: f32,
     pub gun: crate::combat::Gun,
+    /// Patrol route (a spline) and the arc distance and direction walked
+    /// (`npc-set-patrol-route`, `sub_1CDFC0`).
+    pub patrol: Option<(u32, f32, f32)>,
+    /// Combat cover was sought.
+    pub took_cover: bool,
 }
 
 impl Agent {
@@ -209,6 +214,8 @@ impl Agent {
             hit_points: 100.,
             max_hit_points: 100.,
             gun: crate::combat::Gun { ammo: 30, ..Default::default() },
+            patrol: None,
+            took_cover: false,
         }
     }
 

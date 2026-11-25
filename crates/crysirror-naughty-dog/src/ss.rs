@@ -264,6 +264,8 @@ pub trait World {
     fn player_health(&self) -> f32 {
         1.
     }
+    /// End `object`'s script animation.
+    fn stop_animation(&mut self, _object: u32) {}
     fn set_animation_speed(&mut self, _object: u32, _speed: f32) -> bool {
         false
     }
