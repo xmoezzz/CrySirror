@@ -9,6 +9,12 @@ fn main() -> Result<()> {
     let table = anim_state::parse(&std::fs::read(args.first().context("ANIM_PLAYER_BIN")?)?)?;
     let name = |id: u32| table.get(id).map_or(format!("{id:08x}"), |s| s.name.clone());
     println!("{} states, initial {}", table.states.len(), name(table.initial));
+    if args.get(1).is_some_and(|a| a == "--all") {
+        for s in &table.states {
+            println!("{}", s.name);
+        }
+        return Ok(());
+    }
     for want in &args[1..] {
         let s = table.get(sid(want)).context("no such state")?;
         println!("{} animation {:08x} (= sid of state name? {})", s.name, s.animation, s.animation == sid(want));

@@ -111,6 +111,9 @@ pub enum Mode {
     /// Jumping from one edge to another (`ledge-jump-begin` → `-mid` →
     /// `-end`, `auto`): the adapter moves the root between the grips.
     Leap,
+    /// In cover at a cover point (`edge-cover-…` low, `corner-cover-…`
+    /// high): the root stays at the cover.
+    Cover,
 }
 
 const AMBIENT: &[&str] = &["ambient-casual", "ambient-stand-a1", "ambient-stand-a2", "ambient-stand-a3"];
@@ -187,6 +190,10 @@ pub struct Frame {
     pub movement: u32,
     pub weapon: u32,
     pub seconds: f32,
+    /// Take cover of this kind (0 high-left, 1 high-right, 2 low-left, 3
+    /// low-right), or leave cover.
+    pub cover: Option<u8>,
+    pub uncover: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -315,6 +322,8 @@ impl Controller {
             Mode::Climb
         } else if LEAP.contains(&state.as_str()) {
             Mode::Leap
+        } else if state.starts_with("edge-cover-") || state.starts_with("corner-cover-") {
+            Mode::Cover
         } else {
             Mode::Ground
         }
@@ -364,7 +373,33 @@ impl Controller {
                 }
                 return self.finish(graph, table, clips, f, before, None, 0.);
             }
+            Mode::Cover => {
+                let side = if state.contains("left") { "l" } else { "r" };
+                if state.ends_with("-exit-l") || state.ends_with("-exit-r") {
+                    if finished {
+                        self.go(table, "idle", Some("idle"), 0.2);
+                    }
+                } else if f.uncover {
+                    let exit = if f.heading.is_some() { format!("edge-cover-run-exit-{side}") } else { format!("edge-cover-idle-exit-{side}") };
+                    if state.starts_with("edge-cover-") {
+                        self.anim.machine.force(sid(&exit), 0.15);
+                    } else {
+                        self.go(table, "idle", Some("idle"), 0.2);
+                    }
+                } else if state.contains("-enter-") && finished {
+                    let base = state.split("-enter-").next().unwrap_or(&state).to_owned();
+                    self.anim.machine.force(sid(&base), 0.15);
+                }
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
             Mode::Ground => {}
+        }
+        if let Some(kind) = f.cover {
+            let (family, side) = (if kind >= 2 { "edge-cover" } else { "corner-cover" }, if kind % 2 == 0 { "left" } else { "right" });
+            let enter = format!("{family}-{side}-enter-close");
+            let target = if table.get(sid(&enter)).is_some() { enter } else { format!("{family}-{side}") };
+            self.anim.machine.force(sid(&target), 0.15);
+            return self.finish(graph, table, clips, f, before, None, 0.);
         }
         let airborne = matches!(state.as_str(), "run-jump-long" | "jump-long" | "fall" | "jump-in-place");
         if airborne && f.grab {

@@ -34,6 +34,15 @@ fn main() -> Result<()> {
                 }
             }
             println!("  object {i} flag bits {flags:?}");
+            let mut edge_bits = std::collections::BTreeMap::new();
+            for e in &o.features.edges {
+                for bit in 0..16 {
+                    if e.flags >> bit & 1 != 0 {
+                        *edge_bits.entry(bit).or_insert(0usize) += 1;
+                    }
+                }
+            }
+            println!("  object {i} edge flag bits {edge_bits:?}");
             println!("  object {i} joint {:?}: {} triangles ({no_grab} NoEdgeGrab), extents {lo:.2} .. {hi:.2}; {} edges, {} corners", o.joint, o.triangles.len(), o.features.edges.len(), o.features.corners.len());
         }
     }

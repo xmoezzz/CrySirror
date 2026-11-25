@@ -3125,7 +3125,7 @@ impl NaughtyDogVm {
                     None => {}
                 }
             }
-            crate::player::Mode::Ground | crate::player::Mode::Leap => return,
+            crate::player::Mode::Ground | crate::player::Mode::Leap | crate::player::Mode::Cover => return,
         }
         let f = edge_frame(&edge, grip.s).transform_vector3(glam::Vec3::Z);
         p.yaw = f.x.atan2(f.z);
@@ -3532,6 +3532,34 @@ impl NaughtyDogVm {
             } else {
                 None
             };
+            // Cover (Ctrl): the nearest cover point within 1.2 m on the
+            // ground; Ctrl or a jump leaves it. The cover key is not the
+            // native control scheme (SATD-nd-retail-runtime).
+            let ctrl = input.buttons_pressed & b::CTRL != 0 && p.controls;
+            let mut take_cover = None;
+            if ctrl && mode == crate::player::Mode::Ground && p.fall >= 0. {
+                let here = glam::Vec3::from_array(p.position);
+                let near = session.stage.cover.iter().filter(|c| c.position.distance(here) < 1.2).min_by(|a, b| a.position.distance(here).total_cmp(&b.position.distance(here))).cloned();
+                if let Some(c) = near {
+                    let back = c.position - c.direction.normalize_or_zero() * 0.35;
+                    p.position = [back.x, here.y, back.z];
+                    p.yaw = c.direction.x.atan2(c.direction.z);
+                    if let Some(a) = p.anim.as_mut() {
+                        a.yaw = p.yaw;
+                    }
+                    take_cover = Some(c.kind.min(3));
+                }
+            }
+            // The held weapon's animation set (`pistol` for class 0,
+            // `rifle` otherwise; names assumed, unknown ones fall back to
+            // `no-weapon`).
+            let held = session.game.as_ref().and_then(|g| g.rt.inner.current_weapon).and_then(|w| session.stage.combat.as_ref().and_then(|c| c.weapons.get(&w)).map(|d| d.class));
+            let weapon_set = match held {
+                Some(0) => "pistol",
+                Some(_) => "rifle",
+                None => "no-weapon",
+            };
+            let leave_cover = mode == crate::player::Mode::Cover && (ctrl || input.buttons_pressed & b::SPACE != 0);
             let mut ground_speed = None;
             let mut step_mode = mode;
             let mut step_root = None;
@@ -3546,13 +3574,15 @@ impl NaughtyDogVm {
                     dropped,
                     slope,
                     movement: graph.movement_index(wanted).or_else(|| graph.movement_index(sid("run"))).unwrap_or(0),
-                    weapon: graph.weapon_index(sid("no-weapon")).unwrap_or(1),
+                    weapon: graph.weapon_index(sid(weapon_set)).or_else(|| graph.weapon_index(sid("no-weapon"))).unwrap_or(1),
                     grab: candidate.is_some(),
                     lateral,
                     climb,
                     drop: release,
                     leap: leap_to.is_some(),
                     seconds,
+                    cover: take_cover,
+                    uncover: leave_cover,
                 };
                 match anim.step(graph, table, &session.player_clips, &frame) {
                     Ok(step) => {
@@ -3608,7 +3638,7 @@ impl NaughtyDogVm {
             }
             let on_edge = step_mode != crate::player::Mode::Ground && (p.grip.is_some() || p.leap.is_some());
             let speed = match ground_speed {
-                _ if on_edge => 0.,
+                _ if on_edge || step_mode == crate::player::Mode::Cover => 0.,
                 Some(v) => v,
                 None if len > 0. => {
                     p.yaw = mv[0].atan2(mv[1]);
@@ -3718,6 +3748,7 @@ impl NaughtyDogVm {
                 crate::player::Mode::Hang => "Edge",
                 crate::player::Mode::Climb => "EdgeClimbUp",
                 crate::player::Mode::Leap => "JumpAcross",
+                crate::player::Mode::Cover => "Cover",
             };
             sid(class)
         });
