@@ -40,6 +40,7 @@ pub enum Property {
     Float(f32),
     Sid(u32),
     Str(String),
+    Vec4([f32; 4]),
 }
 
 /// Engine services natives use. Names are `StringId`s.
@@ -680,7 +681,7 @@ impl Natives for Ctx<'_> {
                     Some(Property::Int(i)) => i as u32,
                     Some(Property::Float(f)) => if name == "tag-float" { f.to_bits() } else { f as i32 as u32 },
                     Some(Property::Str(s)) => sid(&s),
-                    None => {
+                    Some(Property::Vec4(_)) | None => {
                         self.inner.error(format!("{name}: no tag {:#010x}", a[0]));
                         0
                     }

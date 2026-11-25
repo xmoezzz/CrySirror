@@ -22,6 +22,7 @@ pub mod geometry;
 pub mod menu;
 pub mod mesh;
 pub mod package;
+pub mod particle;
 pub mod player;
 pub mod probes;
 pub mod region;

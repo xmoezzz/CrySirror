@@ -462,7 +462,8 @@ pub enum BlendMode {
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-/// Sprite orientation: camera-facing, velocity-aligned or fixed local axis.
+/// Sprite orientation: camera-facing, velocity-aligned, fixed local axis,
+/// or a quad fixed in the emitter's local XY plane (+X width, +Y height).
 pub enum FacingMode {
     #[default]
     Camera,
@@ -470,6 +471,7 @@ pub enum FacingMode {
     Axis {
         axis: [f32; 3],
     },
+    Local,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

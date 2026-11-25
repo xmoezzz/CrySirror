@@ -25726,7 +25726,7 @@
       "used_by": "`VfxRenderSpec.blend`"
     },
     {
-      "doc": "Sprite orientation: camera-facing, velocity-aligned or fixed local axis. Variants are tagged by `\"kind\"`.",
+      "doc": "Sprite orientation: camera-facing, velocity-aligned, fixed local axis, or a quad fixed in the emitter's local XY plane (+X width, +Y height). Variants are tagged by `\"kind\"`.",
       "fields": [
         {
           "default": null,
@@ -25745,6 +25745,12 @@
           "doc": "",
           "name": "axis",
           "rust_type": "axis: [f32; 3]"
+        },
+        {
+          "default": null,
+          "doc": "",
+          "name": "local",
+          "rust_type": ""
         }
       ],
       "name": "VfxFacingMode",
@@ -30555,7 +30561,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "3832b7ea7ef5e8ae",
+  "fingerprint": "848a0fe0b5b5bfd9",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

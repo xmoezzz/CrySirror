@@ -1,5 +1,12 @@
 # API change log
 
+## `848a0fe0b5b5bfd9` (2026-11-25) — VFX local-plane sprites
+
+`FacingMode::Local` draws a sprite fixed in its emitter's local XY plane
+(+X width, +Y height), for native particle quads oriented by their
+spawner frame. Rust callers matching `FacingMode` exhaustively must handle
+the new variant. The previous fingerprint was `3832b7ea7ef5e8ae`.
+
 ## `3832b7ea7ef5e8ae` (2026-11-25) — KiriKiri text selection
 
 `Ui.setTextSelection` adds UTF-16 caret and range editing. Plain fields

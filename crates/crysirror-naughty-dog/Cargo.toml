@@ -23,6 +23,7 @@ crysirror-runtime = { workspace = true, optional = true }
 crysirror-core.workspace = true
 crysirror-resource.workspace = true
 crysirror-image.workspace = true
+crysirror-vfx.workspace = true
 
 [dev-dependencies]
 crysirror-capfs.workspace = true

@@ -163,6 +163,9 @@ enum Load {
     /// Part of a package's meshes whose model exceeded the host's
     /// per-model limit: `(package, archive path, meshes)`.
     Part(String, String, Vec<crate::mesh::Mesh>),
+    /// `PartSpawner`s of a package, presented once the particle modules
+    /// its regions name are loaded.
+    Particles(Vec<SpawnerRecord>),
 }
 
 /// Largest generated model: the host's large-asset limit less a margin.
@@ -545,6 +548,15 @@ struct Session {
     npc_clips: HashMap<String, HashMap<u32, crate::player::ClipInfo>>,
     /// Each NPC rig's packages (skeleton base, animation packages).
     npc_packages: HashMap<String, Vec<String>>,
+    /// Effect groups and descriptors of the loaded particle modules.
+    particles: crate::particle::Library,
+    part_modules: HashSet<u32>,
+    /// `particle.pak` materials, read on first use.
+    particle_materials: Option<HashMap<u32, crate::particle::ParticleMaterial>>,
+    /// Uploaded particle textures by texture ID: path and atlas columns.
+    particle_textures: HashMap<u32, Option<(String, u32)>>,
+    /// Particle-effect entities of the presented level.
+    effects: Vec<u32>,
     /// The rig each spawned entity is skinned to.
     entity_rigs: HashMap<u32, RigRef>,
     /// Skeletons of skinned art groups that carry their own.
@@ -790,6 +802,11 @@ impl NaughtyDogVm {
             npcs: Vec::new(),
             npc_clips: HashMap::new(),
             npc_packages: HashMap::new(),
+            particles: Default::default(),
+            part_modules: HashSet::new(),
+            particle_materials: None,
+            particle_textures: HashMap::new(),
+            effects: Vec::new(),
             entity_rigs: HashMap::new(),
             own_rigs: HashMap::new(),
             anim_packages: HashMap::new(),
@@ -891,6 +908,9 @@ impl NaughtyDogVm {
             world.push(json!({"op": "despawn", "id": id}));
             host.release_model(self.client, &asset)?;
         }
+        for id in session.effects.drain(..) {
+            world.push(json!({"op": "despawn", "id": id}));
+        }
         session.triangles = 0;
         session.packages.clear();
         session.bounds = None;
@@ -968,6 +988,10 @@ impl NaughtyDogVm {
                 self.load_actor(host, session, &art, &spawners, &mut world)?;
                 String::new()
             }
+            Load::Particles(spawners) => {
+                self.load_particles(host, session, &spawners, &mut world)?;
+                String::new()
+            }
             Load::Part(name, path, meshes) => {
                 let package = session.mount.open(&path)?;
                 let directory = Directory::read(package.as_ref())?;
@@ -998,6 +1022,7 @@ impl NaughtyDogVm {
             }
             // Spawned art groups follow the level packages.
             let mut groups: std::collections::BTreeMap<String, Vec<SpawnerRecord>> = Default::default();
+            let mut emitters = Vec::new();
             for item in directory.items.iter().filter(|i| i.kind == "SPAWNER_GROUP") {
                 for s in scene::spawner_records(&loaded, item.payload_offset as usize)? {
                     session.stage.spawners.insert(sid(&s.name), s.clone());
@@ -1007,11 +1032,17 @@ impl NaughtyDogVm {
                     if let Some(art) = s.art_group.clone() {
                         groups.entry(art).or_default().push(s.clone());
                     }
+                    if s.process_type == sid("PartSpawner") {
+                        emitters.push(s.clone());
+                    }
                     session.records.push(s);
                 }
             }
             for (art, list) in groups {
                 session.pending.push_back(Load::Actor(art, list));
+            }
+            if !emitters.is_empty() {
+                session.pending.push_back(Load::Particles(emitters));
             }
             if session.start.is_none() {
                 if let Some(item) = directory.items.iter().find(|i| i.kind == "CAMERA_TABLE_1") {
@@ -1540,6 +1571,132 @@ impl NaughtyDogVm {
     /// An NPC skeleton from its `*-base` package and the clips named
     /// `wanted` (and `idle`) in it and the character's animation packages
     /// that fit the skeleton; clips the decoder cannot read are skipped.
+    /// Present `PartSpawner`s: load the particle modules the level's
+    /// regions name (`part-module`), then spawn one shared VFX entity per
+    /// emitter of each spawner's `particle-group` (see `crate::particle`).
+    fn load_particles(&self, host: &mut dyn HostServices, session: &mut Session, spawners: &[SpawnerRecord], world: &mut Vec<serde_json::Value>) -> Result<()> {
+        let wanted: Vec<u32> = session.stage.regions.iter().filter_map(|(r, _, _)| r.part_module).filter(|m| !session.part_modules.contains(m)).collect();
+        if let Some(modules) = &session.modules {
+            for module in wanted {
+                session.part_modules.insert(module);
+                let Some(name) = crate::game::ModuleSource::names(modules).into_iter().find(|n| sid(n) == module) else {
+                    session.stage.log(format!("particle module {module:#010x}: not installed"));
+                    continue;
+                };
+                match crate::game::ModuleSource::read(modules, &name).and_then(|b| crate::particle::Library::parse(&name, &b)) {
+                    Ok(library) => {
+                        session.stage.log(format!("particle module {name}: {} groups, {} effects", library.groups.len(), library.effects.len()));
+                        session.particles.extend(library);
+                    }
+                    Err(e) => session.stage.log(format!("particle module {name}: {e:#}")),
+                }
+            }
+        }
+        if session.particle_materials.is_none() {
+            let materials = package_path(&session.mount, "particle").map(|path| -> Result<_> {
+                let reader = crysirror_core::service::MemoryAssetReader(read_all(session.mount.open(&path)?.as_ref(), PACKAGE_LIMIT)?.into());
+                let directory = Directory::read(&reader)?;
+                let loaded = crate::mesh::Loaded::read(&reader, PACKAGE_LIMIT)?;
+                let item = directory.items.iter().find(|i| i.kind == "MATERIAL_TABLE_1").context("particle.pak: no material table")?;
+                Ok((crate::particle::materials(&loaded, item.payload_offset as usize)?, reader, directory))
+            });
+            match materials {
+                Some(Ok((materials, reader, directory))) => {
+                    // Decode each material's first sampler that is not the
+                    // shared placeholder; atlases (width a multiple of the
+                    // height) are frame strips.
+                    let mut textures = HashMap::new();
+                    for item in directory.items.iter().filter(|i| i.kind == "VRAM_DESC") {
+                        if let Ok(desc) = crate::texture::VramDesc::read(&reader, item.payload_offset) {
+                            textures.insert(desc.id, desc);
+                        }
+                    }
+                    for m in materials.values() {
+                        let Some(desc) = m.samplers.iter().filter_map(|id| textures.get(id)).find(|d| !d.name.contains("missingtexture")) else { continue };
+                        if session.particle_textures.contains_key(&desc.id) {
+                            continue;
+                        }
+                        let uploaded = desc.decode(&reader, directory.texture_base).and_then(|image| {
+                            session.next_model += 1;
+                            let path = host.upload_rgba(self.client, 0x4e50_0000 + session.next_model, image.width, image.height, &image.rgba)?;
+                            let columns = if image.width > image.height && image.width % image.height == 0 { image.width / image.height } else { 1 };
+                            Ok((path.relative().to_string(), columns))
+                        });
+                        match uploaded {
+                            Ok(t) => session.particle_textures.insert(desc.id, Some(t)),
+                            Err(e) => {
+                                session.stage.log(format!("particle texture {}: {e:#}", desc.name));
+                                session.particle_textures.insert(desc.id, None)
+                            }
+                        };
+                    }
+                    let resolved: HashMap<u32, crate::particle::ParticleMaterial> = materials
+                        .into_iter()
+                        .map(|(k, mut m)| {
+                            m.samplers.retain(|id| session.particle_textures.get(id).is_some_and(Option::is_some));
+                            (k, m)
+                        })
+                        .collect();
+                    session.particle_materials = Some(resolved);
+                }
+                Some(Err(e)) => {
+                    session.stage.log(format!("particle.pak: {e:#}"));
+                    session.particle_materials = Some(HashMap::new());
+                }
+                None => session.particle_materials = Some(HashMap::new()),
+            }
+        }
+        let task = session.game.is_some();
+        let mut presented = 0;
+        for s in spawners {
+            let property = |name: &str| s.properties.iter().find(|(k, _)| *k == sid(name)).map(|(_, v)| v.clone());
+            let Some(crate::ss::Property::Str(group)) = property("particle-group") else { continue };
+            let Some(emitters) = session.particles.groups.get(&sid(&group)).cloned() else {
+                session.stage.log(format!("{}: particle group {group} not loaded", s.name));
+                continue;
+            };
+            let float = |name: &str, default: f32| match property(name) {
+                Some(crate::ss::Property::Float(f)) => f,
+                Some(crate::ss::Property::Int(i)) => i as f32,
+                _ => default,
+            };
+            let vector = |name: &str| match property(name) {
+                Some(crate::ss::Property::Vec4(v)) => Some([v[0], v[1], v[2]]),
+                _ => None,
+            };
+            let placement = crate::particle::Placement {
+                position: glam::Vec3::from_array(s.position),
+                rotation: glam::Quat::from_array(s.rotation).normalize(),
+                color: vector("color").unwrap_or([1.; 3]),
+                alpha: float("alpha", 1.),
+                sprite_scale: float("sprite-scale", 1.),
+                effect_scale: vector("effect-scale").map_or(glam::Vec3::ONE, glam::Vec3::from_array),
+            };
+            let visible = !task || s.flags & NO_AUTO_BIRTH == 0;
+            for (k, emitter) in emitters.iter().enumerate() {
+                let Some(effect) = session.particles.effects.get(emitter) else { continue };
+                let material = session.particle_materials.as_ref().and_then(|m| m.get(&effect.material));
+                let texture = material.and_then(|m| m.samplers.first()).and_then(|id| session.particle_textures.get(id).cloned().flatten());
+                let blend = material.map_or(crysirror_vfx::BlendMode::Additive, |m| crate::particle::blend(m.blend));
+                let (spec, frame) = crate::particle::emitter(effect, &effect.name, &placement, texture, blend, sid(&s.name) ^ k as u32);
+                let system = crysirror_vfx::SystemSpec { emitters: vec![spec], ..Default::default() };
+                let (scale, rotation, translation) = frame.to_scale_rotation_translation();
+                let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
+                session.next_model += 1;
+                let id = 0x100 + session.next_model;
+                world.push(json!({"op": "spawn", "entity": {"id": id, "name": format!("{}:{}", s.name, effect.name), "visible": visible, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system}}));
+                session.effects.push(id);
+                session.stage.entities.entry(sid(&s.name)).or_default().push(id);
+                presented += 1;
+            }
+            if visible {
+                session.stage.visible.insert(sid(&s.name));
+            }
+        }
+        session.packages.push(format!("particles×{presented}"));
+        Ok(())
+    }
+
     fn npc_rig(actors: &ArchiveMount, base: &str, anims: &[String], wanted: &HashSet<u32>) -> Result<Option<(crate::skeleton::Skeleton, Vec<crate::anim::Clip>)>> {
         let read = |name: &str| -> Result<crate::mesh::Loaded> {
             let package = crysirror_core::service::MemoryAssetReader(read_all(actors.open(name)?.as_ref(), PACKAGE_LIMIT)?.into());

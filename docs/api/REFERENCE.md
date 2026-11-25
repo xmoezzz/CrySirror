@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `3832b7ea7ef5e8ae`
+API fingerprint: `848a0fe0b5b5bfd9`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -7089,13 +7089,14 @@ Renderer blend contract, independent of the execution backend.
 
 Used by: `VfxRenderSpec.sprite.facing`.
 
-Sprite orientation: camera-facing, velocity-aligned or fixed local axis. Variants are tagged by `"kind"`.
+Sprite orientation: camera-facing, velocity-aligned, fixed local axis, or a quad fixed in the emitter's local XY plane (+X width, +Y height). Variants are tagged by `"kind"`.
 
 | Variant | Fields | Description |
 |---|---|---|
 | `camera` | — | — |
 | `velocity` | — | — |
 | `axis` | `axis: [f32; 3]` | — |
+| `local` | — | — |
 
 ### VfxMeshShape
 

@@ -819,6 +819,7 @@ impl VfxRenderer {
                 match facing {
                     FacingMode::Camera => {}
                     FacingMode::Velocity => u.mode[1] = 1,
+                    FacingMode::Local => u.mode[1] = 3,
                     FacingMode::Axis { axis } => {
                         ensure!(
                             Vec3::from(*axis).is_finite()

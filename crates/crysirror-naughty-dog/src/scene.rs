@@ -111,6 +111,7 @@ pub fn spawner_records(p: &mesh::Loaded, payload: usize) -> Result<Vec<SpawnerRe
                             Err(_) => continue,
                         },
                         0xd => Property::Sid(p.u32(data)?),
+                        8 => Property::Vec4([p.f32(data)?, p.f32(data + 4)?, p.f32(data + 8)?, p.f32(data + 12)?]),
                         _ => continue,
                     };
                     properties.push((id, value));

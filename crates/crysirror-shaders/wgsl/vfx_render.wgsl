@@ -6,7 +6,8 @@ struct View {
     view: mat4x4<f32>,
     model: mat4x4<f32>,
     camera: vec4<f32>,
-    // renderer (sprite=0/mesh=1), facing, sheet columns, sheet rows
+    // renderer (sprite=0/mesh=1), facing (camera, velocity, axis, local
+    // plane), sheet columns, sheet rows
     mode: vec4<u32>,
     // frames, fps (0 = over life), soft distance, procedural radial coverage
     animation: vec4<f32>,
@@ -55,7 +56,11 @@ fn vs_sprite(@builtin(vertex_index) vertex:u32,@builtin(instance_index) instance
     let center=(frame.model*vec4<f32>(p.position_age.xyz,1.0)).xyz;
     var right=vec3<f32>(frame.view[0][0],frame.view[1][0],frame.view[2][0]);
     var up=vec3<f32>(frame.view[0][1],frame.view[1][1],frame.view[2][1]);
-    if frame.mode.y>0u {
+    if frame.mode.y==3u {
+        // Fixed in the emitter's local XY plane.
+        right=safe_normal(frame.model[0].xyz,right);
+        up=safe_normal(frame.model[1].xyz,up);
+    } else if frame.mode.y>0u {
         var axis=(frame.model*vec4<f32>(p.velocity_lifetime.xyz,0.0)).xyz;
         if frame.mode.y==2u {axis=(frame.model*vec4<f32>(frame.axis.xyz,0.0)).xyz;}
         up=safe_normal(axis,up);

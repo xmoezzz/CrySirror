@@ -2727,6 +2727,7 @@ dependencies = [
  "crysirror-resource",
  "crysirror-runtime",
  "crysirror-scene",
+ "crysirror-vfx",
  "glam 0.27.0",
  "serde",
  "serde_json",

@@ -72,6 +72,8 @@ pub struct Region {
     pub shapes: Vec<Shape>,
     /// The `render-settings` entry: a `render-settings.bin` record name.
     pub render_settings: Option<u32>,
+    /// The `part-module` entry: the particle DC module the area uses.
+    pub part_module: Option<u32>,
     /// Package offsets of the enter and exit lambdas.
     pub enter: Option<usize>,
     pub exit: Option<usize>,
@@ -153,8 +155,19 @@ pub fn regions(p: &Loaded, payload: usize) -> Result<Vec<Region>> {
         // holds a `StringId`.
         let entries = usize::from(p.u16(a + 0x1c)?);
         ensure!(entries <= 256, "ND region entry count");
-        let render_settings = p.ptr(a + 0x24).ok().and_then(|at| (0..entries).find(|k| p.u32(at + 12 * k).ok() == Some(sid("render-settings")) && p.u32(at + 12 * k + 4).ok() == Some(4)).and_then(|k| p.u32(at + 12 * k + 8).ok()));
-        out.push(Region { name: p.ptr(a).map(|n| text(p, n)).unwrap_or_default(), id: p.u32(a + 4)?, flags: p.u16(a + 0xa)?, parent, categories: Vec::new(), shapes, render_settings, enter: tag(TAG_ENTER), exit: tag(TAG_EXIT) });
+        let entry = |key: &str| p.ptr(a + 0x24).ok().and_then(|at| (0..entries).find(|k| p.u32(at + 12 * k).ok() == Some(sid(key)) && p.u32(at + 12 * k + 4).ok() == Some(4)).and_then(|k| p.u32(at + 12 * k + 8).ok()));
+        out.push(Region {
+            name: p.ptr(a).map(|n| text(p, n)).unwrap_or_default(),
+            id: p.u32(a + 4)?,
+            flags: p.u16(a + 0xa)?,
+            parent,
+            categories: Vec::new(),
+            shapes,
+            render_settings: entry("render-settings"),
+            part_module: entry("part-module"),
+            enter: tag(TAG_ENTER),
+            exit: tag(TAG_EXIT),
+        });
         addresses.push(a);
     }
     // Categories from the grid's buckets.

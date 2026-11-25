@@ -393,7 +393,9 @@ fn cstring(p: &Loaded, at: usize) -> Result<String> {
     Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
 }
 
-fn material(p: &Loaded, m: usize) -> Result<Material> {
+/// The material record at `m` (name, passes, samplers, layer blend and
+/// constants).
+pub fn material(p: &Loaded, m: usize) -> Result<Material> {
     let name = cstring(p, p.ptr(m)?)?;
     let passes = p.u32(m + 0xc)?;
     ensure!((1..=64).contains(&passes), "ND material pass count");
