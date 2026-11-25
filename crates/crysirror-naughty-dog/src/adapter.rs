@@ -251,6 +251,10 @@ struct Stage {
     npc_dead: HashSet<u32>,
     /// The live NPCs' agent state (the NPC manager's objects).
     agents: crate::npc::Agents,
+    /// Objects whose cover points scripts removed.
+    cover_removed: HashSet<u32>,
+    /// Action packs scripts disabled.
+    disabled_aps: HashSet<u32>,
     /// Objects made inert (no collision, no script animation).
     inert: HashSet<u32>,
     /// Look-at targets by character: target, attach point, blend.
@@ -719,6 +723,23 @@ impl World for Stage {
             self.ops.push(json!({"op": "set_transform", "id": e, "transform": {"translation": position, "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": [1.0, 1.0, 1.0]}}));
         }
     }
+    fn nav_block(&mut self, name: u32, block: bool) -> bool {
+        let Some((p, _)) = World::locator(self, name) else { return false };
+        self.navigation.set_blocked(glam::Vec3::from_array(p), block);
+        true
+    }
+    /// Cover points within 2 m of the object's locator stand for the
+    /// ones its collision generated (the level corners carry no owner).
+    fn object_cover(&mut self, name: u32, enabled: bool) -> bool {
+        if World::locator(self, name).is_none() {
+            return false;
+        }
+        if enabled { self.cover_removed.remove(&name) } else { self.cover_removed.insert(name) };
+        true
+    }
+    fn enable_action_pack(&mut self, ap: u32, enabled: bool) {
+        if enabled { self.disabled_aps.remove(&ap) } else { self.disabled_aps.insert(ap) };
+    }
     fn make_inert(&mut self, name: u32) -> bool {
         if !self.entities.contains_key(&name) && !self.spawners.contains_key(&name) {
             return false;
@@ -813,6 +834,7 @@ impl World for Stage {
         self.cover.iter()
             // Cover faces into its wall: a threat must lie beyond it.
             .filter(|c| threat.is_none_or(|t| (glam::Vec3::from_array(t) - c.position).dot(c.direction) > 0.))
+            .filter(|c| !self.cover_removed.iter().any(|o| World::locator(self, *o).is_some_and(|(p, _)| glam::Vec3::from_array(p).distance(c.position) < 2.)))
             .min_by(|a, b| a.position.distance_squared(point).total_cmp(&b.position.distance_squared(point)))
             .map(|c| c.position.to_array())
     }

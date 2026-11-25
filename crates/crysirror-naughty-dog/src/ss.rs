@@ -189,6 +189,15 @@ pub trait World {
     fn set_water_offset(&mut self, _name: u32, _offset: [f32; 3]) -> bool {
         false
     }
+    /// Block or unblock the nav polygon under object `name`.
+    fn nav_block(&mut self, _name: u32, _block: bool) -> bool {
+        false
+    }
+    /// Remove (false) or restore the cover points on object `name`.
+    fn object_cover(&mut self, _name: u32, _enabled: bool) -> bool {
+        false
+    }
+    fn enable_action_pack(&mut self, _ap: u32, _enabled: bool) {}
     /// Every value spawner `spawner` has for tag `prop`.
     fn properties(&self, spawner: u32, prop: u32) -> Vec<Property> {
         self.property(spawner, prop).into_iter().collect()
@@ -363,6 +372,13 @@ pub struct Inner {
     pub prone: Option<u32>,
     /// World time at the last tick.
     now: f64,
+    /// The `-disc` command-line id and the FMA flag of the game state.
+    pub disc: Option<u32>,
+    pub fma: bool,
+    /// Task graphs logged in by `game-task-graph-login` (addresses).
+    pub task_graphs: Vec<u32>,
+    /// The chapter menu needs rebuilding.
+    pub task_menu_dirty: bool,
     /// The game difficulty (`sub_57040`, profile +0x1DE0): 0 easy, 1
     /// normal, 2 hard, 3 crushing.
     pub difficulty: u32,
@@ -449,6 +465,10 @@ impl Runtime {
                 weapons: BTreeMap::new(),
                 prone: None,
                 now: 0.,
+                disc: None,
+                fma: false,
+                task_graphs: Vec::new(),
+                task_menu_dirty: false,
                 difficulty: 1,
             },
         }
@@ -1561,6 +1581,24 @@ impl Natives for Ctx<'_> {
                 }
             }
             "get-difficulty" => ok(self.inner.difficulty),
+            // (disc? id): the `-disc` command-line id (game state +0x1DA0,
+            // e.g. `e3`); unset on the retail disc.
+            "disc?" => b(n > 0 && self.inner.disc.is_some_and(|d| d == a[0])),
+            // (is-fma): the game state's flag byte +0x1DC5.
+            "is-fma" => b(self.inner.fma),
+            // (game-task-graph-login graph): `sub_7E4518` logs a task graph
+            // in; the graph of the boot module is already loaded.
+            "game-task-graph-login" => {
+                if n > 0 && a[0] != 0 && !self.inner.task_graphs.contains(&a[0]) {
+                    self.inner.task_graphs.push(a[0]);
+                }
+                ok(0)
+            }
+            // (update-task-menu): refresh the chapter menu (`sub_7EC0F8`).
+            "update-task-menu" => {
+                self.inner.task_menu_dirty = true;
+                ok(0)
+            }
             // (camera-fade-out name): the named camera object fades out of
             // the blend (`sub_3564E0`); the shared camera releases it.
             "camera-fade-out" => {

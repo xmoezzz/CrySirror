@@ -242,6 +242,44 @@ impl Ctx<'_> {
                 }
                 ok(1)
             }
+            // Nav blockers (`sub_F44D0`) and the polygon under an object
+            // (`sub_F4348`).
+            "enable-nav-blocker-object" | "disable-nav-blocker-object" | "block-nav-poly-under-object" | "unblock-nav-poly-under-object" => {
+                if n == 0 {
+                    return ok(0);
+                }
+                let who = self.object(a[0]);
+                let block = matches!(name, "enable-nav-blocker-object" | "block-nav-poly-under-object");
+                if !self.world.nav_block(who, block) {
+                    self.inner.error(format!("{name}: Object {who:#010x} was not found"));
+                }
+                ok(0)
+            }
+            // Cover action packs on an object's collision (`sub_F8B80`
+            // removes, `sub_F94A0` regenerates them).
+            "remove-cover-action-packs-from-object" | "regenerate-cover-action-packs-from-object" => {
+                if n == 0 {
+                    return ok(0);
+                }
+                let who = self.object(a[0]);
+                if !self.world.object_cover(who, name.starts_with("regenerate")) {
+                    self.inner.error(format!("{name}: Object {who:#010x} was not found"));
+                }
+                ok(0)
+            }
+            // (enable-action-pack ap on?): a traversal action pack spawner.
+            "enable-action-pack" if n > 0 => {
+                self.world.enable_action_pack(a[0], flag(1));
+                ok(0)
+            }
+            // (debug-draw-locator locator [scale] [seconds] [depth?]
+            // [color]): the debug renderer, which the player does not draw.
+            "debug-draw-locator" => {
+                if n == 0 || a[0] == 0 {
+                    self.inner.error("debug-draw-locator: NULL locator".into());
+                }
+                ok(0)
+            }
             _ => Ok(None),
         }
     }

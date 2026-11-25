@@ -128,11 +128,15 @@ impl NavMesh {
     /// within the tolerance (`sub_2B8748`; the lookup grid only narrows the
     /// candidates).
     pub fn find(&self, point: Vec3) -> Option<usize> {
+        self.find_any(point, false)
+    }
+
+    fn find_any(&self, point: Vec3, blocked: bool) -> Option<usize> {
         let local = point - self.origin;
         let mut best = None;
         let mut distance = FIND_TOLERANCE;
         for (i, q) in self.polys.iter().enumerate() {
-            if q.flags & POLY_BLOCKED != 0 || !q.contains_xz(local) {
+            if (!blocked && q.flags & POLY_BLOCKED != 0) || !q.contains_xz(local) {
                 continue;
             }
             let (lo, hi) = q.vertices.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v.y), hi.max(v.y)));
@@ -214,6 +218,15 @@ impl Navigation {
 
     pub fn find(&self, point: Vec3) -> Option<PolyRef> {
         self.meshes.iter().enumerate().find_map(|(m, mesh)| mesh.find(point).map(|q| (m, q)))
+    }
+
+    /// Block or unblock the polygon under `point` (`sub_F4348`, the nav
+    /// blockers of `sub_F44D0`); false when no polygon holds it.
+    pub fn set_blocked(&mut self, point: Vec3, blocked: bool) -> bool {
+        let Some((m, q)) = self.meshes.iter().enumerate().find_map(|(m, mesh)| mesh.find_any(point, true).map(|q| (m, q))) else { return false };
+        let flags = &mut self.meshes[m].polys[q].flags;
+        if blocked { *flags |= POLY_BLOCKED } else { *flags &= !POLY_BLOCKED }
+        true
     }
 
     /// A link polygon stands for the partner's pre-link polygon.

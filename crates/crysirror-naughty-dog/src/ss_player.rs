@@ -13,6 +13,10 @@ pub const SETTING_LIGHT_COMBO_TUTORIAL: u32 = 0x0893_05a1;
 /// `set-player-infinite-ammo` writes its flag through `sub_15F8AC` into
 /// the setting variable at 0xF5041A; the address keys it.
 pub const SETTING_INFINITE_AMMO: u32 = 0x00f5_041a;
+/// `set-ragdoll-flow` (`sub_15F934`, value float) and
+/// `allow-camera-cut-compensate` settings.
+pub const SETTING_RAGDOLL_FLOW: u32 = 0x4d95_a0b1;
+pub const SETTING_CAMERA_CUT_COMPENSATE: u32 = 0xfaa6_c25b;
 const SETTING_FRAMES: u64 = 9;
 
 
@@ -29,6 +33,13 @@ impl Ctx<'_> {
         let player = self.world.locator(sid("player")).is_some();
         match name {
             "player-disable-brutal-melee" => self.set_setting(SETTING_BRUTAL_MELEE_DISABLED, 1),
+            "set-ragdoll-flow" if n > 0 => self.set_setting(SETTING_RAGDOLL_FLOW, a[0]),
+            "allow-camera-cut-compensate" => self.set_setting(SETTING_CAMERA_CUT_COMPENSATE, 1),
+            // (player-disable-controls-explicit mask): as
+            // `player-disable-controls`; mask 0 disables nothing.
+            "player-disable-controls-explicit" => {
+                self.world.player_controls(n > 0 && a[0] == 0);
+            }
             "set-player-invincible" => self.set_setting(SETTING_INVINCIBLE, 1),
             // Also clears the tutorial's pending state (`sub_15FDCC`).
             "player-force-light-combo-tutorial" => self.set_setting(SETTING_LIGHT_COMBO_TUTORIAL, 1),

@@ -302,3 +302,5 @@ root motion).
 | `get-object-health` | breakables 0x8B7DE21A: hit points / maximum; characters: health component vtable +0x3C; `RailVehicle`: +0x1B4 |
 | `set-animation-speed` (object speed [layer 6]) | event 0xAF4A1F1F; the played clip time stays continuous |
 | `spline-activate` (spline on?) | flag bit 61 marks the spline inactive; 1 when found |
+
+Further natives: `enable-`/`disable-nav-blocker-object` and `block-`/`unblock-nav-poly-under-object` set the blocked flag (0x02) of the nav polygon under the object (`sub_F44D0`, `sub_F4348`); `remove-`/`regenerate-cover-action-packs-from-object` (`sub_F8B80`, `sub_F94A0`); `disc?` compares the `-disc` command-line id at game state +0x1DA0 (unset on the retail disc, so `e3` is false); `is-fma` reads the flag byte +0x1DC5; `set-ragdoll-flow` and `allow-camera-cut-compensate` are script settings 0x4D95A0B1 and 0xFAA6C25B; `game-task-graph-login` logs a graph in (`sub_7E4518`); `update-task-menu` marks the chapter menu for rebuilding (`sub_7EC0F8`).
