@@ -39,6 +39,7 @@ pub mod texture;
 pub mod trigger;
 pub mod vehicle;
 pub mod vox;
+pub mod water;
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -340,3 +340,7 @@ The spawn and update programs never write `posX..Z`/`velX..Z`: birth velocity co
 ### Feature flags
 
 The debug printer `sub_62EC50` names the feature flag bits. Edges: `EdgeNoSwing` 0x1, `EdgeCanStand` 0x2, `EdgeCanHang` 0x4, `EdgeResistWalk` 0x8, `EdgeCanUseLowCover` 0x10, `EdgeLadder` 0x20, `EdgeNoJumpAim` 0x40, `EdgeForeground` 0x2000, `EdgeLoop` 0x4000, `EdgeDummy` 0x8000. Corners: `CornerHandPlaced` 0x1, `CornerLowCover` 0x2, `CornerCanStepOut` 0x4, `CornerPeekLeft` 0x8, `CornerPeekRight` 0x10, `CornerPeekOver` 0x20, `CornerNoPlayer` 0x40, `CornerForeground` 0x2000, `CornerIsActive` 0x8000. (The earlier reading of corner 0x20 as wildfire cover was wrong: it is peek-over, i.e. low cover.)
+
+## Water
+
+`WATER_DATA` package items (`src/water.rs`): +0x4 count, +0x8 records of 0x70 bytes: +0x1C surface plane normal, +0x28 plane constant (`n·p = d`), +0x2C bounding box minimum, +0x38 maximum. `dig-02-ship-water` holds six bodies (the first level at y = −103.5, the second tilted, normal (0.038, 0.999, −0.0096)).

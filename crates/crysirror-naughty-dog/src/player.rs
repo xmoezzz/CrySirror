@@ -111,6 +111,8 @@ pub enum Mode {
     /// Jumping from one edge to another (`ledge-jump-begin` → `-mid` →
     /// `-end`, `auto`): the adapter moves the root between the grips.
     Leap,
+    /// Swimming at a water surface (`swim-…`).
+    Swim,
     /// In cover at a cover point (`edge-cover-…` low, `corner-cover-…`
     /// high): the root stays at the cover.
     Cover,
@@ -197,6 +199,9 @@ pub struct Frame {
     /// While hanging: step to the hand hold above (+1) or below (−1)
     /// (wall and ladder climbing, `climb-up-lh/rh`, `climb-down-lh/rh`).
     pub step: i8,
+    /// Deep water at the player's position, and the sprint input.
+    pub swim: bool,
+    pub movement_fast: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -327,6 +332,8 @@ impl Controller {
             Mode::Climb
         } else if LEAP.contains(&state.as_str()) {
             Mode::Leap
+        } else if state.starts_with("swim-") {
+            Mode::Swim
         } else if state.starts_with("edge-cover-") || state.starts_with("corner-cover-") {
             Mode::Cover
         } else {
@@ -382,6 +389,25 @@ impl Controller {
                 }
                 return self.finish(graph, table, clips, f, before, None, 0.);
             }
+            Mode::Swim => {
+                if !f.swim {
+                    self.go(table, "idle", Some("idle"), 0.3);
+                } else {
+                    let target = match f.heading {
+                        None => "swim-idle",
+                        Some(_) if f.movement_fast => "swim-surface-crawl",
+                        Some(_) => "swim-surface-breast",
+                    };
+                    if state != target {
+                        self.anim.machine.force(sid(target), 0.3);
+                    }
+                }
+                if let Some(h) = f.heading {
+                    let d = wrap(h - self.yaw);
+                    self.yaw = wrap(self.yaw + d.clamp(-TURN_RATE * 0.5 * f.seconds, TURN_RATE * 0.5 * f.seconds));
+                }
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
             Mode::Cover => {
                 let side = if state.contains("left") { "l" } else { "r" };
                 if state.ends_with("-exit-l") || state.ends_with("-exit-r") {
@@ -402,6 +428,10 @@ impl Controller {
                 return self.finish(graph, table, clips, f, before, None, 0.);
             }
             Mode::Ground => {}
+        }
+        if f.swim {
+            self.anim.machine.force(sid("swim-idle"), 0.3);
+            return self.finish(graph, table, clips, f, before, None, 0.);
         }
         if let Some(kind) = f.cover {
             let (family, side) = (if kind >= 2 { "edge-cover" } else { "corner-cover" }, if kind % 2 == 0 { "left" } else { "right" });

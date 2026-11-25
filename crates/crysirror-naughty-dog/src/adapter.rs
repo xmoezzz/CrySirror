@@ -301,6 +301,8 @@ struct Stage {
     frame_seconds: f32,
     /// Weapons, archetypes and damage (`crate::combat`).
     combat: Option<Arc<crate::combat::CombatData>>,
+    /// Water bodies of the loaded packages.
+    water: Vec<crate::water::Water>,
     /// Tanks and helicopters scripts command.
     vehicles: crate::vehicle::Vehicles,
     /// The player's native state class (`player-in-state?`).
@@ -1714,6 +1716,7 @@ impl NaughtyDogVm {
         }
         session.stage.joints.retain(|k, _| *k == sid("player"));
         session.stage.navigation.clear();
+        session.stage.water.clear();
         session.stage.cover.clear();
         session.stage.entities.clear();
         session.stage.instance_params.clear();
@@ -1852,6 +1855,10 @@ impl NaughtyDogVm {
                 match crate::nav::nav_meshes(&loaded, &directory) {
                     Ok(meshes) => meshes.into_iter().for_each(|m| session.stage.navigation.add(m)),
                     Err(e) => session.stage.log(format!("{package_name}: nav meshes: {e:#}")),
+                }
+                match crate::water::bodies(&loaded, &directory) {
+                    Ok(w) => session.stage.water.extend(w),
+                    Err(e) => session.stage.log(format!("{package_name}: water: {e:#}")),
                 }
                 match crate::nav::splines(&loaded, &directory) {
                     Ok(splines) => session.stage.splines.extend(splines.into_iter().map(|s| (s.id, s))),
@@ -3125,7 +3132,7 @@ impl NaughtyDogVm {
                     None => {}
                 }
             }
-            crate::player::Mode::Ground | crate::player::Mode::Leap | crate::player::Mode::Cover => return,
+            crate::player::Mode::Ground | crate::player::Mode::Leap | crate::player::Mode::Cover | crate::player::Mode::Swim => return,
         }
         let f = edge_frame(&edge, grip.s).transform_vector3(glam::Vec3::Z);
         p.yaw = f.x.atan2(f.z);
@@ -3575,6 +3582,11 @@ impl NaughtyDogVm {
                 Some(_) => "rifle",
                 None => "no-weapon",
             };
+            // Deep water (surface more than 1.3 m above the feet; 1 m to
+            // stay in): swim at the surface. Depths are not native.
+            let surface = crate::water::surface_at(&session.stage.water, glam::Vec3::from_array(p.position));
+            let depth = surface.map_or(0., |h| h - p.position[1]);
+            let swim = depth > if mode == crate::player::Mode::Swim { 1.0 } else { 1.3 };
             let leave_cover = mode == crate::player::Mode::Cover && (ctrl || input.buttons_pressed & b::SPACE != 0);
             let mut ground_speed = None;
             let mut step_mode = mode;
@@ -3600,6 +3612,8 @@ impl NaughtyDogVm {
                     seconds,
                     cover: take_cover,
                     uncover: leave_cover,
+                    swim,
+                    movement_fast: running,
                 };
                 match anim.step(graph, table, &session.player_clips, &frame) {
                     Ok(step) => {
@@ -3656,6 +3670,9 @@ impl NaughtyDogVm {
             let on_edge = step_mode != crate::player::Mode::Ground && (p.grip.is_some() || p.leap.is_some());
             let speed = match ground_speed {
                 _ if on_edge || step_mode == crate::player::Mode::Cover => 0.,
+                _ if step_mode == crate::player::Mode::Swim => {
+                    if len > 0. { if down(b::SHIFT) { 2.8 } else { 1.6 } } else { 0. }
+                }
                 Some(v) => v,
                 None if len > 0. => {
                     p.yaw = mv[0].atan2(mv[1]);
@@ -3689,8 +3706,14 @@ impl NaughtyDogVm {
                 }
             }
             let support = if on_edge { None } else { session.ground.support(p.position[0], p.position[2], p.position[1] + 0.6) };
+            // Swimming holds the body 1.3 m under the surface, no fall.
+            if let (true, Some(h)) = (swim, surface) {
+                p.position[1] = h - 1.3;
+                p.fall = 0.;
+                p.air_top = None;
+            }
             p.platform = None;
-            match support.map(|(h, _)| h) {
+            match support.map(|(h, _)| h).filter(|_| !swim) {
                 Some(h) if p.fall >= 0. && h >= p.position[1] - p.fall * seconds - 0.05 => {
                     p.position[1] = h;
                     p.fall = 0.;
@@ -3766,6 +3789,7 @@ impl NaughtyDogVm {
                 crate::player::Mode::Climb => "EdgeClimbUp",
                 crate::player::Mode::Leap => "JumpAcross",
                 crate::player::Mode::Cover => "Cover",
+                crate::player::Mode::Swim => "Swimming",
             };
             sid(class)
         });
