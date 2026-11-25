@@ -30,7 +30,7 @@ pub mod player_natives;
 #[path = "ss_object.rs"]
 pub mod object_natives;
 #[path = "ss_sound.rs"]
-mod sound_natives;
+pub mod sound_natives;
 
 /// A script setting override (`sub_15F480`): its value and the frame it
 /// expires after.
@@ -199,6 +199,12 @@ pub trait World {
         false
     }
     fn stop_speaking(&mut self, _speaker: u32) {}
+    /// Start sound `id`; returns its handle (0 when nothing plays).
+    fn play_sound(&mut self, _id: u32, _at: sound_natives::SoundAt, _volume: f32, _pitch: f32) -> u32 {
+        0
+    }
+    fn stop_sound(&mut self, _handle: u32) {}
+    fn set_mixer(&mut self, _mixer: u32) {}
     /// Block or unblock the nav polygon under object `name`.
     fn nav_block(&mut self, _name: u32, _block: bool) -> bool {
         false

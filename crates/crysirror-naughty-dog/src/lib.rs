@@ -32,6 +32,7 @@ pub mod render_settings;
 pub mod rsx;
 pub mod scene;
 pub mod skeleton;
+pub mod sound;
 pub mod texture;
 pub mod trigger;
 pub mod vox;

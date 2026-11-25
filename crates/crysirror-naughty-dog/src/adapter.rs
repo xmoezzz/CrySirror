@@ -64,6 +64,10 @@ const MAX_WORLD_VIDEO: u64 = crysirror_core::limits::LARGE_ASSET_BYTES;
 const MAX_LOG: usize = 64;
 /// The English dialogue lines (the only speech archive on the disc).
 const SPEECH: &str = "sound1/speech/english.psarc";
+const BANKS: &str = "sound1/banks.psarc";
+/// Audio channels of sound effects: a ring of `SOUND_CHANNELS`.
+const SOUND_CHANNEL: u32 = 0x200;
+const SOUND_CHANNELS: u32 = 48;
 /// First audio channel of speakers.
 const SPEECH_CHANNEL: u32 = 0x100;
 /// A dialogue line is read whole.
@@ -257,6 +261,14 @@ struct Stage {
     npc_dead: HashSet<u32>,
     /// The live NPCs' agent state (the NPC manager's objects).
     agents: crate::npc::Agents,
+    /// Sound records (`audio.bin`).
+    sounds: Option<Arc<crate::sound::SoundTable>>,
+    /// Sounds to start: handle, Scream name, position, volume, pitch.
+    sound_requests: Vec<(u32, String, crate::ss::sound_natives::SoundAt, f32, f32)>,
+    sound_stops: Vec<u32>,
+    next_sound: u32,
+    /// The mixer snapshot scripts chose (`set-mixer-override`).
+    mixer: Option<u32>,
     /// Dialogue table (`vox.bin`).
     vox: Option<Arc<crate::vox::VoxTable>>,
     /// Lines to start: speaker and line name.
@@ -755,6 +767,23 @@ impl World for Stage {
         self.speaking.insert(speaker, f64::INFINITY);
         true
     }
+    fn play_sound(&mut self, id: u32, at: crate::ss::sound_natives::SoundAt, volume: f32, pitch: f32) -> u32 {
+        let Some(name) = self.sounds.as_ref().and_then(|t| t.names.get(&id)).cloned() else {
+            self.log(format!("sound {id:#010x}: no audio.bin record"));
+            return 0;
+        };
+        self.next_sound = self.next_sound.wrapping_add(1).max(1);
+        let handle = 0x5300_0000 | (self.next_sound & 0x00ff_ffff);
+        self.sound_requests.push((handle, name, at, volume, pitch));
+        handle
+    }
+    fn stop_sound(&mut self, handle: u32) {
+        self.sound_requests.retain(|r| r.0 != handle);
+        self.sound_stops.push(handle);
+    }
+    fn set_mixer(&mut self, mixer: u32) {
+        self.mixer = Some(mixer);
+    }
     fn speaking(&self, speaker: u32) -> bool {
         self.speaking.get(&speaker).is_some_and(|end| self.now < *end)
     }
@@ -1063,6 +1092,10 @@ struct Session {
     characters: Vec<crate::characters::Character>,
     /// `sound1/speech/<language>.psarc`, the dialogue lines.
     speech: Option<ArchiveMount>,
+    /// The Scream banks of `sound1/banks.psarc`.
+    banks: crate::sound::Banks,
+    /// Sound preparations in flight (host tickets).
+    sound_pending: Vec<u64>,
     /// Speech preparations in flight: speaker, channel, host ticket.
     speech_pending: Vec<(u32, u32, u64)>,
     /// Audio channels by speaker.
@@ -1346,6 +1379,8 @@ impl NaughtyDogVm {
             player_clips: HashMap::new(),
             characters: Vec::new(),
             speech: None,
+            banks: Default::default(),
+            sound_pending: Vec::new(),
             speech_pending: Vec::new(),
             speech_channels: HashMap::new(),
             npc_rigs: HashMap::new(),
@@ -1380,6 +1415,21 @@ impl NaughtyDogVm {
             match crate::game::ModuleSource::read(&modules, "vox").and_then(|b| crate::vox::VoxTable::parse(&b)) {
                 Ok(t) => session.stage.vox = Some(Arc::new(t)),
                 Err(e) => session.stage.log(format!("vox.bin: {e:#}")),
+            }
+            match crate::game::ModuleSource::read(&modules, "audio").and_then(|b| crate::sound::SoundTable::parse(&b)) {
+                Ok(t) => session.stage.sounds = Some(Arc::new(t)),
+                Err(e) => session.stage.log(format!("audio.bin: {e:#}")),
+            }
+            match open(BANKS).and_then(|r| Ok(registry.open(r, Some("sony/psarc"), &context)?)).and_then(|(_, a)| ArchiveMount::new(a, context.clone())) {
+                Ok(mount) => {
+                    for name in mount.list().unwrap_or_default().into_iter().filter(|n| n.ends_with(".bnk")) {
+                        match mount.open(&name).map_err(anyhow::Error::from).and_then(|r| crate::sound::Bank::read(&name, r)) {
+                            Ok(bank) => session.banks.add(bank),
+                            Err(e) => session.stage.log(format!("{name}: {e:#}")),
+                        }
+                    }
+                }
+                Err(e) => session.stage.log(format!("banks: {e:#}")),
             }
             match open(SPEECH).and_then(|r| Ok(registry.open(r, Some("sony/psarc"), &context)?)) {
                 Ok((_, a)) => session.speech = ArchiveMount::new(a, context.clone()).ok(),
@@ -2396,6 +2446,75 @@ impl NaughtyDogVm {
     /// over the blend-in and blend-out times); an animation with a
     /// locator places its entities there when it starts. Animations whose
     /// clip cannot be found end at once (logged).
+    /// A world point in the listener (camera) frame: +X right, +Y up, −Z
+    /// forward.
+    fn listener_point(stage: &Stage, point: [f32; 3]) -> Option<[f32; 3]> {
+        let (eye, forward, up, _) = stage.camera_view?;
+        let f = glam::Vec3::from_array(forward).normalize_or(glam::Vec3::Z);
+        let r = f.cross(glam::Vec3::from_array(up)).normalize_or(glam::Vec3::X);
+        let u = r.cross(f);
+        let d = glam::Vec3::from_array(point) - glam::Vec3::from_array(eye);
+        Some([d.dot(r), d.dot(u), -d.dot(f)])
+    }
+
+    /// Start and stop the scripts' sound effects: a bank sound's tone
+    /// (chosen in turn) as a WAVE stream on a ring of channels, positioned
+    /// in the listener frame.
+    fn serve_sounds(&self, host: &mut dyn HostServices, session: &mut Session) {
+        use crate::ss::sound_natives::SoundAt;
+        use crysirror_core::service::{AudioParameters, AudioPreparePhase, AudioRequest, EncodedAudio, PcmBus};
+        let client = self.client;
+        let channel = |handle: u32| SOUND_CHANNEL + (handle & 0x00ff_ffff) % SOUND_CHANNELS;
+        for handle in std::mem::take(&mut session.stage.sound_stops) {
+            if handle >> 24 == 0x53 {
+                let _ = host.submit_audio(client, AudioRequest::Stop { channel: channel(handle), fade_ms: 30. });
+            }
+        }
+        for (handle, name, at, volume, pitch) in std::mem::take(&mut session.stage.sound_requests) {
+            let Some((bank, sound)) = session.banks.playable(&name) else {
+                session.stage.log(format!("sound {name}: in no bank"));
+                continue;
+            };
+            if sound.tones.is_empty() {
+                continue;
+            }
+            let tone = sound.tones[(handle as usize) % sound.tones.len()];
+            let point = match at {
+                SoundAt::Listener => None,
+                SoundAt::Point(p) => Some(p),
+                SoundAt::Joint { object, joint } => World::joint_locator(&session.stage, object, joint).or_else(|| World::locator(&session.stage, object)).map(|(p, _)| p),
+            };
+            match bank.wave(tone) {
+                Ok((wave, looping)) => {
+                    let parameters = AudioParameters {
+                        bus: PcmBus::Sfx,
+                        gain: (volume.max(0.) * f32::from(sound.volume) / 127.).min(4.),
+                        rate: 2f32.powf(pitch.clamp(-48., 48.) / 12.),
+                        spatial_position: point.and_then(|p| Self::listener_point(&session.stage, p)),
+                        looping: looping.is_some(),
+                        loop_start: looping.unwrap_or(0),
+                        ..Default::default()
+                    };
+                    match host.begin_audio(client, AudioRequest::Play { channel: channel(handle), source: EncodedAudio { bytes: wave.into(), frame_limit: None }, intro: None, parameters }) {
+                        Ok(ticket) => session.sound_pending.push(ticket),
+                        Err(e) => session.stage.log(format!("sound {name}: {e}")),
+                    }
+                }
+                Err(e) => session.stage.log(format!("sound {name}: {e:#}")),
+            }
+        }
+        let mut keep = Vec::new();
+        for ticket in std::mem::take(&mut session.sound_pending) {
+            match host.audio_preparation(client, ticket).map(|p| p.phase) {
+                Ok(AudioPreparePhase::Pending) => keep.push(ticket),
+                _ => {
+                    let _ = host.release_audio(client, ticket);
+                }
+            }
+        }
+        session.sound_pending = keep;
+    }
+
     /// Start, stop and track the scripts' dialogue lines: the XVAG line
     /// becomes a WAVE stream the host decodes; the speaker speaks for the
     /// line's duration.
@@ -3332,6 +3451,7 @@ impl NaughtyDogVm {
         }
         self.script_animations(host, session, &mut world);
         self.serve_speech(host, session);
+        self.serve_sounds(host, session);
         session.stage.player_locator = session.player.as_ref().map(|p| (p.position, glam::Quat::from_rotation_y(p.yaw).to_array()));
         session.stage.publish_lights();
         // Props collide while spawned.
