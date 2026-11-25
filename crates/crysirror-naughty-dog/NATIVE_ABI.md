@@ -74,8 +74,21 @@ Other opcodes report "Unknown opcode". After a native call the interpreter reads
 | `npc-alive-count` / `npc-max-count` | 0x221708 / 0x221070 | the manager's live count / the constant 15 |
 | `npc-group-alive-count` / `-dead-count` / `-find-first-alive` | — | the same tests over an entity group's members (inferred from the names) |
 | `part-module-loaded?` | 0x1405a0 | the particle module is in the loaded-module table (`sub_765C50`) |
+| `add-dynamic-light` | 0x14389c | `(name, locator, radius, [cone-degrees], [enabled])`. Zero selects a point light. The nonzero angle selects a spotlight. By default the light is enabled. |
+| `add-dynamic-light-joint` | 0x14a778 | `(name, object, joint, radius, [cone-degrees], [enabled])`. The native record carries a generational object handle and joint index. |
+| `update-dynamic-light` | 0x143778 | `(name, locator, radius, [cone-degrees])`. Edits an existing record, detaches its joint and restores white, preserving the light type and gain. |
+| `set-dynamic-light-color` / `remove-dynamic-light` | 0x143678 / 0x13ceec | `(name, r, g, b, [gain])` with default gain 1. The colour call returns existence. Removal returns zero. |
+| `set-shader-instance-param` / `set-single-shader-instance-param` | 0x145bb8 / 0x13dbd8 | Write a vector or one component in the drawable's four vectors of `g_optionalInstanceParameters`. CrySirror retains script writes in object state. The translated materials do not consume the block yet. |
 
 `camera-fade-out` (0x13b210) fades a named camera object, not the screen.
+
+The script light pool contains 32 records (`sub_7A88C`). Under pressure,
+`sub_7AFB8` searches for a light behind the camera before comparing distance.
+`sub_7B998` converts the optional cone from degrees to radians, and
+`sub_133568` uses the half-angle for the cone. CrySirror maps the record to
+shared point and spot lights, with an inner cone of 90% of the outer and
+exponent falloff. Joint lights currently follow the object's frame and
+its bind joint. They need the evaluated joint pose for bone animation.
 
 ## State scripts
 

@@ -43,6 +43,34 @@ pub enum Property {
     Vec4([f32; 4]),
 }
 
+/// Parameter names of `set-single-shader-instance-param` and the
+/// `(vector, component)` of `g_optionalInstanceParameters` each sets
+/// (`sub_13DBD8` → `sub_F65D0`; the names are not in the `StringId`
+/// database).
+const INSTANCE_PARAMS: [(u32, usize, usize); 16] = [
+    (0xccb3_9f64, 0, 0), (0xc872_82d3, 0, 1), (0xc531_a40a, 0, 2), (0xf4fc_22d9, 0, 3),
+    (0xcd6b_33e3, 1, 0), (0xc9aa_2e54, 1, 1), (0xc4e9_088d, 1, 2), (0xf524_8e5e, 1, 3),
+    (0xcf02_c66a, 2, 0), (0xcbc3_dbdd, 2, 1), (0xc680_fd04, 2, 2), (0xf74d_7bd7, 2, 3),
+    (0xceda_6aed, 3, 0), (0xca1b_775a, 3, 1), (0xc758_5183, 3, 2), (0xf695_d750, 3, 3),
+];
+
+const INSTANCE_VECTORS: [u32; 4] = [0x80b9_5849, 0x8478_45fe, 0x893b_6327, 0x8dfa_7e90];
+
+/// How a script light obtains its locator on each frame.
+#[derive(Clone, Copy, Debug)]
+pub enum LightLocator {
+    Frame([f32; 3], [f32; 4]),
+    Joint { object: u32, joint: u32 },
+}
+
+/// A script particle request, served by the engine after the frame's
+/// scripts.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ParticleRequest {
+    Spawn { handle: u32, group: u32, position: [f32; 3], rotation: [f32; 4] },
+    Kill { handle: u32 },
+}
+
 /// Engine services natives use. Names are `StringId`s.
 pub trait World {
     /// Seconds since the level started.
@@ -109,6 +137,42 @@ pub trait World {
     /// Live NPC processes.
     fn npc_alive_count(&self) -> u32 {
         0
+    }
+    /// World frame of joint `joint` of `object` (`player` or a spawner).
+    fn joint_locator(&self, _object: u32, _joint: u32) -> Option<([f32; 3], [f32; 4])> {
+        None
+    }
+    /// Add a point light (zero cone) or spot light (cone angle in degrees).
+    fn add_dynamic_light(&mut self, _name: u32, _locator: LightLocator, _radius: f32, _cone: f32, _enabled: bool) {}
+    /// Move an existing light to a fixed locator, keeping its type and gain.
+    fn update_dynamic_light(&mut self, _name: u32, _locator: LightLocator, _radius: f32, _cone: f32) {}
+    /// Recolour dynamic light `name`. False when it does not exist.
+    fn dynamic_light_color(&mut self, _name: u32, _color: [f32; 3], _gain: f32) -> bool {
+        false
+    }
+    fn remove_dynamic_light(&mut self, _name: u32) {}
+    /// Start effect group `group` at a frame; returns its handle (0 when
+    /// unsupported).
+    fn spawn_particles(&mut self, _group: u32, _position: [f32; 3], _rotation: [f32; 4]) -> u32 {
+        0
+    }
+    fn kill_particles(&mut self, _handle: u32) {}
+    /// Set component `component` of instance parameter `vector` of
+    /// `object`'s shaders. False when unknown.
+    fn set_instance_param(&mut self, _object: u32, _vector: usize, _component: usize, _value: f32) -> bool {
+        false
+    }
+    fn set_instance_vector(&mut self, _object: u32, _vector: usize, _value: [f32; 4]) -> bool {
+        false
+    }
+    /// Whether a world point lies in the presented camera's view frustum.
+    fn on_screen(&self, _point: [f32; 3]) -> bool {
+        false
+    }
+    /// Move water object `name` to its spawner plus `offset`. False when
+    /// unknown.
+    fn set_water_offset(&mut self, _name: u32, _offset: [f32; 3]) -> bool {
+        false
     }
     /// Position and unit tangent of spline `spline` at arc distance
     /// `distance` (`sub_35A20`).
@@ -196,6 +260,8 @@ pub struct Inner {
     pub prints: Vec<String>,
     /// State of the scripts' random numbers (xorshift).
     rng: u32,
+    /// Game statistics by `(stat, qualifier)` (`stat-value?`).
+    stats: HashMap<(u32, u32), i32>,
 }
 
 pub struct Runtime {
@@ -269,8 +335,19 @@ impl Runtime {
                 pads: HashMap::new(),
                 movement: [0; 2],
                 rng: 0x2545_f491,
+                stats: HashMap::new(),
             },
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn call_for_test(&mut self, world: &mut dyn World, name: &str, args: &[u32]) -> Result<u32> {
+        let mut ctx = Ctx { inner: &mut self.inner, world, proc: None, wait: Wait::None };
+        let id = ctx.lookup(sid(name)).context("test native id")?;
+        let mut padded = [0; MAX_ARGS];
+        padded[..args.len()].copy_from_slice(args);
+        let (value, _) = ctx.call(&mut self.dc, id, &padded, args.len() as u32)?;
+        Ok(value)
     }
 
     /// Run a top-level lambda (for example a module's `top-level`) to
@@ -964,6 +1041,135 @@ impl Natives for Ctx<'_> {
                 };
                 ok(point.and_then(|p| self.world.spline_distance(a[0], p)).unwrap_or(0.).to_bits())
             }
+            // (get-joint-locator object joint) / (get-joint-position object
+            // joint) / (get-object-position object): heap locator or
+            // position records (`sub_138AC0`, `sub_14F708`, `sub_143240`).
+            "get-joint-locator" | "get-joint-position" | "get-object-position" => {
+                let object = self.npc_name(a, n);
+                let frame = if name == "get-object-position" { self.world.locator(object) } else if n > 1 { self.world.joint_locator(object, a[1]) } else { None };
+                let Some((pos, rot)) = frame else { return ok(0) };
+                let at = dc.mem.alloc(32)?;
+                let words: Vec<f32> = if name == "get-joint-locator" { pos.iter().chain(&[1.]).chain(&rot).copied().collect() } else { pos.iter().chain(&[1.]).copied().collect() };
+                for (k, v) in words.iter().enumerate() {
+                    dc.mem.write_u32(at + 4 * k as u32, v.to_bits())?;
+                }
+                ok(at)
+            }
+            // The optional float is the cone angle: sub_7B998 and
+            // sub_7AE48 multiply it by π/180; zero on add selects a point.
+            "add-dynamic-light" | "update-dynamic-light" if n > 2 && a[1] != 0 => {
+                let mut frame = [0.; 8];
+                for (i, value) in frame.iter_mut().enumerate() {
+                    *value = dc.mem.f32(a[1] + 4 * i as u32)?;
+                }
+                let locator = LightLocator::Frame(
+                    [frame[0], frame[1], frame[2]],
+                    [frame[4], frame[5], frame[6], frame[7]],
+                );
+                let radius = Self::arg_f(a, 2);
+                let cone = if n > 3 { Self::arg_f(a, 3) } else { 0. };
+                if name == "add-dynamic-light" {
+                    self.world.add_dynamic_light(a[0], locator, radius, cone, n < 5 || a[4] != 0);
+                } else {
+                    self.world.update_dynamic_light(a[0], locator, radius, cone);
+                }
+                ok(0)
+            }
+            "add-dynamic-light-joint" if n > 3 => {
+                let object = self.inner.process(a[1]).and_then(|p| self.inner.procs[p].spawner).unwrap_or(a[1]);
+                let joint = a[2];
+                if self.world.joint_locator(object, joint).is_some() {
+                    let cone = if n > 4 { Self::arg_f(a, 4) } else { 0. };
+                    self.world.add_dynamic_light(a[0], LightLocator::Joint { object, joint }, Self::arg_f(a, 3), cone, n < 6 || a[5] != 0);
+                }
+                ok(0)
+            }
+            // (set-dynamic-light-color name r g b [gain]), sub_143678.
+            "set-dynamic-light-color" if n > 3 => b(self.world.dynamic_light_color(
+                a[0],
+                [Self::arg_f(a, 1), Self::arg_f(a, 2), Self::arg_f(a, 3)],
+                if n > 4 { Self::arg_f(a, 4) } else { 1. },
+            )),
+            "remove-dynamic-light" if n > 0 => {
+                self.world.remove_dynamic_light(a[0]);
+                ok(0)
+            }
+            // (spawn-particles-at-joint group object joint [parent] [flag]),
+            // (spawn-particles-attached group object …) and
+            // (spawn-particles-at-locator group locator …): start an effect
+            // group, returning its handle (`sub_1392E0` sends the object a
+            // spawn-particles event and returns the effect's id).
+            "spawn-particles-at-joint" | "spawn-particles-attached" if n > 1 => {
+                let frame = if name == "spawn-particles-at-joint" && n > 2 { self.world.joint_locator(a[1], a[2]).or_else(|| self.world.locator(a[1])) } else { self.world.locator(a[1]) };
+                ok(frame.map_or(0, |(p, q)| self.world.spawn_particles(a[0], p, q)))
+            }
+            "spawn-particles-at-locator" if n > 1 && a[1] != 0 => {
+                let f = |k: u32| dc.mem.f32(a[1] + 4 * k);
+                let (p, q) = ([f(0)?, f(1)?, f(2)?], [f(4)?, f(5)?, f(6)?, f(7)?]);
+                let q = if q.iter().all(|v| *v == 0.) { [0., 0., 0., 1.] } else { q };
+                ok(self.world.spawn_particles(a[0], p, q))
+            }
+            // (kill-particles handle [immediately]) (`sub_13D7C8`); a
+            // gradual stop (live particles finishing) is not reproduced.
+            "kill-particles" if n > 0 => {
+                self.world.kill_particles(a[0]);
+                ok(0)
+            }
+            // Statistics (`sub_67D230` and neighbours): a table of
+            // `{stat, qualifier}` counters; one argument means qualifier 0.
+            // (increment-stat stat qualifier) adds 1; (reset-stat …) clears.
+            "stat-value?" if n > 0 => ok(*self.inner.stats.get(&(a[0], if n > 1 { a[1] } else { 0 })).unwrap_or(&0) as u32),
+            "increment-stat" | "increment-task-stat" | "increment-stat-difficulty" if n > 0 => {
+                *self.inner.stats.entry((a[0], if n > 1 { a[1] } else { 0 })).or_default() += 1;
+                b(true)
+            }
+            "reset-stat" if n > 0 => b(self.inner.stats.remove(&(a[0], if n > 1 { a[1] } else { 0 })).is_some()),
+            // (get-dda): the dynamic difficulty value (`sub_57598`): the
+            // least of the players' values below the global cap, else the
+            // cap, 5.0 (the float at 0xe12ca0). Per-player adjustment is
+            // not modelled, so the cap is returned.
+            "get-dda" => ok(5f32.to_bits()),
+            // Rumble needs a host vibration service.
+            "start-rumble" | "stop-rumble" | "do-rumble-ptr" | "stop-script-rumbles" => ok(0),
+            // (set-single-shader-instance-param object name value): one
+            // component of the object's `g_optionalInstanceParameters`.
+            "set-single-shader-instance-param" if n > 2 => {
+                let object = self.npc_name(a, n);
+                match INSTANCE_PARAMS.iter().find(|(k, _, _)| *k == a[1]) {
+                    Some(&(_, v, c)) => b(self.world.set_instance_param(object, v, c, Self::arg_f(a, 2))),
+                    None => {
+                        self.inner.error(format!("{name}: unknown parameter {:#010x}", a[1]));
+                        ok(0)
+                    }
+                }
+            }
+            // (set-shader-instance-param object name x y z w), sub_145BB8.
+            "set-shader-instance-param" if n > 5 => {
+                let object = self.npc_name(a, n);
+                match INSTANCE_VECTORS.iter().position(|&selector| selector == a[1]) {
+                    Some(vector) => b(self.world.set_instance_vector(
+                        object, vector, std::array::from_fn(|i| Self::arg_f(a, i + 2)),
+                    )),
+                    None => {
+                        self.inner.error(format!("{name}: unknown parameter {:#010x}", a[1]));
+                        ok(0)
+                    }
+                }
+            }
+            // (is-on-screen? locator): the point against the camera frustum
+            // (`sub_14108C`).
+            "is-on-screen?" if n > 0 && a[0] != 0 => b(self.world.on_screen([dc.mem.f32(a[0])?, dc.mem.f32(a[0] + 4)?, dc.mem.f32(a[0] + 8)?])),
+            // (set-water-offset name vector): the named water body moves to
+            // its locator plus the offset (`sub_13F068` → `sub_850BD0`,
+            // `sub_8507E8`).
+            "set-water-offset" if n > 1 && a[1] != 0 => {
+                let offset = [dc.mem.f32(a[1])?, dc.mem.f32(a[1] + 4)?, dc.mem.f32(a[1] + 8)?];
+                b(self.world.set_water_offset(a[0], offset))
+            }
+            // (camera-local-space): switches three camera settings through
+            // the settings table (`sub_142788` → `sub_15F934`, `sub_15F480`);
+            // the follow camera here has no such settings.
+            "camera-local-space" => ok(0),
             "get-spawner-locator" | "get-spawner-position" => {
                 let Some((pos, rot)) = self.world.locator(a[0]) else {
                     self.inner.error(format!("{name}: no spawner {:#010x}", a[0]));

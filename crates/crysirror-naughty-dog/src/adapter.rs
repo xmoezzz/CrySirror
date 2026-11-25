@@ -23,7 +23,7 @@ use crate::{
     levels,
     package::Directory,
     scene::{self, SpawnerRecord},
-    ss::{Property, World},
+    ss::{LightLocator, Property, World},
     task::Manager,
 };
 use anyhow::{Context, Result, ensure};
@@ -36,6 +36,7 @@ use crysirror_core::{
     vm::{VmAdapter, VmYield},
 };
 use crysirror_resource::{ArchiveMount, DecodeContext, FormatRegistry, read_all};
+use crysirror_scene::{components::{Falloff, LightShape, LightSpec}, world::Transform};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -61,6 +62,8 @@ const MOVIE_SURFACE: &str = "__surface/1000";
 /// World videos are read whole (`crysirror_runtime::vfs::MAX_FILE`).
 const MAX_WORLD_VIDEO: u64 = crysirror_core::limits::LARGE_ASSET_BYTES;
 const MAX_LOG: usize = 64;
+/// The BCAS20097 light pool has 32 records (sub_7A88C).
+const DYNAMIC_LIGHT_IDS: std::ops::Range<u32> = 0x4e4c_0000..0x4e4c_0020;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -252,6 +255,52 @@ struct Stage {
     navigation: crate::nav::Navigation,
     /// Cover points derived from the levels' corners.
     cover: Vec<crate::nav::Cover>,
+    /// Bind-pose joint frames (object space) by object and joint name.
+    joints: HashMap<u32, std::sync::Arc<HashMap<u32, glam::Mat4>>>,
+    /// Named runtime light records and their last published scene state.
+    lights: HashMap<u32, DynamicLight>,
+    light_order: u64,
+    /// The presented camera: eye, unit forward, up, vertical field of
+    /// view (degrees) and aspect.
+    camera_view: Option<([f32; 3], [f32; 3], [f32; 3], f32)>,
+    /// Per-object `g_optionalInstanceParameters` set by scripts. The
+    /// materials that read them (box cars, the pistol) do not yet apply
+    /// them.
+    instance_params: HashMap<u32, [[f32; 4]; 4]>,
+    /// Particle spawns and kills the scripts requested this frame.
+    particle_requests: Vec<crate::ss::ParticleRequest>,
+    next_particle_handle: u32,
+}
+
+/// A script dynamic light (`add-dynamic-light`, `sub_7B998`).
+#[derive(Clone, Debug)]
+struct DynamicLight {
+    id: u32,
+    order: u64,
+    locator: LightLocator,
+    radius: f32,
+    color: [f32; 3],
+    gain: f32,
+    /// Shape is chosen when adding the light. Update writes the cone
+    /// angles without changing the native shape flag.
+    spot: bool,
+    cone: f32,
+    enabled: bool,
+    published: Option<(Transform, LightSpec)>,
+}
+
+fn light_input_is_finite(locator: LightLocator, radius: f32, cone: f32) -> bool {
+    radius.is_finite()
+        && cone.is_finite()
+        && match locator {
+            LightLocator::Frame(position, rotation) => position.into_iter().chain(rotation).all(f32::is_finite),
+            LightLocator::Joint { .. } => true,
+        }
+}
+
+/// Object-space bind frames of a skeleton's joints by name `StringId`.
+fn joint_frames(s: &crate::skeleton::Skeleton) -> std::sync::Arc<HashMap<u32, glam::Mat4>> {
+    std::sync::Arc::new(s.names.iter().zip(&s.inverse_bind).map(|(n, m)| (sid(n), glam::Mat4::from_cols_array(m).inverse())).collect())
 }
 
 struct CameraAnimation {
@@ -342,6 +391,98 @@ impl Stage {
         }
         if visible { self.visible.insert(name) } else { self.visible.remove(&name) }
     }
+    fn light_frame(&self, locator: LightLocator) -> Option<([f32; 3], [f32; 4])> {
+        match locator {
+            LightLocator::Frame(position, rotation) => Some((position, rotation)),
+            LightLocator::Joint { object, joint } => self.joint_locator(object, joint),
+        }
+    }
+
+    /// sub_7AFB8 scans the active list newest first: recycle the first
+    /// light behind the camera, otherwise the one farthest from the eye.
+    fn evict_dynamic_light(&mut self) -> Option<u32> {
+        let (eye, forward, _, _) = self.camera_view?;
+        let eye = glam::Vec3::from_array(eye);
+        let forward = glam::Vec3::from_array(forward);
+        let (name, _, _, _) = self.lights.iter().map(|(&name, light)| {
+            let (behind, distance) = match self.light_frame(light.locator) {
+                Some((position, _)) => {
+                    let delta = glam::Vec3::from_array(position) - eye;
+                    (delta.dot(forward) < 0., delta.length_squared())
+                }
+                None => (true, 0.),
+            };
+            (name, behind, distance, light.order)
+        }).max_by(|(_, behind_a, distance_a, order_a), (_, behind_b, distance_b, order_b)| {
+            behind_a.cmp(behind_b).then_with(|| {
+                if *behind_a { order_a.cmp(order_b) } else { distance_a.total_cmp(distance_b).then(order_a.cmp(order_b)) }
+            })
+        })?;
+        let id = self.lights[&name].id;
+        self.remove_dynamic_light(name);
+        Some(id)
+    }
+
+    fn publish_lights(&mut self) {
+        let mut lights = std::mem::take(&mut self.lights);
+        for (&name, light) in &mut lights {
+            let Some((position, rotation)) = self.light_frame(light.locator)
+                .filter(|(position, rotation)| position.iter().chain(rotation).all(|value| value.is_finite()))
+            else {
+                // The native renderer retires a light when the attached
+                // object's handle has gone away.
+                if light.published.take().is_some() {
+                    self.ops.push(json!({"op": "despawn", "id": light.id}));
+                }
+                continue;
+            };
+            // Locators look along local +Z; the shared spot emits along -Z.
+            let rotation = glam::Quat::from_array(rotation);
+            let length = rotation.length_squared();
+            let orientation = if length.is_finite() && length > f32::MIN_POSITIVE {
+                rotation.normalize()
+            } else {
+                glam::Quat::IDENTITY
+            }
+                * glam::Quat::from_rotation_y(std::f32::consts::PI);
+            let (x, y, z) = orientation.to_euler(glam::EulerRot::XYZ);
+            let transform = Transform {
+                translation: position,
+                rotation_degrees: [x.to_degrees(), y.to_degrees(), z.to_degrees()],
+                ..Default::default()
+            };
+            let outer = (light.cone * 0.5).clamp(0.1, 89.);
+            let shape = if light.spot {
+                LightShape::Spot { inner_degrees: outer * 0.9, outer_degrees: outer }
+            } else {
+                LightShape::Point
+            };
+            let spec = LightSpec {
+                shape,
+                color: light.color.map(|value| value.clamp(0., 1000.)),
+                intensity: light.gain.clamp(0., 1e9),
+                range: light.radius.clamp(0.01, 100_000.),
+                falloff: Falloff::Exponent { exponent: 2.0 },
+                enabled: light.enabled && light.radius > 0. && (!light.spot || (0. < light.cone && light.cone < 180.)),
+                ..Default::default()
+            };
+            let id = light.id;
+            if let Some((last_transform, last_spec)) = &light.published {
+                if last_transform != &transform {
+                    self.ops.push(json!({"op": "set_transform", "id": id, "transform": transform}));
+                }
+                if last_spec != &spec {
+                    self.ops.push(json!({"op": "set_light", "id": id, "light": spec}));
+                }
+            } else {
+                self.ops.push(json!({"op": "spawn", "entity": {"id": id, "name": format!("dynamic-light:{name:08x}"), "transform": transform, "light": spec}}));
+            }
+            light.published = Some((transform, spec));
+        }
+        lights.retain(|_, light| light.published.is_some());
+        self.lights = lights;
+    }
+
     fn log(&mut self, line: String) {
         if self.log.len() >= MAX_LOG {
             self.log.remove(0);
@@ -381,6 +522,116 @@ impl World for Stage {
     }
     fn npc_alive_count(&self) -> u32 {
         self.npc_spawners.iter().filter(|n| self.npc(**n) == Some(false)).count() as u32
+    }
+    fn joint_locator(&self, object: u32, joint: u32) -> Option<([f32; 3], [f32; 4])> {
+        let local = *self.joints.get(&object)?.get(&joint)?;
+        let (t, q) = World::locator(self, object)?;
+        let m = glam::Mat4::from_rotation_translation(glam::Quat::from_array(q).normalize(), glam::Vec3::from_array(t)) * local;
+        let (_, r, p) = m.to_scale_rotation_translation();
+        Some((p.to_array(), r.normalize().to_array()))
+    }
+    fn add_dynamic_light(&mut self, name: u32, locator: LightLocator, radius: f32, cone: f32, enabled: bool) {
+        if !light_input_is_finite(locator, radius, cone) {
+            return;
+        }
+        if let Some(light) = self.lights.get_mut(&name) {
+            // Direct add leaves the attachment flag of a reused record
+            // intact. update-dynamic-light explicitly clears it.
+            if !matches!(light.locator, LightLocator::Joint { .. }) || matches!(locator, LightLocator::Joint { .. }) {
+                light.locator = locator;
+            }
+            light.radius = radius;
+            light.color = [1.; 3];
+            light.spot = cone != 0.;
+            light.cone = cone;
+            light.enabled = enabled;
+            return;
+        }
+        let id = DYNAMIC_LIGHT_IDS.into_iter().find(|id| self.lights.values().all(|light| light.id != *id))
+            .or_else(|| self.evict_dynamic_light());
+        if let Some(id) = id {
+            self.light_order += 1;
+            self.lights.insert(name, DynamicLight {
+                id, order: self.light_order, locator, radius, color: [1.; 3], gain: 1., spot: cone != 0., cone, enabled, published: None,
+            });
+        } else {
+            self.log(format!("dynamic-light {name:08x}: light pool full"));
+        }
+    }
+    fn update_dynamic_light(&mut self, name: u32, locator: LightLocator, radius: f32, cone: f32) {
+        if !light_input_is_finite(locator, radius, cone) {
+            return;
+        }
+        if let Some(light) = self.lights.get_mut(&name) {
+            light.locator = locator;
+            light.radius = radius;
+            light.color = [1.; 3];
+            light.cone = cone;
+        }
+    }
+    fn dynamic_light_color(&mut self, name: u32, color: [f32; 3], gain: f32) -> bool {
+        if !gain.is_finite() || !color.iter().all(|value| value.is_finite()) {
+            return false;
+        }
+        let Some(light) = self.lights.get_mut(&name) else { return false };
+        light.color = color;
+        light.gain = gain;
+        true
+    }
+    fn set_instance_param(&mut self, object: u32, vector: usize, component: usize, value: f32) -> bool {
+        if !self.entities.contains_key(&object) || vector > 3 || component > 3 {
+            return false;
+        }
+        self.instance_params.entry(object).or_default()[vector][component] = value;
+        true
+    }
+    fn set_instance_vector(&mut self, object: u32, vector: usize, value: [f32; 4]) -> bool {
+        if !self.entities.contains_key(&object) || vector > 3 {
+            return false;
+        }
+        self.instance_params.entry(object).or_default()[vector] = value;
+        true
+    }
+    fn on_screen(&self, point: [f32; 3]) -> bool {
+        let Some((eye, forward, up, fov)) = self.camera_view else { return false };
+        let (f, u) = (glam::Vec3::from_array(forward).normalize_or(glam::Vec3::Z), glam::Vec3::from_array(up));
+        let r = f.cross(u).normalize_or(glam::Vec3::X);
+        let u = r.cross(f);
+        let d = glam::Vec3::from_array(point) - glam::Vec3::from_array(eye);
+        let z = d.dot(f);
+        if z <= 0.01 {
+            return false;
+        }
+        let t = (fov.to_radians() * 0.5).tan();
+        let aspect = SCREEN[0] as f32 / SCREEN[1] as f32;
+        (d.dot(r) / z).abs() <= t * aspect && (d.dot(u) / z).abs() <= t
+    }
+    fn set_water_offset(&mut self, name: u32, offset: [f32; 3]) -> bool {
+        let Some(s) = self.spawners.get(&name) else { return false };
+        let q = glam::Quat::from_array(s.rotation).normalize();
+        let t = glam::Vec3::from_array(s.position) + glam::Vec3::from_array(offset);
+        self.poses.insert(name, glam::Mat4::from_rotation_translation(q, t));
+        let (x, y, z) = q.to_euler(glam::EulerRot::XYZ);
+        for e in self.entities.get(&name).into_iter().flatten() {
+            self.ops.push(json!({"op": "set_transform", "id": e, "transform": {"translation": t.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": [1.0, 1.0, 1.0]}}));
+        }
+        true
+    }
+    fn spawn_particles(&mut self, group: u32, position: [f32; 3], rotation: [f32; 4]) -> u32 {
+        self.next_particle_handle += 1;
+        // Handles live in their own range, apart from name `StringId`s
+        // only by convention.
+        let handle = 0x5000_0000 | self.next_particle_handle;
+        self.particle_requests.push(crate::ss::ParticleRequest::Spawn { handle, group, position, rotation });
+        handle
+    }
+    fn kill_particles(&mut self, handle: u32) {
+        self.particle_requests.push(crate::ss::ParticleRequest::Kill { handle });
+    }
+    fn remove_dynamic_light(&mut self, name: u32) {
+        if let Some(light) = self.lights.remove(&name).filter(|light| light.published.is_some()) {
+            self.ops.push(json!({"op": "despawn", "id": light.id}));
+        }
     }
     fn spline_at(&self, spline: u32, distance: f32) -> Option<([f32; 3], [f32; 3])> {
         let s = self.splines.get(&spline)?;
@@ -987,9 +1238,16 @@ impl NaughtyDogVm {
         session.stage.npc_spawners.clear();
         session.stage.npc_dead.clear();
         session.stage.splines.clear();
+        for (_, light) in session.stage.lights.drain() {
+            if light.published.is_some() {
+                world.push(json!({"op": "despawn", "id": light.id}));
+            }
+        }
+        session.stage.joints.retain(|k, _| *k == sid("player"));
         session.stage.navigation.clear();
         session.stage.cover.clear();
         session.stage.entities.clear();
+        session.stage.instance_params.clear();
         session.npcs.clear();
         session.stage.animations.clear();
         session.stage.held.clear();
@@ -1739,30 +1997,67 @@ impl NaughtyDogVm {
             // `particle-group` tag each frame (`sub_76BC28` → `sub_761B30`),
             // without the spawner process, so `noAutoBirth` does not hold
             // them back; scripts can still hide them.
-            let visible = true;
-            for (k, emitter) in emitters.iter().enumerate() {
-                let Some(effect) = session.particles.effects.get(emitter) else { continue };
-                let material = session.particle_materials.as_ref().and_then(|m| m.get(&effect.material));
-                let texture = material.and_then(|m| m.samplers.first()).and_then(|id| session.particle_textures.get(id).cloned().flatten());
-                let blend = material.map_or(crysirror_vfx::BlendMode::Additive, |m| crate::particle::blend(m.blend));
-                let soft = material.and_then(|m| m.depth_blend).unwrap_or(0.);
-                let (spec, frame) = crate::particle::emitter(effect, &effect.name, &placement, texture, blend, soft, sid(&s.name) ^ k as u32);
-                let system = crysirror_vfx::SystemSpec { emitters: vec![spec], ..Default::default() };
-                let (scale, rotation, translation) = frame.to_scale_rotation_translation();
-                let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
-                session.next_model += 1;
-                let id = 0x100 + session.next_model;
-                let entity = json!({"id": id, "name": format!("{}:{}", s.name, effect.name), "visible": visible, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system});
-                session.effects.push(Effect { id, spawner: sid(&s.name), at: translation, entity, live: false });
-                presented += 1;
-            }
-            if visible {
-                session.stage.visible.insert(sid(&s.name));
-            }
+            presented += Self::place_effect(session, &emitters, &placement, sid(&s.name), &s.name);
+            session.stage.visible.insert(sid(&s.name));
         }
         session.packages.push(format!("particles×{presented}"));
         Self::update_effects(session, world);
         Ok(())
+    }
+
+    /// Queue the shared emitters of an effect group's descriptors at
+    /// `placement` under `owner` (a spawner or script handle); returns how
+    /// many were placed.
+    fn place_effect(session: &mut Session, emitters: &[u32], placement: &crate::particle::Placement, owner: u32, label: &str) -> usize {
+        let mut placed = 0;
+        for (k, emitter) in emitters.iter().enumerate() {
+            let Some(effect) = session.particles.effects.get(emitter) else { continue };
+            let material = session.particle_materials.as_ref().and_then(|m| m.get(&effect.material));
+            let texture = material.and_then(|m| m.samplers.first()).and_then(|id| session.particle_textures.get(id).cloned().flatten());
+            let blend = material.map_or(crysirror_vfx::BlendMode::Additive, |m| crate::particle::blend(m.blend));
+            let soft = material.and_then(|m| m.depth_blend).unwrap_or(0.);
+            let (spec, frame) = crate::particle::emitter(effect, &effect.name, placement, texture, blend, soft, owner ^ k as u32);
+            let system = crysirror_vfx::SystemSpec { emitters: vec![spec], ..Default::default() };
+            let (scale, rotation, translation) = frame.to_scale_rotation_translation();
+            let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
+            session.next_model += 1;
+            let id = 0x100 + session.next_model;
+            let entity = json!({"id": id, "name": format!("{label}:{}", effect.name), "visible": true, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system});
+            session.effects.push(Effect { id, spawner: owner, at: translation, entity, live: false });
+            placed += 1;
+        }
+        placed
+    }
+
+    /// Serve the scripts' particle requests (`spawn-particles-at-…`,
+    /// `kill-particles`): effects are placed under their handle at the
+    /// requested frame; attached effects do not follow the joint.
+    fn serve_particle_requests(session: &mut Session, world: &mut Vec<serde_json::Value>) {
+        for request in std::mem::take(&mut session.stage.particle_requests) {
+            match request {
+                crate::ss::ParticleRequest::Spawn { handle, group, position, rotation } => {
+                    let Some(emitters) = session.particles.groups.get(&group).cloned() else {
+                        session.stage.log(format!("script particles {group:#010x}: group not loaded"));
+                        continue;
+                    };
+                    let placement = crate::particle::Placement { position: glam::Vec3::from_array(position), rotation: glam::Quat::from_array(rotation).normalize(), color: [1.; 3], alpha: 1., sprite_scale: 1., effect_scale: glam::Vec3::ONE };
+                    Self::place_effect(session, &emitters, &placement, handle, &format!("script-particles-{handle:x}"));
+                    session.stage.visible.insert(handle);
+                }
+                crate::ss::ParticleRequest::Kill { handle } => {
+                    session.effects.retain(|e| {
+                        if e.spawner != handle {
+                            return true;
+                        }
+                        if e.live {
+                            world.push(json!({"op": "despawn", "id": e.id}));
+                        }
+                        false
+                    });
+                    session.stage.visible.remove(&handle);
+                }
+            }
+        }
     }
 
     /// Keep the `MAX_EFFECTS` nearest particle effects within
@@ -2611,6 +2906,12 @@ impl NaughtyDogVm {
             // environment.
             let before = Self::render_settings_name(session);
             session.stage.camera_eye = eye;
+            let vector = |k: &str| camera["camera"][k].as_array().map(|a| [0, 1, 2].map(|i| a.get(i).and_then(|v| v.as_f64()).unwrap_or(0.) as f32));
+            session.stage.camera_view = match (eye, vector("target"), vector("up"), camera["camera"]["fov_y_degrees"].as_f64()) {
+                (Some(e), Some(t), Some(u), Some(fov)) => Some((e, [t[0] - e[0], t[1] - e[1], t[2] - e[2]], u, fov as f32)),
+                _ => None,
+            };
+            Self::serve_particle_requests(session, &mut world);
             Self::update_effects(session, &mut world);
             if Self::render_settings_name(session) != before {
                 if let Some(env) = Self::level_environment(session) {
@@ -2671,6 +2972,8 @@ impl NaughtyDogVm {
             }
         }
         self.script_animations(host, session, &mut world);
+        session.stage.player_locator = session.player.as_ref().map(|p| (p.position, glam::Quat::from_rotation_y(p.yaw).to_array()));
+        session.stage.publish_lights();
         // Props collide while spawned.
         for (name, ids) in &session.stage.entities {
             let on = session.stage.visible.contains(name);
@@ -2810,7 +3113,8 @@ impl NaughtyDogVm {
                 session.stage.log(format!("player rig: {e:#}"));
                 None
             }));
-            if let Some(Some((_, clips))) = &session.player_rig {
+            if let Some(Some((skeleton, clips))) = &session.player_rig {
+                session.stage.joints.insert(sid("player"), joint_frames(skeleton));
                 session.player_clips = clip_infos(clips);
                 session.stage.log(format!("player rig: {} of {} blend-tree clips", clips.len(), wanted.len()));
             }
@@ -2927,6 +3231,9 @@ impl NaughtyDogVm {
                 session.entity_rigs.insert(id, r.clone());
             }
             let name = sid(&s.name);
+            if let Some(r) = &rig {
+                session.stage.joints.insert(name, joint_frames(r.skeleton));
+            }
             session.stage.entities.entry(name).or_default().push(id);
             if visible {
                 session.stage.visible.insert(name);
@@ -3122,4 +3429,136 @@ fn is_additive(name: &str) -> bool {
 /// centre phase.
 fn npc_inputs() -> crate::anim_tree::Inputs {
     crate::anim_tree::Inputs { info: vec![(92, 0.5), (96, 0.5), (140, 0.5), (144, 0.5)], ..Default::default() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{dc::Dc, ss::Runtime};
+    use crysirror_scene::world::{World as Scene, WorldCommand};
+
+    const CLIENT: ClientId = ClientId(1);
+
+    fn publish(stage: &mut Stage, scene: &mut Scene) {
+        stage.publish_lights();
+        let ops: Vec<WorldCommand> = stage.ops.drain(..)
+            .map(|op| serde_json::from_value(op).unwrap())
+            .collect();
+        scene.apply_batch(CLIENT, &ops).unwrap();
+    }
+
+    fn locator(rt: &mut Runtime, position: [f32; 3]) -> u32 {
+        let address = rt.dc.mem.alloc(32).unwrap();
+        let words = position.into_iter().chain([1., 0., 0., 0., 1.]);
+        for (index, value) in words.enumerate() {
+            rt.dc.mem.write_u32(address + (4 * index) as u32, value.to_bits()).unwrap();
+        }
+        address
+    }
+
+    #[test]
+    fn dynamic_light_natives_change_the_existing_scene_light() {
+        let mut rt = Runtime::new(Dc::default());
+        let mut stage = Stage::default();
+        let mut scene = Scene::default();
+        let pos = locator(&mut rt, [1., 2., 3.]);
+        let new_pos = locator(&mut rt, [4., 5., 6.]);
+        let (name, other_name) = (0xabcd_0012, 0x1234_0012);
+        let radius = 8f32.to_bits();
+        let angle = 60f32.to_bits();
+        rt.call_for_test(&mut stage, "update-dynamic-light", &[name, pos, radius, angle]).unwrap();
+        rt.call_for_test(&mut stage, "add-dynamic-light", &[name, pos, radius, angle, 0]).unwrap();
+        rt.call_for_test(&mut stage, "add-dynamic-light", &[other_name, pos, radius]).unwrap();
+        publish(&mut stage, &mut scene);
+        assert_eq!(scene.len(), 2);
+        let spot = scene.handle(CLIENT, stage.lights[&name].id).unwrap();
+        let point = scene.handle(CLIENT, stage.lights[&other_name].id).unwrap();
+        let light = scene.entity(spot).unwrap().light.as_ref().unwrap();
+        assert!(!light.enabled);
+        assert_eq!(light.shape, LightShape::Spot { inner_degrees: 27., outer_degrees: 30. });
+        assert_eq!(scene.entity(point).unwrap().light.as_ref().unwrap().shape, LightShape::Point);
+
+        rt.call_for_test(&mut stage, "add-dynamic-light", &[name, pos, radius, angle, 1]).unwrap();
+        let color = [0.25f32, 0.5, 0.75].map(f32::to_bits);
+        let value = rt.call_for_test(&mut stage, "set-dynamic-light-color", &[name, color[0], color[1], color[2], 2f32.to_bits()]).unwrap();
+        assert_eq!(value, 1);
+        publish(&mut stage, &mut scene);
+        let light = scene.entity(spot).unwrap().light.as_ref().unwrap();
+        assert!(light.enabled);
+        assert_eq!(light.color, [0.25, 0.5, 0.75]);
+        assert_eq!(light.intensity, 2.);
+
+        rt.call_for_test(&mut stage, "update-dynamic-light", &[name, new_pos, radius, angle]).unwrap();
+        publish(&mut stage, &mut scene);
+        let entity = scene.entity(spot).unwrap();
+        assert_eq!(entity.transform.translation, [4., 5., 6.]);
+        assert_eq!(entity.light.as_ref().unwrap().color, [1.; 3]);
+        assert_eq!(entity.light.as_ref().unwrap().intensity, 2.);
+
+        rt.call_for_test(&mut stage, "remove-dynamic-light", &[name]).unwrap();
+        publish(&mut stage, &mut scene);
+        assert!(scene.entity(spot).is_err());
+        assert!(scene.entity(point).is_ok());
+    }
+
+    #[test]
+    fn joint_light_moves_and_is_released_when_the_joint_is_gone() {
+        let mut rt = Runtime::new(Dc::default());
+        let mut stage = Stage::default();
+        let mut scene = Scene::default();
+        let (name, object, joint) = (7, 8, 9);
+        stage.poses.insert(object, glam::Mat4::IDENTITY);
+        stage.joints.insert(object, Arc::new(HashMap::from([(joint, glam::Mat4::from_translation(glam::Vec3::Y))])));
+        rt.call_for_test(&mut stage, "add-dynamic-light-joint", &[name, object, joint, 8f32.to_bits()]).unwrap();
+        publish(&mut stage, &mut scene);
+        let handle = scene.handle(CLIENT, stage.lights[&name].id).unwrap();
+        assert_eq!(scene.entity(handle).unwrap().transform.translation, [0., 1., 0.]);
+        stage.poses.insert(object, glam::Mat4::from_translation(glam::Vec3::X));
+        publish(&mut stage, &mut scene);
+        assert_eq!(scene.entity(handle).unwrap().transform.translation, [1., 1., 0.]);
+        stage.joints.remove(&object);
+        publish(&mut stage, &mut scene);
+        assert!(scene.is_empty() && stage.lights.is_empty());
+    }
+
+    #[test]
+    fn full_light_pool_reuses_a_light_behind_the_camera() {
+        let mut stage = Stage {
+            camera_view: Some(([0.; 3], [0., 0., 1.], [0., 1., 0.], 60.)),
+            ..Default::default()
+        };
+        let mut scene = Scene::default();
+        for name in 0..32 {
+            let z = if name == 0 { -1. } else { name as f32 };
+            let frame = LightLocator::Frame([0., 0., z], glam::Quat::IDENTITY.to_array());
+            stage.add_dynamic_light(name, frame, 10., 0., true);
+        }
+        publish(&mut stage, &mut scene);
+        let id = stage.lights[&0].id;
+        let evicted = scene.handle(CLIENT, id).unwrap();
+        let frame = LightLocator::Frame([0.; 3], glam::Quat::IDENTITY.to_array());
+        stage.add_dynamic_light(32, frame, 10., 0., true);
+        publish(&mut stage, &mut scene);
+        assert_eq!(scene.len(), 32);
+        assert!(!stage.lights.contains_key(&0));
+        assert_eq!(stage.lights[&32].id, id);
+        assert!(scene.entity(evicted).is_err());
+    }
+
+    #[test]
+    fn shader_instance_natives_share_the_native_component_layout() {
+        let mut rt = Runtime::new(Dc::default());
+        let mut stage = Stage::default();
+        let object = 1;
+        stage.entities.insert(object, vec![2]);
+        let values = [1f32, 2., 3., 4.].map(f32::to_bits);
+        let result = rt.call_for_test(&mut stage, "set-shader-instance-param", &[
+            object, 0x8478_45fe, values[0], values[1], values[2], values[3],
+        ]).unwrap();
+        assert_eq!(result, 1);
+        rt.call_for_test(&mut stage, "set-single-shader-instance-param", &[object, 0xc4e9_088d, 5f32.to_bits()]).unwrap();
+        rt.call_for_test(&mut stage, "set-single-shader-instance-param", &[object, 0xcbc3_dbdd, 6f32.to_bits()]).unwrap();
+        assert_eq!(stage.instance_params[&object][1], [1., 2., 5., 4.]);
+        assert_eq!(stage.instance_params[&object][2], [0., 6., 0., 0.]);
+    }
 }

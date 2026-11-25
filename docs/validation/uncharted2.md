@@ -176,3 +176,23 @@ Render settings (2026-11-25):
 
 - **Title screen:** the main menu capture against a capture of the original title screen gives mean RGB (68, 58, 33) against (57, 60, 32) and luminance p10/p50/p90 17/44/121 against 21/43/104; before the change the capture measured (141, 135, 90) and 74/125/203. The gold statue shows its gold `color-01` layer over `colordrk` by the mask, where before it rendered white.
 - **Prologue:** the camera at the hanging car lies in `regiongroup-train-wreck-climb-states-1` (`camera` category, record `#f8cd5e96`); the capture shows the blue canyon fog (0.17, 0.31, 0.52) and the earlier exposure. With fog the menu measures 23/40/93 against the original's 21/43/104.
+
+## 2026-11-26 — Script lights and shader instance state
+
+- **Native evidence.** BCAS20097's `sub_7B998` converts the fourth argument
+  of `add-dynamic-light` from degrees to radians. The fifth controls enablement.
+  `sub_7AD88` writes the optional colour gain at +0xb8.
+  `sub_7AE48` updates an existing named light, resets its colour to white
+  and detaches its joint. See the [native ABI](../../crates/crysirror-naughty-dog/NATIVE_ABI.md).
+- **Release tests.** `cargo test --offline --locked --release -p crysirror-naughty-dog --features runtime --lib`
+  passed 26 tests. New fixtures run the script native dispatcher and apply the
+  emitted commands to CrySirror's scene. They check a persistent scene handle
+  across edits, light shape and gain, distinct names with equal low bits,
+  joint movement and removal, 32-record pool reuse, and both shader parameter
+  setters' layout in object state.
+- **Desktop build.** `cargo build --offline --locked --release -p crysirror-desktop --bin crysirror`
+  linked the arm64 executable at `target/release/crysirror`.
+- **Coverage.** The installed game was examined statically for this change.
+  No gameplay replay was run. Joint tests cover object transforms composed
+  with bind joints. Shader tests cover state writes. Animated skeletal joints
+  and shader parameter effects on the rendered materials have no coverage here.
