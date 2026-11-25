@@ -299,6 +299,8 @@ struct Stage {
     render_override: Option<(u32, Option<(u32, f32)>)>,
     /// Seconds of the frame being run.
     frame_seconds: f32,
+    /// Weapons, archetypes and damage (`crate::combat`).
+    combat: Option<Arc<crate::combat::CombatData>>,
     /// Tanks and helicopters scripts command.
     vehicles: crate::vehicle::Vehicles,
     /// The player's native state class (`player-in-state?`).
@@ -558,7 +560,19 @@ impl Stage {
         for name in live {
             if !self.agents.agents.contains_key(&name) {
                 if let Some((p, q)) = World::locator(self, name) {
-                    self.agents.agents.insert(name, crate::npc::Agent::new(p, q));
+                    let mut agent = crate::npc::Agent::new(p, q);
+                    let archetype = match World::property(self, name, sid("archetype")) {
+                        Some(Property::Str(a)) => sid(&a),
+                        Some(Property::Sid(a)) => a,
+                        _ => 0,
+                    };
+                    agent.archetype = archetype;
+                    if let Some((a, _, w)) = self.combat.as_ref().and_then(|c| c.npc_weapon(archetype)) {
+                        agent.max_hit_points = a.health.max(1) as f32;
+                        agent.hit_points = agent.max_hit_points;
+                        agent.gun.ammo = w.map_or(30, |w| w.clip.max(1));
+                    }
+                    self.agents.agents.insert(name, agent);
                 }
             }
         }
@@ -1152,6 +1166,14 @@ struct Session {
     characters: Vec<crate::characters::Character>,
     /// `sound1/speech/<language>.psarc`, the dialogue lines.
     speech: Option<ArchiveMount>,
+    /// The player's health, gun, the time since death and the combat
+    /// random state.
+    player_health: crate::combat::Health,
+    player_gun: crate::combat::Gun,
+    /// The weapon `player_gun` is loaded for.
+    gun_weapon: Option<u32>,
+    death: Option<f32>,
+    combat_rng: u32,
     /// The Scream banks of `sound1/banks.psarc`.
     banks: crate::sound::Banks,
     /// Sound preparations in flight (host tickets).
@@ -1439,6 +1461,11 @@ impl NaughtyDogVm {
             player_clips: HashMap::new(),
             characters: Vec::new(),
             speech: None,
+            player_health: Default::default(),
+            player_gun: Default::default(),
+            gun_weapon: None,
+            death: None,
+            combat_rng: 0x1234_5678,
             banks: Default::default(),
             sound_pending: Vec::new(),
             speech_pending: Vec::new(),
@@ -1475,6 +1502,16 @@ impl NaughtyDogVm {
             match crate::game::ModuleSource::read(&modules, "vox").and_then(|b| crate::vox::VoxTable::parse(&b)) {
                 Ok(t) => session.stage.vox = Some(Arc::new(t)),
                 Err(e) => session.stage.log(format!("vox.bin: {e:#}")),
+            }
+            let combat = (|| -> Result<crate::combat::CombatData> {
+                let names = ["weapons", "ai", "damage-settings", "dda-settings"];
+                let bytes = names.iter().map(|n| crate::game::ModuleSource::read(&modules, n)).collect::<Result<Vec<_>>>()?;
+                let modules: Vec<(&str, &[u8])> = names.iter().copied().zip(bytes.iter().map(Vec::as_slice)).collect();
+                crate::combat::CombatData::parse(&modules)
+            })();
+            match combat {
+                Ok(c) => session.stage.combat = Some(Arc::new(c)),
+                Err(e) => session.stage.log(format!("combat tables: {e:#}")),
             }
             match crate::game::ModuleSource::read(&modules, "audio").and_then(|b| crate::sound::SoundTable::parse(&b)) {
                 Ok(t) => session.stage.sounds = Some(Arc::new(t)),
@@ -2518,6 +2555,150 @@ impl NaughtyDogVm {
     /// over the blend-in and blend-out times); an animation with a
     /// locator places its entities there when it starts. Animations whose
     /// clip cannot be found end at once (logged).
+    fn combat_random(session: &mut Session) -> f32 {
+        let r = &mut session.combat_rng;
+        *r ^= *r << 13;
+        *r ^= *r >> 17;
+        *r ^= *r << 5;
+        (*r >> 8) as f32 / (1u32 << 24) as f32
+    }
+
+    /// Whether the segment between two points is free of level and prop
+    /// collision.
+    fn clear_line(session: &Session, from: glam::Vec3, to: glam::Vec3) -> bool {
+        session.ground.raycast(from.to_array(), to.to_array()).is_none_or(|t| t >= 0.98)
+    }
+
+    /// NPC perception and fire, the player's shots, health and death
+    /// (`crate::combat`).
+    fn step_combat(&self, session: &mut Session, input: &InputFrame, dt: f32) {
+        use crate::combat::{CHARACTER_HEIGHT, CHARACTER_RADIUS, aim_point, hit_chance, ray_capsule};
+        let Some(data) = session.stage.combat.clone() else { return };
+        let Some(player) = session.player.as_ref() else { return };
+        let (foot, controls) = (glam::Vec3::from_array(player.position), player.controls);
+        let exposed = player.anim.as_ref().zip(session.anim_table.as_ref()).is_none_or(|(a, t)| a.mode(t) == crate::player::Mode::Ground);
+        let invincible = session.game.as_ref().and_then(|g| g.rt.setting(crate::ss::player_natives::SETTING_INVINCIBLE)).is_some();
+        // Death: two seconds of black, then the task restarts.
+        if let Some(t) = session.death.as_mut() {
+            *t += dt;
+            if *t >= 2. {
+                session.death = None;
+                session.player_health = Default::default();
+                if let Some(g) = session.game.as_mut() {
+                    g.rt.inner.task_change = g.rt.inner.task;
+                }
+            }
+            return;
+        }
+        session.player_health.step(dt);
+        // NPCs: see the player, turn and fire bursts.
+        let names: Vec<u32> = session.stage.agents.agents.keys().copied().collect();
+        let chest = aim_point(foot);
+        let mut damage = 0.;
+        for name in names {
+            let Some(agent) = session.stage.agents.get(name).cloned() else { continue };
+            let eye = glam::Vec3::from_array(agent.position) + glam::Vec3::Y * CHARACTER_HEIGHT * 0.9;
+            let (archetype, skill, weapon) = data.npc_weapon(agent.archetype).map_or((None, None, None), |(a, s, w)| (Some(a), s, w));
+            let vision = archetype.map_or(30., |a| a.vision);
+            let distance = eye.distance(chest);
+            let sees = distance < vision && !agent.ignored && Self::clear_line(session, eye, chest) && {
+                let to = chest - eye;
+                let forward = glam::Quat::from_rotation_y(agent.yaw) * glam::Vec3::Z;
+                agent.in_combat() || distance < 5. || glam::Vec3::new(to.x, 0., to.z).normalize_or_zero().dot(forward) > 0.5
+            };
+            let mut shot = false;
+            if sees {
+                let r = Self::combat_random(session);
+                let mut draw = || r;
+                if let Some(a) = session.stage.agents.get_mut(name) {
+                    a.knowledge = crate::npc::KNOWLEDGE_COMBAT;
+                    if a.order.is_none() {
+                        let to = chest - eye;
+                        a.yaw = to.x.atan2(to.z);
+                    }
+                    if !a.config.shooting_disabled && a.bound.is_none() {
+                        shot = a.gun.step(dt, weapon, skill, &mut draw);
+                    }
+                }
+            }
+            if shot && Self::combat_random(session) < hit_chance(distance, vision, agent.accuracy_multiplier, exposed) {
+                damage += data.player_damage[1] * agent.config.shot_damage_multiplier;
+            }
+        }
+        if session.player_health.hurt(damage, invincible) {
+            session.stage.log("player killed".into());
+            World::kill_player(&mut session.stage, false, true, 0.);
+            World::fade(&mut session.stage, [0.; 3], 1., 1.5);
+            session.death = Some(0.);
+            return;
+        }
+        // The player fires the held weapon along the camera's view: left
+        // button (held for automatic weapons), R reloads.
+        let Some(weapon_id) = session.game.as_ref().and_then(|g| g.rt.inner.current_weapon) else { return };
+        let weapon = data.weapons.get(&weapon_id).cloned();
+        let clip = weapon.as_ref().map_or(12, |w| w.clip.max(1));
+        // A newly drawn weapon arrives loaded.
+        if session.gun_weapon != Some(weapon_id) {
+            session.gun_weapon = Some(weapon_id);
+            session.player_gun = crate::combat::Gun { ammo: clip, ..Default::default() };
+        }
+        let gun = &mut session.player_gun;
+        if gun.ammo == 0 && gun.reloading <= 0. && gun.cooldown <= 0. && input.buttons_pressed & b::KEY_R != 0 {
+            gun.reloading = 1.5;
+        }
+        if gun.reloading > 0. {
+            gun.reloading -= dt;
+            if gun.reloading <= 0. {
+                gun.ammo = clip;
+            }
+        }
+        gun.cooldown -= dt;
+        let trigger = if weapon.as_ref().is_some_and(|w| w.automatic) { input.buttons_down & b::MOUSE_LEFT != 0 } else { input.buttons_pressed & b::MOUSE_LEFT != 0 };
+        if !trigger || gun.cooldown > 0. || gun.reloading > 0. || !controls {
+            return;
+        }
+        if gun.ammo == 0 {
+            gun.reloading = 1.5;
+            return;
+        }
+        gun.ammo -= 1;
+        gun.cooldown = weapon.as_ref().map_or(0.25, |w| w.interval.max(0.05));
+        let Some((eye, forward, up, _)) = session.stage.camera_view else { return };
+        let (eye, forward, up) = (glam::Vec3::from_array(eye), glam::Vec3::from_array(forward).normalize_or(glam::Vec3::Z), glam::Vec3::from_array(up));
+        let pellets = weapon.as_ref().map_or(1, |w| w.pellets.clamp(1, 16));
+        let spread = weapon.as_ref().map_or(0., |w| w.spread_degrees).to_radians();
+        let right = forward.cross(up).normalize_or(glam::Vec3::X);
+        let up = right.cross(forward);
+        const RANGE: f32 = 200.;
+        for k in 0..pellets {
+            let (u, v) = if pellets > 1 { (Self::combat_random(session) * 2. - 1., Self::combat_random(session) * 2. - 1.) } else { (0., 0.) };
+            let dir = (forward + right * (u * spread.tan()) + up * (v * spread.tan())).normalize();
+            let wall = session.ground.raycast(eye.to_array(), (eye + dir * RANGE).to_array()).map_or(RANGE, |t| t * RANGE);
+            let hit = session.stage.agents.agents.iter()
+                .filter_map(|(n, a)| ray_capsule(eye, dir, glam::Vec3::from_array(a.position), CHARACTER_RADIUS, CHARACTER_HEIGHT, wall).map(|t| (t, *n)))
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            let _ = k;
+            let Some((_, name)) = hit else { continue };
+            let class = session.stage.agents.get(name).and_then(|a| data.archetypes.get(&a.archetype)).map_or(sid("medium-class"), |a| a.damage_class);
+            let dealt = data.damage(weapon_id, class) as f32;
+            let mut killed = false;
+            if let Some(a) = session.stage.agents.get_mut(name) {
+                a.knowledge = crate::npc::KNOWLEDGE_COMBAT;
+                if a.can_be_hit {
+                    a.hit_points -= dealt;
+                    a.health = (a.hit_points / a.max_hit_points).clamp(0., 1.);
+                    killed = a.hit_points <= 0. && a.can_die;
+                }
+            }
+            if killed {
+                session.stage.log(format!("npc {name:#010x} killed"));
+                World::npc_die(&mut session.stage, name);
+                World::set_visible(&mut session.stage, name, false);
+                session.stage.agents.agents.remove(&name);
+            }
+        }
+    }
+
     /// A world point in the listener (camera) frame: +X right, +Y up, −Z
     /// forward.
     fn listener_point(stage: &Stage, point: [f32; 3]) -> Option<[f32; 3]> {
@@ -3490,6 +3671,7 @@ impl NaughtyDogVm {
         session.stage.frame_seconds = seconds as f32;
         session.stage.step_agents(seconds as f32);
         session.stage.step_vehicles(seconds as f32);
+        self.step_combat(session, &input, seconds as f32);
         // Region enter/exit scripts for the player (`sub_115828`).
         if session.player.is_some() {
             let player = sid("player");

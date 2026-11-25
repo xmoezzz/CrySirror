@@ -172,6 +172,11 @@ pub struct Agent {
     /// Health fraction (`get-object-health`: health component vtable
     /// +0x3C).
     pub health: f32,
+    /// The spawner's `archetype` (`ai-archetype` record) and hit points.
+    pub archetype: u32,
+    pub hit_points: f32,
+    pub max_hit_points: f32,
+    pub gun: crate::combat::Gun,
 }
 
 impl Agent {
@@ -200,6 +205,10 @@ impl Agent {
             ap: None,
             speed: 0.,
             health: 1.,
+            archetype: 0,
+            hit_points: 100.,
+            max_hit_points: 100.,
+            gun: crate::combat::Gun { ammo: 30, ..Default::default() },
         }
     }
 

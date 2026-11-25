@@ -413,6 +413,8 @@ pub struct Inner {
     pub settings: HashMap<u32, Setting>,
     /// The player's weapons and their ammo (-1: the weapon's full load).
     pub weapons: BTreeMap<u32, i32>,
+    /// The weapon the player holds (the last given).
+    pub current_weapon: Option<u32>,
     /// Prone settings record chosen by `player-set-prone-mode`.
     pub prone: Option<u32>,
     /// World time at the last tick.
@@ -511,6 +513,7 @@ impl Runtime {
                 settings: HashMap::new(),
                 weapons: BTreeMap::new(),
                 prone: None,
+                current_weapon: None,
                 now: 0.,
                 disc: None,
                 fma: false,

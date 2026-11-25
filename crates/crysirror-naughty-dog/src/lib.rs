@@ -11,6 +11,7 @@ pub mod anim_state;
 pub mod anim_tree;
 pub mod characters;
 pub mod collision;
+pub mod combat;
 pub mod dc;
 pub mod game;
 pub mod ground;

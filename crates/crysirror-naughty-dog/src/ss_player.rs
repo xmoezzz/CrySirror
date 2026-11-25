@@ -80,6 +80,7 @@ impl Ctx<'_> {
                     if !held || ammo > -1 {
                         self.inner.weapons.insert(a[0], ammo);
                     }
+                    self.inner.current_weapon = Some(a[0]);
                 }
                 return ok(0);
             }
