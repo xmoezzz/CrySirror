@@ -34,6 +34,7 @@ pub mod scene;
 pub mod skeleton;
 pub mod texture;
 pub mod trigger;
+pub mod vox;
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::{BTreeMap, BTreeSet};
 

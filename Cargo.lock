@@ -2720,6 +2720,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "crysirror-asset",
+ "crysirror-audio",
  "crysirror-capfs",
  "crysirror-core",
  "crysirror-formats-arc",

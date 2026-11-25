@@ -29,6 +29,8 @@ mod npc_natives;
 pub mod player_natives;
 #[path = "ss_object.rs"]
 pub mod object_natives;
+#[path = "ss_sound.rs"]
+mod sound_natives;
 
 /// A script setting override (`sub_15F480`): its value and the frame it
 /// expires after.
@@ -189,6 +191,14 @@ pub trait World {
     fn set_water_offset(&mut self, _name: u32, _offset: [f32; 3]) -> bool {
         false
     }
+    /// `speaker` says vox `id`; false when no line plays.
+    fn say(&mut self, _speaker: u32, _id: u32) -> bool {
+        false
+    }
+    fn speaking(&self, _speaker: u32) -> bool {
+        false
+    }
+    fn stop_speaking(&mut self, _speaker: u32) {}
     /// Block or unblock the nav polygon under object `name`.
     fn nav_block(&mut self, _name: u32, _block: bool) -> bool {
         false
@@ -302,6 +312,8 @@ enum Wait {
     /// Until NPC `name`'s scripted-skill order completes (or the NPC is
     /// gone).
     Npc(u32),
+    /// Until `speaker` stops speaking.
+    Speech(u32),
 }
 
 struct Track {
@@ -590,7 +602,7 @@ impl Runtime {
             Wait::Signal(s) => self.inner.signals.contains(s),
             Wait::Var { process, var, value } => self.inner.procs.get(*process).is_none_or(|p| p.vars.get(var).copied().unwrap_or(0) == *value),
             // Resolved against the world in `run_track`.
-            Wait::Animation(_) | Wait::Npc(_) => false,
+            Wait::Animation(_) | Wait::Npc(_) | Wait::Speech(_) => false,
         }
     }
 
@@ -600,6 +612,7 @@ impl Runtime {
             let t = &self.inner.procs[i].groups[gi].tracks[ti];
             let done = match t.wait {
                 Wait::Animation(object) => world.animation_phase(object).is_none(),
+                Wait::Speech(speaker) => !world.speaking(speaker),
                 Wait::Npc(name) => world.agents_ref().and_then(|a| a.get(name)).is_none_or(|a| a.order.is_none()),
                 ref w => self.wait_done(w, now),
             };
@@ -896,6 +909,9 @@ impl Natives for Ctx<'_> {
             return Ok(reply);
         }
         if let Some(reply) = self.object_native(dc, name, a, n)? {
+            return Ok(reply);
+        }
+        if let Some(reply) = self.sound_native(dc, name, a, n)? {
             return Ok(reply);
         }
         match name {

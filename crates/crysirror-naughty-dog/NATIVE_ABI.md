@@ -304,3 +304,9 @@ root motion).
 | `spline-activate` (spline on?) | flag bit 61 marks the spline inactive; 1 when found |
 
 Further natives: `enable-`/`disable-nav-blocker-object` and `block-`/`unblock-nav-poly-under-object` set the blocked flag (0x02) of the nav polygon under the object (`sub_F44D0`, `sub_F4348`); `remove-`/`regenerate-cover-action-packs-from-object` (`sub_F8B80`, `sub_F94A0`); `disc?` compares the `-disc` command-line id at game state +0x1DA0 (unset on the retail disc, so `e3` is false); `is-fma` reads the flag byte +0x1DC5; `set-ragdoll-flow` and `allow-camera-cut-compensate` are script settings 0x4D95A0B1 and 0xFAA6C25B; `game-task-graph-login` logs a graph in (`sub_7E4518`); `update-task-menu` marks the chapter menu for rebuilding (`sub_7EC0F8`).
+
+## Dialogue
+
+`vox.bin` (`src/vox.rs`): `vox-info` records (0x30 bytes): +0x00 id, +0x18 the default speaker, +0x20 track count, +0x24 tracks. A track (16 bytes) is `{speaker character, flags, line count, lines}`, keyed by a character (`drake`, `soldier-a`, …) or `any`; a line (24 bytes) is `{name, 0, 0, flags, id, flags}` naming `sound1/speech/english.psarc/<name>.xvag`. 24,311 of the 24,330 line names on the disc resolve to files (19 are empty).
+
+`say` (object vox [distance] [distance] …) posts event 0x1300F59C to the object's vox controller (`sub_14E790`) and returns 1 when it plays; `wait-say` also waits for the line to end, or one second when nothing played (`sub_14EBD8`). `stop-speaking` (event 0x6F43F211) and `is-speaking` (event 0xEC6D6762) need an existing object; `say-pre-roll` takes exactly two arguments (`sub_32B5A8`). Lines play through the host's voice bus: XVAG PS-ADPCM converted to WAVE, decoded by the host's audio workers.

@@ -62,6 +62,12 @@ const MOVIE_SURFACE: &str = "__surface/1000";
 /// World videos are read whole (`crysirror_runtime::vfs::MAX_FILE`).
 const MAX_WORLD_VIDEO: u64 = crysirror_core::limits::LARGE_ASSET_BYTES;
 const MAX_LOG: usize = 64;
+/// The English dialogue lines (the only speech archive on the disc).
+const SPEECH: &str = "sound1/speech/english.psarc";
+/// First audio channel of speakers.
+const SPEECH_CHANNEL: u32 = 0x100;
+/// A dialogue line is read whole.
+const MAX_LINE: u64 = 64 << 20;
 /// The BCAS20097 light pool has 32 records (sub_7A88C).
 const DYNAMIC_LIGHT_IDS: std::ops::Range<u32> = 0x4e4c_0000..0x4e4c_0020;
 
@@ -251,6 +257,14 @@ struct Stage {
     npc_dead: HashSet<u32>,
     /// The live NPCs' agent state (the NPC manager's objects).
     agents: crate::npc::Agents,
+    /// Dialogue table (`vox.bin`).
+    vox: Option<Arc<crate::vox::VoxTable>>,
+    /// Lines to start: speaker and line name.
+    speech_requests: Vec<(u32, String)>,
+    /// Speakers and when their line ends (infinite while it is prepared).
+    speaking: HashMap<u32, f64>,
+    speech_stops: Vec<u32>,
+    speech_pick: u32,
     /// Objects whose cover points scripts removed.
     cover_removed: HashSet<u32>,
     /// Action packs scripts disabled.
@@ -723,6 +737,32 @@ impl World for Stage {
             self.ops.push(json!({"op": "set_transform", "id": e, "transform": {"translation": position, "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": [1.0, 1.0, 1.0]}}));
         }
     }
+    fn say(&mut self, speaker: u32, id: u32) -> bool {
+        let Some(table) = self.vox.clone() else { return false };
+        // The speaker's character keys the track: the player is Drake;
+        // other speakers by their art group (`soldier-a`, `elena`, …).
+        let mut keys = Vec::new();
+        if speaker == sid("player") {
+            keys.push(sid("drake"));
+        }
+        if let Some(art) = self.spawners.get(&speaker).and_then(|s| s.art_group.as_deref()) {
+            keys.push(sid(art));
+            keys.extend(art.rsplit_once('-').map(|(head, _)| sid(head)));
+        }
+        self.speech_pick = self.speech_pick.wrapping_add(1);
+        let Some(line) = table.line(id, &keys, self.speech_pick) else { return false };
+        self.speech_requests.push((speaker, line.to_owned()));
+        self.speaking.insert(speaker, f64::INFINITY);
+        true
+    }
+    fn speaking(&self, speaker: u32) -> bool {
+        self.speaking.get(&speaker).is_some_and(|end| self.now < *end)
+    }
+    fn stop_speaking(&mut self, speaker: u32) {
+        self.speaking.remove(&speaker);
+        self.speech_requests.retain(|(s, _)| *s != speaker);
+        self.speech_stops.push(speaker);
+    }
     fn nav_block(&mut self, name: u32, block: bool) -> bool {
         let Some((p, _)) = World::locator(self, name) else { return false };
         self.navigation.set_blocked(glam::Vec3::from_array(p), block);
@@ -1021,6 +1061,12 @@ struct Session {
     /// `spawn-character.bin` package lists, and the NPC rigs loaded from
     /// them by skeleton package.
     characters: Vec<crate::characters::Character>,
+    /// `sound1/speech/<language>.psarc`, the dialogue lines.
+    speech: Option<ArchiveMount>,
+    /// Speech preparations in flight: speaker, channel, host ticket.
+    speech_pending: Vec<(u32, u32, u64)>,
+    /// Audio channels by speaker.
+    speech_channels: HashMap<u32, u32>,
     npc_rigs: HashMap<String, Option<(crate::skeleton::Skeleton, Vec<crate::anim::Clip>)>>,
     /// `anim-npc.bin` states and trees, `anim-sets.bin`, the NPCs they
     /// drive and each NPC rig's clips by name `StringId`.
@@ -1299,6 +1345,9 @@ impl NaughtyDogVm {
             anim_graph: None,
             player_clips: HashMap::new(),
             characters: Vec::new(),
+            speech: None,
+            speech_pending: Vec::new(),
+            speech_channels: HashMap::new(),
             npc_rigs: HashMap::new(),
             npc_anim: None,
             anim_sets: Default::default(),
@@ -1326,8 +1375,16 @@ impl NaughtyDogVm {
             let catalog = format!("{}.common", self.config.language.unwrap_or(2));
             session.catalog = text.open(&catalog).ok().map(|r| read_all(r.as_ref(), 16 << 20)).transpose()?;
             let (_, dc) = registry.open(open("dc1.psarc")?, Some("sony/psarc"), &context)?;
-            let modules = ArchiveMount::new(dc, context)?;
+            let modules = ArchiveMount::new(dc, context.clone())?;
             let game = Game::boot(&modules, &mut session.stage)?;
+            match crate::game::ModuleSource::read(&modules, "vox").and_then(|b| crate::vox::VoxTable::parse(&b)) {
+                Ok(t) => session.stage.vox = Some(Arc::new(t)),
+                Err(e) => session.stage.log(format!("vox.bin: {e:#}")),
+            }
+            match open(SPEECH).and_then(|r| Ok(registry.open(r, Some("sony/psarc"), &context)?)) {
+                Ok((_, a)) => session.speech = ArchiveMount::new(a, context.clone()).ok(),
+                Err(e) => session.stage.log(format!("speech: {e:#}")),
+            }
             session.characters = crate::game::ModuleSource::read(&modules, "spawn-character").and_then(|b| crate::characters::parse(&b)).unwrap_or_default();
             match crate::game::ModuleSource::read(&modules, "anim-npc").and_then(|b| {
                 let graph = crate::anim_tree::Graph::load("anim-npc", &b)?;
@@ -2339,6 +2396,68 @@ impl NaughtyDogVm {
     /// over the blend-in and blend-out times); an animation with a
     /// locator places its entities there when it starts. Animations whose
     /// clip cannot be found end at once (logged).
+    /// Start, stop and track the scripts' dialogue lines: the XVAG line
+    /// becomes a WAVE stream the host decodes; the speaker speaks for the
+    /// line's duration.
+    fn serve_speech(&self, host: &mut dyn HostServices, session: &mut Session) {
+        use crysirror_core::service::{AudioParameters, AudioPreparePhase, AudioRequest, EncodedAudio, PcmBus};
+        let client = self.client;
+        for speaker in std::mem::take(&mut session.stage.speech_stops) {
+            if let Some(&channel) = session.speech_channels.get(&speaker) {
+                for (_, _, ticket) in session.speech_pending.iter().filter(|(s, _, _)| *s == speaker) {
+                    let _ = host.release_audio(client, *ticket);
+                }
+                session.speech_pending.retain(|(s, _, _)| *s != speaker);
+                let _ = host.submit_audio(client, AudioRequest::Stop { channel, fade_ms: 50. });
+            }
+        }
+        for (speaker, line) in std::mem::take(&mut session.stage.speech_requests) {
+            let next = SPEECH_CHANNEL + session.speech_channels.len() as u32;
+            let channel = *session.speech_channels.entry(speaker).or_insert(next);
+            let wave = (|| -> Result<(Vec<u8>, f64)> {
+                let speech = session.speech.as_ref().context("no speech archive")?;
+                let bytes = read_all(speech.open(&format!("{line}.xvag"))?.as_ref(), MAX_LINE)?;
+                let header = crysirror_audio::xvag::Header::parse(&bytes)?;
+                Ok((crysirror_audio::xvag::to_wave(&bytes)?, header.frames as f64 / f64::from(header.rate)))
+            })();
+            match wave {
+                Ok((wave, seconds)) => {
+                    let parameters = AudioParameters { bus: PcmBus::Voice, ..Default::default() };
+                    match host.begin_audio(client, AudioRequest::Play { channel, source: EncodedAudio { bytes: wave.into(), frame_limit: None }, intro: None, parameters }) {
+                        Ok(ticket) => {
+                            session.speech_pending.push((speaker, channel, ticket));
+                            session.stage.speaking.insert(speaker, session.stage.now + seconds);
+                        }
+                        Err(e) => {
+                            session.stage.log(format!("vox {line}: {e}"));
+                            session.stage.speaking.insert(speaker, session.stage.now + seconds);
+                        }
+                    }
+                }
+                Err(e) => {
+                    session.stage.log(format!("vox {line}: {e:#}"));
+                    session.stage.speaking.remove(&speaker);
+                }
+            }
+        }
+        let mut keep = Vec::new();
+        for (speaker, channel, ticket) in std::mem::take(&mut session.speech_pending) {
+            match host.audio_preparation(client, ticket).map(|p| (p.phase, p.error)) {
+                Ok((AudioPreparePhase::Pending, _)) => keep.push((speaker, channel, ticket)),
+                Ok((AudioPreparePhase::Failed, error)) => {
+                    session.stage.log(format!("vox audio: {}", error.unwrap_or_default()));
+                    let _ = host.release_audio(client, ticket);
+                }
+                _ => {
+                    let _ = host.release_audio(client, ticket);
+                }
+            }
+        }
+        session.speech_pending = keep;
+        let now = session.stage.now;
+        session.stage.speaking.retain(|_, end| now < *end);
+    }
+
     fn script_animations(&self, host: &mut dyn HostServices, session: &mut Session, world: &mut Vec<serde_json::Value>) {
         let objects: Vec<u32> = session.stage.animations.iter().filter(|(_, a)| a.source.is_none() && !a.failed).map(|(o, _)| *o).collect();
         for object in objects {
@@ -3212,6 +3331,7 @@ impl NaughtyDogVm {
             }
         }
         self.script_animations(host, session, &mut world);
+        self.serve_speech(host, session);
         session.stage.player_locator = session.player.as_ref().map(|p| (p.position, glam::Quat::from_rotation_y(p.yaw).to_array()));
         session.stage.publish_lights();
         // Props collide while spawned.
