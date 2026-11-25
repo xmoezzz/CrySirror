@@ -11,11 +11,14 @@
 //! step, min, max}` per group) and the group bases from the EBOOT's
 //! settings writer (`sub_123C1C`): lighting at 0 (`:ambient-scale` +0xcc),
 //! post at 0x440 (tint, ambient, light-scale and shadow-colour RGBI), the
-//! tonemap at 0x4b0; the `:fog` group at 0x3d0 is the only offset where
-//! every record's fog fields fall in their menu ranges (the menu temple's
-//! warm (0.33, 0.31, 0.25) over 150 m, train-wreck's blue (0.17, 0.31,
-//! 0.52) over 800 m above 260 m). Other groups (shadow, sky-fog, wind, sky, skydome,
-//! particles, rain, environment) are not mapped.
+//! tonemap at 0x4b0, `:fog` at 0x1b0 and `:sky-fog` at 0x3d0 (the writer
+//! prints both groups from these offsets). The fog writer (`sub_7587F8`)
+//! turns the group into the shader terms of a Gaussian fog: opacity
+//! `density·(1 − exp(−(max((w − start)/range, 0)·max(1 − (y −
+//! height-start)/height-range, 0))²))` at view depth `w` and height `y`,
+//! `density` applying only with a multiplier of at least 1. Other groups
+//! (shadow, sky-fog, wind, sky, skydome, particles, rain, environment) are
+//! not mapped.
 use crate::dc::Dc;
 use anyhow::Result;
 
@@ -35,7 +38,7 @@ pub struct Tonemap {
     pub exposure_bias: f32,
 }
 
-/// The `:fog` group (record +0x3d0).
+/// The `:fog` group (record +0x1b0).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Fog {
     pub colour: [f32; 3],
@@ -62,7 +65,7 @@ pub struct RenderSettings {
 const LIGHTING_AMBIENT_SCALE: u32 = 0xcc;
 const POST: u32 = 0x440;
 const TONEMAP: u32 = 0x4b0;
-const FOG: u32 = 0x3d0;
+const FOG: u32 = 0x1b0;
 
 /// The record named `name` (a `StringId`) of the loaded `render-settings`
 /// module.

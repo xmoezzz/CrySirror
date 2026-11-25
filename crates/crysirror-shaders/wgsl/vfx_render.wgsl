@@ -13,6 +13,7 @@ struct View {
     animation: vec4<f32>,
     axis: vec4<f32>,
     screen: vec4<f32>,
+    // rgb, largest opacity
     fog_color: vec4<f32>,
     // density, height falloff, base height, start distance
     fog_params: vec4<f32>,
@@ -130,15 +131,22 @@ fn rgba(i:Out)->vec4<f32> {
             color.a*=clamp((seen-point)/frame.animation.z,0.0,1.0);
         }
     }
-    if frame.fog_params.x>0.0 {
-        let distance=max(length(i.world-frame.camera.xyz)-frame.fog_params.w,0.0);
-        let density=frame.fog_params.x*exp(clamp(-frame.fog_params.y*(i.world.y-frame.fog_params.z),-40.,40.));
-        let amount=1.0-exp(-density*distance);
-        color=vec4<f32>(mix(color.rgb,frame.fog_color.rgb,amount),color.a);
-    }
     return color;
 }
-@fragment fn fs_alpha(i:Out)->@location(0) vec4<f32> {return rgba(i);}
-@fragment fn fs_premultiplied(i:Out)->@location(0) vec4<f32> {let c=rgba(i);return vec4<f32>(c.rgb*c.a,c.a);}
-@fragment fn fs_additive(i:Out)->@location(0) vec4<f32> {let c=rgba(i);return vec4<f32>(c.rgb*c.a,0.0);}
-@fragment fn fs_multiply(i:Out)->@location(0) vec4<f32> {let c=rgba(i);return vec4<f32>(mix(vec3<f32>(1.0),c.rgb,c.a),0.0);}
+// Fog opacity at the fragment (0 without fog).
+fn fog_amount(i:Out)->f32 {
+    if frame.fog_params.x<=0.0 {return 0.0;}
+    let distance=max(length(i.world-frame.camera.xyz)-frame.fog_params.w,0.0);
+    let density=frame.fog_params.x*exp(clamp(-frame.fog_params.y*(i.world.y-frame.fog_params.z),-40.,40.));
+    return min(1.0-exp(-density*distance),frame.fog_color.w);
+}
+// Blended sprites take the fog colour; emitted (additive) light is only
+// attenuated by it.
+fn fogged(i:Out)->vec4<f32> {
+    let c=rgba(i);
+    return vec4<f32>(mix(c.rgb,frame.fog_color.rgb,fog_amount(i)),c.a);
+}
+@fragment fn fs_alpha(i:Out)->@location(0) vec4<f32> {return fogged(i);}
+@fragment fn fs_premultiplied(i:Out)->@location(0) vec4<f32> {let c=fogged(i);return vec4<f32>(c.rgb*c.a,c.a);}
+@fragment fn fs_additive(i:Out)->@location(0) vec4<f32> {let c=rgba(i);return vec4<f32>(c.rgb*c.a*(1.0-fog_amount(i)),0.0);}
+@fragment fn fs_multiply(i:Out)->@location(0) vec4<f32> {let c=fogged(i);return vec4<f32>(mix(vec3<f32>(1.0),c.rgb,c.a),0.0);}

@@ -35,6 +35,8 @@ pub struct VfxView {
     pub fog_color: [f32; 3],
     /// density, height falloff, base height, start distance.
     pub fog: [f32; 4],
+    /// Largest fog opacity (`Fog::max_opacity`).
+    pub fog_max_opacity: f32,
 }
 impl Default for VfxView {
     fn default() -> Self {
@@ -46,6 +48,7 @@ impl Default for VfxView {
             time: 0.,
             fog_color: [0.; 3],
             fog: [0.; 4],
+            fog_max_opacity: 1.,
         }
     }
 }
@@ -778,7 +781,7 @@ impl VfxRenderer {
                 self.view.fog_color[0],
                 self.view.fog_color[1],
                 self.view.fog_color[2],
-                1.,
+                self.view.fog_max_opacity,
             ],
             fog_params: self.view.fog,
         };

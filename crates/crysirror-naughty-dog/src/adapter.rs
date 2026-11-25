@@ -581,8 +581,9 @@ struct Session {
     particle_materials: Option<HashMap<u32, crate::particle::ParticleMaterial>>,
     /// Uploaded particle textures by texture ID: path and atlas columns.
     particle_textures: HashMap<u32, Option<(String, u32)>>,
-    /// Particle-effect entities of the presented level.
-    effects: Vec<u32>,
+    /// Particle effects of the presented level; the nearest to the camera
+    /// are live entities.
+    effects: Vec<Effect>,
     /// The rig each spawned entity is skinned to.
     entity_rigs: HashMap<u32, RigRef>,
     /// Skeletons of skinned art groups that carry their own.
@@ -619,6 +620,26 @@ enum RigRef {
     /// An art group's own `JOINT_HIERARCHY`.
     Own(String),
 }
+
+/// A particle emitter placed by a spawner: its entity (spawned while
+/// near the camera) and world position.
+struct Effect {
+    id: u32,
+    spawner: u32,
+    at: glam::Vec3,
+    entity: serde_json::Value,
+    live: bool,
+}
+
+/// Live particle systems at once (the shared VFX budget is 128) and the
+/// distance beyond which effects sleep. The native particle pass culls
+/// spawners per frame (`sub_76BC28`); its criteria are not decoded.
+const MAX_EFFECTS: usize = 96;
+const EFFECT_RANGE: f32 = 80.;
+/// Particle modules resident in game (the effect groups of 
+/// `train-wreck`'s fire spawners live in `particle-u2-gameparts`; the
+/// native loader of these modules is not located).
+const GLOBAL_PART_MODULES: &[&str] = &["particle-u2-base", "particle-u2-gameparts"];
 
 /// An NPC entity presented by the `anim-npc` state machine.
 struct Npc {
@@ -934,8 +955,10 @@ impl NaughtyDogVm {
             world.push(json!({"op": "despawn", "id": id}));
             host.release_model(self.client, &asset)?;
         }
-        for id in session.effects.drain(..) {
-            world.push(json!({"op": "despawn", "id": id}));
+        for e in session.effects.drain(..) {
+            if e.live {
+                world.push(json!({"op": "despawn", "id": e.id}));
+            }
         }
         session.triangles = 0;
         session.packages.clear();
@@ -1251,15 +1274,17 @@ impl NaughtyDogVm {
                 env["environment"]["filmic_curve"] = json!({"shoulder": t.shoulder, "linear": t.linear, "angle": t.angle, "toe": t.toe, "toe_numerator": t.toe_numerator, "toe_denominator": t.toe_denominator, "white": t.white, "exposure_bias": t.exposure_bias});
                 env["environment"]["auto_exposure"] = json!({"min_log2": -8.0, "max_log2": 8.0, "speed_up": 3.0, "speed_down": 1.0, "compensation": EXPOSURE_CALIBRATION});
                 env["environment"]["grading"] = json!({"color_filter": s.tint.map(|v| v.clamp(0., 4.))});
-                // The record's fog: opacity `density` reached over
-                // `distance-range` past `distance-start`, thinning over
-                // `height-range` above `height-start` (the native curve is
-                // not recovered; mapped to the shared exponential fog).
+                // The record's Gaussian fog (see `crate::render_settings`)
+                // mapped to the shared exponential fog: the same maximum
+                // opacity `density`, and the same opacity `1 − e⁻¹` of it
+                // one `distance-range` past `distance-start`. Height
+                // thinning maps to the exponential falloff when the range
+                // is positive; fog thickening with height (a negative
+                // range, the menu temple) stays uniform.
                 let f = s.fog;
-                if f.density > 0. && f.distance_range > 0. {
-                    let cap = f.density.clamp(0., 0.99);
-                    let colour = f.colour.map(|c| c.clamp(0., 1.).powf(2.2) * f.multiplier.clamp(0., 1.));
-                    env["environment"]["fog"] = json!({"color": colour, "density": -(1. - cap).ln() / f.distance_range, "height_falloff": if f.height_range > 0. { 1. / f.height_range } else { 0. }, "base_height": f.height_start, "start_distance": f.distance_start.max(0.), "max_opacity": cap, "sun_scattering": 0.0});
+                if f.density > 0. && f.distance_range > 0. && f.multiplier >= 1. {
+                    let colour = f.colour.map(|c| c.clamp(0., 16.));
+                    env["environment"]["fog"] = json!({"color": colour, "density": 1. / f.distance_range, "height_falloff": if f.height_range > 0. { 1. / f.height_range } else { 0. }, "base_height": f.height_start, "start_distance": f.distance_start.max(0.), "max_opacity": f.density.clamp(0., 1.), "sun_scattering": 0.0});
                 }
             }
             None => {
@@ -1613,7 +1638,8 @@ impl NaughtyDogVm {
     /// regions name (`part-module`), then spawn one shared VFX entity per
     /// emitter of each spawner's `particle-group` (see `crate::particle`).
     fn load_particles(&self, host: &mut dyn HostServices, session: &mut Session, spawners: &[SpawnerRecord], world: &mut Vec<serde_json::Value>) -> Result<()> {
-        let wanted: Vec<u32> = session.stage.regions.iter().filter_map(|(r, _, _)| r.part_module).filter(|m| !session.part_modules.contains(m)).collect();
+        let globals = GLOBAL_PART_MODULES.iter().map(|n| sid(n)).filter(|_| session.game.is_some());
+        let wanted: Vec<u32> = session.stage.regions.iter().filter_map(|(r, _, _)| r.part_module).chain(globals).filter(|m| !session.part_modules.contains(m)).collect();
         if let Some(modules) = &session.modules {
             for module in wanted {
                 session.part_modules.insert(module);
@@ -1726,9 +1752,8 @@ impl NaughtyDogVm {
                 let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
                 session.next_model += 1;
                 let id = 0x100 + session.next_model;
-                world.push(json!({"op": "spawn", "entity": {"id": id, "name": format!("{}:{}", s.name, effect.name), "visible": visible, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system}}));
-                session.effects.push(id);
-                session.stage.entities.entry(sid(&s.name)).or_default().push(id);
+                let entity = json!({"id": id, "name": format!("{}:{}", s.name, effect.name), "visible": visible, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system});
+                session.effects.push(Effect { id, spawner: sid(&s.name), at: translation, entity, live: false });
                 presented += 1;
             }
             if visible {
@@ -1736,7 +1761,25 @@ impl NaughtyDogVm {
             }
         }
         session.packages.push(format!("particles×{presented}"));
+        Self::update_effects(session, world);
         Ok(())
+    }
+
+    /// Keep the `MAX_EFFECTS` nearest particle effects within
+    /// `EFFECT_RANGE` of the camera live (spawned) and the rest asleep.
+    fn update_effects(session: &mut Session, world: &mut Vec<serde_json::Value>) {
+        let Some(eye) = session.stage.camera_eye.map(glam::Vec3::from_array).or_else(|| session.start.as_ref().map(|c| glam::Vec3::from_array(c.position))) else { return };
+        let mut order: Vec<(f32, usize)> = session.effects.iter().enumerate().filter(|(_, e)| session.stage.visible.contains(&e.spawner)).map(|(i, e)| (e.at.distance(eye), i)).filter(|(d, _)| *d <= EFFECT_RANGE).collect();
+        order.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let wanted: HashSet<usize> = order.into_iter().take(MAX_EFFECTS).map(|(_, i)| i).collect();
+        for (i, e) in session.effects.iter_mut().enumerate() {
+            match (e.live, wanted.contains(&i)) {
+                (false, true) => world.push(json!({"op": "spawn", "entity": e.entity})),
+                (true, false) => world.push(json!({"op": "despawn", "id": e.id})),
+                _ => continue,
+            }
+            e.live = !e.live;
+        }
     }
 
     fn npc_rig(actors: &ArchiveMount, base: &str, anims: &[String], wanted: &HashSet<u32>) -> Result<Option<(crate::skeleton::Skeleton, Vec<crate::anim::Clip>)>> {
@@ -2568,6 +2611,7 @@ impl NaughtyDogVm {
             // environment.
             let before = Self::render_settings_name(session);
             session.stage.camera_eye = eye;
+            Self::update_effects(session, &mut world);
             if Self::render_settings_name(session) != before {
                 if let Some(env) = Self::level_environment(session) {
                     world.push(env);

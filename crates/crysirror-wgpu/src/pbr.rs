@@ -4700,6 +4700,7 @@ impl PbrRenderer {
                 fog: fog.map_or([0.; 4], |f| {
                     [f.density, f.height_falloff, f.base_height, f.start_distance]
                 }),
+                fog_max_opacity: fog.map_or(1., |f| f.max_opacity),
             },
         )?;
         let frame_bind_with =
