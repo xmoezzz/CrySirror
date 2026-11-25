@@ -3146,8 +3146,8 @@ impl NaughtyDogVm {
         let frame = edge_frame(&edge, grip.s);
         let at = frame.transform_point3(glam::Vec3::ZERO);
         let facing = frame.transform_vector3(glam::Vec3::Z);
-        let up = toward.y > 0.5;
-        let probe = at + toward * 1.4;
+        let (up, down) = (toward.y > 0.5, toward.y < -0.5);
+        let probe = at + toward * if up || down { 0.8 } else { 1.4 };
         let closest = |e: &crate::collision::Edge| {
             let d = (e.p1 - e.p0).normalize_or_zero();
             let s = (at - e.p0).dot(d).clamp(0., (e.p1 - e.p0).length());
@@ -3161,7 +3161,8 @@ impl NaughtyDogVm {
                 let (q, s) = closest(&e);
                 let d = q - at;
                 let flat = glam::Vec3::new(d.x, 0., d.z);
-                let ok = if up { (0.4..=2.5).contains(&d.y) && flat.length() < 0.8 } else { d.y.abs() < 1. && (0.5..=2.5).contains(&flat.dot(toward)) };
+                let hold = e.flags & (crate::collision::EDGE_CAN_HANG | crate::collision::EDGE_LADDER) != 0 || e.flags == 0;
+                let ok = hold && if up { (0.2..=2.5).contains(&d.y) && flat.length() < 0.8 } else if down { (-2.5..=-0.2).contains(&d.y) && flat.length() < 0.8 } else { d.y.abs() < 1. && (0.5..=2.5).contains(&flat.dot(toward)) };
                 ok.then_some((d.length(), Grip { body, edge: i, s, climb: None }))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -3505,6 +3506,7 @@ impl NaughtyDogVm {
             let stick = if len > 0. { glam::Vec3::new(mv[0], 0., mv[1]) / len } else { glam::Vec3::ZERO };
             let (mut lateral, mut climb, mut release) = (0., false, false);
             let mut leap_to = None;
+            let mut step = 0i8;
             p.regrab = (p.regrab - seconds).max(0.);
             if mode == crate::player::Mode::Hang {
                 if let Some(edge) = p.grip.and_then(|g| session.ground.edge(g.body, g.edge).map(|e| (g, e))).map(|(g, e)| edge_frame(&e, g.s)) {
@@ -3517,6 +3519,19 @@ impl NaughtyDogVm {
                     if input.buttons_pressed & b::SPACE != 0 {
                         let toward = if lateral.abs() > 0.5 { right * lateral.signum() } else { glam::Vec3::Y };
                         leap_to = p.grip.and_then(|g| Self::leap_target(&session.ground, g, toward));
+                    } else if !climb && stick.dot(facing).abs() > 0.7 {
+                        // Wall and ladder climbing: the hold above or below
+                        // within a hand's reach (1 m).
+                        let toward = if stick.dot(facing) > 0. { glam::Vec3::Y } else { -glam::Vec3::Y };
+                        let here = p.grip.and_then(|g| session.ground.edge(g.body, g.edge).map(|e| edge_frame(&e, g.s).transform_point3(glam::Vec3::ZERO)));
+                        let target = p.grip.and_then(|g| Self::leap_target(&session.ground, g, toward)).filter(|g| {
+                            let there = session.ground.edge(g.body, g.edge).map(|e| edge_frame(&e, g.s).transform_point3(glam::Vec3::ZERO));
+                            here.zip(there).is_some_and(|(a, b)| (b.y - a.y).abs() <= 1.)
+                        });
+                        if target.is_some() {
+                            step = toward.y.signum() as i8;
+                            leap_to = target;
+                        }
                     }
                 }
                 release = input.buttons_pressed & b::KEY_C != 0 || p.grip.is_some_and(|g| session.ground.edge(g.body, g.edge).is_none());
@@ -3528,6 +3543,7 @@ impl NaughtyDogVm {
                     .edges_near(reach, 0.45)
                     .into_iter()
                     .filter(|(_, e, _)| glam::Vec3::new(-e.n1.x, 0., -e.n1.z).normalize_or_zero().dot(facing) > 0.3)
+                    .filter(|(_, e, _)| e.flags == 0 || e.flags & (crate::collision::EDGE_CAN_HANG | crate::collision::EDGE_LADDER) != 0)
                     .min_by(|a, b| crate::ground::segment_distance(reach, a.1.p0, a.1.p1).total_cmp(&crate::ground::segment_distance(reach, b.1.p0, b.1.p1)))
             } else {
                 None
@@ -3539,7 +3555,7 @@ impl NaughtyDogVm {
             let mut take_cover = None;
             if ctrl && mode == crate::player::Mode::Ground && p.fall >= 0. {
                 let here = glam::Vec3::from_array(p.position);
-                let near = session.stage.cover.iter().filter(|c| c.position.distance(here) < 1.2).min_by(|a, b| a.position.distance(here).total_cmp(&b.position.distance(here))).cloned();
+                let near = session.stage.cover.iter().filter(|c| c.player && c.position.distance(here) < 1.2).min_by(|a, b| a.position.distance(here).total_cmp(&b.position.distance(here))).cloned();
                 if let Some(c) = near {
                     let back = c.position - c.direction.normalize_or_zero() * 0.35;
                     p.position = [back.x, here.y, back.z];
@@ -3579,7 +3595,8 @@ impl NaughtyDogVm {
                     lateral,
                     climb,
                     drop: release,
-                    leap: leap_to.is_some(),
+                    leap: leap_to.is_some() && step == 0,
+                    step,
                     seconds,
                     cover: take_cover,
                     uncover: leave_cover,

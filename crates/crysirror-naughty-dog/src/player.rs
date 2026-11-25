@@ -95,7 +95,7 @@ pub const STATES: &[&str] = &[
 ];
 
 const HANG: &[&str] = &["ledge-grab", "ledge-shimmy-left", "ledge-shimmy-right", "fall-grab-edge"];
-const LEAP: &[&str] = &["ledge-jump-begin", "ledge-jump-mid", "ledge-jump-end"];
+const LEAP: &[&str] = &["ledge-jump-begin", "ledge-jump-mid", "ledge-jump-end", "climb-up-lh", "climb-up-rh", "climb-down-lh", "climb-down-rh"];
 const CLIMB: &[&str] = &["ledge-climb-up", "ledge-climb-up-2", "climb-onto-1-75m^idle", "climb-onto-1-75m^run"];
 
 /// How the adapter places the player for the current state.
@@ -194,6 +194,9 @@ pub struct Frame {
     /// low-right), or leave cover.
     pub cover: Option<u8>,
     pub uncover: bool,
+    /// While hanging: step to the hand hold above (+1) or below (−1)
+    /// (wall and ladder climbing, `climb-up-lh/rh`, `climb-down-lh/rh`).
+    pub step: i8,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -289,6 +292,8 @@ pub struct Controller {
     rest_time: f32,
     yaw_rate: f32,
     ambient: usize,
+    /// The hand that led the last climbing step.
+    hand: bool,
 }
 
 fn wrap(a: f32) -> f32 {
@@ -297,7 +302,7 @@ fn wrap(a: f32) -> f32 {
 
 impl Controller {
     pub fn new(table: &StateTable, yaw: f32) -> Self {
-        Self { anim: Animator::new(Machine::new(table)), yaw, rest_time: 0., yaw_rate: 0., ambient: 0 }
+        Self { anim: Animator::new(Machine::new(table)), yaw, rest_time: 0., yaw_rate: 0., ambient: 0, hand: false }
     }
 
     fn name(&self, table: &StateTable) -> String {
@@ -346,6 +351,10 @@ impl Controller {
                     if finished {
                         self.anim.machine.force(sid("ledge-grab"), 0.15);
                     }
+                } else if f.step != 0 {
+                    self.hand = !self.hand;
+                    let target = format!("climb-{}-{}", if f.step > 0 { "up" } else { "down" }, if self.hand { "lh" } else { "rh" });
+                    self.anim.machine.force(sid(&target), 0.1);
                 } else if f.leap {
                     self.anim.machine.force(sid("ledge-jump-begin"), 0.1);
                 } else if f.climb {
@@ -360,7 +369,7 @@ impl Controller {
                 return self.finish(graph, table, clips, f, before, None, 0.);
             }
             Mode::Leap => {
-                if state == "ledge-jump-end" && finished {
+                if (state == "ledge-jump-end" || state.starts_with("climb-up-") || state.starts_with("climb-down-")) && finished {
                     self.anim.machine.force(sid("ledge-grab"), 0.15);
                 }
                 return self.finish(graph, table, clips, f, before, None, 0.);

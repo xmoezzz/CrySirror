@@ -62,6 +62,14 @@ pub struct Edge {
     pub flags: u16,
 }
 
+/// Edge flags (`sub_62EC50` prints them): `EdgeNoSwing` 0x1,
+/// `EdgeCanStand` 0x2, `EdgeCanHang` 0x4, `EdgeResistWalk` 0x8,
+/// `EdgeCanUseLowCover` 0x10, `EdgeLadder` 0x20, `EdgeNoJumpAim` 0x40,
+/// `EdgeForeground` 0x2000, `EdgeLoop` 0x4000, `EdgeDummy` 0x8000.
+pub const EDGE_CAN_STAND: u16 = 0x2;
+pub const EDGE_CAN_HANG: u16 = 0x4;
+pub const EDGE_LADDER: u16 = 0x20;
+
 #[derive(Clone, Debug, Default)]
 pub struct FeatureDb {
     pub edges: Vec<Edge>,

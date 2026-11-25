@@ -497,25 +497,39 @@ pub struct Cover {
     /// Into the wall, horizontal.
     pub direction: Vec3,
     pub height: f32,
-    /// 0 high-left, 1 high-right, 2 low-left, 3 low-right, 4 wildfire
-    /// (names from the string order of `sub_210A0C`).
+    /// 0 high-left, 1 high-right, 2 low-left, 3 low-right.
     pub kind: u8,
+    /// Usable by the player (`CornerNoPlayer` clear).
+    pub player: bool,
 }
 
+/// Corner flags (`sub_62EC50` prints them): `CornerHandPlaced` 0x1,
+/// `CornerLowCover` 0x2, `CornerCanStepOut` 0x4, `CornerPeekLeft` 0x8,
+/// `CornerPeekRight` 0x10, `CornerPeekOver` 0x20, `CornerNoPlayer` 0x40,
+/// `CornerForeground` 0x2000, `CornerIsActive` 0x8000.
+pub const CORNER_LOW_COVER: u16 = 0x2;
+pub const CORNER_PEEK_LEFT: u16 = 0x8;
+pub const CORNER_PEEK_RIGHT: u16 = 0x10;
+pub const CORNER_PEEK_OVER: u16 = 0x20;
+pub const CORNER_NO_PLAYER: u16 = 0x40;
+
 /// The cover point of a `FEATURE_DB_2` corner: base `p0`, direction `−n0`
-/// in XZ, height `p1.y − p0.y`; flags 0x08 left, 0x10 right (low under
-/// 1.3 m), 0x20 wildfire, otherwise none.
+/// in XZ, height `p1.y − p0.y`; low when flagged low cover or peeked over,
+/// the side by the peek flags. Corners without a peek are not cover.
 pub fn cover(corner: &Edge) -> Option<Cover> {
     let height = corner.p1.y - corner.p0.y;
-    let low = height < 1.3;
-    let kind = match corner.flags {
-        f if f & 0x08 != 0 => if low { 2 } else { 0 },
-        f if f & 0x10 != 0 => if low { 3 } else { 1 },
-        f if f & 0x20 != 0 => 4,
-        _ => return None,
+    let f = corner.flags;
+    let low = f & (CORNER_LOW_COVER | CORNER_PEEK_OVER) != 0;
+    let side = if f & CORNER_PEEK_LEFT != 0 {
+        0
+    } else if f & CORNER_PEEK_RIGHT != 0 || f & CORNER_PEEK_OVER != 0 {
+        1
+    } else {
+        return None;
     };
+    let kind = if low { 2 + side } else { side };
     let d = Vec3::new(-corner.n0.x, 0., -corner.n0.z);
-    Some(Cover { position: corner.p0, direction: if d.length() > 1e-4 { d.normalize() } else { d }, height, kind })
+    Some(Cover { position: corner.p0, direction: if d.length() > 1e-4 { d.normalize() } else { d }, height, kind, player: f & CORNER_NO_PLAYER == 0 })
 }
 
 #[cfg(test)]
@@ -525,6 +539,17 @@ mod tests {
     fn quad(x0: f32, x1: f32) -> Poly {
         // Clockwise in (x, z).
         Poly { vertices: [Vec3::new(x0, 0., 0.), Vec3::new(x0, 0., 1.), Vec3::new(x1, 0., 1.), Vec3::new(x1, 0., 0.)], count: 4, flags: 0, link: NONE, neighbours: [NONE; 4], cost: 1. }
+    }
+
+    #[test]
+    fn corner_flags_select_cover_kinds() {
+        let corner = |flags| Edge { p0: Vec3::ZERO, p1: Vec3::Y * 2., n0: Vec3::X, n1: Vec3::Z, prev: None, next: None, flags };
+        assert_eq!(cover(&corner(CORNER_PEEK_LEFT)).unwrap().kind, 0);
+        assert_eq!(cover(&corner(CORNER_PEEK_RIGHT)).unwrap().kind, 1);
+        assert_eq!(cover(&corner(CORNER_PEEK_LEFT | CORNER_LOW_COVER)).unwrap().kind, 2);
+        assert_eq!(cover(&corner(CORNER_PEEK_OVER)).unwrap().kind, 3);
+        assert!(!cover(&corner(CORNER_PEEK_LEFT | CORNER_NO_PLAYER)).unwrap().player);
+        assert!(cover(&corner(0x8000)).is_none());
     }
 
     #[test]
