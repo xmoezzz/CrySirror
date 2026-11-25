@@ -238,6 +238,11 @@ struct Stage {
     regions: Vec<(crate::trigger::Region, Option<u32>, Option<u32>)>,
     /// The regions the player is in (indices into `regions`).
     player_regions: HashSet<usize>,
+    /// Spawners whose objects are NPC processes (`Soldier` process
+    /// type, or a character driven by the NPC state machine).
+    npc_spawners: HashSet<u32>,
+    /// NPCs that died; their spawners keep the killed flag.
+    npc_dead: HashSet<u32>,
 }
 
 struct CameraAnimation {
@@ -345,6 +350,18 @@ impl World for Stage {
     }
     fn kill(&mut self, name: u32) -> bool {
         self.set_visible(name, false)
+    }
+    fn npc(&self, name: u32) -> Option<bool> {
+        (self.npc_spawners.contains(&name) && self.visible.contains(&name)).then(|| self.npc_dead.contains(&name))
+    }
+    fn npc_killed(&self, name: u32) -> bool {
+        self.npc_dead.contains(&name)
+    }
+    fn npc_die(&mut self, name: u32) -> bool {
+        self.npc(name).is_some() && self.npc_dead.insert(name)
+    }
+    fn npc_alive_count(&self) -> u32 {
+        self.npc_spawners.iter().filter(|n| self.npc(**n) == Some(false)).count() as u32
     }
     fn locator(&self, name: u32) -> Option<([f32; 3], [f32; 4])> {
         if name == sid("player") {
@@ -898,6 +915,8 @@ impl NaughtyDogVm {
         }
         session.ui = None;
         session.stage.spawners.clear();
+        session.stage.npc_spawners.clear();
+        session.stage.npc_dead.clear();
         session.stage.entities.clear();
         session.npcs.clear();
         session.stage.animations.clear();
@@ -982,6 +1001,9 @@ impl NaughtyDogVm {
             for item in directory.items.iter().filter(|i| i.kind == "SPAWNER_GROUP") {
                 for s in scene::spawner_records(&loaded, item.payload_offset as usize)? {
                     session.stage.spawners.insert(sid(&s.name), s.clone());
+                    if s.process_type == sid("Soldier") {
+                        session.stage.npc_spawners.insert(sid(&s.name));
+                    }
                     if let Some(art) = s.art_group.clone() {
                         groups.entry(art).or_default().push(s.clone());
                     }
@@ -2653,6 +2675,7 @@ impl NaughtyDogVm {
             if let Some(key) = driven {
                 let machine = crate::anim_state::Machine { state: sid(NPC_STATES[0]), time: 0., previous: None, fade: 0. };
                 session.npcs.push(Npc { entity: id, animator: crate::player::Animator::new(machine), sets: npc_sets.clone(), rig: key.clone() });
+                session.stage.npc_spawners.insert(sid(&s.name));
             } else if let (Some(clip), Some(source)) = (&idle, &library) {
                 world.push(json!({"op": "set_animation", "id": id, "animation": {"layers": [{"clip": clip, "source": source, "looping": true}]}}));
             }

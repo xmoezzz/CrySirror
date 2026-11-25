@@ -70,6 +70,10 @@ Other opcodes report "Unknown opcode". After a native call the interpreter reads
 | `set-visible` | 0x13ae98 | `(object, on)`, any non-zero shows |
 | `object-on-object?` | 0x143c54 | `(object, support)`: the object stands on the support's rigid body (here the player's platform or grip body) |
 | `get-object-id` / `get-object-state` | 0x144838 / 0x1429e8 | the process id word (+76; here the name) / its state |
+| `npc-alive?` / `npc-killed?` / `npc-die` | 0x22e1b4 / 0x22a900 / 0x22b8b8 | the NPC manager's process for the name (or the caller): not dead / dead, else the spawner's killed flag (flags 0x2000_0000) / kill. NPC spawners are `Soldier` processes and characters the NPC state machine drives |
+| `npc-alive-count` / `npc-max-count` | 0x221708 / 0x221070 | the manager's live count / the constant 15 |
+| `npc-group-alive-count` / `-dead-count` / `-find-first-alive` | — | the same tests over an entity group's members (inferred from the names) |
+| `part-module-loaded?` | 0x1405a0 | the particle module is in the loaded-module table (`sub_765C50`) |
 
 `camera-fade-out` (0x13b210) fades a named camera object, not the screen.
 

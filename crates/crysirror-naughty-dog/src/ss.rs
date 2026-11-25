@@ -92,6 +92,23 @@ pub trait World {
     fn object_on_object(&self, _object: u32, _support: u32) -> bool {
         false
     }
+    /// Spawner `name`'s NPC while its process exists: `Some(dead)`.
+    fn npc(&self, _name: u32) -> Option<bool> {
+        None
+    }
+    /// Whether spawner `name`'s NPC was killed; kept after its process
+    /// is gone (the spawner's flag 0x2000_0000).
+    fn npc_killed(&self, _name: u32) -> bool {
+        false
+    }
+    /// Kill spawner `name`'s NPC. False when it has none.
+    fn npc_die(&mut self, _name: u32) -> bool {
+        false
+    }
+    /// Live NPC processes.
+    fn npc_alive_count(&self) -> u32 {
+        0
+    }
 }
 
 /// Options of `(animate object clip key value …)`. The keys seen in the
@@ -557,6 +574,11 @@ impl Ctx<'_> {
     }
 
     /// Members of an `entity-group` symbol (empty when it is none).
+    /// The NPC a `npc-*` native names, or the calling process.
+    fn npc_name(&self, a: &[u32], n: usize) -> u32 {
+        if n > 0 { a[0] } else { self.proc.map_or(0, |p| self.inner.procs[p].name) }
+    }
+
     fn group_members(dc: &Dc, name: u32) -> Result<Vec<u32>> {
         let Some(&group) = dc.symbols.get(&name) else { return Ok(Vec::new()) };
         if dc.mem.type_of(group).ok() != Some(sid("entity-group")) {
@@ -711,6 +733,41 @@ impl Natives for Ctx<'_> {
                 let object = if a[0] == sid("player") { a[0] } else { self.inner.process(a[0]).and_then(|p| self.inner.procs[p].spawner).unwrap_or(a[0]) };
                 b(self.world.in_region(object, a[1]))
             }
+            // NPC bookkeeping. (npc-alive? name) asks the NPC manager's
+            // process (`sub_1E2968`) for not-dead (vtable +0x128, ^1);
+            // (npc-killed? name) for dead, else the spawner's killed flag
+            // (`sub_22A900`). Without a name they use the caller.
+            "npc-alive?" => {
+                let who = self.npc_name(a, n);
+                b(self.world.npc(who) == Some(false))
+            }
+            "npc-killed?" => {
+                let who = self.npc_name(a, n);
+                b(self.world.npc(who).unwrap_or(false) || self.world.npc_killed(who))
+            }
+            "npc-die" => {
+                let who = self.npc_name(a, n);
+                b(self.world.npc_die(who))
+            }
+            // The manager's live count (`sub_221708`) and its fixed
+            // capacity, 15 (`sub_221070`).
+            "npc-alive-count" => ok(self.world.npc_alive_count()),
+            "npc-max-count" => ok(15),
+            // Group forms over an entity group's members (inferred from
+            // the names; the natives are not decompiled).
+            "npc-group-alive-count" | "npc-group-dead-count" | "npc-group-find-first-alive" if n > 0 => {
+                let members = Self::group_members(dc, a[0])?;
+                let alive = |w: &dyn World, m: u32| w.npc(m) == Some(false);
+                let dead = |w: &dyn World, m: u32| w.npc(m).unwrap_or(false) || w.npc_killed(m);
+                match name {
+                    "npc-group-alive-count" => ok(members.iter().filter(|m| alive(&*self.world, **m)).count() as u32),
+                    "npc-group-dead-count" => ok(members.iter().filter(|m| dead(&*self.world, **m)).count() as u32),
+                    _ => ok(members.iter().copied().find(|m| alive(&*self.world, *m)).unwrap_or(0)),
+                }
+            }
+            // (part-module-loaded? module): whether the particle module is
+            // in the loaded-module table (`sub_765C50`).
+            "part-module-loaded?" if n > 0 => b(dc.module(a[0]).is_some()),
             // Entity groups (`entity-group` symbols: `{count, {ptr,
             // member}…}`). (for-group group fn args…) calls `fn` (a native
             // or lambda) with each member and the args (`sub_A1BF0`);
