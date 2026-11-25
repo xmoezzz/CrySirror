@@ -143,7 +143,7 @@ impl Ctx<'_> {
                 self.inner.game.journal_page = -1;
                 ok(0)
             }
-            // (grab-rope grabber rope): the grabber is sent event 0x37DE2D93
+            // (grab-rope grabber rope): the grabber is sent event 0x37DDF093
             // with the rope; (drop-rope grabber) lets go.
             "grab-rope" => {
                 if n <= 1 {
@@ -318,10 +318,10 @@ impl Ctx<'_> {
                 ok(0)
             }
             // (kill-part-spawner spawner [immediately]): the `PartSpawner`
-            // (type 0xA51C8C09) is sent event 0x188472CC (`sub_1460B8`).
+            // (type 0xA51C3C09) is sent event 0x188467CC (`sub_1460B8`).
             "kill-part-spawner" => {
                 let who = if n > 0 { a[0] } else { self.proc.map_or(0, |p| self.inner.procs[p].name) };
-                if self.world.object_type(who) != Some(0xa51c_8c09) {
+                if self.world.object_type(who) != Some(0xa51c_3c09) {
                     self.inner.error(format!("DcKillPartSpawner: could not find part spawner {who:#010x}"));
                     return ok(0);
                 }

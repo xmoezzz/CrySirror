@@ -878,7 +878,7 @@ impl World for Stage {
     }
     /// Hides every spawned breakable (process type `Breakable`).
     fn kill_all_breakables(&mut self) {
-        let breakables: Vec<u32> = self.spawners.iter().filter(|(_, s)| s.process_type == 0x8b7d_e21a).map(|(n, _)| *n).collect();
+        let breakables: Vec<u32> = self.spawners.iter().filter(|(_, s)| s.process_type == 0x8b7d_6f1a).map(|(n, _)| *n).collect();
         for name in breakables {
             if self.visible.contains(&name) {
                 World::kill(self, name);

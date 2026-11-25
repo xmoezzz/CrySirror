@@ -11,8 +11,8 @@ use anyhow::Result;
 
 /// Spawner tags `sub_22CE80` reads for a zone marker (and
 /// `npc-move-to-spawner` for the arrival radius); names not recovered.
-const TAG_ZONE_RADIUS: u32 = 0xa28a_21ec;
-const TAG_ZONE_Y_THRESHOLD: u32 = 0xac43_b6dd;
+const TAG_ZONE_RADIUS: u32 = 0xa28a_0aec;
+const TAG_ZONE_Y_THRESHOLD: u32 = 0xac43_d55d;
 /// The object type `npc-use-scripted-ap` requires of its spawner.
 const TYPE_ACTION_PACK: u32 = 0x7dbc_3381;
 /// Scripted skill index (`sub_2A10B0(npc+0x1864, 2)`).

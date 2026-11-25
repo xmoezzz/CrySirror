@@ -18,7 +18,7 @@ impl Ctx<'_> {
         let ok = |v: u32| Ok(Some((v, Status::Continue)));
         match name {
             // (say object vox [distance] [distance] …): the object's vox
-            // controller plays the line (`sub_14E790`, event 0x1300F59C);
+            // controller plays the line (`sub_14E790`, event 0x13011B9C);
             // 1 when it plays. (wait-say …) also waits for it to end, or one
             // second when nothing played (`sub_14EBD8`).
             "say" | "wait-say" => {

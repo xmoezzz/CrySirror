@@ -7,7 +7,7 @@ use crate::vehicle::{HELI_SPEED, Order, TANK_SPEED, Target, Vehicle};
 use anyhow::Result;
 
 /// `heli-enable-wind`'s script setting (`sub_15F480`, 30 frames).
-pub const SETTING_HELI_WIND: u32 = 0xc282_3eeb;
+pub const SETTING_HELI_WIND: u32 = 0xc282_45eb;
 
 type Reply = Option<(u32, Status)>;
 

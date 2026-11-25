@@ -7,7 +7,7 @@
 //! flags, line count, lines}`; its key is a character (`drake`,
 //! `soldier-a`, …) or `any`. A line (24 bytes) is `{name, 0, 0, flags, id,
 //! flags}`. The PPU resolves the record through the speaker's vox
-//! controller (event 0x1300F59C, `sub_81FFC`).
+//! controller (event 0x13011B9C, `sub_81FFC`).
 use crate::dc::{Dc, sid};
 use anyhow::{Result, ensure};
 use std::collections::HashMap;

@@ -7,7 +7,7 @@ use anyhow::Result;
 
 /// The spawner tag listing schema spawner candidates (`sub_14CBF0`;
 /// the hard and crushing lists apply only in multiplayer).
-const TAG_SCHEMA_SPAWNER: u32 = 0x618b_27b8;
+const TAG_SCHEMA_SPAWNER: u32 = 0x618b_73b8; // `schema-spawner`
 /// Camera shake types of `camera-shake` (`sub_13FFAC`).
 const SHAKE_STOP: u32 = 0x94f8_66ac;
 const SHAKE_PROCEDURAL: u32 = 0xcf48_9dc4;
@@ -15,7 +15,7 @@ const SHAKE_GRENADE: u32 = 0x409c_ff29;
 /// `grenade-shake` plays this camera animation (`sub_3669C8`).
 pub const GRENADE_SHAKE_CLIP: u32 = 0x7f36_e1fe;
 /// Object types `get-object-health` reads.
-const TYPE_BREAKABLE: u32 = 0x8b7d_e21a;
+const TYPE_BREAKABLE: u32 = 0x8b7d_6f1a;
 const TYPE_RAIL_VEHICLE: u32 = 0xdc98_4a89;
 
 type Reply = Option<(u32, Status)>;
@@ -213,7 +213,7 @@ impl Ctx<'_> {
                 }
             }
             // (set-animation-speed object speed [layer]): the speed of the
-            // object's animation (event 0xAF4A1F1F, layer default 6).
+            // object's animation (event 0xAF4A581F, layer default 6).
             "set-animation-speed" => {
                 if n <= 1 {
                     self.inner.error("set-animation-speed: Expected two arguments (object-name speed).".into());
@@ -229,7 +229,7 @@ impl Ctx<'_> {
                 }
                 ok(0)
             }
-            // (stop-animating object [layer 6] [blend]): event 0xD9CB0A6D
+            // (stop-animating object [layer 6] [blend]): event 0xD9CB0C6D
             // ends the object's script animation.
             "stop-animating" => {
                 if n == 0 || a[0] == 0 {

@@ -253,13 +253,13 @@ lives in `src/npc.rs`:
 | `npc-override-contact-status` | argument 0/1/2 → contact status 1/2/3 (`sub_1D6748`) |
 | `npc-prefer-target` | knowledge +0x1190 |
 | `npc-set-demeanor` | 1 and 2 select those demeanours, others 0 (`sub_1A3EE4`) |
-| `npc-set-zone-*` | two 32-byte zones at Npc +0x2680: radius +0, y-threshold +4 (absolute values); a marker spawner's tags 0xA28A21EC/0xAC43B6DD apply when ≥ 0 and set update method 3 |
+| `npc-set-zone-*` | two 32-byte zones at Npc +0x2680: radius +0, y-threshold +4 (absolute values); a marker spawner's tags 0xA28A0AEC/0xAC43D55D apply when ≥ 0 and set update method 3 |
 | `npc-set-can-die` / `npc-set-can-be-hit` | health component (+0x15C) vtable +0x4C; can-be-hit also sends `ignore-all-fire-no-blood` with the inverted flag |
 | `npc-set-ignore` / `npc-mark-as-defunct` | targeting bit 14 / Npc +0x1858 bit 42 |
 | `set-object-faction` | factions 0–11; others are invalid (`sub_85A40`) |
 | `npc-is-player-in-front?` | player within 2 m and unit offset · forward ≥ 0.5 |
 | `broadcast-event-to-npcs` | event and arguments to every manager slot's process |
-| `npc-move-to-spawner` (npc spawner [motion] [goal]) | motion 0 walk, 2 sprint, else run (codes 1/5/3); goal 1 stop-and-face, 2 continue, else stop; the spawner's 0xA28A21EC tag is the arrival radius |
+| `npc-move-to-spawner` (npc spawner [motion] [goal]) | motion 0 walk, 2 sprint, else run (codes 1/5/3); goal 1 stop-and-face, 2 continue, else stop; the spawner's 0xA28A0AEC tag is the arrival radius |
 | `npc-move-to` (npc point [motion]) | run by default; both fail "off the nav mesh" without a nav path |
 | `npc-turn-to`, `wait-npc-bind`, `npc-unbind`, `npc-use-scripted-ap`, `wait-npc-leave-scripted-ap`, `npc-use-closest-cover` | orders of the scripted skill (skill 2, `sub_2A10B0`); the AP spawner must be of type `action-pack` |
 
@@ -271,7 +271,7 @@ root motion).
 
 | Native | Native rule |
 | --- | --- |
-| `player-disable-brutal-melee`, `set-player-invincible`, `player-force-light-combo-tutorial`, `set-player-infinite-ammo` | script settings (`sub_15F480`/`sub_15F8AC`, priority 100) ids 0x8E83AE5A, 0xA7065A6C, 0x089305A1 and the variable at 0xF5041A; an override lives 9 frames after each call (`sub_15E628`), so scripts repeat them per frame. `Runtime::setting` reads them |
+| `player-disable-brutal-melee`, `set-player-invincible`, `player-force-light-combo-tutorial`, `set-player-infinite-ammo` | script settings (`sub_15F480`/`sub_15F8AC`, priority 100) ids 0x8E83955A, 0xA707046C, 0x0892FFA1 and the variable at 0xF5041A; an override lives 9 frames after each call (`sub_15E628`), so scripts repeat them per frame. `Runtime::setting` reads them |
 | `player-has-weapon?` / `give-player-weapon` (weapon [ammo]) | the inventory at player +0x388 (`sub_2CE6D0`); ammo −1 is the weapon's full load; giving a held weapon only sets its ammo |
 | `player-in-state?` | asks the player process (event 0x27807427) for its state class; the controller reports `Normal`, `Falling`, `Edge`, `EdgeClimbUp` or `JumpAcross` |
 | `player-in-combat?` | the global combat flag (`sub_7E8748`); here any NPC in knowledge state 4 |
@@ -293,23 +293,23 @@ root motion).
 | --- | --- |
 | `wait-spawn-entity`, `spawn-entity-at` (name locator), `wait-spawn-entity-at` | `sub_150008`; spawning completes in the frame here, so the wait forms do not suspend |
 | `entity-auto-spawn-once` | the spawner spawns once (`sub_7E5CC`); 1 when it exists |
-| `select-best-schema-spawner` (spawner index) | the existing spawners named by tag 0x618B27B8 (hard/crushing lists 0xD25696B0/0x931A2C11 only in multiplayer), `index` modulo their count |
+| `select-best-schema-spawner` (spawner index) | the existing spawners named by tag `schema-spawner` (hard/crushing lists 0xD25696B0/0x931A2C11 only in multiplayer), `index` modulo their count |
 | `make-inert` | the caller's object stops (vtable +0x94): no collision, no script clip |
 | `look-at-object` (character target attach [blend]) / `clear-look-at` | 1 when both objects exist |
 | `set-mesh-visible` (object mesh on?) | exactly three arguments |
 | `camera-shake` (type amount [name]) | 0x94F866AC stops shakes, 0xCF489DC4 a procedural shake (`sub_36611C`), `grenade-shake` plays camera clip 0x7F36E1FE (`sub_3669C8`) |
 | `set-collision-layer` | the layer index of the name (`sub_377F48`) |
-| `get-object-health` | breakables 0x8B7DE21A: hit points / maximum; characters: health component vtable +0x3C; `RailVehicle`: +0x1B4 |
-| `set-animation-speed` (object speed [layer 6]) | event 0xAF4A1F1F; the played clip time stays continuous |
+| `get-object-health` | breakables 0x8B7D6F1A: hit points / maximum; characters: health component vtable +0x3C; `RailVehicle`: +0x1B4 |
+| `set-animation-speed` (object speed [layer 6]) | event 0xAF4A581F; the played clip time stays continuous |
 | `spline-activate` (spline on?) | flag bit 61 marks the spline inactive; 1 when found |
 
-Further natives: `enable-`/`disable-nav-blocker-object` and `block-`/`unblock-nav-poly-under-object` set the blocked flag (0x02) of the nav polygon under the object (`sub_F44D0`, `sub_F4348`); `remove-`/`regenerate-cover-action-packs-from-object` (`sub_F8B80`, `sub_F94A0`); `disc?` compares the `-disc` command-line id at game state +0x1DA0 (unset on the retail disc, so `e3` is false); `is-fma` reads the flag byte +0x1DC5; `set-ragdoll-flow` and `allow-camera-cut-compensate` are script settings 0x4D95A0B1 and 0xFAA6C25B; `game-task-graph-login` logs a graph in (`sub_7E4518`); `update-task-menu` marks the chapter menu for rebuilding (`sub_7EC0F8`).
+Further natives: `enable-`/`disable-nav-blocker-object` and `block-`/`unblock-nav-poly-under-object` set the blocked flag (0x02) of the nav polygon under the object (`sub_F44D0`, `sub_F4348`); `remove-`/`regenerate-cover-action-packs-from-object` (`sub_F8B80`, `sub_F94A0`); `disc?` compares the `-disc` command-line id at game state +0x1DA0 (unset on the retail disc, so `e3` is false); `is-fma` reads the flag byte +0x1DC5; `set-ragdoll-flow` and `allow-camera-cut-compensate` are script settings 0x4D95EDB1 and 0xFAA7265B; `game-task-graph-login` logs a graph in (`sub_7E4518`); `update-task-menu` marks the chapter menu for rebuilding (`sub_7EC0F8`).
 
 ## Dialogue
 
 `vox.bin` (`src/vox.rs`): `vox-info` records (0x30 bytes): +0x00 id, +0x18 the default speaker, +0x20 track count, +0x24 tracks. A track (16 bytes) is `{speaker character, flags, line count, lines}`, keyed by a character (`drake`, `soldier-a`, …) or `any`; a line (24 bytes) is `{name, 0, 0, flags, id, flags}` naming `sound1/speech/english.psarc/<name>.xvag`. 24,311 of the 24,330 line names on the disc resolve to files (19 are empty).
 
-`say` (object vox [distance] [distance] …) posts event 0x1300F59C to the object's vox controller (`sub_14E790`) and returns 1 when it plays; `wait-say` also waits for the line to end, or one second when nothing played (`sub_14EBD8`). `stop-speaking` (event 0x6F43F211) and `is-speaking` (event 0xEC6D6762) need an existing object; `say-pre-roll` takes exactly two arguments (`sub_32B5A8`). Lines play through the host's voice bus: XVAG PS-ADPCM converted to WAVE, decoded by the host's audio workers.
+`say` (object vox [distance] [distance] …) posts event 0x13011B9C to the object's vox controller (`sub_14E790`) and returns 1 when it plays; `wait-say` also waits for the line to end, or one second when nothing played (`sub_14EBD8`). `stop-speaking` (event 0x6F437411) and `is-speaking` (event 0xEC6D8062) need an existing object; `say-pre-roll` takes exactly two arguments (`sub_32B5A8`). Lines play through the host's voice bus: XVAG PS-ADPCM converted to WAVE, decoded by the host's audio workers.
 
 ## Sound effects
 
@@ -321,13 +321,13 @@ On the disc, 182 banks hold 4,792 sounds and 12,713 tones (2,297 MP3); 3,373 of 
 
 ## Vehicles
 
-`src/vehicle.rs`, `src/ss_vehicle.rs`. The tank natives are registered at run time (`sub_83BF50` calls `sub_1538C0(slot, &opd, "DcTank…", script name)`; `native_names.rs` now carries these addresses) and post command events to the tank process through `sub_83AED4`, which checks the argument count against each native's range (`tank-teleport` 2, `tank-30cal-fire-at-location`/`-object` 2, `tank-30cal-cease-fire` 1, `tank-move-tracking-object` 3–6 `(tank object min max speed accel)`, `wait-tank-move-to` 2–4 `(tank position speed accel)`, `wait-tank-fire-at-object` 2–3 `(tank object pause)`). Tank hit points are process +0x1040 and their maximum +0x1044; `tank-set-health` clamps (`sub_832808`) and 0 destroys the tank (vtable +0x118). The helicopter natives find the heli process (`sub_808BC0`) and write: aim point +0x240 (radius) with the object handle +0x244/+0x248 cleared; target object handle +0x244/+0x248 (default `player`); firing state +0x2EC and enable +0x2CC (both default true); MG stats burst +0x2E4 (20), spread +0x2D8 (0), +0x2D4 (1.0), +0x2DC (5.0); base pitch +0x31C in radians from degrees. `heli-enable-wind` is script setting 0xC2823EEB held 30 frames.
+`src/vehicle.rs`, `src/ss_vehicle.rs`. The tank natives are registered at run time (`sub_83BF50` calls `sub_1538C0(slot, &opd, "DcTank…", script name)`; `native_names.rs` now carries these addresses) and post command events to the tank process through `sub_83AED4`, which checks the argument count against each native's range (`tank-teleport` 2, `tank-30cal-fire-at-location`/`-object` 2, `tank-30cal-cease-fire` 1, `tank-move-tracking-object` 3–6 `(tank object min max speed accel)`, `wait-tank-move-to` 2–4 `(tank position speed accel)`, `wait-tank-fire-at-object` 2–3 `(tank object pause)`). Tank hit points are process +0x1040 and their maximum +0x1044; `tank-set-health` clamps (`sub_832808`) and 0 destroys the tank (vtable +0x118). The helicopter natives find the heli process (`sub_808BC0`) and write: aim point +0x240 (radius) with the object handle +0x244/+0x248 cleared; target object handle +0x244/+0x248 (default `player`); firing state +0x2EC and enable +0x2CC (both default true); MG stats burst +0x2E4 (20), spread +0x2D8 (0), +0x2D4 (1.0), +0x2DC (5.0); base pitch +0x31C in radians from degrees. `heli-enable-wind` is script setting 0xC28245EB held 30 frames.
 
 ## Game-state natives
 
-`src/ss_misc.rs`: `spawn-explosion` (locator type …, `sub_EE608`); `c-spawn-npc` (spawner [at-spawner], `sub_80E00`); `npc-collect-one` culls one NPC when more than ten live (`sub_2231A8`); `grenade-director-enable`/`-disable` (player +0x20B0, single player only); `set-table-shader-material-values-param` (table t) blends each 20-byte `{material, parameter, components 1|3, from, to}` entry to `(1 − t)·from + t·to` (`sub_145720`); `set-character-wet-mask-value` and `set-state-character-accumulates-snow-from-sky` (+0x4E1) write the character weather object; the journal page is game state +0x1F1C (`journal-set-page` stores page − 1 for pages from 2, `journal-clear-page` −1); `grab-rope` sends the grabber event 0x37DE2D93; `hide-hud` sets HUD +0x64D; `spawn-message` (`sub_D45C4`); `kill-all-breakables` (`sub_70F788`).
+`src/ss_misc.rs`: `spawn-explosion` (locator type …, `sub_EE608`); `c-spawn-npc` (spawner [at-spawner], `sub_80E00`); `npc-collect-one` culls one NPC when more than ten live (`sub_2231A8`); `grenade-director-enable`/`-disable` (player +0x20B0, single player only); `set-table-shader-material-values-param` (table t) blends each 20-byte `{material, parameter, components 1|3, from, to}` entry to `(1 − t)·from + t·to` (`sub_145720`); `set-character-wet-mask-value` and `set-state-character-accumulates-snow-from-sky` (+0x4E1) write the character weather object; the journal page is game state +0x1F1C (`journal-set-page` stores page − 1 for pages from 2, `journal-clear-page` −1); `grab-rope` sends the grabber event 0x37DDF093; `hide-hud` sets HUD +0x64D; `spawn-message` (`sub_D45C4`); `kill-all-breakables` (`sub_70F788`).
 
-Further natives (`src/ss_misc.rs`): `set-render-settings` (name [name blend]) applies a `render-settings` record at priority 140 (`sub_12A7D0`) or a field-wise blend of two (`sub_127BA4`), returning 1 when the records exist (the lookup table is 0x30DD9F2D, or 0x9EC6D522 while an FMA plays); `set-render-settings-defaults` returns to the regions' choice. `from-ups` (value dt) is `value·dt` (PPU 0x2DB580) and `from-ups-no-dt` multiplies by the frame time (`sub_46938`). `fma-request-part-module` loads a particle module (`sub_76CFC0`); `kill-part-spawner` needs a `PartSpawner` (0xA51C8C09) and sends it event 0x188472CC. In single player `sub_4466F4` (network game) is false, so `net-is-host` and the coop id/task natives return 0. `event-sender`/`event-sender?` read the sender of the event being handled (`sub_84DF4`, `sub_846A8`); `get-state-time` counts 1/300 s ticks since the state began (`sub_7D7318`); `wait-until` waits until that many seconds into the state; `get-self-id` is the `self` object's id word (+0x4C).
+Further natives (`src/ss_misc.rs`): `set-render-settings` (name [name blend]) applies a `render-settings` record at priority 140 (`sub_12A7D0`) or a field-wise blend of two (`sub_127BA4`), returning 1 when the records exist (the lookup table is 0x30DD9F2D, or 0x9EC6D522 while an FMA plays); `set-render-settings-defaults` returns to the regions' choice. `from-ups` (value dt) is `value·dt` (PPU 0x2DB580) and `from-ups-no-dt` multiplies by the frame time (`sub_46938`). `fma-request-part-module` loads a particle module (`sub_76CFC0`); `kill-part-spawner` needs a `PartSpawner` (0xA51C3C09) and sends it event 0x188467CC. In single player `sub_4466F4` (network game) is false, so `net-is-host` and the coop id/task natives return 0. `event-sender`/`event-sender?` read the sender of the event being handled (`sub_84DF4`, `sub_846A8`); `get-state-time` counts 1/300 s ticks since the state began (`sub_7D7318`); `wait-until` waits until that many seconds into the state; `get-self-id` is the `self` object's id word (+0x4C).
 
 ### Particle motion
 

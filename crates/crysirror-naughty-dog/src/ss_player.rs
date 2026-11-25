@@ -7,16 +7,16 @@ use anyhow::Result;
 
 /// Script setting ids (`sub_15F480`'s first argument): each call keeps
 /// the override alive for 9 frames (`sub_15E628`, expiry frame + 9).
-pub const SETTING_BRUTAL_MELEE_DISABLED: u32 = 0x8e83_ae5a;
-pub const SETTING_INVINCIBLE: u32 = 0xa706_5a6c;
-pub const SETTING_LIGHT_COMBO_TUTORIAL: u32 = 0x0893_05a1;
+pub const SETTING_BRUTAL_MELEE_DISABLED: u32 = 0x8e83_955a;
+pub const SETTING_INVINCIBLE: u32 = 0xa707_046c;
+pub const SETTING_LIGHT_COMBO_TUTORIAL: u32 = 0x0892_ffa1;
 /// `set-player-infinite-ammo` writes its flag through `sub_15F8AC` into
 /// the setting variable at 0xF5041A; the address keys it.
 pub const SETTING_INFINITE_AMMO: u32 = 0x00f5_041a;
 /// `set-ragdoll-flow` (`sub_15F934`, value float) and
 /// `allow-camera-cut-compensate` settings.
-pub const SETTING_RAGDOLL_FLOW: u32 = 0x4d95_a0b1;
-pub const SETTING_CAMERA_CUT_COMPENSATE: u32 = 0xfaa6_c25b;
+pub const SETTING_RAGDOLL_FLOW: u32 = 0x4d95_edb1;
+pub const SETTING_CAMERA_CUT_COMPENSATE: u32 = 0xfaa7_265b;
 const SETTING_FRAMES: u64 = 9;
 
 
