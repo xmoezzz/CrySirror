@@ -27,6 +27,7 @@ pub mod mesh;
 pub mod nav;
 pub mod npc;
 pub mod package;
+pub mod pad;
 pub mod particle;
 pub mod player;
 pub mod probes;

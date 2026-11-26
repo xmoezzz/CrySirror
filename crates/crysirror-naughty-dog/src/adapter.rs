@@ -256,11 +256,9 @@ struct Stage {
     fade_rate: f32,
     controls: Option<bool>,
     camera: Option<u32>,
-    /// Left stick from the movement keys.
-    stick: [f32; 2],
-    /// Pad 0's buttons in the native bit order (`sub_137B28`): held,
-    /// pressed, released; and each button's last two press times.
-    pad: [u32; 3],
+    /// Pad 0 from the keyboard (`crate::pad`) and each button's last two
+    /// press times.
+    pad: crate::pad::Pad,
     pad_presses: HashMap<u32, (f64, f64)>,
     /// Published each frame for the player natives: ground speed, the
     /// grabbable edge nearest the player, seconds since last hurt.
@@ -634,19 +632,10 @@ impl Stage {
     }
 
     /// Step the vehicles' orders and move their objects.
-    /// Pad 0 in the native button bits from the host keys (a host
-    /// mapping, not native): CROSS Space, CIRCLE Ctrl, SQUARE E, TRIANGLE
-    /// F, R1 left and L1 right mouse, L2 Q, R2 T, the d-pad on the arrows,
-    /// START Escape, SELECT Backspace, R3 middle mouse, L3 V.
+    /// Read pad 0 from the keyboard (`crate::pad`) and note press times.
     fn read_pad(&mut self, input: &InputFrame) {
-        const MAP: [(u64, u32); 16] = [
-            (b::UP, 0x1), (b::LEFT, 0x2), (b::RIGHT, 0x4), (b::DOWN, 0x8), (b::KEY_Q, 0x10), (b::KEY_T, 0x20), (b::SPACE, 0x40), (b::MOUSE_RIGHT, 0x80),
-            (b::MOUSE_LEFT, 0x100), (b::KEY_E, 0x200), (b::KEY_F, 0x400), (b::CTRL, 0x800), (b::MOUSE_MIDDLE, 0x1000), (b::ESCAPE, 0x2000), (b::BACKSPACE, 0x4000), (b::KEY_V, 0x8000),
-        ];
-        let bits = |mask: u64| MAP.iter().filter(|(k, _)| mask & k != 0).fold(0, |acc, (_, v)| acc | v);
-        let held = bits(input.buttons_down);
-        self.pad = [held, bits(input.buttons_pressed), self.pad[0] & !held];
-        for (_, bit) in MAP.iter().filter(|(_, v)| self.pad[1] & v != 0) {
+        self.pad = crate::pad::Pad::read(&self.pad, input);
+        for (_, bit) in crate::pad::KEYS.iter().filter(|(_, v)| self.pad.pressed & v != 0) {
             let entry = self.pad_presses.entry(*bit).or_insert((f64::NEG_INFINITY, f64::NEG_INFINITY));
             *entry = (entry.1, self.now);
         }
@@ -1172,7 +1161,7 @@ impl World for Stage {
         }
     }
     fn pad_buttons(&self, pad: u32) -> [u32; 3] {
-        if pad == 0 { self.pad } else { [0; 3] }
+        if pad == 0 { [self.pad.held, self.pad.pressed, self.pad.released] } else { [0; 3] }
     }
     fn camera_frame(&self) -> Option<([f32; 3], [f32; 4])> {
         let (eye, forward, _, _) = self.camera_view?;
@@ -1285,7 +1274,7 @@ impl World for Stage {
         self.controls = Some(enabled);
     }
     fn sticks(&self, pad: u32) -> [f32; 4] {
-        if pad == 0 { [self.stick[0], self.stick[1], 0., 0.] } else { [0.; 4] }
+        if pad == 0 { [self.pad.left[0], self.pad.left[1], self.pad.right[0], self.pad.right[1]] } else { [0.; 4] }
     }
     fn animate(&mut self, object: u32, clip: u32, options: &crate::ss::Animate) -> bool {
         if object != sid("player") && !self.entities.contains_key(&object) {
@@ -2950,9 +2939,10 @@ impl NaughtyDogVm {
 
     /// NPC perception and fire, the player's shots, health and death
     /// (`crate::combat`).
-    fn step_combat(&self, session: &mut Session, input: &InputFrame, dt: f32) {
+    fn step_combat(&self, session: &mut Session, dt: f32) {
         use crate::combat::{CHARACTER_HEIGHT, CHARACTER_RADIUS, aim_point, hit_chance, ray_capsule};
         let Some(data) = session.stage.combat.clone() else { return };
+        let pad = session.stage.pad;
         let Some(player) = session.player.as_ref() else { return };
         let (foot, controls) = (glam::Vec3::from_array(player.position), player.controls);
         let exposed = player.anim.as_ref().zip(session.anim_table.as_ref()).is_none_or(|(a, t)| a.mode(t) == crate::player::Mode::Ground);
@@ -3125,7 +3115,7 @@ impl NaughtyDogVm {
         let chest = foot + glam::Vec3::Y * 1.3;
         let gun = &mut session.player_gun;
         let mut reload_started = false;
-        if gun.ammo == 0 && gun.reloading <= 0. && gun.cooldown <= 0. && input.buttons_pressed & b::KEY_R != 0 {
+        if gun.ammo == 0 && gun.reloading <= 0. && gun.cooldown <= 0. && pad.hit(crate::pad::TRIANGLE) {
             gun.reloading = 1.5;
             reload_started = true;
         }
@@ -3142,7 +3132,7 @@ impl NaughtyDogVm {
             }
         }
         gun.cooldown -= dt;
-        let trigger = forced || if weapon.as_ref().is_some_and(|w| w.automatic) { input.buttons_down & b::MOUSE_LEFT != 0 } else { input.buttons_pressed & b::MOUSE_LEFT != 0 };
+        let trigger = forced || if weapon.as_ref().is_some_and(|w| w.automatic) { pad.down(crate::pad::R1) } else { pad.hit(crate::pad::R1) };
         if !trigger || gun.cooldown > 0. || gun.reloading > 0. || !controls {
             return;
         }
@@ -3897,8 +3887,6 @@ impl NaughtyDogVm {
         let mut world = Vec::new();
         let mut layers = Vec::new();
         session.stage.now = (host.now_ms().saturating_sub(session.start_ms)) as f64 / 1000.;
-        let key = |m: u64| f32::from(u8::from(input.buttons_down & m != 0));
-        session.stage.stick = [key(b::KEY_D) - key(b::KEY_A), key(b::KEY_W) - key(b::KEY_S)];
         session.stage.read_pad(input);
         if let Some(c) = session.stage.controls.take() {
             if let Some(p) = &mut session.player {
@@ -3952,27 +3940,27 @@ impl NaughtyDogVm {
                 session.player_hidden = hide;
                 World::set_visible(&mut session.stage, sid("player"), !hide);
             }
-            let down = |m| input.buttons_down & m != 0;
+            // The PS3 pad (`crate::pad`): the right stick turns the
+            // camera, the left stick moves relative to it.
+            use crate::pad as pb;
+            let pad = session.stage.pad;
             let turn = 1.8 * seconds;
-            if down(b::LEFT) {
-                p.view_yaw -= turn;
-            }
-            if down(b::RIGHT) {
-                p.view_yaw += turn;
-            }
-            if down(b::UP) {
-                p.view_pitch = (p.view_pitch - turn).max(-1.2);
-            }
-            if down(b::DOWN) {
-                p.view_pitch = (p.view_pitch + turn).min(0.6);
-            }
+            p.view_yaw += pad.right[0] * turn;
+            p.view_pitch = (p.view_pitch - pad.right[1] * turn).clamp(-1.2, 0.6);
             let (fx, fz) = (p.view_yaw.sin(), -p.view_yaw.cos());
             let mut mv = [0f32; 2];
             if p.controls {
-                for (key, dx, dz) in [(b::KEY_W, fx, fz), (b::KEY_S, -fx, -fz), (b::KEY_D, -fz, fx), (b::KEY_A, fz, -fx)] {
-                    if down(key) {
-                        mv[0] += dx;
-                        mv[1] += dz;
+                let [lx, ly] = pad.left;
+                mv = [fx * ly - fz * lx, fz * ly + fx * lx];
+            }
+            // The d-pad picks a weapon: left a pistol, right a long gun.
+            if p.controls && (pad.hit(pb::LEFT) || pad.hit(pb::RIGHT)) {
+                let want_pistol = pad.hit(pb::LEFT);
+                if let (Some(g), Some(c)) = (session.game.as_mut(), session.stage.combat.as_ref()) {
+                    let pick = g.rt.inner.weapons.keys().copied().find(|w| c.weapons.get(w).is_some_and(|d| (d.class == 0) == want_pistol && !GRENADES.iter().any(|n| sid(n) == *w)));
+                    if pick.is_some() {
+                        g.rt.inner.current_weapon = pick;
+                        g.rt.inner.holstered = false;
                     }
                 }
             }
@@ -4023,7 +4011,7 @@ impl NaughtyDogVm {
                     climb = stick.dot(facing) > 0.7 && top.is_some();
                     // Jump: to an edge above, or to the side the stick
                     // points.
-                    if input.buttons_pressed & b::SPACE != 0 {
+                    if pad.hit(pb::CROSS) {
                         let toward = if lateral.abs() > 0.5 { right * lateral.signum() } else { glam::Vec3::Y };
                         leap_to = p.grip.and_then(|g| Self::leap_target(&session.ground, g, toward));
                     } else if !climb && stick.dot(facing).abs() > 0.7 {
@@ -4041,7 +4029,7 @@ impl NaughtyDogVm {
                         }
                     }
                 }
-                release = input.buttons_pressed & b::KEY_C != 0 || p.grip.is_some_and(|g| session.ground.edge(g.body, g.edge).is_none());
+                release = pad.hit(pb::CIRCLE) || p.grip.is_some_and(|g| session.ground.edge(g.body, g.edge).is_none());
             }
             climb |= forced_climb && mode == crate::player::Mode::Hang;
             release |= forced_drop && mode == crate::player::Mode::Hang;
@@ -4064,7 +4052,7 @@ impl NaughtyDogVm {
             let setting = |id: u32| session.game.as_ref().and_then(|g| g.rt.setting(id));
             let (no_jump, no_cover) = (setting(pn::SETTING_DISABLE_JUMP).is_some(), setting(pn::SETTING_DISABLE_COVER).is_some());
             let max_fall = setting(pn::SETTING_MAX_FALL_HEIGHT).map_or(pn::DEFAULT_MAX_FALL_HEIGHT, f32::from_bits);
-            let ctrl = input.buttons_pressed & b::CTRL != 0 && p.controls && !no_cover;
+            let ctrl = pad.hit(pb::CIRCLE) && p.controls && !no_cover;
             let mut take_cover = None;
             if ctrl && mode == crate::player::Mode::Ground && p.fall >= 0. {
                 let here = glam::Vec3::from_array(p.position);
@@ -4088,9 +4076,9 @@ impl NaughtyDogVm {
             // the nearest NPC within 1.6 m ahead; a hit reaction at most
             // every 1.5 s; the death state once.
             let holstered = session.game.as_ref().is_some_and(|g| g.rt.inner.holstered);
-            let aim = (down(b::MOUSE_RIGHT) && p.controls && held.is_some() && !holstered).then(|| fx.atan2(fz));
+            let aim = (pad.down(pb::L1) && p.controls && held.is_some() && !holstered).then(|| fx.atan2(fz));
             let grenade = session.game.as_ref().and_then(|g| GRENADES.iter().map(|n| sid(n)).find(|w| g.rt.inner.weapons.get(w).is_some_and(|a| *a != 0)));
-            let throw = input.buttons_pressed & b::KEY_Q != 0 && p.controls && grenade.is_some() && aim.is_none();
+            let throw = pad.hit(pb::L2) && p.controls && grenade.is_some() && aim.is_none();
             if let (true, Some(w)) = (throw, grenade) {
                 if let Some(g) = session.game.as_mut() {
                     if let Some(a) = g.rt.inner.weapons.get_mut(&w) {
@@ -4104,7 +4092,7 @@ impl NaughtyDogVm {
                 let to = session.ground.height(to.x, to.z, to.y + 5.).map_or(to, |h| glam::Vec3::new(to.x, h, to.z));
                 World::throw_grenade(&mut session.stage, from.to_array(), to.to_array());
             }
-            let melee_target = (input.buttons_pressed & b::KEY_E != 0 && p.controls).then(|| {
+            let melee_target = (pad.hit(pb::SQUARE) && p.controls).then(|| {
                 let here = glam::Vec3::from_array(p.position);
                 let ahead = glam::Quat::from_rotation_y(p.yaw) * glam::Vec3::Z;
                 session.stage.agents.agents.iter().filter(|(_, a)| {
@@ -4112,7 +4100,7 @@ impl NaughtyDogVm {
                     d.length() < 1.6 && d.dot(ahead) > 0.
                 }).min_by(|a, b| glam::Vec3::from_array(a.1.position).distance(here).total_cmp(&glam::Vec3::from_array(b.1.position).distance(here))).map(|(n, _)| *n)
             }).flatten();
-            let melee = input.buttons_pressed & b::KEY_E != 0 && p.controls;
+            let melee = pad.hit(pb::SQUARE) && p.controls;
             session.melee_target = melee_target;
             let hurt = (std::mem::take(&mut session.hurt_now) && session.stage.now - session.last_reaction > 1.5).then(|| {
                 session.last_reaction = session.stage.now;
@@ -4157,18 +4145,19 @@ impl NaughtyDogVm {
             let surface = crate::water::surface_at(&session.stage.water, glam::Vec3::from_array(p.position));
             let depth = surface.map_or(0., |h| h - p.position[1]);
             let swim = depth > if mode == crate::player::Mode::Swim { 1.0 } else { 1.3 };
-            let leave_cover = mode == crate::player::Mode::Cover && (ctrl || input.buttons_pressed & b::SPACE != 0);
+            let leave_cover = mode == crate::player::Mode::Cover && (ctrl || pad.hit(pb::CROSS));
             let hard_land = session.game.as_ref().and_then(|g| g.rt.setting(crate::ss::player_natives::SETTING_FORCE_HARD_LAND)).is_some();
             let mut ground_speed = None;
             let mut step_mode = mode;
             let mut step_root = None;
             if let (Some(anim), Some(table), Some(graph), Some(id)) = (p.anim.as_mut(), session.anim_table.as_ref(), session.anim_graph.as_mut(), p.entity) {
-                let running = down(b::SHIFT);
+                // The keyboard stick is fully deflected: run.
+                let running = true;
                 let wanted = movement[usize::from(running)];
                 let wanted = if wanted == 0 { sid(if running { "run" } else { "walk" }) } else { wanted };
                 let frame = crate::player::Frame {
                     heading,
-                    jump: (input.buttons_pressed & b::SPACE != 0 && p.controls && !no_jump) || forced_jump,
+                    jump: (pad.hit(pb::CROSS) && p.controls && !no_jump) || forced_jump,
                     grounded,
                     dropped,
                     slope,
@@ -4252,12 +4241,12 @@ impl NaughtyDogVm {
             let speed = match ground_speed {
                 _ if on_edge || step_mode == crate::player::Mode::Cover => 0.,
                 _ if step_mode == crate::player::Mode::Swim => {
-                    if len > 0. { if down(b::SHIFT) { 2.8 } else { 1.6 } } else { 0. }
+                    if len > 0. { 2.8 } else { 0. }
                 }
                 Some(v) => v,
                 None if len > 0. => {
                     p.yaw = mv[0].atan2(mv[1]);
-                    if down(b::SHIFT) { 6. } else { 2.5 }
+                    6.
                 }
                 None => 0.,
             };
@@ -4345,7 +4334,7 @@ impl NaughtyDogVm {
             }
             // The camera drifts behind a player moving away from it unless
             // the view keys turn it.
-            if heading.is_some() && !(down(b::LEFT) || down(b::RIGHT)) {
+            if heading.is_some() && pad.right[0] == 0. {
                 let behind = std::f32::consts::PI - p.yaw;
                 let d = (behind - p.view_yaw + std::f32::consts::PI).rem_euclid(2. * std::f32::consts::PI) - std::f32::consts::PI;
                 if d.abs() < 2. {
@@ -4472,7 +4461,7 @@ impl NaughtyDogVm {
         for n in gone {
             World::set_visible(&mut session.stage, n, false);
         }
-        self.step_combat(session, &input, seconds as f32);
+        self.step_combat(session, seconds as f32);
         // Hits reach the targets' scripts as `Attack` events.
         let attacks = std::mem::take(&mut session.stage.attacks);
         if let Some(game) = session.game.as_mut() {
@@ -4526,14 +4515,16 @@ impl NaughtyDogVm {
             }
         }
         world.append(&mut session.stage.ops);
-        let skip = input.buttons_pressed & (b::ENTER | b::ESCAPE) != 0;
+        use crate::pad as pb;
+        let pad = session.stage.pad;
+        let skip = pad.hit(pb::START | pb::CROSS);
         let mut change = session.game.as_mut().and_then(|g| g.rt.inner.task_change.take());
         // Boot screens: Enter dismisses a message; the menu moves with
         // Up/Down and New Game starts the story.
-        let pressed = |m: u64| input.buttons_pressed & m != 0;
+        let pressed = |m: u32| pad.hit(m);
         let mut ui_changed = false;
         match &mut session.ui {
-            Some(Ui::Message(_)) if pressed(b::ENTER) => {
+            Some(Ui::Message(_)) if pressed(pb::START | pb::CROSS) => {
                 session.ui = None;
                 ui_changed = true;
                 let at = session.game.as_ref().and_then(|g| g.rt.inner.task);
@@ -4543,20 +4534,20 @@ impl NaughtyDogVm {
                 let page = stack.last().and_then(|i| session.menu_pages.get(*i));
                 let visible: Vec<String> = page.map(|p| p.buttons.iter().filter(|b| b.condition == 0 || (session.has_save && matches!(b.name.as_str(), "BUTTON_CONTINUE" | "BUTTON_LOADGAME"))).map(|b| b.name.clone()).collect()).unwrap_or_default();
                 let n = visible.len().max(1);
-                if pressed(b::DOWN) {
+                if pressed(pb::DOWN) {
                     *selected = (*selected + 1) % n;
                     ui_changed = true;
                 }
-                if pressed(b::UP) {
+                if pressed(pb::UP) {
                     *selected = (*selected + n - 1) % n;
                     ui_changed = true;
                 }
-                if pressed(b::ESCAPE) && stack.len() > 1 {
+                if pressed(pb::CIRCLE) && stack.len() > 1 {
                     stack.pop();
                     *selected = 0;
                     ui_changed = true;
                 }
-                if pressed(b::ENTER) {
+                if pressed(pb::START | pb::CROSS) {
                     match visible.get(*selected).map(|b| menu_action(b)) {
                         Some(MenuAction::Page(target)) => {
                             if let Some(i) = session.menu_pages.iter().position(|p| p.name == target) {
