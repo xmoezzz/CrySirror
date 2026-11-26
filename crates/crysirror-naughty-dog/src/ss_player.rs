@@ -5,8 +5,10 @@ use crate::dc::{Dc, sid};
 use crate::script::{MAX_ARGS, Status};
 use anyhow::Result;
 
-/// Script setting ids (`sub_15F480`'s first argument): each call keeps
-/// the override alive for 9 frames (`sub_15E628`, expiry frame + 9).
+/// Script setting keys. `sub_15F480(owner, variable, value, priority)`
+/// overrides a setting variable for 9 frames (`sub_15E628`, expiry frame
+/// + 9). Natives whose owner sid is their own name are keyed by it; those
+/// sharing the `script` owner are keyed by the variable's address.
 pub const SETTING_BRUTAL_MELEE_DISABLED: u32 = 0x8e83_955a;
 pub const SETTING_INVINCIBLE: u32 = 0xa707_046c;
 pub const SETTING_LIGHT_COMBO_TUTORIAL: u32 = 0x0892_ffa1;
@@ -15,7 +17,10 @@ pub const SETTING_LIGHT_COMBO_TUTORIAL: u32 = 0x0892_ffa1;
 pub const SETTING_INFINITE_AMMO: u32 = 0x00f5_041a;
 /// `set-ragdoll-flow` (`sub_15F934`, value float) and
 /// `allow-camera-cut-compensate` settings.
-pub const SETTING_RAGDOLL_FLOW: u32 = 0x4d95_edb1;
+pub const SETTING_RAGDOLL_FLOW: u32 = 0x00e1_4cb0;
+/// `player-force-hard-land`: owner `script`, variable 0xF504F1, value true
+/// at priority 100; the next landing is a hard one.
+pub const SETTING_FORCE_HARD_LAND: u32 = 0x00f5_04f1;
 pub const SETTING_CAMERA_CUT_COMPENSATE: u32 = 0xfaa7_265b;
 const SETTING_FRAMES: u64 = 9;
 
@@ -28,12 +33,13 @@ impl Ctx<'_> {
         self.inner.settings.insert(id, Setting { value, until });
     }
 
-    pub(super) fn player_native(&mut self, _dc: &mut Dc, name: &str, a: &[u32; MAX_ARGS], n: usize) -> Result<Reply> {
+    pub(super) fn player_native(&mut self, dc: &mut Dc, name: &str, a: &[u32; MAX_ARGS], n: usize) -> Result<Reply> {
         let ok = |v: u32| Ok(Some((v, Status::Continue)));
         let player = self.world.locator(sid("player")).is_some();
         match name {
             "player-disable-brutal-melee" => self.set_setting(SETTING_BRUTAL_MELEE_DISABLED, 1),
             "set-ragdoll-flow" if n > 0 => self.set_setting(SETTING_RAGDOLL_FLOW, a[0]),
+            "player-force-hard-land" => self.set_setting(SETTING_FORCE_HARD_LAND, 1),
             "allow-camera-cut-compensate" => self.set_setting(SETTING_CAMERA_CUT_COMPENSATE, 1),
             // (player-disable-controls-explicit mask): as
             // `player-disable-controls`; mask 0 disables nothing.
@@ -81,6 +87,24 @@ impl Ctx<'_> {
                         self.inner.weapons.insert(a[0], ammo);
                     }
                     self.inner.current_weapon = Some(a[0]);
+                }
+                return ok(0);
+            }
+            // (weapon-set-reset): copy the `*player-starting-weapons*`
+            // weapon-set (80 bytes: four 16-byte slots {name, weapon, ammo,
+            // 0}) over the saved set (`sub_7E84CC`) the player's inventory
+            // is restored from; here it replaces the inventory.
+            "weapon-set-reset" => {
+                if let Some(&set) = dc.symbols.get(&sid("*player-starting-weapons*")) {
+                    self.inner.weapons.clear();
+                    self.inner.current_weapon = None;
+                    for slot in 0..4 {
+                        let weapon = dc.mem.u32(set + 16 * slot + 4)?;
+                        if weapon != 0 && weapon != sid("none") {
+                            self.inner.weapons.insert(weapon, dc.mem.u32(set + 16 * slot + 8)? as i32);
+                            self.inner.current_weapon.get_or_insert(weapon);
+                        }
+                    }
                 }
                 return ok(0);
             }

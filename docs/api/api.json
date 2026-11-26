@@ -22182,7 +22182,7 @@
       "used_by": "`Environment.sun`"
     },
     {
-      "doc": "Exponential height fog (the UE \"ExponentialHeightFog\" model): density decays with height above `base_height`; the line integral along each view ray gives the opacity, with directional inscattering toward the sun.",
+      "doc": "Height fog. The default model is exponential height fog (the UE \"ExponentialHeightFog\" model): density decays with height above `base_height` and the line integral along each view ray gives the opacity; `model` selects a per-fragment Gaussian profile instead. Both add directional inscattering toward the sun.",
       "fields": [
         {
           "default": [
@@ -22235,6 +22235,12 @@
           "doc": "Sharpness of the inscattering lobe toward the sun (1..256).",
           "name": "sun_exponent",
           "rust_type": "f32"
+        },
+        {
+          "default": "exponential",
+          "doc": "How opacity grows with distance and height.",
+          "name": "model",
+          "rust_type": "FogModel"
         }
       ],
       "name": "Fog",
@@ -30561,7 +30567,7 @@
       "used_by": "UiEvent.widget client/local identity"
     }
   ],
-  "fingerprint": "848a0fe0b5b5bfd9",
+  "fingerprint": "2ac32143b330d5a1",
   "generated_by": "crysirror-engine api_doc (tests/api_docs.rs)",
   "globals": [
     {

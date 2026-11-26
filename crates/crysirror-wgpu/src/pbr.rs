@@ -4177,7 +4177,7 @@ impl PbrRenderer {
             fog_sun: env
                 .fog
                 .as_ref()
-                .map_or([0.; 4], |f| [f.sun_scattering, f.sun_exponent, 0., 0.]),
+                .map_or([0.; 4], |f| [f.sun_scattering, f.sun_exponent, fog_model(f), 0.]),
             ssr: env.reflections.as_ref().map_or([0.; 4], |r| {
                 [
                     r.intensity,
@@ -4701,6 +4701,7 @@ impl PbrRenderer {
                     [f.density, f.height_falloff, f.base_height, f.start_distance]
                 }),
                 fog_max_opacity: fog.map_or(1., |f| f.max_opacity),
+                fog_model: fog.map_or(0., fog_model),
             },
         )?;
         let frame_bind_with =
@@ -6443,5 +6444,13 @@ mod tests {
         for band in &sh[1..] {
             assert!(band[0].abs() < 0.02);
         }
+    }
+}
+
+/// The shader's fog model selector (`FogModel` order).
+fn fog_model(f: &crysirror_scene::view::Fog) -> f32 {
+    match f.model {
+        crysirror_scene::view::FogModel::Exponential => 0.,
+        crysirror_scene::view::FogModel::Gaussian => 1.,
     }
 }

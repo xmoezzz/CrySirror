@@ -137,6 +137,11 @@ fn rgba(i:Out)->vec4<f32> {
 fn fog_amount(i:Out)->f32 {
     if frame.fog_params.x<=0.0 {return 0.0;}
     let distance=max(length(i.world-frame.camera.xyz)-frame.fog_params.w,0.0);
+    if frame.screen.w>0.5 {
+        let b=max(1.0-frame.fog_params.y*(i.world.y-frame.fog_params.z),0.0);
+        let x=frame.fog_params.x*distance*b;
+        return frame.fog_color.w*(1.0-exp(-x*x));
+    }
     let density=frame.fog_params.x*exp(clamp(-frame.fog_params.y*(i.world.y-frame.fog_params.z),-40.,40.));
     return min(1.0-exp(-density*distance),frame.fog_color.w);
 }

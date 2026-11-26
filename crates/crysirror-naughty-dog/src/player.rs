@@ -202,6 +202,8 @@ pub struct Frame {
     /// Deep water at the player's position, and the sprint input.
     pub swim: bool,
     pub movement_fast: bool,
+    /// Land hard whatever the drop (`player-force-hard-land`).
+    pub hard_land: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -452,7 +454,9 @@ impl Controller {
         if airborne {
             if f.grounded && state != "jump-in-place" && state != "run-jump-long" {
                 if state == "fall" {
-                    let grade = if f.dropped < 1.5 {
+                    let grade = if f.hard_land {
+                        "hard"
+                    } else if f.dropped < 1.5 {
                         "soft"
                     } else if f.dropped < 4. {
                         "medium"

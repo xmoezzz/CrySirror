@@ -68,9 +68,11 @@ impl Default for Sun {
     }
 }
 
-/// Exponential height fog (the UE "ExponentialHeightFog" model): density
-/// decays with height above `base_height`; the line integral along each view
-/// ray gives the opacity, with directional inscattering toward the sun.
+/// Height fog. The default model is exponential height fog (the UE
+/// "ExponentialHeightFog" model): density decays with height above
+/// `base_height` and the line integral along each view ray gives the
+/// opacity; `model` selects a per-fragment Gaussian profile instead.
+/// Both add directional inscattering toward the sun.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fog {
@@ -98,6 +100,24 @@ pub struct Fog {
     /// Sharpness of the inscattering lobe toward the sun (1..256).
     #[serde(default = "fog_exponent")]
     pub sun_exponent: f32,
+    /// How opacity grows with distance and height.
+    #[serde(default)]
+    pub model: FogModel,
+}
+
+/// The fog's opacity model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FogModel {
+    /// The ray integral of `density·e^(−height_falloff·(h−base_height))`.
+    #[default]
+    Exponential,
+    /// Per fragment, `max_opacity·(1 − e^(−(d·b)²))` with
+    /// `d = density·(distance − start_distance)⁺` and
+    /// `b = (1 − height_falloff·(h − base_height))⁺`: a Gaussian in
+    /// distance over a linear height ramp. A negative `height_falloff`
+    /// thickens the fog with height.
+    Gaussian,
 }
 fn fog_color() -> [f32; 3] {
     [0.45, 0.5, 0.6]
@@ -117,7 +137,7 @@ impl Fog {
             finite(&self.color)
                 && self.color.iter().all(|c| (0.0..=1000.).contains(c))
                 && (0.0..=100.).contains(&self.density)
-                && (0.0..=100.).contains(&self.height_falloff)
+                && (if self.model == FogModel::Gaussian { -100.0..=100. } else { 0.0..=100. }).contains(&self.height_falloff)
                 && self.base_height.is_finite()
                 && self.base_height.abs() <= 1e6
                 && (0.0..=1e6).contains(&self.start_distance)

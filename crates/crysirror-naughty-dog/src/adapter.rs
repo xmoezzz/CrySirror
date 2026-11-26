@@ -1249,6 +1249,8 @@ struct Session {
     /// Effect groups and descriptors of the loaded particle modules.
     particles: crate::particle::Library,
     part_modules: HashSet<u32>,
+    /// Particle materials already reported as not drawable.
+    untextured: HashSet<u32>,
     /// `particle.pak` materials, read on first use.
     particle_materials: Option<HashMap<u32, crate::particle::ParticleMaterial>>,
     /// Uploaded particle textures by texture ID: path and atlas columns.
@@ -1564,6 +1566,7 @@ impl NaughtyDogVm {
             npc_packages: HashMap::new(),
             particles: Default::default(),
             part_modules: HashSet::new(),
+            untextured: HashSet::new(),
             particle_materials: None,
             particle_textures: HashMap::new(),
             effects: Vec::new(),
@@ -2050,17 +2053,19 @@ impl NaughtyDogVm {
                 env["environment"]["filmic_curve"] = json!({"shoulder": t.shoulder, "linear": t.linear, "angle": t.angle, "toe": t.toe, "toe_numerator": t.toe_numerator, "toe_denominator": t.toe_denominator, "white": t.white, "exposure_bias": t.exposure_bias});
                 env["environment"]["auto_exposure"] = json!({"min_log2": -8.0, "max_log2": 8.0, "speed_up": 3.0, "speed_down": 1.0, "compensation": EXPOSURE_CALIBRATION});
                 env["environment"]["grading"] = json!({"color_filter": s.tint.map(|v| v.clamp(0., 4.))});
-                // The record's Gaussian fog (see `crate::render_settings`)
-                // mapped to the shared exponential fog: the same maximum
-                // opacity `density`, and the same opacity `1 − e⁻¹` of it
-                // one `distance-range` past `distance-start`. Height
-                // thinning maps to the exponential falloff when the range
-                // is positive; fog thickening with height (a negative
-                // range, the menu temple) stays uniform.
+                // The record's fog as the fog writer (`sub_7587F8`) sets it
+                // up: opacity `density·(1 − e^(−(a·b)²))` with
+                // `a = ((d − distance-start)/distance-range)⁺` and the height
+                // ramp `b = (1 − (y − height-start)/height-range)⁺`; a
+                // negative range (the menu temple) thickens it upward.
+                // Inactive below multiplier 1. Distance here is the eye
+                // distance rather than clip w, and the floor-fog term
+                // (`floor-fog-height-*`) is not applied.
                 let f = s.fog;
                 if f.density > 0. && f.distance_range > 0. && f.multiplier >= 1. {
                     let colour = f.colour.map(|c| c.clamp(0., 16.));
-                    env["environment"]["fog"] = json!({"color": colour, "density": 1. / f.distance_range, "height_falloff": if f.height_range > 0. { 1. / f.height_range } else { 0. }, "base_height": f.height_start, "start_distance": f.distance_start.max(0.), "max_opacity": f.density.clamp(0., 1.), "sun_scattering": 0.0});
+                    let falloff = if f.height_range != 0. { (1. / f.height_range).clamp(-100., 100.) } else { 0. };
+                    env["environment"]["fog"] = json!({"color": colour, "density": 1. / f.distance_range, "height_falloff": falloff, "base_height": f.height_start, "start_distance": f.distance_start.max(0.), "max_opacity": f.density.clamp(0., 1.), "sun_scattering": 0.0, "model": "gaussian"});
                 }
             }
             None => {
@@ -2211,8 +2216,13 @@ impl NaughtyDogVm {
         }
         let plan = session.plan.as_ref().context("task plan")?;
         if plan.menu {
-            world.push(Self::menu_camera(session));
-            session.stage.log(format!("task {} level {}: menu camera", plan.name, plan.level));
+            let camera = Self::menu_camera(session);
+            session.stage.camera_eye = session.start.as_ref().map(|c| c.position);
+            world.push(camera);
+            // Effects placed before the camera was known wake now.
+            let line = format!("task {} level {}: menu camera", plan.name, plan.level);
+            Self::update_effects(session, world);
+            session.stage.log(line);
             let (Some(game), Some(modules)) = (session.game.as_mut(), session.modules.as_ref()) else { return Ok(()) };
             if let Err(e) = game.start(modules, &mut session.stage, &session.records) {
                 session.script_error = Some(format!("{e:#}"));
@@ -2442,41 +2452,71 @@ impl NaughtyDogVm {
             });
             match materials {
                 Some(Ok((materials, reader, directory))) => {
-                    // Decode each material's first sampler that is not the
-                    // shared placeholder; atlases (width a multiple of the
-                    // height) are frame strips.
+                    // Each material's sprite: colour from its `*-color`
+                    // sampler (white without one) and opacity from its
+                    // `*-trans`/`*-mask` sampler's green channel, as the
+                    // particle fragment programs take them from separate
+                    // grey textures (`godrays-fog`: s1 colour, s2 `fog-trans`
+                    // .g). Without an opacity sampler the first non-
+                    // placeholder texture is used as is. Atlases (width a
+                    // multiple of the height) are frame strips. The roles
+                    // come from texture names, not from each shader.
                     let mut textures = HashMap::new();
                     for item in directory.items.iter().filter(|i| i.kind == "VRAM_DESC") {
                         if let Ok(desc) = crate::texture::VramDesc::read(&reader, item.payload_offset) {
                             textures.insert(desc.id, desc);
                         }
                     }
-                    for m in materials.values() {
-                        let Some(desc) = m.samplers.iter().filter_map(|id| textures.get(id)).find(|d| !d.name.contains("missingtexture")) else { continue };
-                        if session.particle_textures.contains_key(&desc.id) {
+                    let mut resolved = HashMap::new();
+                    for (key, mut m) in materials {
+                        let found: Vec<&crate::texture::VramDesc> = m.samplers.iter().filter_map(|id| textures.get(id)).filter(|d| !d.name.contains("missingtexture")).collect();
+                        let file = |d: &crate::texture::VramDesc| d.name.rsplit('/').nth(1).unwrap_or(&d.name).to_ascii_lowercase();
+                        let opacity = found.iter().copied().find(|d| {
+                            let f = file(d);
+                            (f.contains("-trans") || f.contains("-mask")) && !f.contains("normal") && !f.contains("height")
+                        });
+                        let colour = found.iter().copied().find(|d| file(d).contains("-color")).or_else(|| if opacity.is_none() { found.first().copied() } else { None });
+                        if colour.is_none() && opacity.is_none() {
+                            m.samplers.clear();
+                            resolved.insert(key, m);
                             continue;
                         }
-                        let uploaded = desc.decode(&reader, directory.texture_base).and_then(|image| {
-                            session.next_model += 1;
-                            let path = host.upload_rgba(self.client, 0x4e50_0000 + session.next_model, image.width, image.height, &image.rgba)?;
-                            let columns = if image.width > image.height && image.width % image.height == 0 { image.width / image.height } else { 1 };
-                            Ok((path.relative().to_string(), columns))
-                        });
-                        match uploaded {
-                            Ok(t) => session.particle_textures.insert(desc.id, Some(t)),
-                            Err(e) => {
-                                session.stage.log(format!("particle texture {}: {e:#}", desc.name));
-                                session.particle_textures.insert(desc.id, None)
-                            }
-                        };
+                        let id = colour.map_or(0, |d| d.id).rotate_left(7) ^ opacity.map_or(0, |d| d.id);
+                        if !session.particle_textures.contains_key(&id) {
+                            let image = (|| -> Result<crysirror_image::ImageSurface> {
+                                let mask = opacity.map(|d| d.decode(&reader, directory.texture_base)).transpose()?;
+                                let mut image = match colour {
+                                    Some(d) => d.decode(&reader, directory.texture_base)?,
+                                    None => {
+                                        let m = mask.as_ref().context("particle opacity")?;
+                                        crysirror_image::ImageSurface::filled(m.width, m.height, [255; 4])?
+                                    }
+                                };
+                                if let Some(mask) = mask {
+                                    let plane = crysirror_image::associated::CoveragePlane { width: mask.width, height: mask.height, bytes: mask.rgba.chunks_exact(4).map(|p| p[1]).collect() };
+                                    let plane = plane.resize_nearest([image.width, image.height])?;
+                                    let identity: [u8; 256] = std::array::from_fn(|v| v as u8);
+                                    crysirror_image::associated::map_coverage_alpha(&mut image.rgba, &plane.bytes, &identity)?;
+                                }
+                                Ok(image)
+                            })();
+                            let uploaded = image.and_then(|image| {
+                                session.next_model += 1;
+                                let path = host.upload_rgba(self.client, 0x4e50_0000 + session.next_model, image.width, image.height, &image.rgba)?;
+                                let columns = if image.width > image.height && image.width % image.height == 0 { image.width / image.height } else { 1 };
+                                Ok((path.relative().to_string(), columns))
+                            });
+                            match uploaded {
+                                Ok(t) => session.particle_textures.insert(id, Some(t)),
+                                Err(e) => {
+                                    session.stage.log(format!("particle material {}: {e:#}", m.name));
+                                    session.particle_textures.insert(id, None)
+                                }
+                            };
+                        }
+                        m.samplers = if session.particle_textures.get(&id).is_some_and(Option::is_some) { vec![id] } else { Vec::new() };
+                        resolved.insert(key, m);
                     }
-                    let resolved: HashMap<u32, crate::particle::ParticleMaterial> = materials
-                        .into_iter()
-                        .map(|(k, mut m)| {
-                            m.samplers.retain(|id| session.particle_textures.get(id).is_some_and(Option::is_some));
-                            (k, m)
-                        })
-                        .collect();
                     session.particle_materials = Some(resolved);
                 }
                 Some(Err(e)) => {
@@ -2552,6 +2592,15 @@ impl NaughtyDogVm {
             let Some(effect) = session.particles.effects.get(emitter) else { continue };
             let material = session.particle_materials.as_ref().and_then(|m| m.get(&effect.material));
             let texture = material.and_then(|m| m.samplers.first()).and_then(|id| session.particle_textures.get(id).cloned().flatten());
+            // Descriptors without a `particle.pak` material (sound emitters,
+            // mesh debris) draw nothing here.
+            if material.is_none() {
+                if session.untextured.insert(effect.material) {
+                    let line = format!("particle {}: material {:#010x} not in particle.pak, not drawn", effect.name, effect.material);
+                    session.stage.log(line);
+                }
+                continue;
+            }
             let blend = material.map_or(crysirror_vfx::BlendMode::Additive, |m| crate::particle::blend(m.blend));
             let soft = material.and_then(|m| m.depth_blend).unwrap_or(0.);
             let (spec, frame) = crate::particle::emitter(effect, &effect.name, placement, texture, blend, soft, owner ^ k as u32);
@@ -2820,8 +2869,8 @@ impl NaughtyDogVm {
     }
 
     /// Start and stop the scripts' sound effects: a bank sound's tone
-    /// (chosen in turn) as a WAVE stream on a ring of channels, positioned
-    /// in the listener frame.
+    /// (chosen in turn) as a WAVE stream on a ring of channels, panned by
+    /// its direction in the listener frame.
     fn serve_sounds(&self, host: &mut dyn HostServices, session: &mut Session) {
         use crate::ss::sound_natives::SoundAt;
         use crysirror_core::service::{AudioParameters, AudioPreparePhase, AudioRequest, EncodedAudio, PcmBus};
@@ -2848,11 +2897,16 @@ impl NaughtyDogVm {
             };
             match bank.wave(tone) {
                 Ok((wave, looping)) => {
+                    // Placed sounds pan by their listener-frame direction
+                    // and fall off as 5 m / distance beyond 5 m (not the
+                    // native Scream attenuation curves).
+                    let local = point.and_then(|p| Self::listener_point(&session.stage, p)).map(glam::Vec3::from_array);
+                    let (pan, falloff) = local.map_or((0.5, 1.), |d| (0.5 + 0.5 * d.x / d.length().max(1e-3), (5. / d.length().max(5.))));
                     let parameters = AudioParameters {
                         bus: PcmBus::Sfx,
-                        gain: (volume.max(0.) * f32::from(sound.volume) / 127.).min(4.),
+                        gain: (volume.max(0.) * f32::from(sound.volume) / 127. * falloff).min(4.),
                         rate: 2f32.powf(pitch.clamp(-48., 48.) / 12.),
-                        spatial_position: point.and_then(|p| Self::listener_point(&session.stage, p)),
+                        pan,
                         looping: looping.is_some(),
                         loop_start: looping.unwrap_or(0),
                         ..Default::default()
@@ -3619,6 +3673,7 @@ impl NaughtyDogVm {
             let depth = surface.map_or(0., |h| h - p.position[1]);
             let swim = depth > if mode == crate::player::Mode::Swim { 1.0 } else { 1.3 };
             let leave_cover = mode == crate::player::Mode::Cover && (ctrl || input.buttons_pressed & b::SPACE != 0);
+            let hard_land = session.game.as_ref().and_then(|g| g.rt.setting(crate::ss::player_natives::SETTING_FORCE_HARD_LAND)).is_some();
             let mut ground_speed = None;
             let mut step_mode = mode;
             let mut step_root = None;
@@ -3645,6 +3700,7 @@ impl NaughtyDogVm {
                     uncover: leave_cover,
                     swim,
                     movement_fast: running,
+                    hard_land,
                 };
                 match anim.step(graph, table, &session.player_clips, &frame) {
                     Ok(step) => {
@@ -4078,7 +4134,7 @@ impl NaughtyDogVm {
         active.sort_unstable();
         active.truncate(HUD_ELEMENTS as usize);
         let tint = if hidden { 0 } else { ((1. - health).clamp(0., 1.) * 140.) as u8 };
-        let signature = format!("{tint} {ammo:?} {active:?}");
+        let signature = format!("{hidden} {tint} {ammo:?} {active:?}");
         if signature == session.hud_shown {
             return;
         }
@@ -4392,6 +4448,7 @@ impl VmAdapter for NaughtyDogVm {
                         v["player"] = json!(s.player.as_ref().map(|p| p.position));
                         v["ground_triangles"] = json!(s.ground.len());
                         v["movie"] = json!(s.movie);
+                        v["effects"] = json!({"placed": s.effects.len(), "live": s.effects.iter().filter(|e| e.live).count(), "visible": s.effects.iter().filter(|e| s.stage.visible.contains(&e.spawner)).count()});
                     }
                     _ => v["level"] = json!(s.levels[s.current].0),
                 }

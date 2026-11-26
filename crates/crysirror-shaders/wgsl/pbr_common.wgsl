@@ -127,8 +127,10 @@ struct VertexIn {
     @location(3) tangent: vec4<f32>,
 };
 
-// Exponential height fog (opacity, inscattered color) for a ray from the
-// camera to `world`: ∫ density·e^(−falloff·(h−base)) along the ray.
+// Height fog (opacity, inscattered color) for a ray from the camera to
+// `world`. Exponential model: ∫ density·e^(−falloff·(h−base)) along the
+// ray. Gaussian model (fog_sun.z = 1): max·(1 − e^(−(density·d·b)²)) with
+// the linear height ramp b = (1 − falloff·(h−base))⁺.
 fn height_fog(world: vec3<f32>) -> vec4<f32> {
     if frame.fog_params.w <= 0.0 {
         return vec4<f32>(0.0);
@@ -138,13 +140,20 @@ fn height_fog(world: vec3<f32>) -> vec4<f32> {
     let len = length(ray);
     let dist = max(len - frame.fog_params.z, 0.0);
     let falloff = frame.fog_params.x;
-    let dy = ray.y * dist / max(len, 1e-4);
-    var integral = frame.fog_color.a * dist * exp(-falloff * (cam.y - frame.fog_params.y));
-    let k = falloff * dy;
-    if abs(k) > 1e-4 {
-        integral = integral * (1.0 - exp(-k)) / k;
+    var opacity = 0.0;
+    if frame.fog_sun.z > 0.5 {
+        let b = max(1.0 - falloff * (world.y - frame.fog_params.y), 0.0);
+        let x = frame.fog_color.a * dist * b;
+        opacity = frame.fog_params.w * (1.0 - exp(-x * x));
+    } else {
+        let dy = ray.y * dist / max(len, 1e-4);
+        var integral = frame.fog_color.a * dist * exp(-falloff * (cam.y - frame.fog_params.y));
+        let k = falloff * dy;
+        if abs(k) > 1e-4 {
+            integral = integral * (1.0 - exp(-k)) / k;
+        }
+        opacity = min(1.0 - exp(-max(integral, 0.0)), frame.fog_params.w);
     }
-    let opacity = min(1.0 - exp(-max(integral, 0.0)), frame.fog_params.w);
     var color = frame.fog_color.rgb;
     if frame.fog_sun.x > 0.0 && frame.sun_dir.w > 0.0 {
         let cos_sun = max(dot(ray / max(len, 1e-4), -frame.sun_dir.xyz), 0.0);

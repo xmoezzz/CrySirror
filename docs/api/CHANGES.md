@@ -1,5 +1,15 @@
 # API change log
 
+## `2ac32143b330d5a1` (2026-11-26) — Gaussian fog model
+
+`Fog.model` selects the opacity model: `exponential` (default, unchanged)
+or `gaussian`, a per-fragment `max_opacity·(1 − e^(−(d·b)²))` with a
+linear height ramp `b` that may thicken upward (negative
+`height_falloff`, allowed only for this model). Existing environments
+omit the field and keep their fog. Rust code building `Fog` with a struct
+literal must add `model` (or use `..Default`-style construction). The
+previous fingerprint was `848a0fe0b5b5bfd9`.
+
 ## `848a0fe0b5b5bfd9` (2026-11-25) — VFX local-plane sprites
 
 `FacingMode::Local` draws a sprite fixed in its emitter's local XY plane

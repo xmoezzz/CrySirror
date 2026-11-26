@@ -6,7 +6,7 @@ Generated from the class registry, the command table, serde defaults and Rust do
 `CRYSIRROR_BLESS=1 cargo test --release -p crysirror-engine --test api_docs`.
 Policy and change log: [README](README.md), [CHANGES](CHANGES.md).
 
-API fingerprint: `848a0fe0b5b5bfd9`
+API fingerprint: `2ac32143b330d5a1`
 
 The same classes are exposed to Rust (`EngineContext` calls), to JavaScript/TypeScript (bindings generated from the registry, [crysirror.d.ts](crysirror.d.ts)) and to inspection tools.
 
@@ -6033,7 +6033,7 @@ Used by: `Environment.sun`.
 
 Used by: `Environment.fog`.
 
-Exponential height fog (the UE "ExponentialHeightFog" model): density decays with height above `base_height`; the line integral along each view ray gives the opacity, with directional inscattering toward the sun.
+Height fog. The default model is exponential height fog (the UE "ExponentialHeightFog" model): density decays with height above `base_height` and the line integral along each view ray gives the opacity; `model` selects a per-fragment Gaussian profile instead. Both add directional inscattering toward the sun.
 
 | Field | Rust type | Default | Description |
 |---|---|---|---|
@@ -6045,6 +6045,7 @@ Exponential height fog (the UE "ExponentialHeightFog" model): density decays wit
 | `max_opacity` | `f32` | `1.0` | Opacity cap (keeps distant geometry and sky partly visible). |
 | `sun_scattering` | `f32` | `0.0` | Extra inscattering toward the sun (color × sun color × strength). |
 | `sun_exponent` | `f32` | `8.0` | Sharpness of the inscattering lobe toward the sun (1..256). |
+| `model` | `FogModel` | `"exponential"` | How opacity grows with distance and height. |
 
 ### AutoExposure
 
