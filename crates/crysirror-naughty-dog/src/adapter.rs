@@ -52,6 +52,8 @@ const SCREEN: [u32; 2] = [1280, 720];
 const FADE_LAYER: u32 = 0x4e44_0001;
 const NO_AUTO_BIRTH: u32 = 0x4000_0000;
 const MOVIE_LAYER: u32 = 0x4e44_0002;
+/// Black behind boot screens and level loads (under the movie and UI).
+const BACKDROP_LAYER: u32 = 0x4e44_0003;
 /// Message dialog and main-menu text layers.
 const UI_LAYER: u32 = 0x4e44_0010;
 const MENU_LEVEL: &str = "menu-temple";
@@ -1533,6 +1535,10 @@ struct Session {
     /// world video and its layer present it.
     movie: Option<f64>,
     movie_video: bool,
+    /// A movie started at its task change, over the level load.
+    movie_early: Option<String>,
+    /// Whether the black backdrop is up.
+    backdrop: bool,
     ui: Option<Ui>,
     /// The `text1.psarc` common catalog of the configured language.
     catalog: Option<Vec<u8>>,
@@ -1930,6 +1936,8 @@ impl NaughtyDogVm {
             script_error: None,
             movie: None,
             movie_video: false,
+            movie_early: None,
+            backdrop: false,
             ui: None,
             catalog: None,
             free: false,
@@ -2217,6 +2225,13 @@ impl NaughtyDogVm {
     /// level's start camera is known or the last package is in.
     fn load_next(&self, host: &mut dyn HostServices, session: &mut Session) -> Result<()> {
         let Some(step) = session.pending.pop_front() else { return Ok(()) };
+        let started = std::time::Instant::now();
+        let what = match &step {
+            Load::Package(n) => format!("package {n}"),
+            Load::Actor(a, _) => format!("actor {a}"),
+            Load::Particles(s) => format!("particles ×{}", s.len()),
+            Load::Part(n, _, _) => format!("part {n}"),
+        };
         let mut world = Vec::new();
         let package_name = match step {
             Load::Package(name) => name,
@@ -2239,9 +2254,11 @@ impl NaughtyDogVm {
             // Read and relocate the package once; every item below parses
             // the same copy.
             let package: Arc<dyn AssetReader> = Arc::new(crysirror_core::service::MemoryAssetReader(read_all(session.mount.open(&path)?.as_ref(), PACKAGE_LIMIT)?.into()));
+            let read_ms = started.elapsed().as_millis();
             let directory = Directory::read(package.as_ref())?;
             let loaded = crate::mesh::Loaded::read(package.as_ref(), PACKAGE_LIMIT)?;
             let meshes = scene::meshes_of(&loaded, &directory)?;
+            session.stage.log(format!("load timing {package_name}: read {read_ms} ms, decoded {} ms", started.elapsed().as_millis()));
             if session.game.is_some() {
                 if let Some(item) = directory.items.iter().find(|i| i.kind == "LIGHT_TABLE_1") {
                     session.probes.add(crate::probes::read(&loaded, item.payload_offset as usize)?);
@@ -2366,6 +2383,7 @@ impl NaughtyDogVm {
                 self.upload_meshes(host, session, &package_name, &path, meshes, package.as_ref(), &directory, &mut world)?;
             }
         }
+        session.stage.log(format!("load timing {what}: {} ms", started.elapsed().as_millis()));
         if session.pending.is_empty() {
             let (lo, hi) = session.bounds.unwrap_or(([-5.; 3], [5.; 3]));
             let (center, size): ([f32; 3], f32) = (std::array::from_fn(|k| (lo[k] + hi[k]) * 0.5), (0..3).map(|k| hi[k] - lo[k]).fold(0., f32::max));
@@ -2762,6 +2780,7 @@ impl NaughtyDogVm {
         let mut layers = Vec::new();
         let mut world = Vec::new();
         match &sub.manager {
+            Manager::PlayMovie(name) if session.movie.is_some() && session.movie_early.as_deref() == Some(name.as_str()) => session.movie_early = None,
             Manager::PlayMovie(name) => match self.start_movie(host, session, name)? {
                 Some((video, layer)) => {
                     world.push(video);
@@ -2790,6 +2809,14 @@ impl NaughtyDogVm {
         layers.extend(Self::ui_layers(session));
         host.submit_engine(self.client, 1, &serde_json::to_vec(&json!({"layers": layers, "world": world}))?)?;
         Ok(())
+    }
+
+    /// Whether no level is presented: a boot screen without a world (the
+    /// message dialog, movies and empty subnodes before the menu) or a
+    /// level still loading or not yet started. The menu shows its temple.
+    fn needs_backdrop(session: &Session) -> bool {
+        let menu = session.plan.as_ref().is_some_and(|p| p.menu);
+        session.game.is_some() && !menu && (matches!(session.ui, Some(Ui::Message(_))) || !session.pending.is_empty() || session.player.is_none())
     }
 
     /// Message dialog or main-menu layers (text from the disc catalog).
@@ -4060,7 +4087,17 @@ impl NaughtyDogVm {
             session.ui = None;
             return self.enter_task(host, session);
         }
-        self.begin(host, session)
+        self.begin(host, session)?;
+        // A movie subnode plays while its levels load, as the original
+        // covers the load with it.
+        let manager = session.game.as_ref().map(|g| g.rt.inner.tasks.nodes[at.0].subnodes[at.1].manager.clone());
+        if let (Some(Manager::PlayMovie(movie)), false) = (manager, session.pending.is_empty()) {
+            if let Some((video, layer)) = self.start_movie(host, session, &movie)? {
+                session.movie_early = Some(movie);
+                host.submit_engine(self.client, 1, &serde_json::to_vec(&json!({"layers": [layer], "world": [video]}))?)?;
+            }
+        }
+        Ok(())
     }
 
     /// Evaluate load regions for the current task: each region's scheme
@@ -5084,7 +5121,10 @@ impl NaughtyDogVm {
         session.stage.hud_active.retain(|_, until| *until >= now);
         let hidden = session.game.as_ref().is_some_and(|g| g.rt.inner.game.hud_hidden) || session.player.is_none();
         let health = session.player_health.value / crate::combat::PLAYER_HEALTH;
-        let ammo = session.game.as_ref().and_then(|g| g.rt.inner.current_weapon).map(|_| session.player_gun.ammo);
+        // The ammo count needs a player in a level (boot subnodes set a
+        // weapon before any level).
+        let in_level = session.player.is_some() && session.plan.as_ref().is_some_and(|p| !p.menu && !p.level.is_empty());
+        let ammo = session.game.as_ref().filter(|g| in_level && !g.rt.inner.holstered).and_then(|g| g.rt.inner.current_weapon).map(|_| session.player_gun.ammo);
         let mut active: Vec<u32> = if hidden { Vec::new() } else { session.stage.hud_active.keys().copied().filter(|k| session.hud_defs.contains_key(k)).collect() };
         active.sort_unstable();
         active.truncate(HUD_ELEMENTS as usize);
@@ -5339,6 +5379,13 @@ impl VmAdapter for NaughtyDogVm {
             self.state = Some(session);
             begun.map_err(fail)?;
             return Ok(VmYield::WaitUntil(host.now_ms() + FRAME_MS));
+        }
+        let backdrop = Self::needs_backdrop(&session);
+        if backdrop != session.backdrop {
+            session.backdrop = backdrop;
+            let layer = json!({"op": "put", "layer": {"id": BACKDROP_LAYER, "order": [-100, 0], "rect": [0, 0, SCREEN[0], SCREEN[1]], "paint": {"kind": "solid", "color": [0, 0, 0, if backdrop { 255 } else { 0 }]}}});
+            let bytes = serde_json::to_vec(&json!({"layers": [layer], "world": []})).map_err(|e| fail(e.into()))?;
+            host.submit_engine(self.client, 1, &bytes)?;
         }
         if !session.pending.is_empty() {
             let loaded = self.load_next(host, &mut session);
