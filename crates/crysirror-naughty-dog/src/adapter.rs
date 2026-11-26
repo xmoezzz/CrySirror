@@ -5046,6 +5046,7 @@ impl NaughtyDogVm {
             layers.push(json!({"op": "set_solid_color", "id": FADE_LAYER, "color": [r, g, b, (st.fade * 255.).round() as u8]}));
         }
         self.hud_layers(host, session, &mut layers);
+        limit_animation_layers(&mut world);
         host.submit_engine(self.client, 1, &serde_json::to_vec(&json!({"layers": layers, "world": world}))?)?;
         if let Some(at) = change {
             self.change_task(host, session, at)?;
@@ -5527,6 +5528,20 @@ impl crysirror_runtime::runtime::VmFactory for Factory {
     fn create(&self, client: ClientId, spec: &crysirror_runtime::model::ClientSpec) -> Result<Box<dyn VmAdapter>> {
         ensure!(spec.program.is_empty(), "the Naughty Dog player executes no data actions");
         Ok(Box::new(NaughtyDogVm::new(client, serde_json::from_value(spec.config.clone())?)?))
+    }
+}
+
+/// Keep each `set_animation` within the scene's layer limit
+/// (`MAX_ANIMATION_LAYERS`): the heaviest layers stay. A blend of the
+/// controller's layers with a script animation or additive parts can
+/// exceed it, which the host rejects and which ended the session.
+fn limit_animation_layers(world: &mut [serde_json::Value]) {
+    let max = crysirror_scene::components::MAX_ANIMATION_LAYERS;
+    for op in world.iter_mut().filter(|op| op["op"] == "set_animation") {
+        if let Some(layers) = op["animation"]["layers"].as_array_mut().filter(|l| l.len() > max) {
+            layers.sort_by(|a, b| b["weight"].as_f64().unwrap_or(0.).total_cmp(&a["weight"].as_f64().unwrap_or(0.)));
+            layers.truncate(max);
+        }
     }
 }
 
