@@ -223,6 +223,11 @@ pub trait World {
     fn spawn_explosion(&mut self, _kind: u32, _position: [f32; 3], _rotation: [f32; 4]) {}
     /// Show text `id` as an on-screen message.
     fn message(&mut self, _id: u32) {}
+    /// `spawn-message` with a HUD element: show `element` with text `text`
+    /// until `despawn-message` of `id` (the `hint` script's
+    /// `(spawn-message id text *hud-hint* 1)`).
+    fn show_message(&mut self, _id: u32, _text: u32, _element: u32) {}
+    fn hide_message(&mut self, _id: u32) {}
     fn kill_all_breakables(&mut self) {}
     /// The vehicles (tanks, helicopters) by object name.
     fn vehicles(&mut self) -> Option<&mut crate::vehicle::Vehicles> {
@@ -950,6 +955,15 @@ impl Ctx<'_> {
         let spawner = self.inner.procs.get(self.proc?)?.spawner?;
         self.world.property(spawner, prop)
     }
+    /// The value lookup of `tag-symbol`/`-int32`/`-boolean`/`-float`
+    /// (`sub_7C99A0`, `sub_7C9FAC`): the spawner's tags, then the process's
+    /// own variables (`sub_7C96D4`), as their stored word. The `hint`
+    /// script sets its display time with `(set-float 'display-time 5.0
+    /// self)` and reads it back with `tag-float`. The lookup's first table
+    /// (process +40 → +0x44) is not decoded.
+    fn tag_value(&mut self, prop: u32) -> Option<Property> {
+        self.tag(prop).or_else(|| self.inner.procs.get(self.proc?)?.vars.get(&prop).map(|v| Property::Sid(*v)))
+    }
     fn suspend(&mut self, wait: Wait) -> (u32, Status) {
         if self.proc.is_none() {
             self.inner.error("wait outside a state-script track".into());
@@ -992,7 +1006,7 @@ fn builtin_group(group: u32) -> Option<Option<u32>> {
 }
 
 /// `ND_TRACE_NATIVES=substring` prints matching native calls (diagnostic).
-fn trace_natives() -> Option<&'static String> {
+pub(crate) fn trace_natives() -> Option<&'static String> {
     static FILTER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     FILTER.get_or_init(|| std::env::var("ND_TRACE_NATIVES").ok()).as_ref()
 }
@@ -1045,6 +1059,11 @@ impl Ctx<'_> {
 }
 
 impl Natives for Ctx<'_> {
+    fn trace_ops(&self) -> bool {
+        static PROC: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+        let want = *PROC.get_or_init(|| std::env::var("ND_TRACE_PROC").ok().and_then(|v| u32::from_str_radix(v.trim_start_matches("0x"), 16).ok()));
+        want.is_some_and(|w| self.proc.is_some_and(|p| self.inner.procs[p].name == w))
+    }
     fn lookup(&self, s: u32) -> Option<u32> {
         self.inner.native_ids.get(&s).copied()
     }
@@ -1129,7 +1148,7 @@ impl Natives for Ctx<'_> {
             "set-boolean" | "set-int32" | "set-float" | "set-symbol" => ok(self.set_var(a, argc)),
             "get-boolean" | "get-int32" | "get-float" | "get-symbol" => ok(self.get_var(a, argc)),
             "tag-symbol" | "tag-int32" | "tag-boolean" | "tag-float" => {
-                let v = match self.tag(a[0]) {
+                let v = match self.tag_value(a[0]) {
                     Some(Property::Sid(s)) => s,
                     Some(Property::Int(i)) => i as u32,
                     Some(Property::Float(f)) => if name == "tag-float" { f.to_bits() } else { f as i32 as u32 },

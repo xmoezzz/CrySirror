@@ -385,8 +385,11 @@ struct Stage {
     combat: Option<Arc<crate::combat::CombatData>>,
     /// HUD elements scripts show, until when (`display-button-hud`).
     hud_active: HashMap<u32, f64>,
-    /// Text keys replacing an element's own text (hint messages).
-    hud_text: HashMap<u32, String>,
+    /// Text ids replacing an element's own text (hint messages,
+    /// `spawn-message` on an element), and the element of each such
+    /// message id.
+    hud_text: HashMap<u32, u32>,
+    shown_messages: HashMap<u32, u32>,
     /// `Hint` spawners' timers, and the hints scripts activated.
     hints: HashMap<u32, HintState>,
     hint_on: HashSet<u32>,
@@ -811,12 +814,9 @@ impl Stage {
             }
             let since = *state.since.get_or_insert(now);
             let count = num("repeat-count", -1.);
-            // `dpad-activate` hints show on a d-pad press inside their
-            // region (up or down here: left and right pick weapons; the
-            // native direction is not decoded), without timers.
-            let due = if num("dpad-activate", 0.) != 0. {
-                self.pad.pressed & (crate::pad::UP | crate::pad::DOWN) != 0
-            } else if state.shown == 0 {
+            // `dpad-activate` is not read: no code, DC module or `hint`
+            // script references it.
+            let due = if state.shown == 0 {
                 now - since >= f64::from(num("on-timer", 0.))
             } else {
                 now >= state.next && (count < 0. || (state.shown as f32) <= count)
@@ -831,7 +831,7 @@ impl Stage {
             let element = sid(&element);
             self.hud_active.insert(element, now + f64::from(seconds.max(0.5)));
             self.log(format!("hint {}: {message} on {element:#010x} for {seconds:.1} s at {now:.1}", s.name));
-            self.hud_text.insert(element, message);
+            self.hud_text.insert(element, sid(&message));
             if first {
                 if let Some(vox) = text("vox") {
                     let speaker = text("vox-speaker").map_or(sid("player"), |s| sid(&s));
@@ -1167,6 +1167,17 @@ impl World for Stage {
             None => {
                 self.hud_active.remove(&sid("*hud-hint*"));
             }
+        }
+    }
+    fn show_message(&mut self, id: u32, text: u32, element: u32) {
+        self.hud_active.insert(element, f64::INFINITY);
+        self.hud_text.insert(element, text);
+        self.shown_messages.insert(id, element);
+    }
+    fn hide_message(&mut self, id: u32) {
+        if let Some(element) = self.shown_messages.remove(&id) {
+            self.hud_active.remove(&element);
+            self.hud_text.remove(&element);
         }
     }
     fn message(&mut self, id: u32) {
@@ -1855,6 +1866,10 @@ impl Session {
     /// Catalog text marks line breaks with `\`.
     fn text(&self, key: &str) -> String {
         self.catalog.as_deref().and_then(|b| crate::Strings::parse(b).ok()).and_then(|s| s.get(sid(key)).map(|t| t.replace('\\', "\n"))).unwrap_or_else(|| key.to_owned())
+    }
+    /// The catalog text of a string id (empty when missing).
+    fn text_id(&self, id: u32) -> String {
+        self.catalog.as_deref().and_then(|b| crate::Strings::parse(b).ok()).and_then(|s| s.get(id).map(|t| t.replace('\\', "\n"))).unwrap_or_default()
     }
 }
 
@@ -5158,8 +5173,11 @@ impl NaughtyDogVm {
             layers.push(match &def.text {
                 Some(key) => {
                     let c = def.color.map(|v| (v.clamp(0., 1.) * 255.) as u8);
-                    let key = active.get(k as usize).and_then(|n| session.stage.hud_text.get(n)).cloned().unwrap_or_else(|| key.clone());
-                    text(text_id, [rect[0] + def.text_offset[0] as i32, rect[1] + def.text_offset[1] as i32, 400, 40], &session.text(&key), c, 24)
+                    let line = match active.get(k as usize).and_then(|n| session.stage.hud_text.get(n)) {
+                        Some(id) => session.text_id(*id),
+                        None => session.text(key),
+                    };
+                    text(text_id, [rect[0] + def.text_offset[0] as i32, rect[1] + def.text_offset[1] as i32, 400, 40], &line, c, 24)
                 }
                 None => clear(text_id),
             });

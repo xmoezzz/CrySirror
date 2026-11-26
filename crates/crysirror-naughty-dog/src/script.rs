@@ -54,6 +54,10 @@ pub trait Natives {
     fn lookup(&self, sid: u32) -> Option<u32>;
     /// Record a script error the PPU prints and continues past.
     fn error(&mut self, message: String);
+    /// Whether to print each instruction (diagnostic).
+    fn trace_ops(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -105,6 +109,9 @@ impl Thread {
             let word = dc.mem.u32(f.code + 4 * f.pc)?;
             f.pc += 1;
             let (op, a, b, c) = ((word >> 24) as u8, (word >> 16) as u8 as usize, (word >> 8) as u8 as usize, word as u8 as usize);
+            if natives.trace_ops() {
+                eprintln!("[op {:#x}+{}] {op:#04x} {a} {b} {c}  r[a]={:#x} r[b]={:#x} r[c]={:#x}", f.code, f.pc - 1, f.regs[a], f.regs[b], f.regs[c]);
+            }
             let r = &mut f.regs;
             let fl = |v: u32| f32::from_bits(v);
             let set_bool = |r: &mut [u32; 256], v: bool| r[a] = if v { u32::MAX } else { 0 };
@@ -173,6 +180,9 @@ impl Thread {
                     ensure!(target >= NATIVE_BASE, "Call through non-native {target:#010x}");
                     let args: [u32; MAX_ARGS] = r[ARG_BASE..ARG_BASE + MAX_ARGS].try_into()?;
                     let (value, status) = natives.call(dc, target - NATIVE_BASE, &args, c as u32)?;
+                    if crate::ss::trace_natives().is_some() {
+                        eprintln!("[native result] {value:#010x} {status:?}");
+                    }
                     self.frames.last_mut().expect("frame").regs[a] = value;
                     match status {
                         Status::Continue => {}

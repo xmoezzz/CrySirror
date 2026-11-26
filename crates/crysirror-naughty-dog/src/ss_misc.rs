@@ -183,12 +183,17 @@ impl Ctx<'_> {
                 self.inner.game.hud_hidden = true;
                 ok(0)
             }
-            // (spawn-message text [a] [b]), `sub_D45C4`.
+            // (spawn-message id text [element] [flag]), `sub_D45C4`: with a
+            // HUD element the text shows on it until `despawn-message`.
             "spawn-message" => {
                 if n > 0 {
                     let message = (a[0], if n > 1 { a[1] } else { 0 }, if n > 2 { a[2] } else { 0 });
                     self.inner.game.messages.push(message);
-                    self.world.message(message.0);
+                    if message.2 != 0 {
+                        self.world.show_message(message.0, message.1, message.2);
+                    } else {
+                        self.world.message(message.0);
+                    }
                 }
                 ok(0)
             }
@@ -611,6 +616,7 @@ impl Ctx<'_> {
             // (despawn-message id).
             "despawn-message" => {
                 self.inner.game.messages.retain(|m| m.0 != arg(0));
+                self.world.hide_message(arg(0));
                 ok(0)
             }
             "display-message" => {
