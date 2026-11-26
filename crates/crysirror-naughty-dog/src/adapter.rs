@@ -310,6 +310,8 @@ struct Stage {
     water: Vec<crate::water::Water>,
     /// Tanks and helicopters scripts command.
     vehicles: crate::vehicle::Vehicles,
+    /// Objects moving along splines: trackers, train cars, rail vehicles.
+    followers: crate::follow::Followers,
     /// The player's native state class (`player-in-state?`).
     player_state: Option<u32>,
     /// `kill-player-no-anim` requested: ragdoll, death camera, delay.
@@ -586,6 +588,33 @@ impl Stage {
     }
 
     /// Step the vehicles' orders and move their objects.
+    /// Step the spline followers and place the objects that moved, facing
+    /// along the spline.
+    fn step_followers(&mut self, seconds: f32) {
+        struct Splines<'a>(&'a Stage);
+        impl crate::follow::Track for Splines<'_> {
+            fn length(&self, spline: u32) -> Option<f32> {
+                self.0.splines.get(&spline).map(|s| s.length())
+            }
+            fn project(&self, spline: u32, object: u32) -> Option<f32> {
+                let (p, _) = World::locator(self.0, object)?;
+                World::spline_distance(self.0, spline, p)
+            }
+        }
+        if self.followers.objects.is_empty() && self.followers.movers.is_empty() {
+            return;
+        }
+        let mut followers = std::mem::take(&mut self.followers);
+        let moved = followers.step(seconds, &Splines(self));
+        for name in moved {
+            let Some((Some(spline), distance)) = followers.objects.get(&name).map(|f| (f.spline, f.distance)) else { continue };
+            let Some((p, t)) = World::spline_at(self, spline, distance) else { continue };
+            let q = glam::Quat::from_rotation_arc(glam::Vec3::Z, glam::Vec3::from_array(t).normalize_or(glam::Vec3::Z));
+            World::place(self, name, p, q.to_array());
+        }
+        self.followers = followers;
+    }
+
     fn step_vehicles(&mut self, seconds: f32) {
         let mut vehicles = std::mem::take(&mut self.vehicles);
         for (&name, v) in &mut vehicles.vehicles {
@@ -1010,6 +1039,30 @@ impl World for Stage {
     }
     fn vehicles(&mut self) -> Option<&mut crate::vehicle::Vehicles> {
         Some(&mut self.vehicles)
+    }
+    fn followers(&mut self) -> Option<&mut crate::follow::Followers> {
+        Some(&mut self.followers)
+    }
+    fn followers_ref(&self) -> Option<&crate::follow::Followers> {
+        Some(&self.followers)
+    }
+    fn spline_length(&self, spline: u32) -> Option<f32> {
+        self.splines.get(&spline).map(|s| s.length())
+    }
+    fn closest_spline(&self, point: [f32; 3]) -> Option<(u32, f32)> {
+        let mut best: Option<(f32, u32, f32)> = None;
+        for (&name, s) in &self.splines {
+            let d = World::spline_distance(self, name, point).unwrap_or(0.);
+            let Some((p, _)) = World::spline_at(self, name, d) else { continue };
+            let off = glam::Vec3::from_array(p).distance(glam::Vec3::from_array(point));
+            if off <= 2. && best.is_none_or(|b| off < b.0) && s.length() > 0. {
+                best = Some((off, name, d));
+            }
+        }
+        best.map(|(_, s, d)| (s, d))
+    }
+    fn spawned_of_type(&self, kind: u32) -> Vec<u32> {
+        self.spawners.iter().filter(|(n, s)| s.process_type == kind && self.visible.contains(n)).map(|(n, _)| *n).collect()
     }
     fn vehicles_ref(&self) -> Option<&crate::vehicle::Vehicles> {
         Some(&self.vehicles)
@@ -3912,6 +3965,7 @@ impl NaughtyDogVm {
         session.stage.frame_seconds = seconds as f32;
         session.stage.step_agents(seconds as f32);
         session.stage.step_vehicles(seconds as f32);
+        session.stage.step_followers(seconds as f32);
         self.step_combat(session, &input, seconds as f32);
         // Region enter/exit scripts for the player (`sub_115828`).
         if session.player.is_some() {

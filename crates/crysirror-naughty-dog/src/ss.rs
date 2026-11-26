@@ -35,6 +35,8 @@ pub mod sound_natives;
 pub mod vehicle_natives;
 #[path = "ss_misc.rs"]
 pub mod misc_natives;
+#[path = "ss_rail.rs"]
+pub mod rail_natives;
 
 /// A script setting override (`sub_15F480`): its value and the frame it
 /// expires after.
@@ -319,6 +321,24 @@ pub trait World {
     fn spline_distance(&self, _spline: u32, _point: [f32; 3]) -> Option<f32> {
         None
     }
+    fn spline_length(&self, _spline: u32) -> Option<f32> {
+        None
+    }
+    /// The spline passing within 2 m of `point`, with the point's arc
+    /// distance on it.
+    fn closest_spline(&self, _point: [f32; 3]) -> Option<(u32, f32)> {
+        None
+    }
+    /// Spawned objects of a process type.
+    fn spawned_of_type(&self, _kind: u32) -> Vec<u32> {
+        Vec::new()
+    }
+    fn followers(&mut self) -> Option<&mut crate::follow::Followers> {
+        None
+    }
+    fn followers_ref(&self) -> Option<&crate::follow::Followers> {
+        None
+    }
 }
 
 /// Options of `(animate object clip key value …)`. The keys seen in the
@@ -350,6 +370,8 @@ enum Wait {
     Speech(u32),
     /// Until vehicle `name`'s order completes.
     Vehicle(u32),
+    /// Until `object` is `distance` along its spline (or leaves it).
+    Spline { object: u32, distance: f32 },
 }
 
 struct Track {
@@ -650,7 +672,7 @@ impl Runtime {
             Wait::Signal(s) => self.inner.signals.contains(s),
             Wait::Var { process, var, value } => self.inner.procs.get(*process).is_none_or(|p| p.vars.get(var).copied().unwrap_or(0) == *value),
             // Resolved against the world in `run_track`.
-            Wait::Animation(_) | Wait::Npc(_) | Wait::Speech(_) | Wait::Vehicle(_) => false,
+            Wait::Animation(_) | Wait::Npc(_) | Wait::Speech(_) | Wait::Vehicle(_) | Wait::Spline { .. } => false,
         }
     }
 
@@ -663,6 +685,7 @@ impl Runtime {
                 Wait::Speech(speaker) => !world.speaking(speaker),
                 Wait::Vehicle(name) => world.vehicles_ref().and_then(|v| v.vehicles.get(&name)).is_none_or(|v| v.order.is_none()),
                 Wait::Npc(name) => world.agents_ref().and_then(|a| a.get(name)).is_none_or(|a| a.order.is_none()),
+                Wait::Spline { object, distance } => world.followers_ref().and_then(|f| f.objects.get(&object)).is_none_or(|f| f.spline.is_none() || f.distance >= distance),
                 ref w => self.wait_done(w, now),
             };
             if !done {
@@ -974,6 +997,9 @@ impl Natives for Ctx<'_> {
             return Ok(reply);
         }
         if let Some(reply) = self.misc_native(dc, name, a, n)? {
+            return Ok(reply);
+        }
+        if let Some(reply) = self.rail_native(dc, name, a, n)? {
             return Ok(reply);
         }
         match name {

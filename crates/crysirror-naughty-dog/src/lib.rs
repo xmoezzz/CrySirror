@@ -13,6 +13,7 @@ pub mod characters;
 pub mod collision;
 pub mod combat;
 pub mod dc;
+pub mod follow;
 pub mod game;
 pub mod ground;
 pub mod native_names;
