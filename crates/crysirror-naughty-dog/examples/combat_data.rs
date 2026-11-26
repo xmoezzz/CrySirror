@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Parse the combat tables from extracted DC modules and print a summary:
 //! weapons, archetypes, skills, damage entries, bullets, the player damage
-//! and, when `camera.bin` is present, the follow and aim camera settings.
+//! and, when `camera.bin`/`player-combos.bin` are present, the camera
+//! settings and the default melee combo.
 //!
 //! `combat_data DIR` (holding `weapons.bin`, `ai.bin`,
 //! `damage-settings.bin`, `dda-settings.bin`)
@@ -28,6 +29,11 @@ fn main() -> Result<()> {
     }
     if let Ok(b) = std::fs::read(format!("{dir}/camera.bin")) {
         println!("camera: {:?}", crysirror_naughty_dog::camera_settings::CameraSettings::parse(&b)?);
+    }
+    if let Ok(b) = std::fs::read(format!("{dir}/player-combos.bin")) {
+        let c = crysirror_naughty_dog::combo::Combo::parse(&b)?;
+        println!("combo stages {:?}, first intro {:#x} (hero-open-fw-rnh-backhand-enter {:#x}) / {:#x}", c.stages.iter().map(Vec::len).collect::<Vec<_>>(), c.stages[0][0].hero, sid("hero-open-fw-rnh-backhand-enter"), c.stages[0][0].npc);
+        println!("first sync npc {:#x} (npc-open-fw-rnh-backhand {:#x})", c.stages[1][0].npc, sid("npc-open-fw-rnh-backhand"));
     }
     println!("pistol-chloe vs light {} medium {}", d.damage(sid("pistol-chloe"), sid("light-class")), d.damage(sid("pistol-chloe"), sid("medium-class")));
     Ok(())

@@ -13,6 +13,7 @@ pub mod camera_settings;
 pub mod characters;
 pub mod collision;
 pub mod combat;
+pub mod combo;
 pub mod dc;
 pub mod follow;
 pub mod game;

@@ -803,7 +803,16 @@ impl Stage {
             }
             let since = *state.since.get_or_insert(now);
             let count = num("repeat-count", -1.);
-            let due = if state.shown == 0 { now - since >= f64::from(num("on-timer", 0.)) } else { now >= state.next && (count < 0. || (state.shown as f32) <= count) };
+            // `dpad-activate` hints show on a d-pad press inside their
+            // region (up or down here: left and right pick weapons; the
+            // native direction is not decoded), without timers.
+            let due = if num("dpad-activate", 0.) != 0. {
+                self.pad.pressed & (crate::pad::UP | crate::pad::DOWN) != 0
+            } else if state.shown == 0 {
+                now - since >= f64::from(num("on-timer", 0.))
+            } else {
+                now >= state.next && (count < 0. || (state.shown as f32) <= count)
+            };
             if !due {
                 continue;
             }
@@ -1561,11 +1570,11 @@ struct Session {
     player_hidden: bool,
     /// The death state to play (set with `death`), the time of the last
     /// hit reaction, damage taken last combat step, and a melee strike's
-    /// target.
+    /// target (and whether it finishes a combo).
     death_state: Option<&'static str>,
     last_reaction: f64,
     hurt_now: bool,
-    melee_target: Option<u32>,
+    melee_target: Option<(u32, bool)>,
     death: Option<f32>,
     combat_rng: u32,
     /// HUD element definitions (`hud-settings.bin`), the HUD package's
@@ -1574,6 +1583,9 @@ struct Session {
     hud_defs: HashMap<u32, crate::hud::HudButton>,
     /// Follow and aim camera settings (`camera.bin`).
     camera_settings: crate::camera_settings::CameraSettings,
+    /// The player's melee combo (`player-combos.bin`) and the one running.
+    combo: Option<crate::combo::Combo>,
+    combo_state: Option<crate::combo::ComboState>,
     hud_pak: Option<(Arc<crysirror_core::service::MemoryAssetReader>, Directory, HashMap<String, (u32, Option<u32>)>)>,
     hud_images: HashMap<String, Option<(String, u32, u32)>>,
     hud_shown: String,
@@ -1928,6 +1940,8 @@ impl NaughtyDogVm {
             has_save: false,
             hud_defs: HashMap::new(),
             camera_settings: Default::default(),
+            combo: None,
+            combo_state: None,
             hud_pak: None,
             hud_images: HashMap::new(),
             hud_shown: String::new(),
@@ -1997,6 +2011,10 @@ impl NaughtyDogVm {
             match crate::game::ModuleSource::read(&modules, "camera").and_then(|b| crate::camera_settings::CameraSettings::parse(&b)) {
                 Ok(c) => session.camera_settings = c,
                 Err(e) => session.stage.log(format!("camera.bin: {e:#}")),
+            }
+            match crate::game::ModuleSource::read(&modules, "player-combos").and_then(|b| crate::combo::Combo::parse(&b)) {
+                Ok(c) => session.combo = Some(c),
+                Err(e) => session.stage.log(format!("player-combos.bin: {e:#}")),
             }
             session.hud_defs = crate::game::ModuleSource::read(&modules, "hud-settings").and_then(|b| crate::hud::parse(&b)).unwrap_or_else(|e| {
                 session.stage.log(format!("hud-settings.bin: {e:#}"));
@@ -3273,10 +3291,10 @@ impl NaughtyDogVm {
             session.death = Some(0.);
             return;
         }
-        // A melee strike: the NPC in front takes a third of its hit points
-        // (not native) and reacts.
-        if let Some(target) = session.melee_target.take() {
-            let dealt = session.stage.agents.get(target).map_or(0., |a| a.max_hit_points / 3.);
+        // A melee strike: the NPC in front takes a third of its hit points,
+        // a combo finisher all that remain (not native), and reacts.
+        if let Some((target, finish)) = session.melee_target.take() {
+            let dealt = session.stage.agents.get(target).map_or(0., |a| if finish { a.hit_points.max(1.) } else { a.max_hit_points / 3. });
             session.stage.attacks.push((target, sid("player"), dealt));
             let killed = session.stage.agents.get_mut(target).is_some_and(|a| {
                 a.knowledge = crate::npc::KNOWLEDGE_COMBAT;
@@ -4363,7 +4381,31 @@ impl NaughtyDogVm {
                 }).min_by(|a, b| glam::Vec3::from_array(a.1.position).distance(here).total_cmp(&glam::Vec3::from_array(b.1.position).distance(here))).map(|(n, _)| *n)
             }).flatten();
             let melee = pad.hit(pb::SQUARE) && p.controls;
-            session.melee_target = melee_target;
+            // Against an NPC each press plays the combo's next paired
+            // strike on both at the player's position, facing the NPC.
+            session.melee_target = match (melee_target, session.combo.as_ref()) {
+                (Some(target), Some(combo)) => {
+                    let now = session.stage.now;
+                    combo.next_stage(session.combo_state.as_ref(), target, now).map(|stage| {
+                        let strikes = &combo.stages[stage];
+                        let strike = strikes[(now * 13.) as usize % strikes.len()];
+                        let finish = combo.is_finish(stage);
+                        session.combo_state = Some(crate::combo::ComboState { target, stage, at: now });
+                        if let Some(a) = session.stage.agents.get(target) {
+                            let d = glam::Vec3::from_array(a.position) - glam::Vec3::from_array(p.position);
+                            p.yaw = d.x.atan2(d.z);
+                        }
+                        let rotation = glam::Quat::from_rotation_y(p.yaw).to_array();
+                        let options = crate::ss::Animate { blend_in: Some(0.1), blend_out: Some(0.2), locator: Some((p.position, rotation)) };
+                        World::animate(&mut session.stage, sid("player"), strike.hero, &options);
+                        if strike.npc != 0 {
+                            World::animate(&mut session.stage, target, strike.npc, &options);
+                        }
+                        (target, finish)
+                    })
+                }
+                (target, _) => target.map(|t| (t, false)),
+            };
             let hurt = (std::mem::take(&mut session.hurt_now) && session.stage.now - session.last_reaction > 1.5).then(|| {
                 session.last_reaction = session.stage.now;
                 ((session.stage.now * 7.) as i64 % 3 - 1) as i8
