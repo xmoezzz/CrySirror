@@ -72,18 +72,29 @@ pub struct ImageSky<'a> {
 }
 
 fn srgb_to_linear(c: u8) -> f32 {
-    let c = f32::from(c) / 255.;
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        std::array::from_fn(|i| {
+            let c = i as f32 / 255.;
+            if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        })
+    })[usize::from(c)]
 }
 
 impl ImageSky<'_> {
     /// Bilinear linear radiance along `dir` (repeat in u, clamp in v).
     pub fn radiance(&self, dir: Vec3) -> Vec3 {
+        self.radiance_with(dir, || self.horizon())
+    }
+
+    /// [`Self::radiance`] with the horizon colour supplied (computed once
+    /// per render instead of per direction).
+    fn radiance_with(&self, dir: Vec3, horizon: impl FnOnce() -> Vec3) -> Vec3 {
         let d = dir.normalize_or_zero();
         let u = d.z.atan2(d.x) / std::f32::consts::TAU + self.u_offset;
         let v = d.y.clamp(-1., 1.).acos() / self.zenith_span;
         if v > 1. {
-            return self.horizon() * self.scale;
+            return horizon() * self.scale;
         }
         let (w, h) = (self.width as i64, self.height as i64);
         let (x, y) = (u.rem_euclid(1.) * w as f32 - 0.5, (v.clamp(0., 1.) * h as f32 - 0.5).clamp(0., (h - 1) as f32));
@@ -114,13 +125,14 @@ impl ImageSky<'_> {
         ensure!(w == h * 2 && (2..=4096).contains(&w), "sky size");
         ensure!(self.width > 0 && self.height > 0 && self.rgba.len() == (self.width * self.height * 4) as usize, "sky image size");
         ensure!(self.zenith_span > 0. && self.scale.is_finite() && self.scale >= 0., "sky mapping");
+        let horizon = self.horizon();
         let mut rgb = Vec::with_capacity((w * h) as usize);
         for y in 0..h {
             let theta = (y as f32 + 0.5) / h as f32 * std::f32::consts::PI;
             for x in 0..w {
                 let phi = ((x as f32 + 0.5) / w as f32 - 0.5) * std::f32::consts::TAU;
                 let dir = Vec3::new(theta.sin() * phi.cos(), theta.cos(), theta.sin() * phi.sin());
-                rgb.push(self.radiance(dir).to_array());
+                rgb.push(self.radiance_with(dir, || horizon).to_array());
             }
         }
         Ok(HdrImage { width: w, height: h, rgb })
