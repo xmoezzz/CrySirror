@@ -5225,7 +5225,7 @@ impl NaughtyDogVm {
             }));
             if let Some(Some((skeleton, clips))) = &session.player_rig {
                 session.stage.joints.insert(sid("player"), joint_frames(skeleton));
-                session.player_clips = clip_infos(clips);
+                session.player_clips = clip_infos(clips, Some(skeleton));
                 session.stage.log(format!("player rig: {} of {} blend-tree clips", clips.len(), wanted.len()));
             }
         }
@@ -5251,7 +5251,7 @@ impl NaughtyDogVm {
                     None
                 });
                 if let Some((_, clips)) = &rig {
-                    session.npc_clips.insert(key.clone(), clip_infos(clips));
+                    session.npc_clips.insert(key.clone(), clip_infos(clips, None));
                 }
                 session.npc_packages.insert(key.clone(), std::iter::once(format!("{base}.pak")).chain(anims.iter().map(|a| format!("{a}.pak"))).collect());
                 session.npc_rigs.insert(key.clone(), rig);
@@ -5530,8 +5530,36 @@ impl crysirror_runtime::runtime::VmFactory for Factory {
     }
 }
 
+/// The midpoint of the wrists in a clip's first frame (clip space).
+fn hand_point(skeleton: &crate::skeleton::Skeleton, clip: &crate::anim::Clip) -> Option<glam::Vec3> {
+    let mut world = vec![glam::Mat4::IDENTITY; skeleton.names.len()];
+    for j in skeleton.order() {
+        let (mut t, mut r, mut sc) = skeleton.rest[j];
+        if let Some(track) = clip.joints.get(j) {
+            t = track.translation.as_ref().and_then(|v| v.first().copied()).unwrap_or(t);
+            r = track.rotation.as_ref().and_then(|v| v.first().copied()).unwrap_or(r);
+            sc = track.scale.as_ref().and_then(|v| v.first().copied()).unwrap_or(sc);
+        }
+        let local = glam::Mat4::from_scale_rotation_translation(sc, r, t);
+        world[j] = skeleton.parents[j].map_or(local, |p| world[p] * local);
+    }
+    let at = |n: &str| skeleton.names.iter().position(|x| x == n).map(|j| world[j].transform_point3(glam::Vec3::ZERO));
+    Some((at("l_wrist")? + at("r_wrist")?) * 0.5)
+}
+
+/// How far short of the edge the hands of a hanging pose close their
+/// grip, along the reference's into-the-wall axis (the regular hang
+/// clips: 0.43–0.44 m of the reference's 0.5 m).
+const HAND_GRIP: f32 = 0.07;
+
 /// What the animation controllers need of decoded clips, by name `StringId`.
-fn clip_infos(clips: &[crate::anim::Clip]) -> HashMap<u32, crate::player::ClipInfo> {
+/// With the rig's skeleton, a clip whose hands end more than 0.15 m short
+/// of its action-pack reference has the reference moved back to
+/// [`HAND_GRIP`] ahead of them: the hurt hang clips
+/// (`ledge-grab-idle-hurt`) keep a 0.5 m reference while their hands end
+/// 0.25–0.5 m behind it, so they hung in the air in front of the edge. The
+/// original's handling of this is not decoded.
+fn clip_infos(clips: &[crate::anim::Clip], skeleton: Option<&crate::skeleton::Skeleton>) -> HashMap<u32, crate::player::ClipInfo> {
     clips
         .iter()
         .map(|c| {
@@ -5541,6 +5569,13 @@ fn clip_infos(clips: &[crate::anim::Clip]) -> HashMap<u32, crate::player::ClipIn
                 (Some(&(at, ar)), Some(&(pt, pr))) if pt.length_squared() > 1e-8 => Some((at + ar * pt, ar * pr)),
                 _ => None,
             };
+            let ap = ap.map(|(t, q)| {
+                let into = q * glam::Vec3::Z;
+                match skeleton.and_then(|s| hand_point(s, c)) {
+                    Some(h) if (t - h).dot(into) > 0.15 => (t - into * ((t - h).dot(into) - HAND_GRIP), q),
+                    _ => (t, q),
+                }
+            });
             let info = crate::player::ClipInfo { name: c.name.clone(), duration: if c.frames > 1 { c.frames as f32 / c.fps.max(1.) } else { 0. }, speed: c.root_speed, additive: is_additive(&c.name), fps: c.fps, align: c.align.clone(), ap };
             (sid(&c.name), info)
         })
