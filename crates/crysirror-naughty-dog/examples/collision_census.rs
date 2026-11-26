@@ -53,6 +53,32 @@ fn main() -> Result<()> {
                 }
             }
             println!("  object {i} edge flag bits {edge_bits:?}");
+            // The wall face under each edge: the triangle holding both
+            // endpoints whose normal is closest to horizontal; its normal
+            // against the edge's n1 (+ the same way, − opposite).
+            let (mut same, mut opposite) = (0usize, 0usize);
+            for e in &o.features.edges {
+                // The edge midpoint on the triangle within 3 cm.
+                let mid = (e.p0 + e.p1) * 0.5;
+                let on = |t: &collision::Triangle| {
+                    let [a, b, c] = t.vertices;
+                    let n = (b - a).cross(c - a);
+                    if n.length_squared() < 1e-10 {
+                        return false;
+                    }
+                    let n = n.normalize();
+                    let q = mid - n * n.dot(mid - a);
+                    let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -0.03);
+                    n.dot(mid - a).abs() < 0.03 && inside
+                };
+                let wall = o.triangles.iter().filter(|t| on(t)).map(|t| (t.vertices[1] - t.vertices[0]).cross(t.vertices[2] - t.vertices[0]).normalize_or_zero()).min_by(|a, b| a.y.abs().total_cmp(&b.y.abs()));
+                match wall.map(|n| n.dot(e.n1)) {
+                    Some(d) if d > 0.3 => same += 1,
+                    Some(d) if d < -0.3 => opposite += 1,
+                    _ => {}
+                }
+            }
+            println!("  object {i} edge n1 vs wall face normal: same {same}, opposite {opposite}");
             println!("  object {i} joint {:?}: {} triangles ({no_grab} NoEdgeGrab), extents {lo:.2} .. {hi:.2}; {} edges, {} corners", o.joint, o.triangles.len(), o.features.edges.len(), o.features.corners.len());
         }
     }

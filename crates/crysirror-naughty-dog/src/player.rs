@@ -9,7 +9,7 @@
 //! stick requests `run-idle` (or `idle` from states that name it); ten
 //! seconds at rest requests an ambient idle. Jumps, falls and landings
 //! have no incoming transitions and are entered directly: Space enters
-//! `run-jump-long` (moving, with a 4.5 m/s lift) or `jump-in-place`;
+//! `run-jump-long` (moving) or `jump-in-place`, both with a 4.5 m/s lift;
 //! leaving the ground by more than 0.5 m enters `fall`; touching down
 //! from `fall` enters `fall-land-soft`/`-medium`/`-hard` (drops under
 //! 1.5 m, under 4 m, beyond) `-run` or `-idle`, and from `jump-long` the
@@ -395,7 +395,7 @@ impl Controller {
         Self { anim: Animator::new(Machine::new(table)), yaw, rest_time: 0., yaw_rate: 0., ambient: 0, hand: false }
     }
 
-    fn name(&self, table: &StateTable) -> String {
+    pub fn name(&self, table: &StateTable) -> String {
         table.get(self.anim.machine.state).map(|s| s.name.clone()).unwrap_or_default()
     }
 
@@ -699,7 +699,10 @@ impl Controller {
                 self.anim.machine.force(sid("run-jump-long"), 0.1);
                 lift = Some(JUMP_LIFT);
             } else {
+                // Standing jumps rise too, so they reach edges overhead
+                // (the clip's own vertical root motion is not applied).
                 self.anim.machine.force(sid("jump-in-place"), 0.1);
+                lift = Some(JUMP_LIFT);
             }
         } else if let Some(a) = relative {
             if at_rest {

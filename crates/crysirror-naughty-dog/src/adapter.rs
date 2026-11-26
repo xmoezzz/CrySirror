@@ -4305,7 +4305,7 @@ impl NaughtyDogVm {
             release |= forced_drop && mode == crate::player::Mode::Hang;
             // On a bar: no climbing onto it or wall steps; the stick ahead
             // reaches for the next bar (level within 0.4 m, 1.5 m away).
-            let on_bar = mode == crate::player::Mode::Hang && p.grip.and_then(|g| session.ground.edge(g.body, g.edge)).is_some_and(|e| e.flags & crate::collision::EDGE_CAN_HANG != 0 && e.flags & crate::collision::EDGE_NO_SWING == 0);
+            let on_bar = mode == crate::player::Mode::Hang && p.grip.is_some_and(|g| is_bar(&session.ground, &g));
             if on_bar {
                 climb = false;
                 step = 0;
@@ -4466,9 +4466,7 @@ impl NaughtyDogVm {
                 p.rope = Some(hold);
             }
             let rope_swing = p.rope.map_or(0., |r| r.rate);
-            // A bar: a hang edge without `EdgeNoSwing` (wall ledges carry
-            // it; the prologue's railing does, its monkey bars do not).
-            let bar = p.grip.and_then(|g| session.ground.edge(g.body, g.edge)).is_some_and(|e| e.flags & crate::collision::EDGE_CAN_HANG != 0 && e.flags & crate::collision::EDGE_NO_SWING == 0);
+            let bar = p.grip.is_some_and(|g| is_bar(&session.ground, &g));
             // A wall 0.6 m ahead at chest height.
             let wall_ahead = {
                 let chest = glam::Vec3::from_array(p.position) + glam::Vec3::Y * 1.2;
@@ -5404,14 +5402,46 @@ impl VmAdapter for NaughtyDogVm {
                         v["script_error"] = json!(s.script_error);
                         v["log"] = json!(s.stage.log);
                         v["player"] = json!(s.player.as_ref().map(|p| p.position));
+                        v["player_state"] = json!(s.player.as_ref().map(|p| {
+                            let state = p.anim.as_ref().zip(s.anim_table.as_ref()).map_or_else(String::new, |(a, t)| a.name(t));
+                            format!("{state} yaw {:.2} view {:.2} grip {} fall {:.2}", p.yaw, p.view_yaw, p.grip.as_ref().map_or("-".into(), |g| format!("{:?}#{} s{:.2}", g.body, g.edge, g.s)), p.fall)
+                        }));
                         // Edges within 3 m of the player: height above the
                         // feet, horizontal distance, flags, facing.
+                        // Where hint/jump regions lie around the player:
+                        // the centre of the grid samples (0.5 m) inside.
+                        v["region_probe"] = json!(s.player.as_ref().map(|p| {
+                            let feet = glam::Vec3::from_array(p.position);
+                            s.stage.regions.iter().filter(|(r, _, _)| r.name.contains("hint") || r.name.contains("jump")).filter_map(|(r, _, _)| {
+                                let (mut sum, mut n) = (glam::Vec3::ZERO, 0u32);
+                                for i in -16..=16 {
+                                    for k in -16..=16 {
+                                        for j in -4..=8 {
+                                            let at = feet + glam::Vec3::new(i as f32, j as f32, k as f32) * 0.5;
+                                            if s.stage.holds_point(r, at.to_array()) {
+                                                sum += at;
+                                                n += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                (n > 0).then(|| {
+                                    let d = sum / n as f32 - feet;
+                                    format!("{} h{:+.2} d{:.2} yaw{:+.2} samples {n}", r.name, d.y, glam::Vec2::new(d.x, d.z).length(), d.x.atan2(d.z))
+                                })
+                            }).collect::<Vec<_>>()
+                        }));
+                        v["edges_dump"] = json!(s.player.as_ref().map(|p| {
+                            let feet = glam::Vec3::from_array(p.position);
+                            s.ground.edges_near(feet + glam::Vec3::Y, 5.).into_iter().map(|(_, e, body)| json!({"p0": e.p0.to_array(), "p1": e.p1.to_array(), "n0": e.n0.to_array(), "n1": e.n1.to_array(), "flags": e.flags, "body": body})).collect::<Vec<_>>()
+                        }));
                         v["edges_near_player"] = json!(s.player.as_ref().map(|p| {
                             let feet = glam::Vec3::from_array(p.position);
                             let mut out: Vec<String> = s.ground.edges_near(feet + glam::Vec3::Y, 3.).into_iter().map(|(_, e, _)| {
                                 let mid = (e.p0 + e.p1) * 0.5;
                                 let d = mid - feet;
-                                format!("h{:+.2} d{:.2} len{:.2} flags{:#x} n({:.2},{:.2},{:.2})", d.y, glam::Vec2::new(d.x, d.z).length(), (e.p1 - e.p0).length(), e.flags, e.n1.x, e.n1.y, e.n1.z)
+                                // Bearing in the player's yaw convention (atan2(x, z)).
+                                format!("h{:+.2} d{:.2} yaw{:+.2} len{:.2} flags{:#x} n({:.2},{:.2},{:.2})", d.y, glam::Vec2::new(d.x, d.z).length(), d.x.atan2(d.z), (e.p1 - e.p0).length(), e.flags, e.n1.x, e.n1.y, e.n1.z)
                             }).collect();
                             out.sort();
                             out.truncate(24);
@@ -5478,6 +5508,22 @@ struct Grip {
     edge: usize,
     s: f32,
     climb: Option<glam::Mat4>,
+}
+
+/// Whether a grip is on a bar: a hang edge without `EdgeNoSwing` and no
+/// wall under it (nothing within 0.5 m into the wall 0.9 m below the grab
+/// point). Wall holds such as the prologue car's floor beams lack
+/// `EdgeNoSwing` too, so the flag alone does not make a bar; the wall test
+/// is not native.
+fn is_bar(ground: &Ground, g: &Grip) -> bool {
+    let Some(e) = ground.edge(g.body, g.edge) else { return false };
+    if e.flags & crate::collision::EDGE_CAN_HANG == 0 || e.flags & crate::collision::EDGE_NO_SWING != 0 {
+        return false;
+    }
+    let frame = edge_frame(&e, g.s);
+    let into = frame.transform_vector3(glam::Vec3::Z);
+    let below = frame.transform_point3(glam::Vec3::ZERO) - glam::Vec3::Y * 0.9;
+    ground.raycast((below - into * 0.3).to_array(), (below + into * 0.5).to_array()).is_none()
 }
 
 /// The frame of an edge at `s` metres from `p0`: at the grab point, +z
