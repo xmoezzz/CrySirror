@@ -148,7 +148,18 @@ pub struct Material {
     pub layers: Option<crate::rsx::LayerBlend>,
     /// Pass 0's named fragment-program constants.
     pub parameters: Vec<(String, [f32; 4])>,
+    /// Pass 0's render-state word (pass data +0x20). By its values on the
+    /// hero materials (opaque 0x7980, eye film and alpha pieces 0xF380,
+    /// eyelashes 0xF280, hair 0x7880): [`STATE_BLEND`] alpha blending,
+    /// 0x0800 depth writes (cleared when blended) and [`STATE_CULL`]
+    /// back-face culling (cleared on the thin lash and hair cards). The bit
+    /// meanings are inferred from these values, not decoded from the RSX
+    /// setup.
+    pub state: u16,
 }
+
+pub const STATE_BLEND: u16 = 0x8000;
+pub const STATE_CULL: u16 = 0x0100;
 
 impl Material {
     /// A named fragment-program constant.
@@ -418,7 +429,8 @@ pub fn material(p: &Loaded, m: usize) -> Result<Material> {
         .and_then(|(code, units)| crate::rsx::layer_blend(&code, &units));
     let passes = (0..passes as usize).map(|i| p.ptr(list + 4 * i).and_then(pass_samplers)).collect::<Result<Vec<_>>>().unwrap_or_else(|_| vec![samplers.clone()]);
     let parameters = p.ptr(p.ptr(list)? + 0x10).and_then(|data| crate::rsx::pass_parameters(p, data)).unwrap_or_default();
-    Ok(Material { name, samplers, passes, layers, parameters })
+    let state = p.ptr(p.ptr(list)? + 0x10).and_then(|data| p.u16(data + 0x20)).unwrap_or(0);
+    Ok(Material { name, samplers, passes, layers, parameters, state })
 }
 
 /// First word of the collision-mesh collections in actor packages (the

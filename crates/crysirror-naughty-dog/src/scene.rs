@@ -315,12 +315,22 @@ fn influences(v: &[(u16, f32)], joints: usize) -> ([u16; 4], [f32; 4]) {
     (j, w)
 }
 
+/// The lower-case source image name of a `VRAM_DESC` path: actor packages
+/// append the build hash (`…/hero-head_color-injured.tga/DF42….ndb`), so
+/// the component naming the image (`.tga`) is taken, else the last one
+/// with an extension.
+fn texture_file(name: &str) -> String {
+    let parts: Vec<&str> = name.split('/').collect();
+    let image = parts.iter().rev().find(|p| [".tga", ".dds", ".png", ".tif", ".psd"].iter().any(|e| p.to_ascii_lowercase().contains(e)));
+    image.or_else(|| parts.iter().rev().find(|p| p.contains('.'))).map_or(name, |p| *p).to_ascii_lowercase()
+}
+
 /// Texture role from the source file name stored in `VRAM_DESC`
 /// (`…/name-color.tga/….ndb`): 2 colour, 0 not a colour map (normal, mask,
 /// blend, specular, reflection, translucency, lightmap, missing texture),
 /// 1 unknown.
 fn texture_role(name: &str) -> u8 {
-    let file = name.rsplit('/').find(|p| p.contains('.')).unwrap_or(name).to_ascii_lowercase();
+    let file = texture_file(name);
     let stem = file.split('.').next().unwrap_or("");
     if name.contains("missingtexture") || name.contains("indirect") || ["normal", "mask", "blend", "spec", "reflection", "trans", "lightmap", "gloss", "bump"].iter().any(|r| stem.contains(r)) {
         0
@@ -381,6 +391,39 @@ pub fn document_lit(name: &str, meshes: &[Mesh], source: &dyn AssetReader, direc
                 None => colour(&group.material.samplers).or_else(|| group.material.base_color_with(|id| role(id) == 0 || tiny(id))),
             }
             .or_else(|| group.material.passes.iter().skip(1).find_map(|p| colour(p)));
+            // Blended materials (eyelashes, the eye's wet film, hair alpha
+            // pieces) take their opacity from a separate `…-trans` map's
+            // green channel, like the particle sprites; the colour map
+            // keeps the colour (white without one).
+            let state = group.material.state;
+            let blended = state & crate::mesh::STATE_BLEND != 0;
+            let trans = blended
+                .then(|| {
+                    group.material.passes.iter().flatten().copied().find(|id| {
+                        textures.get(id).is_some_and(|d: &VramDesc| {
+                            let file = texture_file(&d.name);
+                            (file.contains("-trans") || file.contains("_trans")) && !file.contains("normal")
+                        })
+                    })
+                })
+                .flatten();
+            let mut composed = None;
+            if let Some(desc) = trans.and_then(|id| textures.get(&id)) {
+                let mask = desc.decode(source, directory.texture_base)?;
+                let mut surface = match chosen.and_then(|id| textures.get(&id)) {
+                    Some(c) => c.decode(source, directory.texture_base)?,
+                    None => crysirror_image::ImageSurface::filled(mask.width, mask.height, [255; 4])?,
+                };
+                let plane = crysirror_image::associated::CoveragePlane { width: mask.width, height: mask.height, bytes: mask.rgba.chunks_exact(4).map(|p| p[1]).collect() };
+                let plane = plane.resize_nearest([surface.width, surface.height])?;
+                let identity: [u8; 256] = std::array::from_fn(|v| v as u8);
+                crysirror_image::associated::map_coverage_alpha(&mut surface.rgba, &plane.bytes, &identity)?;
+                while surface.width > max_texture.max(1) || surface.height > max_texture.max(1) {
+                    surface = halve(&surface);
+                }
+                doc.images.push((crysirror_image::encode_png(&surface)?, "image/png"));
+                composed = Some(doc.images.len() - 1);
+            }
             let mut image_of = |id: Option<u32>| -> Result<Option<usize>> {
                 let Some(desc) = id.and_then(|id| textures.get(&id)) else { return Ok(None) };
                 if let Some(&i) = images.get(&desc.id) {
@@ -394,7 +437,8 @@ pub fn document_lit(name: &str, meshes: &[Mesh], source: &dyn AssetReader, direc
                 images.insert(desc.id, doc.images.len() - 1);
                 Ok(Some(doc.images.len() - 1))
             };
-            let image = image_of(chosen)?;
+            let image = composed.or(image_of(chosen)?);
+
             // The upper layer: a sampler, or the light grey the
             // `cliffwall-snow` programs compute (0.5 plus lighting terms;
             // approximated, SATD-nd-retail-runtime); a height-mask blend
@@ -447,7 +491,7 @@ pub fn document_lit(name: &str, meshes: &[Mesh], source: &dyn AssetReader, direc
             let named = |role: &str| {
                 group.material.passes.iter().flatten().copied().find(|id| {
                     textures.get(id).is_some_and(|d: &VramDesc| {
-                        let file = d.name.rsplit('/').find(|p| p.contains('.')).unwrap_or(&d.name).to_ascii_lowercase();
+                        let file = texture_file(&d.name);
                         file.contains(role) && !file.starts_with("default-")
                     })
                 })
@@ -478,6 +522,15 @@ pub fn document_lit(name: &str, meshes: &[Mesh], source: &dyn AssetReader, direc
             if let Some(id) = normal {
                 engine.normal_encoding = if textures.get(&id).is_some_and(|d| d.format == crate::texture::Format::Dxt5) { crysirror_scene::material::NormalEncoding::Ag } else { crysirror_scene::material::NormalEncoding::Rgb };
                 engine.normal_texture = image_of(Some(id))?;
+            }
+            // Pass state: blending and culling (`Material::state`).
+            if blended {
+                material.alpha_mode = "BLEND";
+                engine.alpha_mode = crysirror_asset::pbr::AlphaMode::Blend;
+            }
+            if state != 0 && state & crate::mesh::STATE_CULL == 0 {
+                material.double_sided = true;
+                engine.double_sided = true;
             }
             material.engine = Some(engine);
             doc.materials.push(material);

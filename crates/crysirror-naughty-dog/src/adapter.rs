@@ -4788,6 +4788,16 @@ impl NaughtyDogVm {
             };
             Self::animate_camera(session, &mut camera);
             Self::shake_camera(session, &mut camera);
+            // `ND_FACE_CAMERA=<radians>`: 1 m from the head at that angle
+            // off the facing, looking at it (diagnostic close-ups).
+            if let Some((position, yaw)) = session.player.as_ref().map(|p| (p.position, p.yaw)).filter(|_| std::env::var_os("ND_FACE_CAMERA").is_some()) {
+                let height = std::env::var("ND_FACE_HEIGHT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.62);
+                let head = glam::Vec3::from_array(position) + glam::Vec3::Y * height;
+                let turn = std::env::var("ND_FACE_CAMERA").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.6);
+                let ahead = glam::Quat::from_rotation_y(yaw + turn) * glam::Vec3::Z;
+                let eye = head + ahead * 1.0;
+                camera = json!({"op": "set_camera", "camera": {"eye": eye.to_array(), "target": head.to_array(), "up": [0.0, 1.0, 0.0], "fov_y_degrees": 40.0, "near": 0.05, "far": 20000.0}});
+            }
             let eye = camera["camera"]["eye"].as_array().map(|a| [0, 1, 2].map(|k| a.get(k).and_then(|v| v.as_f64()).unwrap_or(0.) as f32));
             // Crossing into another render-settings region changes the
             // environment.
