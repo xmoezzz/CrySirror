@@ -50,6 +50,15 @@ pub struct WeaponDef {
     pub bullet: u32,
     pub pellets: u32,
     pub spread_degrees: f32,
+    /// Name `StringId`s (0 when absent): +0x28 the fire sound (`p-fire`),
+    /// +0x2C reload, +0x30 empty-click, +0x50 the shell-ejection effect,
+    /// +0x54 the shell sound, +0x8C the muzzle-flash effect.
+    pub fire_sound: u32,
+    pub reload_sound: u32,
+    pub empty_sound: u32,
+    pub shell_effect: u32,
+    pub shell_sound: u32,
+    pub muzzle_effect: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,7 +138,22 @@ impl CombatData {
                     let f = |o: u32| dc.mem.f32(v + o);
                     let w = |o: u32| dc.mem.u32(v + o);
                     if kind == def {
-                        data.weapons.insert(key, WeaponDef { automatic: w(0x8)? != 0, class: w(0xc)?, interval: f(0x14)?, clip: w(0x18)?, bullet: w(0xe0)?, pellets: w(0xe4)?.max(1), spread_degrees: f(0xe8)? });
+                        let name = |o: u32| -> u32 { w(o).ok().filter(|p| *p != 0).and_then(|p| dc.mem.cstr(p).ok()).filter(|s| !s.is_empty()).map_or(0, |s| sid(&s)) };
+                        data.weapons.insert(key, WeaponDef {
+                            automatic: w(0x8)? != 0,
+                            class: w(0xc)?,
+                            interval: f(0x14)?,
+                            clip: w(0x18)?,
+                            bullet: w(0xe0)?,
+                            pellets: w(0xe4)?.max(1),
+                            spread_degrees: f(0xe8)?,
+                            fire_sound: name(0x28),
+                            reload_sound: name(0x2c),
+                            empty_sound: name(0x30),
+                            shell_effect: name(0x50),
+                            shell_sound: name(0x54),
+                            muzzle_effect: name(0x8c),
+                        });
                     } else if kind == arch {
                         data.archetypes.insert(key, Archetype { vision: f(0x10)?, damage_class: w(0x18)?, health: w(0x3c)?, weapon_skill: w(0x50)? });
                     } else if kind == skill {

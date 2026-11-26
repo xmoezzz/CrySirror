@@ -353,6 +353,9 @@ struct Stage {
     attacks: Vec<(u32, u32, f32)>,
     /// Killed NPCs playing their death clip, since when.
     corpses: Vec<(u32, f64)>,
+    /// One-shot effects the host spawned (shots, explosions) and when
+    /// they are removed.
+    transient_effects: Vec<(u32, f64)>,
     script_shots: Vec<(u32, crate::vehicle::Target)>,
     grenades: Vec<crate::vehicle::Projectile>,
     /// The player's native state class (`player-in-state?`).
@@ -980,7 +983,8 @@ impl World for Stage {
     /// physics impulses are not applied.
     fn spawn_explosion(&mut self, kind: u32, position: [f32; 3], rotation: [f32; 4]) {
         self.log(format!("explosion {kind:#010x} at {position:?}"));
-        World::spawn_particles(self, kind, position, rotation);
+        let handle = World::spawn_particles(self, kind, position, rotation);
+        self.transient_effects.push((handle, self.now + EXPLOSION_EFFECT_SECONDS));
         let near = self.camera_eye.map_or(f32::INFINITY, |e| glam::Vec3::from_array(e).distance(glam::Vec3::from_array(position)));
         if near < 40. {
             World::camera_shake(self, crate::ss::object_natives::Shake::Procedural { amount: (1. - near / 40.) * 2. });
@@ -1512,6 +1516,9 @@ const MAX_EFFECTS: usize = 96;
 /// (hit points of 100); NPCs take 1.5× their maximum there. Not native.
 const BLAST_RADIUS: f32 = 6.;
 const BLAST_DAMAGE: f32 = 80.;
+/// Lifetime of host-spawned shot and explosion effects (s; not native).
+const SHOT_EFFECT_SECONDS: f64 = 1.;
+const EXPLOSION_EFFECT_SECONDS: f64 = 4.;
 /// `player-take-melee-damage` hit points (of 100); not native.
 const MELEE_DAMAGE: f32 = 25.;
 /// Carried grenade weapons and the player's throw distance (m; not
@@ -3003,6 +3010,10 @@ impl NaughtyDogVm {
                     }
                 }
             }
+            if shot {
+                let muzzle = eye + (chest - eye).normalize_or_zero() * 0.6;
+                Self::shot_effects(&mut session.stage, weapon, muzzle, (chest - eye).normalize_or_zero());
+            }
             if shot && (agent.perfect_aim || Self::combat_random(session) < hit_chance(distance, vision, agent.accuracy_multiplier, exposed)) {
                 damage += data.player_damage[1] * agent.config.shot_damage_multiplier;
             }
@@ -3105,10 +3116,19 @@ impl NaughtyDogVm {
             session.gun_weapon = Some(weapon_id);
             session.player_gun = crate::combat::Gun { ammo: clip, ..Default::default() };
         }
+        let chest = foot + glam::Vec3::Y * 1.3;
         let gun = &mut session.player_gun;
+        let mut reload_started = false;
         if gun.ammo == 0 && gun.reloading <= 0. && gun.cooldown <= 0. && input.buttons_pressed & b::KEY_R != 0 {
             gun.reloading = 1.5;
+            reload_started = true;
         }
+        if reload_started {
+            if let Some(s) = weapon.as_ref().map(|w| w.reload_sound).filter(|s| *s != 0) {
+                World::play_sound(&mut session.stage, s, crate::ss::sound_natives::SoundAt::Point(chest.to_array()), 1., 0.);
+            }
+        }
+        let gun = &mut session.player_gun;
         if gun.reloading > 0. {
             gun.reloading -= dt;
             if gun.reloading <= 0. {
@@ -3122,6 +3142,9 @@ impl NaughtyDogVm {
         }
         if gun.ammo == 0 {
             gun.reloading = 1.5;
+            for s in weapon.as_ref().map(|w| [w.empty_sound, w.reload_sound]).into_iter().flatten().filter(|s| *s != 0) {
+                World::play_sound(&mut session.stage, s, crate::ss::sound_natives::SoundAt::Point(chest.to_array()), 1., 0.);
+            }
             return;
         }
         let no_reload = session.game.as_ref().is_some_and(|g| g.rt.setting(crate::ss::player_natives::SETTING_NO_RELOAD).is_some() || g.rt.setting(crate::ss::player_natives::SETTING_INFINITE_AMMO).is_some_and(|v| v != 0));
@@ -3132,6 +3155,7 @@ impl NaughtyDogVm {
         gun.cooldown = weapon.as_ref().map_or(0.25, |w| w.interval.max(0.05));
         let Some((eye, forward, up, _)) = session.stage.camera_view else { return };
         let (eye, forward, up) = (glam::Vec3::from_array(eye), glam::Vec3::from_array(forward).normalize_or(glam::Vec3::Z), glam::Vec3::from_array(up));
+        Self::shot_effects(&mut session.stage, weapon.as_ref(), chest + forward * 0.6, forward);
         let pellets = weapon.as_ref().map_or(1, |w| w.pellets.clamp(1, 16));
         let spread = weapon.as_ref().map_or(0., |w| w.spread_degrees).to_radians();
         let right = forward.cross(up).normalize_or(glam::Vec3::X);
@@ -3162,6 +3186,20 @@ impl NaughtyDogVm {
                 session.stage.log(format!("npc {name:#010x} killed"));
             }
             Self::npc_hit(session, name, eye, killed, crate::npc::Hit::Bullet);
+        }
+    }
+
+    /// A shot's fire sound, muzzle flash and shell ejection at the muzzle
+    /// (the weapon's `weapon-def` names; the effects face the shot).
+    fn shot_effects(stage: &mut Stage, weapon: Option<&crate::combat::WeaponDef>, muzzle: glam::Vec3, dir: glam::Vec3) {
+        let Some(w) = weapon else { return };
+        let rot = glam::Quat::from_rotation_arc(glam::Vec3::Z, dir.normalize_or(glam::Vec3::Z)).to_array();
+        if w.fire_sound != 0 {
+            World::play_sound(stage, w.fire_sound, crate::ss::sound_natives::SoundAt::Point(muzzle.to_array()), 1., 0.);
+        }
+        for effect in [w.muzzle_effect, w.shell_effect].into_iter().filter(|e| *e != 0) {
+            let handle = World::spawn_particles(stage, effect, muzzle.to_array(), rot);
+            stage.transient_effects.push((handle, stage.now + SHOT_EFFECT_SECONDS));
         }
     }
 
@@ -4417,6 +4455,12 @@ impl NaughtyDogVm {
         session.stage.step_vehicles(seconds as f32);
         session.stage.step_followers(seconds as f32);
         session.stage.step_grenades(seconds as f32);
+        // Host one-shot effects end.
+        let expired: Vec<u32> = session.stage.transient_effects.iter().filter(|(_, until)| *until <= session.stage.now).map(|(h, _)| *h).collect();
+        session.stage.transient_effects.retain(|(h, _)| !expired.contains(h));
+        for h in expired {
+            World::kill_particles(&mut session.stage, h);
+        }
         // Bodies go once their death clip ends (or after 6 s).
         let now = session.stage.now;
         let gone: Vec<u32> = session.stage.corpses.iter().filter(|(n, t)| now - t > 6. || (now - t > 0.2 && World::animation_phase(&session.stage, *n).is_none())).map(|(n, _)| *n).collect();
