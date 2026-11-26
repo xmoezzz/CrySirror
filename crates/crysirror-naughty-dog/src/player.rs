@@ -92,7 +92,26 @@ pub const STATES: &[&str] = &[
     "ledge-jump-begin",
     "ledge-jump-mid",
     "ledge-jump-end",
+    "aim-idle",
+    "aim-run-forward",
+    "aim-run-backward",
+    "throw-grenade",
+    "air-punch",
+    "hero-generic-hit-reaction",
+    "hero-generic-hit-reaction-left",
+    "hero-generic-hit-reaction-right",
+    "hero-multi-death-front",
+    "hero-multi-death-back",
+    "death-stand-explosion-front",
+    "death-stand-explosion-back",
+    "fall-death",
 ];
+
+/// One-shot ground actions that return to `idle` when their clip ends,
+/// and the death states, which hold.
+const ACTIONS: &[&str] = &["throw-grenade", "air-punch", "hero-generic-hit-reaction", "hero-generic-hit-reaction-left", "hero-generic-hit-reaction-right"];
+const DEATHS: &[&str] = &["hero-multi-death-front", "hero-multi-death-back", "death-stand-explosion-front", "death-stand-explosion-back", "fall-death"];
+const AIM: &[&str] = &["aim-idle", "aim-run-forward", "aim-run-backward"];
 
 const HANG: &[&str] = &["ledge-grab", "ledge-shimmy-left", "ledge-shimmy-right", "fall-grab-edge"];
 const LEAP: &[&str] = &["ledge-jump-begin", "ledge-jump-mid", "ledge-jump-end", "climb-up-lh", "climb-up-rh", "climb-down-lh", "climb-down-rh"];
@@ -202,6 +221,14 @@ pub struct Frame {
     /// Deep water at the player's position, and the sprint input.
     pub swim: bool,
     pub movement_fast: bool,
+    /// Aiming (the camera's yaw to face), throwing a grenade, a melee
+    /// strike, a hit taken (side: −1 left, 0 front, 1 right) and death
+    /// (the death state to play).
+    pub aim: Option<f32>,
+    pub throw: bool,
+    pub melee: bool,
+    pub hurt: Option<i8>,
+    pub death: Option<&'static str>,
     /// Land hard whatever the drop (`player-force-hard-land`).
     pub hard_land: bool,
 }
@@ -441,6 +468,56 @@ impl Controller {
             let target = if table.get(sid(&enter)).is_some() { enter } else { format!("{family}-{side}") };
             self.anim.machine.force(sid(&target), 0.15);
             return self.finish(graph, table, clips, f, before, None, 0.);
+        }
+        // Death holds its state; one-shot actions play out; aiming walks
+        // facing the camera.
+        if DEATHS.contains(&state.as_str()) {
+            return self.finish(graph, table, clips, f, before, None, 0.);
+        }
+        if let Some(d) = f.death {
+            self.anim.machine.force(sid(d), 0.1);
+            return self.finish(graph, table, clips, f, before, None, 0.);
+        }
+        if ACTIONS.contains(&state.as_str()) {
+            if finished {
+                self.go(table, "idle", Some("idle"), 0.2);
+            }
+            return self.finish(graph, table, clips, f, before, None, 0.);
+        }
+        let grounded_state = !matches!(state.as_str(), "run-jump-long" | "jump-long" | "fall" | "jump-in-place");
+        if grounded_state && f.grounded {
+            if f.throw {
+                self.anim.machine.force(sid("throw-grenade"), 0.1);
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
+            if f.melee {
+                self.anim.machine.force(sid("air-punch"), 0.1);
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
+            if let Some(side) = f.hurt {
+                let target = match side {
+                    s if s < 0 => "hero-generic-hit-reaction-left",
+                    s if s > 0 => "hero-generic-hit-reaction-right",
+                    _ => "hero-generic-hit-reaction",
+                };
+                self.anim.machine.force(sid(target), 0.1);
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
+            if let Some(yaw) = f.aim {
+                self.yaw = yaw;
+                let target = match f.heading.map(|h| wrap(h - yaw)) {
+                    Some(a) if a.abs() > FRAC_PI_4 * 3. => "aim-run-backward",
+                    Some(_) => "aim-run-forward",
+                    None => "aim-idle",
+                };
+                if state != target {
+                    self.go(table, target, Some(target), 0.15);
+                }
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
+            if AIM.contains(&state.as_str()) {
+                self.go(table, "idle", Some("idle"), 0.2);
+            }
         }
         let airborne = matches!(state.as_str(), "run-jump-long" | "jump-long" | "fall" | "jump-in-place");
         if airborne && f.grab {

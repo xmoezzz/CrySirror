@@ -1387,6 +1387,13 @@ struct Session {
     forced_fire: bool,
     melee_damage: f32,
     player_hidden: bool,
+    /// The death state to play (set with `death`), the time of the last
+    /// hit reaction, damage taken last combat step, and a melee strike's
+    /// target.
+    death_state: Option<&'static str>,
+    last_reaction: f64,
+    hurt_now: bool,
+    melee_target: Option<u32>,
     death: Option<f32>,
     combat_rng: u32,
     /// HUD element definitions (`hud-settings.bin`), the HUD package's
@@ -1484,6 +1491,10 @@ const BLAST_RADIUS: f32 = 6.;
 const BLAST_DAMAGE: f32 = 80.;
 /// `player-take-melee-damage` hit points (of 100); not native.
 const MELEE_DAMAGE: f32 = 25.;
+/// Carried grenade weapons and the player's throw distance (m; not
+/// native).
+const GRENADES: &[&str] = &["hand-grenade-b", "hand-grenade-a", "hand-grenade"];
+const GRENADE_RANGE: f32 = 15.;
 /// Grenade flight speed (m/s) and the shortest fuse (s); not native.
 const GRENADE_SPEED: f32 = 12.;
 const GRENADE_FUSE: f32 = 1.5;
@@ -1735,6 +1746,10 @@ impl NaughtyDogVm {
             forced_fire: false,
             melee_damage: 0.,
             player_hidden: false,
+            death_state: None,
+            last_reaction: f64::NEG_INFINITY,
+            hurt_now: false,
+            melee_target: None,
             death: None,
             combat_rng: 0x1234_5678,
             banks: Default::default(),
@@ -3025,12 +3040,36 @@ impl NaughtyDogVm {
         if fell && !invincible {
             session.stage.log("player fell to death".into());
         }
+        session.hurt_now = damage > 0. && !invincible;
+        let blasted = !session.stage.blasts.is_empty();
         if session.player_health.hurt(damage, invincible) || (fell && !invincible) || scripted {
             session.stage.log("player killed".into());
+            session.death_state = Some(if fell {
+                "fall-death"
+            } else if blasted {
+                "death-stand-explosion-front"
+            } else {
+                "hero-multi-death-front"
+            });
             World::kill_player(&mut session.stage, false, true, 0.);
             World::fade(&mut session.stage, [0.; 3], 1., 1.5);
             session.death = Some(0.);
             return;
+        }
+        // A melee strike: the NPC in front takes a third of its hit points
+        // (not native) and reacts.
+        if let Some(target) = session.melee_target.take() {
+            let dealt = session.stage.agents.get(target).map_or(0., |a| a.max_hit_points / 3.);
+            session.stage.attacks.push((target, sid("player"), dealt));
+            let killed = session.stage.agents.get_mut(target).is_some_and(|a| {
+                a.knowledge = crate::npc::KNOWLEDGE_COMBAT;
+                if a.can_be_hit {
+                    a.hit_points -= dealt;
+                    a.health = (a.hit_points / a.max_hit_points).clamp(0., 1.);
+                }
+                a.hit_points <= 0. && a.can_die
+            });
+            Self::npc_hit(session, target, foot + glam::Vec3::Y, killed, crate::npc::Hit::Bullet);
         }
         // The player fires the held weapon along the camera's view: left
         // button (held for automatic weapons), R reloads.
@@ -3976,6 +4015,42 @@ impl NaughtyDogVm {
             // `rifle` otherwise; names assumed, unknown ones fall back to
             // `no-weapon`).
             let held = session.game.as_ref().and_then(|g| g.rt.inner.current_weapon).and_then(|w| session.stage.combat.as_ref().and_then(|c| c.weapons.get(&w)).map(|d| d.class));
+            // Aim (right mouse, L1) with a drawn weapon, facing the camera;
+            // a grenade (Q, L2) when one is carried; melee (E, square) on
+            // the nearest NPC within 1.6 m ahead; a hit reaction at most
+            // every 1.5 s; the death state once.
+            let holstered = session.game.as_ref().is_some_and(|g| g.rt.inner.holstered);
+            let aim = (down(b::MOUSE_RIGHT) && p.controls && held.is_some() && !holstered).then(|| fx.atan2(fz));
+            let grenade = session.game.as_ref().and_then(|g| GRENADES.iter().map(|n| sid(n)).find(|w| g.rt.inner.weapons.get(w).is_some_and(|a| *a != 0)));
+            let throw = input.buttons_pressed & b::KEY_Q != 0 && p.controls && grenade.is_some() && aim.is_none();
+            if let (true, Some(w)) = (throw, grenade) {
+                if let Some(g) = session.game.as_mut() {
+                    if let Some(a) = g.rt.inner.weapons.get_mut(&w) {
+                        if *a > 0 {
+                            *a -= 1;
+                        }
+                    }
+                }
+                let from = glam::Vec3::from_array(p.position) + glam::Vec3::Y * 1.7;
+                let to = from + glam::Vec3::new(fx, 0., fz) * GRENADE_RANGE;
+                let to = session.ground.height(to.x, to.z, to.y + 5.).map_or(to, |h| glam::Vec3::new(to.x, h, to.z));
+                World::throw_grenade(&mut session.stage, from.to_array(), to.to_array());
+            }
+            let melee_target = (input.buttons_pressed & b::KEY_E != 0 && p.controls).then(|| {
+                let here = glam::Vec3::from_array(p.position);
+                let ahead = glam::Quat::from_rotation_y(p.yaw) * glam::Vec3::Z;
+                session.stage.agents.agents.iter().filter(|(_, a)| {
+                    let d = glam::Vec3::from_array(a.position) - here;
+                    d.length() < 1.6 && d.dot(ahead) > 0.
+                }).min_by(|a, b| glam::Vec3::from_array(a.1.position).distance(here).total_cmp(&glam::Vec3::from_array(b.1.position).distance(here))).map(|(n, _)| *n)
+            }).flatten();
+            let melee = input.buttons_pressed & b::KEY_E != 0 && p.controls;
+            session.melee_target = melee_target;
+            let hurt = (std::mem::take(&mut session.hurt_now) && session.stage.now - session.last_reaction > 1.5).then(|| {
+                session.last_reaction = session.stage.now;
+                ((session.stage.now * 7.) as i64 % 3 - 1) as i8
+            });
+            let death = session.death_state.take();
             let weapon_set = match held {
                 Some(0) => "pistol",
                 Some(_) => "rifle",
@@ -4015,6 +4090,11 @@ impl NaughtyDogVm {
                     swim,
                     movement_fast: running,
                     hard_land,
+                    aim,
+                    throw,
+                    melee,
+                    hurt,
+                    death,
                 };
                 match anim.step(graph, table, &session.player_clips, &frame) {
                     Ok(step) => {
