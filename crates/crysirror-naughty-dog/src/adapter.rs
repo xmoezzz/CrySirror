@@ -213,7 +213,30 @@ struct Player {
     leap: Option<(glam::Vec3, Grip, f32)>,
     /// Seconds before an airborne player may grab again (after a drop).
     regrab: f32,
+    /// The free rope held.
+    rope: Option<RopeHold>,
 }
+
+/// A free rope held: its anchor, the hands' distance below it, the swing
+/// angle and its rate (radians, + forward along `yaw`).
+#[derive(Clone, Copy, Debug)]
+struct RopeHold {
+    anchor: glam::Vec3,
+    reach: f32,
+    angle: f32,
+    rate: f32,
+    yaw: f32,
+}
+
+/// `ProcessFreeRope` spawners hang from their position; the art group
+/// names the length (`rope5m`, `rope8m`).
+const TYPE_FREE_ROPE: u32 = 0xaaf8_5ead;
+/// Hands above the feet (m), the grab reach around the rope, the swing
+/// push (rad/s²) and damping per second, and the release push; not native.
+const ROPE_HANDS: f32 = 2.;
+const ROPE_REACH: f32 = 0.7;
+const ROPE_PUSH: f32 = 2.5;
+const ROPE_DAMPING: f32 = 0.3;
 
 /// Engine side of the script natives: spawner entities, prints and fades.
 #[derive(Default)]
@@ -2450,7 +2473,7 @@ impl NaughtyDogVm {
         let anim = session.anim_table.as_ref().filter(|_| entity.is_some()).map(|t| crate::player::Controller::new(t, yaw));
         // The camera starts behind the player (eye offset `(-sin, cos)` of
         // the view yaw opposite the facing `(sin, cos)` of the yaw).
-        let mut player = Player { entity, position, yaw, fall: 0., view_yaw: std::f32::consts::PI - yaw, view_pitch: -0.25, controls: true, anim, air_top: None, view_distance: FOLLOW_DISTANCE, platform: None, grip: None, leap: None, regrab: 0. };
+        let mut player = Player { entity, position, yaw, fall: 0., view_yaw: std::f32::consts::PI - yaw, view_pitch: -0.25, controls: true, anim, air_top: None, view_distance: FOLLOW_DISTANCE, platform: None, grip: None, leap: None, regrab: 0., rope: None };
         // The continue camera spawner sets the starting view direction
         // (eye offset `(-sin y · cos p, -sin p, cos y · cos p)` from the head).
         if let Some(c) = camera {
@@ -3489,6 +3512,7 @@ impl NaughtyDogVm {
         };
         let ap = |r: Option<&crate::player::Root>| r.and_then(|r| r.ap).map_or(glam::Mat4::from_translation(HANG_REACH), |(t, q)| glam::Mat4::from_rotation_translation(q, t));
         match mode {
+            crate::player::Mode::Rope => {}
             crate::player::Mode::Hang => {
                 grip.climb = None;
                 if let Some(r) = root {
@@ -4051,6 +4075,36 @@ impl NaughtyDogVm {
                 ((session.stage.now * 7.) as i64 % 3 - 1) as i8
             });
             let death = session.death_state.take();
+            // A free rope within reach of the hands while airborne.
+            let hands = glam::Vec3::from_array(p.position) + glam::Vec3::Y * ROPE_HANDS;
+            let rope_found = if p.rope.is_none() && p.regrab <= 0. && (p.air_top.is_some() || p.fall != 0.) {
+                session.stage.spawners.iter().filter(|(n, s)| s.process_type == TYPE_FREE_ROPE && session.stage.visible.contains(n)).find_map(|(_, s)| {
+                    let anchor = glam::Vec3::from_array(s.position);
+                    let length = s.art_group.as_deref().and_then(|a| a.strip_prefix("rope")).and_then(|a| a.strip_suffix('m')).and_then(|m| m.parse::<f32>().ok()).unwrap_or(5.);
+                    let d = hands - anchor;
+                    (glam::Vec2::new(d.x, d.z).length() < ROPE_REACH && d.y < 0. && -d.y < length).then_some(RopeHold { anchor, reach: (-d.y).max(0.5), angle: 0., rate: 0., yaw: p.yaw })
+                })
+            } else {
+                None
+            };
+            let rope_grab = rope_found.is_some();
+            if let Some(hold) = rope_found {
+                p.rope = Some(hold);
+            }
+            let rope_swing = p.rope.map_or(0., |r| r.rate);
+            // A bar: nothing solid 0.3 m under the held edge, toward the
+            // wall it would face.
+            let bar = p.grip.and_then(|g| session.ground.edge(g.body, g.edge)).is_some_and(|e| {
+                let mid = (e.p0 + e.p1) * 0.5 - glam::Vec3::Y * 0.3;
+                let inward = -glam::Vec3::new(e.n1.x, 0., e.n1.z).normalize_or_zero();
+                session.ground.raycast((mid - inward * 0.3).to_array(), (mid + inward * 0.6).to_array()).is_none()
+            });
+            // A wall 0.6 m ahead at chest height.
+            let wall_ahead = {
+                let chest = glam::Vec3::from_array(p.position) + glam::Vec3::Y * 1.2;
+                let ahead = glam::Quat::from_rotation_y(p.yaw) * glam::Vec3::Z;
+                session.ground.raycast(chest.to_array(), (chest + ahead * 0.6).to_array()).is_some()
+            };
             let weapon_set = match held {
                 Some(0) => "pistol",
                 Some(_) => "rifle",
@@ -4095,6 +4149,10 @@ impl NaughtyDogVm {
                     melee,
                     hurt,
                     death,
+                    rope_grab,
+                    rope_swing,
+                    bar,
+                    wall_ahead,
                 };
                 match anim.step(graph, table, &session.player_clips, &frame) {
                     Ok(step) => {
@@ -4218,6 +4276,28 @@ impl NaughtyDogVm {
                 }
                 None => {}
             }
+            // On a free rope: a pendulum about the anchor pushed by the
+            // forward/back stick; leaving the rope states lets go.
+            if step_mode == crate::player::Mode::Rope {
+                if let Some(r) = p.rope.as_mut() {
+                    let facing = glam::Quat::from_rotation_y(r.yaw) * glam::Vec3::Z;
+                    let push = if mv[0] != 0. || mv[1] != 0. { glam::Vec3::new(mv[0], 0., mv[1]).normalize_or_zero().dot(facing) } else { 0. };
+                    let dt = seconds.clamp(0., 0.1);
+                    r.rate += (-(9.8 / r.reach) * r.angle.sin() + push * ROPE_PUSH) * dt;
+                    r.rate *= 1. - ROPE_DAMPING * dt;
+                    r.angle = (r.angle + r.rate * dt).clamp(-1.2, 1.2);
+                    let hands = r.anchor + facing * r.angle.sin() * r.reach - glam::Vec3::Y * r.angle.cos() * r.reach;
+                    p.position = (hands - glam::Vec3::Y * ROPE_HANDS).to_array();
+                    p.yaw = r.yaw;
+                    p.fall = 0.;
+                    p.air_top = None;
+                }
+            } else if let Some(r) = p.rope.take() {
+                // Released: the swing's tangential speed carries upward.
+                p.fall = -(r.rate * r.reach * r.angle.cos()).abs().min(6.);
+                p.air_top = Some(p.position[1]);
+                p.regrab = 0.6;
+            }
             if let Some(id) = p.entity {
                 world.push(json!({"op": "set_transform", "id": id, "transform": {"translation": p.position, "rotation_degrees": [0.0, p.yaw.to_degrees(), 0.0], "scale": [1.0, 1.0, 1.0]}}));
             }
@@ -4276,6 +4356,7 @@ impl NaughtyDogVm {
                 crate::player::Mode::Leap => "JumpAcross",
                 crate::player::Mode::Cover => "Cover",
                 crate::player::Mode::Swim => "Swimming",
+                crate::player::Mode::Rope => "Rope",
             };
             sid(class)
         });

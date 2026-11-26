@@ -105,7 +105,23 @@ pub const STATES: &[&str] = &[
     "death-stand-explosion-front",
     "death-stand-explosion-back",
     "fall-death",
+    "free-rope-grab",
+    "free-rope-idle",
+    "free-rope-swing-mid^front",
+    "free-rope-swing-mid^back",
+    "free-rope-swing-front^mid",
+    "free-rope-swing-back^mid",
+    "free-rope^jump-long",
+    "ledge-overhead-swing-enter",
+    "ledge-overhead-swing",
+    "ledge-overhead-swing-jump",
+    "wall-jump-ant-90",
+    "wall-jump-90-long-jump",
 ];
+const ROPE: &[&str] = &["free-rope-grab", "free-rope-idle", "free-rope-swing-mid^front", "free-rope-swing-mid^back", "free-rope-swing-front^mid", "free-rope-swing-back^mid"];
+/// Airborne states besides the jumps and the fall: rope and bar
+/// releases, wall jumps.
+const FLIGHT: &[&str] = &["free-rope^jump-long", "ledge-overhead-swing-jump", "wall-jump-90-long-jump"];
 
 /// One-shot ground actions that return to `idle` when their clip ends,
 /// and the death states, which hold.
@@ -113,7 +129,7 @@ const ACTIONS: &[&str] = &["throw-grenade", "air-punch", "hero-generic-hit-react
 const DEATHS: &[&str] = &["hero-multi-death-front", "hero-multi-death-back", "death-stand-explosion-front", "death-stand-explosion-back", "fall-death"];
 const AIM: &[&str] = &["aim-idle", "aim-run-forward", "aim-run-backward"];
 
-const HANG: &[&str] = &["ledge-grab", "ledge-shimmy-left", "ledge-shimmy-right", "fall-grab-edge"];
+const HANG: &[&str] = &["ledge-grab", "ledge-shimmy-left", "ledge-shimmy-right", "fall-grab-edge", "ledge-overhead-swing-enter", "ledge-overhead-swing"];
 const LEAP: &[&str] = &["ledge-jump-begin", "ledge-jump-mid", "ledge-jump-end", "climb-up-lh", "climb-up-rh", "climb-down-lh", "climb-down-rh"];
 const CLIMB: &[&str] = &["ledge-climb-up", "ledge-climb-up-2", "climb-onto-1-75m^idle", "climb-onto-1-75m^run"];
 
@@ -135,6 +151,9 @@ pub enum Mode {
     /// In cover at a cover point (`edge-cover-…` low, `corner-cover-…`
     /// high): the root stays at the cover.
     Cover,
+    /// On a free rope (`free-rope-…`): the adapter swings the root about
+    /// the rope's anchor.
+    Rope,
 }
 
 const AMBIENT: &[&str] = &["ambient-casual", "ambient-stand-a1", "ambient-stand-a2", "ambient-stand-a3"];
@@ -229,6 +248,14 @@ pub struct Frame {
     pub melee: bool,
     pub hurt: Option<i8>,
     pub death: Option<&'static str>,
+    /// A free rope within reach of the hands while airborne; on a rope,
+    /// the swing's angular velocity (rad/s, + forward) and the release.
+    pub rope_grab: bool,
+    pub rope_swing: f32,
+    /// The held edge is a free-standing bar (no wall under it).
+    pub bar: bool,
+    /// A wall right ahead during a long jump.
+    pub wall_ahead: bool,
     /// Land hard whatever the drop (`player-force-hard-land`).
     pub hard_land: bool,
 }
@@ -361,6 +388,8 @@ impl Controller {
             Mode::Climb
         } else if LEAP.contains(&state.as_str()) {
             Mode::Leap
+        } else if ROPE.contains(&state.as_str()) {
+            Mode::Rope
         } else if state.starts_with("swim-") {
             Mode::Swim
         } else if state.starts_with("edge-cover-") || state.starts_with("corner-cover-") {
@@ -380,6 +409,41 @@ impl Controller {
         let state = self.name(table);
         let finished = self.anim.duration > 0. && self.anim.machine.time >= self.anim.duration;
         match self.mode(table) {
+            Mode::Rope => {
+                if f.jump || f.drop {
+                    self.anim.machine.force(sid("free-rope^jump-long"), 0.1);
+                    let lift = (f.jump).then_some(JUMP_LIFT);
+                    return self.finish(graph, table, clips, f, before, lift, 0.);
+                }
+                let target = if state == "free-rope-grab" && !finished {
+                    "free-rope-grab"
+                } else if f.rope_swing > 0.8 {
+                    "free-rope-swing-mid^front"
+                } else if f.rope_swing < -0.8 {
+                    "free-rope-swing-mid^back"
+                } else {
+                    "free-rope-idle"
+                };
+                if state != target && (state == "free-rope-grab" || !state.starts_with("free-rope-swing") || finished || target == "free-rope-idle") {
+                    self.go(table, target, Some(target), 0.25);
+                }
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
+            Mode::Hang if f.bar && state == "ledge-grab" => {
+                self.anim.machine.force(sid("ledge-overhead-swing-enter"), 0.15);
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
+            Mode::Hang if state.starts_with("ledge-overhead-swing") => {
+                if f.drop {
+                    self.anim.machine.force(sid("fall"), 0.2);
+                } else if f.jump || f.leap {
+                    self.anim.machine.force(sid("ledge-overhead-swing-jump"), 0.1);
+                    return self.finish(graph, table, clips, f, before, Some(JUMP_LIFT * 0.6), 0.);
+                } else if state == "ledge-overhead-swing-enter" && finished {
+                    self.anim.machine.force(sid("ledge-overhead-swing"), 0.15);
+                }
+                return self.finish(graph, table, clips, f, before, None, 0.);
+            }
             Mode::Hang => {
                 if f.drop {
                     self.anim.machine.force(sid("fall"), 0.2);
@@ -484,7 +548,7 @@ impl Controller {
             }
             return self.finish(graph, table, clips, f, before, None, 0.);
         }
-        let grounded_state = !matches!(state.as_str(), "run-jump-long" | "jump-long" | "fall" | "jump-in-place");
+        let grounded_state = !matches!(state.as_str(), "run-jump-long" | "jump-long" | "fall" | "jump-in-place") && !FLIGHT.contains(&state.as_str());
         if grounded_state && f.grounded {
             if f.throw {
                 self.anim.machine.force(sid("throw-grenade"), 0.1);
@@ -519,7 +583,18 @@ impl Controller {
                 self.go(table, "idle", Some("idle"), 0.2);
             }
         }
-        let airborne = matches!(state.as_str(), "run-jump-long" | "jump-long" | "fall" | "jump-in-place");
+        let airborne = matches!(state.as_str(), "run-jump-long" | "jump-long" | "fall" | "jump-in-place") || FLIGHT.contains(&state.as_str());
+        if airborne && f.rope_grab {
+            self.anim.machine.force(sid("free-rope-grab"), 0.1);
+            return self.finish(graph, table, clips, f, before, None, 0.);
+        }
+        // A wall jump: jump again against a wall during a long jump; the
+        // player turns away from the wall.
+        if matches!(state.as_str(), "run-jump-long" | "jump-long") && f.wall_ahead && f.jump {
+            self.yaw = wrap(self.yaw + PI);
+            self.anim.machine.force(sid("wall-jump-90-long-jump"), 0.05);
+            return self.finish(graph, table, clips, f, before, Some(JUMP_LIFT), 0.);
+        }
         if airborne && f.grab {
             self.anim.machine.force(sid("fall-grab-edge"), 0.1);
             return self.finish(graph, table, clips, f, before, None, 0.);
@@ -530,7 +605,7 @@ impl Controller {
         let relative = f.heading.map(|h| wrap(h - self.yaw));
         if airborne {
             if f.grounded && state != "jump-in-place" && state != "run-jump-long" {
-                if state == "fall" {
+                if state == "fall" || FLIGHT.contains(&state.as_str()) {
                     let grade = if f.hard_land {
                         "hard"
                     } else if f.dropped < 1.5 {
