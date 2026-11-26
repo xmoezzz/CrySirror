@@ -360,3 +360,7 @@ The debug printer `sub_62EC50` names the feature flag bits. Edges: `EdgeNoSwing`
 ## Further NPC and object natives
 
 `set-object-health (object fraction)` sets hit points to `fraction ×` the health system's maximum (virtuals +0x28, +0x10; NPCs only). `wait-npc-use-closest-cover (npc [threat] [radius])` runs the cover skill (`sub_299C14`); `wait-npc-use-scripted-ap`, `wait-for-npc-not-busy` wait on the scripted skill. `translate-y-loop (object speed min max)` moves the object up by `speed ×` the frame time per call and back to `min` past `max`. `attach-flashlight (object joint index r g b …)`, `turn-on-flashlight (object on)` and `kill-flashlight (object)` manage a light on a joint. `shut-up (object [seconds])` stops the speaker and mutes it; `suppress-idle-speech (seconds)` mutes idle chatter. `swap-entity (process spawner)` kills the process's object and spawns the spawner.
+
+## Remaining script natives
+
+Attack events carry an attack record as their first argument (`sub_81ADC`: +4 attack type 0–8, +8/+12 the source process handle checked against +0x38, +24 damage); `event-attack-type?`, `event-attack-source?` and `event-object-damage` read it. `make-vector (x y z [w])` allocates 16 bytes, defaults 0 and w 1 (`sub_910094`). `pow-float (x)` is `sub_ABB33C`. `facing-point? (frame frame)` asserts two arguments. `set-rain-state (state)` goes to the weather system (`sub_84F8E0`) and `set-time-to-dry-period (seconds)` to `sub_379244`. The multiplayer natives see no network game in single player (`sub_4466F4`).

@@ -380,6 +380,10 @@ pub trait World {
     fn throw_grenade(&mut self, _from: [f32; 3], _to: [f32; 3]) {}
     /// An explosion that damages NPCs only (`spawn-explosion-npc-only`).
     fn npc_blast(&mut self, _at: [f32; 3]) {}
+    /// The camera's eye and orientation.
+    fn camera_frame(&self) -> Option<([f32; 3], [f32; 4])> {
+        None
+    }
 }
 
 /// Options of `(animate object clip key value …)`. The keys seen in the

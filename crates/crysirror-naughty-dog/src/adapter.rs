@@ -1143,6 +1143,11 @@ impl World for Stage {
     fn pad_buttons(&self, pad: u32) -> [u32; 3] {
         if pad == 0 { self.pad } else { [0; 3] }
     }
+    fn camera_frame(&self) -> Option<([f32; 3], [f32; 4])> {
+        let (eye, forward, _, _) = self.camera_view?;
+        let q = glam::Quat::from_rotation_arc(glam::Vec3::Z, glam::Vec3::from_array(forward).normalize_or(glam::Vec3::Z));
+        Some((eye, q.to_array()))
+    }
     fn camera_forward(&self) -> Option<[f32; 3]> {
         self.camera_view.map(|(_, f, _, _)| f)
     }

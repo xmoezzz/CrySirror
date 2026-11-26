@@ -512,6 +512,240 @@ impl Ctx<'_> {
                 self.inner.game.flags.insert(sid(name), if n > 0 { a[0] } else { 1 });
                 ok(0)
             }
+            _ => self.misc_native3(dc, name, a, n),
+        }
+    }
+}
+
+impl Ctx<'_> {
+    fn misc_native3(&mut self, dc: &mut Dc, name: &str, a: &[u32; MAX_ARGS], n: usize) -> Result<Reply> {
+        let ok = |v: u32| Ok(Some((v, Status::Continue)));
+        let okf = |v: f32| Ok(Some((v.to_bits(), Status::Continue)));
+        let f = |i: usize, default: f32| if n > i { f32::from_bits(a[i]) } else { default };
+        let arg = |i: usize| if n > i { a[i] } else { 0 };
+        let vec3 = |dc: &Dc, at: u32| -> Result<[f32; 3]> { Ok([dc.mem.f32(at)?, dc.mem.f32(at + 4)?, dc.mem.f32(at + 8)?]) };
+        match name {
+            // Attack events carry an attack record as their first argument
+            // (`sub_81ADC`: +4 type 0–8, +8/+12 source handle, +24 damage).
+            // The host's combat does not post attack events, so inside an
+            // event these take the native's not-an-attack path.
+            "event-attack-type?" | "event-attack-source?" | "event-object-damage" => {
+                let in_event = self.proc.is_some_and(|p| self.inner.procs[p].groups.iter().any(|g| g.kind == super::KIND_EVENT));
+                if !in_event {
+                    self.inner.error(format!("{name}: Called from outside event context, ignored"));
+                } else {
+                    self.inner.error(format!("{name}: Not an Attack event, ignored"));
+                }
+                if name == "event-object-damage" { okf(0.) } else { ok(0) }
+            }
+            // Weather, wind and water-reflection state (`sub_84F8E0`,
+            // `sub_379244`): recorded; no rain or wetness is drawn.
+            "set-rain-state" | "set-time-to-dry-period" | "use-rain-intensity-values" | "use-wind-intensity-values" | "use-audio-rain-level"
+            | "use-water-unit-for-reflection" | "lerp-reflection-plane-of-water-units" | "rope-disable-character-collision" | "disable-platform-control-on-object"
+            | "disable-gadgetry" | "enable-gadgetry" | "grenade-director-change-settings" | "journal-set-ambient-scale" | "update-ap-ref" | "set-e3-loading-screen"
+            | "start-movie-audio" | "demo-reset-defaults" | "draw-reticle" | "sync-vox-mp-meta-data" | "disable-cover-camera" | "camera-set-default-follow"
+            | "camera-aim-override-point" | "camera-cancel-aim-override" | "camera-store-locator" | "camera-restore-locator" => {
+                self.inner.game.flags.insert(sid(name), arg(0));
+                ok(0)
+            }
+            // The clock multiplier and slow motion (`sub_15F824` time-scale
+            // settings) are recorded; the host clock is not scaled.
+            "set-clock-multiplier" | "slow-mo-effect" => {
+                self.inner.game.flags.insert(sid(name), f(0, 1.).to_bits());
+                ok(0)
+            }
+            "set-character-wet-mask-state" => {
+                if n < 2 {
+                    self.inner.error("set-character-wet-mask-state: Expected two arguments (int32 int32)".into());
+                    return ok(0);
+                }
+                self.inner.game.wet_mask = a[1];
+                ok(0)
+            }
+            // A music stinger: played as a sound (`sub_319F78`'s music
+            // streams are not separated from sound effects).
+            "play-music-stinger" => {
+                if n > 0 && a[0] != 0 {
+                    return ok(self.world.play_sound(a[0], super::sound_natives::SoundAt::Listener, 1., 0.));
+                }
+                ok(0)
+            }
+            // (play-sound-attached name object joint [volume] [pitch]).
+            "play-sound-attached" => {
+                if n < 2 {
+                    self.inner.error("play-sound-attached: Expected (sound-name string) (attach-object …)".into());
+                    return ok(0);
+                }
+                if self.world.locator(a[1]).is_none() {
+                    self.inner.error(format!("play-sound-attached: Object '{:#010x}' was not found, or is not a ProcessGameObject.", a[1]));
+                    return ok(0);
+                }
+                let at = super::sound_natives::SoundAt::Joint { object: a[1], joint: arg(2) };
+                ok(self.world.play_sound(a[0], at, f(3, 1.), f(4, 0.)))
+            }
+            "play-movie" => {
+                self.world.print(&format!("play-movie {:#010x}: not played from scripts", arg(0)));
+                ok(0)
+            }
+            // (despawn-message id).
+            "despawn-message" => {
+                self.inner.game.messages.retain(|m| m.0 != arg(0));
+                ok(0)
+            }
+            "display-message" => {
+                self.world.message(arg(0));
+                ok(0)
+            }
+            // (task-failed!): the task restarts from its checkpoint.
+            "task-failed!" => {
+                self.inner.task_change = self.inner.task;
+                ok(0)
+            }
+            // (wait-player-move-to point …) / (wait-player-turn-to point):
+            // the player turns there; moving is a turn and a jump-free
+            // placement (not the native walk).
+            "wait-player-move-to" | "wait-player-turn-to" => {
+                if n == 0 || a[0] == 0 {
+                    return ok(0);
+                }
+                let p = vec3(dc, a[0])?;
+                self.world.player_request(super::player_natives::PlayerRequest::TurnTo(p));
+                if name == "wait-player-move-to" {
+                    if let Some((_, q)) = self.world.locator(sid("player")) {
+                        self.world.place(sid("player"), p, q);
+                    }
+                }
+                ok(0)
+            }
+            "wait-until-net-time" => {
+                self.inner.error("wait-until-net-time: You must specify is-net-timer in the options block if you want to use this function".into());
+                ok(0)
+            }
+            // Debug output.
+            "print-event" => {
+                let event = self.proc.and_then(|p| self.inner.procs[p].groups.iter().rev().find(|g| g.kind == super::KIND_EVENT)).map(|g| (g.event, g.sender));
+                let text = match event {
+                    Some((e, Some(s))) => format!("Event  :: {e:#010x} / Sender :: {s:#010x}"),
+                    Some((e, None)) => format!("Event  :: {e:#010x} / Sender :: NO SENDER?!?"),
+                    None => "Event  :: none".into(),
+                };
+                self.world.print(&text);
+                ok(0)
+            }
+            "printf" => {
+                let text = if n > 0 && a[0] != 0 { dc.mem.cstr(a[0]).unwrap_or_default() } else { String::new() };
+                self.world.print(&text);
+                self.inner.prints.push(text);
+                ok(0)
+            }
+            "print-point" => {
+                if n > 0 && a[0] != 0 {
+                    let p = vec3(dc, a[0])?;
+                    self.world.print(&format!("print-point: ({:4.2}, {:4.2}, {:4.2})", p[0], p[1], p[2]));
+                }
+                ok(0)
+            }
+            "debug-break" => {
+                self.world.print("*** debug-break ***");
+                ok(0)
+            }
+            // Journal and tutorial state.
+            "journal-get-page" => ok(self.inner.game.journal_page.max(0) as u32 + u32::from(self.inner.game.journal_page >= 0)),
+            "journal-open?" => ok(0),
+            "tutorial-hints-on?" => ok(1),
+            // Vectors and locators.
+            "make-vector" => {
+                let at = dc.mem.alloc(16)?;
+                for (k, v) in [f(0, 0.), f(1, 0.), f(2, 0.), f(3, 1.)].iter().enumerate() {
+                    dc.mem.write_u32(at + 4 * k as u32, v.to_bits())?;
+                }
+                ok(at)
+            }
+            // (pow-float x): `sub_ABB33C`, two to the power x (the exposure
+            // code's exp2).
+            "pow-float" => okf(f(0, 0.).exp2()),
+            // (units-per-frame v): per-second units scaled to a frame.
+            "units-per-frame" => okf(f(0, 0.) * self.world.frame_seconds()),
+            "get-origin-locator" => ok(super::rail_natives::alloc_frame(dc, [0.; 3], [0., 0., 0., 1.])?),
+            "reverse-locator" => {
+                if n == 0 || a[0] == 0 {
+                    self.inner.error("reverse-locator: Expected 1 argument: (locator)".into());
+                    return ok(0);
+                }
+                let (p, q) = Self::frame(dc, a[0])?;
+                let r = glam::Quat::from_array(q).normalize() * glam::Quat::from_rotation_y(std::f32::consts::PI);
+                ok(super::rail_natives::alloc_frame(dc, p, r.to_array())?)
+            }
+            // (rotate-locator-lookat locator point [weight]): turned toward
+            // the point about +Y, by the weight.
+            "rotate-locator-lookat" => {
+                if n < 2 || a[0] == 0 || a[1] == 0 {
+                    self.inner.error("rotate-locator-lookat: not enough arguments".into());
+                    return ok(0);
+                }
+                let (p, q) = Self::frame(dc, a[0])?;
+                let t = vec3(dc, a[1])?;
+                let d = glam::Vec3::from_array(t) - glam::Vec3::from_array(p);
+                let look = glam::Quat::from_rotation_y(d.x.atan2(d.z));
+                let q = glam::Quat::from_array(q).normalize().slerp(look, f(2, 1.).clamp(0., 1.));
+                ok(super::rail_natives::alloc_frame(dc, p, q.to_array())?)
+            }
+            // (get-object-offset-locator object offset): the object frame
+            // moved by the offset in its own axes.
+            "get-object-offset-locator" => {
+                if n < 2 || a[1] == 0 {
+                    self.inner.error("get-object-offset-locator: Expected 2 arguments: (spawner-name string) (offset vector)".into());
+                    return ok(0);
+                }
+                let Some((p, q)) = self.world.locator(a[0]) else { return ok(0) };
+                let off = glam::Quat::from_array(q).normalize() * glam::Vec3::from_array(vec3(dc, a[1])?);
+                ok(super::rail_natives::alloc_frame(dc, (glam::Vec3::from_array(p) + off).to_array(), q)?)
+            }
+            // (get-align-locator object anim …) / (get-spawner-locator-
+            // projected spawner …): the object's frame (the clip alignment
+            // and the ground projection are not applied).
+            "get-align-locator" | "get-spawner-locator-projected" => match self.world.locator(arg(0)) {
+                Some((p, q)) => ok(super::rail_natives::alloc_frame(dc, p, q)?),
+                None => {
+                    self.inner.error(format!("{name}: Unable to find spawner '{:#010x}'", arg(0)));
+                    ok(0)
+                }
+            },
+            // (facing-point? frame frame): the first frame's forward points
+            // toward the second's position.
+            "facing-point?" => {
+                if n != 2 || a[0] == 0 || a[1] == 0 {
+                    return ok(0);
+                }
+                let (p, q) = Self::frame(dc, a[0])?;
+                let (t, _) = Self::frame(dc, a[1])?;
+                let fwd = glam::Quat::from_array(q).normalize() * glam::Vec3::Z;
+                ok(u32::from((glam::Vec3::from_array(t) - glam::Vec3::from_array(p)).dot(fwd) > 0.))
+            }
+            "camera-locator" => match self.world.camera_frame() {
+                Some((p, q)) => ok(super::rail_natives::alloc_frame(dc, p, q)?),
+                None => ok(0),
+            },
+            "is-camera-stick-pressed" => ok(u32::from(self.world.sticks(0)[2..].iter().any(|v| v.abs() > 0.3))),
+            "get-water-offset" => {
+                let at = dc.mem.alloc(16)?;
+                ok(at)
+            }
+            // (rail-fire-turret-grenade vehicle npc target): a grenade from
+            // the vehicle to the target.
+            "rail-fire-turret-grenade" => {
+                let (Some((from, _)), Some((to, _))) = (self.world.locator(arg(0)), self.world.locator(arg(2))) else {
+                    self.inner.error("rail-fire-turret-grenade: Unable to find target.".into());
+                    return ok(0);
+                };
+                self.world.throw_grenade([from[0], from[1] + 2., from[2]], to);
+                ok(1)
+            }
+            // Multiplayer and co-op natives: no network game in single
+            // player (`sub_4466F4` false).
+            "net-alive-player-count" => ok(1),
+            "net-character-killed?" => ok(u32::from(self.world.npc_killed(arg(0)))),
+            "net-clear-npc-fight-owner" | "net-coop-team-failed?" | "net-end-wave" | "net-get-booster-amount" | "net-get-capture-zone" | "net-hud-set-grapple-indicator" | "net-is-cinema?" | "net-safety-npc-fight-damage" | "net-spawn-flag" | "net-update-fight-ref" => ok(0),
             _ => Ok(None),
         }
     }
