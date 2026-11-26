@@ -215,7 +215,44 @@ struct Player {
     regrab: f32,
     /// The free rope held.
     rope: Option<RopeHold>,
+    /// The wall rope held.
+    wall_rope: Option<WallRopeHold>,
 }
+
+/// A wall rope held: its top, length, the hands' distance below the top
+/// and the facing (toward the rope).
+#[derive(Clone, Copy, Debug)]
+struct WallRopeHold {
+    top: glam::Vec3,
+    length: f32,
+    below: f32,
+    yaw: f32,
+}
+
+/// A `Hint` spawner's progress: since when its condition holds, how
+/// often it was shown and when it shows next.
+#[derive(Clone, Copy, Debug, Default)]
+struct HintState {
+    since: Option<f64>,
+    shown: u32,
+    next: f64,
+}
+
+/// `Hint` spawners (process type 0x9711BC65) show a HUD message while the
+/// player is in their region. Tags: `message-type` (the HUD element),
+/// `message` (its text key), `on-timer` (seconds before the first show),
+/// `display-time-initial`, `display-time-repeat`, `repeat-time`,
+/// `repeat-count` (−1 without end), `off-leave-region`, `vox` and
+/// `vox-speaker`; the region is the string tag naming a trigger region.
+const TYPE_HINT: u32 = 0x9711_bc65;
+
+/// `WallRope` spawners hang from their position along a wall; the
+/// `Length` tag (0xFDC4BC55) gives the length. Climb speed (m/s) and the
+/// body's distance from the rope; not native.
+const TYPE_WALL_ROPE: u32 = 0xf9cb_4287;
+const TAG_ROPE_LENGTH: u32 = 0xfdc4_bc55;
+const WALL_ROPE_CLIMB: f32 = 0.9;
+const WALL_ROPE_OFFSET: f32 = 0.3;
 
 /// A free rope held: its anchor, the hands' distance below it, the swing
 /// angle and its rate (radians, + forward along `yaw`).
@@ -337,6 +374,13 @@ struct Stage {
     combat: Option<Arc<crate::combat::CombatData>>,
     /// HUD elements scripts show, until when (`display-button-hud`).
     hud_active: HashMap<u32, f64>,
+    /// Text keys replacing an element's own text (hint messages).
+    hud_text: HashMap<u32, String>,
+    /// `Hint` spawners' timers, and the hints scripts activated.
+    hints: HashMap<u32, HintState>,
+    hint_on: HashSet<u32>,
+    /// Objects whose edges are not offered (`disable-object-features`).
+    featureless: HashSet<u32>,
     /// Water bodies of the loaded packages.
     water: Vec<crate::water::Water>,
     /// Tanks and helicopters scripts command.
@@ -666,6 +710,115 @@ impl Stage {
             World::place(self, name, p, q.to_array());
         }
         self.followers = followers;
+    }
+
+    /// An event for a native process; hints keep activations (any event
+    /// but `deactivate`/`off`/`kill` turns them on).
+    fn native_event(&mut self, target: u32, event: u32) {
+        let (on, off) = (event == sid("turn-on"), event == sid("turn-off"));
+        if self.spawners.get(&target).is_some_and(|s| s.process_type == TYPE_HINT) {
+            if on {
+                self.hint_on.insert(target);
+            } else if off {
+                self.hint_on.remove(&target);
+                if let Some(e) = self.spawners.get(&target).and_then(|s| s.properties.iter().find(|(k, _)| *k == sid("message-type"))).and_then(|(_, v)| match v {
+                    crate::ss::Property::Str(s) => Some(sid(s)),
+                    _ => None,
+                }) {
+                    self.hud_active.remove(&e);
+                }
+            } else if event == sid("reset") {
+                self.hints.remove(&target);
+            }
+        }
+        // Script dynamic lights switch with turn-on / turn-off.
+        if let Some(light) = self.lights.get_mut(&target) {
+            if on || off {
+                light.enabled = on;
+            }
+        }
+        if event == sid("disable-object-features") {
+            self.featureless.insert(target);
+        } else if event == sid("enable-object-features") {
+            self.featureless.remove(&target);
+        }
+    }
+
+    /// Run the `Hint` spawners: while the condition holds (the player in
+    /// the hint's region, or always without one), show the message after
+    /// `on-timer`, then again every `repeat-time` up to `repeat-count`.
+    fn step_hints(&mut self) {
+        if self.player_locator.is_none() {
+            return;
+        }
+        // Hints are processes without art: every loaded one runs.
+        let hints: Vec<(u32, SpawnerRecord)> = self.spawners.iter().filter(|(_, s)| s.process_type == TYPE_HINT).map(|(n, s)| (*n, s.clone())).collect();
+        for (name, s) in hints {
+            let prop = |k: &str| s.properties.iter().find(|(t, _)| *t == sid(k)).map(|(_, v)| v.clone());
+            let num = |k: &str, d: f32| match prop(k) {
+                Some(crate::ss::Property::Float(f)) => f,
+                Some(crate::ss::Property::Int(i)) => i as f32,
+                _ => d,
+            };
+            let text = |k: &str| match prop(k) {
+                Some(crate::ss::Property::Str(s)) if !s.is_empty() => Some(s),
+                _ => None,
+            };
+            let (Some(element), Some(message)) = (text("message-type"), text("message")) else {
+                if self.hints.insert(name, HintState { shown: u32::MAX, ..Default::default() }).is_none() {
+                    self.log(format!("hint {}: no message-type/message", s.name));
+                }
+                continue;
+            };
+            let region = s.properties.iter().find_map(|(_, v)| match v {
+                crate::ss::Property::Str(n) => self.regions.iter().find(|(r, _, _)| &r.name == n).map(|(r, _, _)| r.id),
+                _ => None,
+            });
+            // A hint with a region holds while the player is inside; one
+            // without waits for a script event.
+            let holds = match region {
+                Some(r) => World::in_region(self, sid("player"), r),
+                None => self.hint_on.contains(&name),
+            };
+            if !self.hints.contains_key(&name) {
+                let strs: Vec<String> = s.properties.iter().filter_map(|(k, v)| match v {
+                    crate::ss::Property::Str(t) => Some(format!("{k:08x}={t}")),
+                    _ => None,
+                }).collect();
+                self.log(format!("hint {} element {element} message {message} region {region:?} on-timer {} strings {strs:?}", s.name, num("on-timer", 0.)));
+            }
+            let now = self.now;
+            let state = self.hints.entry(name).or_default();
+            if !holds {
+                if num("off-leave-region", 0.) != 0. || state.shown == 0 {
+                    *state = HintState::default();
+                    if num("off-leave-region", 0.) != 0. {
+                        self.hud_active.remove(&sid(&element));
+                    }
+                }
+                continue;
+            }
+            let since = *state.since.get_or_insert(now);
+            let count = num("repeat-count", -1.);
+            let due = if state.shown == 0 { now - since >= f64::from(num("on-timer", 0.)) } else { now >= state.next && (count < 0. || (state.shown as f32) <= count) };
+            if !due {
+                continue;
+            }
+            let first = state.shown == 0;
+            state.shown += 1;
+            state.next = now + f64::from(num("repeat-time", 30.));
+            let seconds = num(if first { "display-time-initial" } else { "display-time-repeat" }, 5.);
+            let element = sid(&element);
+            self.hud_active.insert(element, now + f64::from(seconds.max(0.5)));
+            self.log(format!("hint {}: {message} on {element:#010x} for {seconds:.1} s at {now:.1}", s.name));
+            self.hud_text.insert(element, message);
+            if first {
+                if let Some(vox) = text("vox") {
+                    let speaker = text("vox-speaker").map_or(sid("player"), |s| sid(&s));
+                    World::say(self, speaker, sid(&vox));
+                }
+            }
+        }
     }
 
     /// Grenades land after their flight and explode.
@@ -2473,7 +2626,7 @@ impl NaughtyDogVm {
         let anim = session.anim_table.as_ref().filter(|_| entity.is_some()).map(|t| crate::player::Controller::new(t, yaw));
         // The camera starts behind the player (eye offset `(-sin, cos)` of
         // the view yaw opposite the facing `(sin, cos)` of the yaw).
-        let mut player = Player { entity, position, yaw, fall: 0., view_yaw: std::f32::consts::PI - yaw, view_pitch: -0.25, controls: true, anim, air_top: None, view_distance: FOLLOW_DISTANCE, platform: None, grip: None, leap: None, regrab: 0., rope: None };
+        let mut player = Player { entity, position, yaw, fall: 0., view_yaw: std::f32::consts::PI - yaw, view_pitch: -0.25, controls: true, anim, air_top: None, view_distance: FOLLOW_DISTANCE, platform: None, grip: None, leap: None, regrab: 0., rope: None, wall_rope: None };
         // The continue camera spawner sets the starting view direction
         // (eye offset `(-sin y · cos p, -sin p, cos y · cos p)` from the head).
         if let Some(c) = camera {
@@ -3546,7 +3699,7 @@ impl NaughtyDogVm {
         };
         let ap = |r: Option<&crate::player::Root>| r.and_then(|r| r.ap).map_or(glam::Mat4::from_translation(HANG_REACH), |(t, q)| glam::Mat4::from_rotation_translation(q, t));
         match mode {
-            crate::player::Mode::Rope => {}
+            crate::player::Mode::Rope | crate::player::Mode::WallRope => {}
             crate::player::Mode::Hang => {
                 grip.climb = None;
                 if let Some(r) = root {
@@ -4119,6 +4272,36 @@ impl NaughtyDogVm {
             } else {
                 None
             };
+            // A wall rope: grabbed from the air within reach of the hands,
+            // or from the ground walking into its foot.
+            let grounded_now = p.air_top.is_none() && p.fall == 0.;
+            let wall_found = if p.wall_rope.is_none() && p.rope.is_none() && p.regrab <= 0. {
+                session.stage.spawners.iter().filter(|(n, s)| s.process_type == TYPE_WALL_ROPE && session.stage.visible.contains(n)).find_map(|(_, s)| {
+                    let top = glam::Vec3::from_array(s.position);
+                    let length = s.properties.iter().find(|(k, _)| *k == TAG_ROPE_LENGTH).and_then(|(_, v)| match v {
+                        crate::ss::Property::Float(f) => Some(*f),
+                        _ => None,
+                    }).unwrap_or(8.);
+                    let d = hands - top;
+                    let flat = glam::Vec2::new(d.x, d.z).length();
+                    let along = -d.y;
+                    let air = !grounded_now && flat < ROPE_REACH && along > 0. && along < length;
+                    let ground = grounded_now && heading.is_some() && flat < 0.8 && along > 0. && along <= length + 0.3;
+                    (air || ground).then(|| {
+                        let yaw = (top.x - hands.x).atan2(top.z - hands.z);
+                        (WallRopeHold { top, length, below: along.min(length), yaw: if flat > 0.05 { yaw } else { p.yaw } }, air)
+                    })
+                })
+            } else {
+                None
+            };
+            let wall_rope_grab = wall_found.map(|(_, air)| air);
+            if let Some((hold, _)) = wall_found {
+                p.wall_rope = Some(hold);
+            }
+            let wall_rope_climb = if p.wall_rope.is_some() { pad.left[1].signum() as i8 } else { 0 };
+            let wall_rope_top = p.wall_rope.is_some_and(|w| w.below <= 0.35);
+            let wall_rope_bottom = p.wall_rope.is_some_and(|w| w.below >= w.length - 0.2 || session.ground.height(p.position[0], p.position[2], p.position[1] + 0.1).is_some_and(|h| p.position[1] - h < 0.3));
             let rope_grab = rope_found.is_some();
             if let Some(hold) = rope_found {
                 p.rope = Some(hold);
@@ -4182,6 +4365,10 @@ impl NaughtyDogVm {
                     death,
                     rope_grab,
                     rope_swing,
+                    wall_rope_grab,
+                    wall_rope_climb,
+                    wall_rope_top,
+                    wall_rope_bottom,
                     bar,
                     wall_ahead,
                 };
@@ -4323,6 +4510,32 @@ impl NaughtyDogVm {
                     p.fall = 0.;
                     p.air_top = None;
                 }
+            } else if step_mode == crate::player::Mode::WallRope {
+                // On a wall rope: hands at the climbed height, the body
+                // just off the rope, facing it.
+                if let Some(w) = p.wall_rope.as_mut() {
+                    let dt = seconds.clamp(0., 0.1);
+                    let climb = f32::from(wall_rope_climb);
+                    w.below = (w.below - climb * WALL_ROPE_CLIMB * dt).clamp(0.2, w.length);
+                    let facing = glam::Vec3::new(w.yaw.sin(), 0., w.yaw.cos());
+                    let hands = w.top - glam::Vec3::Y * w.below - facing * WALL_ROPE_OFFSET;
+                    p.position = (hands - glam::Vec3::Y * ROPE_HANDS).to_array();
+                    p.yaw = w.yaw;
+                    p.fall = 0.;
+                    p.air_top = None;
+                }
+            } else if let Some(w) = p.wall_rope.take() {
+                // Off the rope: over its top onto the surface beyond when the
+                // climb ended there, otherwise as the jump or drop left it.
+                if w.below <= 0.35 && wall_rope_climb > 0 {
+                    let facing = glam::Vec3::new(w.yaw.sin(), 0., w.yaw.cos());
+                    let onto = w.top + facing * 0.6;
+                    let h = session.ground.height(onto.x, onto.z, onto.y + 1.).unwrap_or(w.top.y);
+                    p.position = [onto.x, h, onto.z];
+                    p.fall = 0.;
+                    p.air_top = None;
+                }
+                p.regrab = 0.6;
             } else if let Some(r) = p.rope.take() {
                 // Released: the swing's tangential speed carries upward.
                 p.fall = -(r.rate * r.reach * r.angle.cos()).abs().min(6.);
@@ -4388,6 +4601,7 @@ impl NaughtyDogVm {
                 crate::player::Mode::Cover => "Cover",
                 crate::player::Mode::Swim => "Swimming",
                 crate::player::Mode::Rope => "Rope",
+                crate::player::Mode::WallRope => "WallRope",
             };
             sid(class)
         });
@@ -4448,6 +4662,7 @@ impl NaughtyDogVm {
         session.stage.step_vehicles(seconds as f32);
         session.stage.step_followers(seconds as f32);
         session.stage.step_grenades(seconds as f32);
+        session.stage.step_hints();
         // Host one-shot effects end.
         let expired: Vec<u32> = session.stage.transient_effects.iter().filter(|(_, until)| *until <= session.stage.now).map(|(h, _)| *h).collect();
         session.stage.transient_effects.retain(|(h, _)| !expired.contains(h));
@@ -4462,6 +4677,16 @@ impl NaughtyDogVm {
             World::set_visible(&mut session.stage, n, false);
         }
         self.step_combat(session, seconds as f32);
+        // Events for native processes: hints.
+        if let Some(game) = session.game.as_mut() {
+            for (target, event, _) in std::mem::take(&mut game.rt.inner.native_events) {
+                let line = format!("native event {event:#010x} to {target:#010x}");
+                session.stage.native_event(target, event);
+                if session.stage.log.len() < 300 {
+                    session.stage.log(line);
+                }
+            }
+        }
         // Hits reach the targets' scripts as `Attack` events.
         let attacks = std::mem::take(&mut session.stage.attacks);
         if let Some(game) = session.game.as_mut() {
@@ -4510,8 +4735,10 @@ impl NaughtyDogVm {
         // Props collide while spawned.
         for (name, ids) in &session.stage.entities {
             let on = session.stage.visible.contains(name) && !session.stage.inert.contains(name);
+            let features = !session.stage.featureless.contains(name);
             for id in ids {
                 session.ground.enable_body(*id, on);
+                session.ground.enable_features(*id, features);
             }
         }
         world.append(&mut session.stage.ops);
@@ -4720,7 +4947,8 @@ impl NaughtyDogVm {
             layers.push(match &def.text {
                 Some(key) => {
                     let c = def.color.map(|v| (v.clamp(0., 1.) * 255.) as u8);
-                    text(text_id, [rect[0] + def.text_offset[0] as i32, rect[1] + def.text_offset[1] as i32, 400, 40], &session.text(key), c, 24)
+                    let key = active.get(k as usize).and_then(|n| session.stage.hud_text.get(n)).cloned().unwrap_or_else(|| key.clone());
+                    text(text_id, [rect[0] + def.text_offset[0] as i32, rect[1] + def.text_offset[1] as i32, 400, 40], &session.text(&key), c, 24)
                 }
                 None => clear(text_id),
             });
@@ -5004,8 +5232,22 @@ impl VmAdapter for NaughtyDogVm {
                         v["script_error"] = json!(s.script_error);
                         v["log"] = json!(s.stage.log);
                         v["player"] = json!(s.player.as_ref().map(|p| p.position));
+                        // Edges within 3 m of the player: height above the
+                        // feet, horizontal distance, flags, facing.
+                        v["edges_near_player"] = json!(s.player.as_ref().map(|p| {
+                            let feet = glam::Vec3::from_array(p.position);
+                            let mut out: Vec<String> = s.ground.edges_near(feet + glam::Vec3::Y, 3.).into_iter().map(|(_, e, _)| {
+                                let mid = (e.p0 + e.p1) * 0.5;
+                                let d = mid - feet;
+                                format!("h{:+.2} d{:.2} len{:.2} flags{:#x} n({:.2},{:.2},{:.2})", d.y, glam::Vec2::new(d.x, d.z).length(), (e.p1 - e.p0).length(), e.flags, e.n1.x, e.n1.y, e.n1.z)
+                            }).collect();
+                            out.sort();
+                            out.truncate(24);
+                            out
+                        }));
                         v["ground_triangles"] = json!(s.ground.len());
                         v["movie"] = json!(s.movie);
+                        v["hud"] = json!({"active": s.stage.hud_active.iter().map(|(k, t)| format!("{k:08x}@{t:.1}")).collect::<Vec<_>>(), "now": s.stage.now, "hidden": s.game.as_ref().is_some_and(|g| g.rt.inner.game.hud_hidden), "known": s.hud_defs.len(), "shown": s.hud_shown});
                         let eye = s.stage.camera_eye.map(glam::Vec3::from_array);
                         let mut near: Vec<(f32, String)> = s.effects.iter().filter(|e| e.live).map(|e| (eye.map_or(0., |c| c.distance(e.at)), e.entity["name"].as_str().unwrap_or("").to_string())).collect();
                         near.sort_by(|a, b| a.0.total_cmp(&b.0));

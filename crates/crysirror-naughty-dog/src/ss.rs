@@ -495,6 +495,9 @@ pub struct Inner {
     pub current_weapon: Option<u32>,
     /// `holster-player-weapon` put the weapon away.
     pub holstered: bool,
+    /// Events sent to objects without a script process: target, event,
+    /// arguments (drained by the host).
+    pub native_events: Vec<(u32, u32, Vec<u32>)>,
     /// `set-move-mode`'s `*player-move-modes*` entry.
     pub move_mode: Option<u32>,
     /// Prone settings record chosen by `player-set-prone-mode`.
@@ -597,6 +600,7 @@ impl Runtime {
                 prone: None,
                 current_weapon: None,
                 holstered: false,
+                native_events: Vec::new(),
                 move_mode: None,
                 save_requested: false,
                 now: 0.,
@@ -955,7 +959,14 @@ impl Ctx<'_> {
         (1, Status::Suspend)
     }
     fn send(&mut self, event: u32, target: u32, args: Vec<u32>) -> u32 {
-        let Some(p) = self.inner.process(target) else { return 0 };
+        let Some(p) = self.inner.process(target) else {
+            // Objects without a script process (native processes such as
+            // hints) get their events through the host.
+            if self.inner.native_events.len() < 256 {
+                self.inner.native_events.push((target, event, args));
+            }
+            return 0;
+        };
         if event == sid("go") {
             self.inner.procs[p].pending_go = args.first().copied();
         } else {

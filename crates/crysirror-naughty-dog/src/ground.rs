@@ -43,6 +43,8 @@ struct Body {
     lo: [f32; 3],
     hi: [f32; 3],
     enabled: bool,
+    /// Its edges can be grabbed (`disable-object-features` clears it).
+    features: bool,
     /// Column-major world transform.
     transform: [f32; 16],
 }
@@ -189,7 +191,7 @@ impl Ground {
             }
         }
         let stand = vec![true; local.len()];
-        let mut body = Body { local, world: Vec::new(), stand, edges_local: Vec::new(), edges: Vec::new(), lo: [0.; 3], hi: [0.; 3], enabled, transform: [0.; 16] };
+        let mut body = Body { local, world: Vec::new(), stand, edges_local: Vec::new(), edges: Vec::new(), lo: [0.; 3], hi: [0.; 3], enabled, features: true, transform: [0.; 16] };
         body.place(world);
         self.bodies.insert(id, body);
     }
@@ -200,7 +202,7 @@ impl Ground {
         let solid: Vec<&Triangle> = triangles.iter().filter(|t| t.pat & (collision::PAT_PASS_THRU | collision::PAT_WATER) == 0).take(MAX_BODY_TRIANGLES).collect();
         let local = solid.iter().map(|t| t.vertices.map(|v| v.to_array())).collect();
         let stand = solid.iter().map(|t| t.pat & collision::PAT_NO_STAND == 0).collect();
-        let mut body = Body { local, world: Vec::new(), stand, edges_local: edges.to_vec(), edges: Vec::new(), lo: [0.; 3], hi: [0.; 3], enabled, transform: [0.; 16] };
+        let mut body = Body { local, world: Vec::new(), stand, edges_local: edges.to_vec(), edges: Vec::new(), lo: [0.; 3], hi: [0.; 3], enabled, features: true, transform: [0.; 16] };
         body.place(world);
         self.bodies.insert(id, body);
     }
@@ -211,7 +213,7 @@ impl Ground {
     pub fn edges_near(&self, point: Vec3, radius: f32) -> Vec<(usize, Edge, Option<u32>)> {
         let near = |e: &Edge| e.n0.y >= 0.707 && segment_distance(point, e.p0, e.p1) <= radius;
         let mut out: Vec<(usize, Edge, Option<u32>)> = self.edges.iter().enumerate().filter(|(_, e)| near(e)).map(|(i, e)| (i, *e, None)).collect();
-        for (id, b) in self.bodies.iter().filter(|(_, b)| b.enabled) {
+        for (id, b) in self.bodies.iter().filter(|(_, b)| b.enabled && b.features) {
             out.extend(b.edges.iter().enumerate().filter(|(_, e)| near(e)).map(|(i, e)| (i, *e, Some(*id))));
         }
         out
@@ -239,6 +241,13 @@ impl Ground {
     pub fn move_body(&mut self, id: u32, world: [f32; 16]) {
         if let Some(b) = self.bodies.get_mut(&id) {
             b.place(world);
+        }
+    }
+
+    /// Whether a body's edges are offered (`disable-object-features`).
+    pub fn enable_features(&mut self, id: u32, enabled: bool) {
+        if let Some(b) = self.bodies.get_mut(&id) {
+            b.features = enabled;
         }
     }
 
