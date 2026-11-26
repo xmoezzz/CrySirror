@@ -365,8 +365,59 @@ impl Agents {
     }
 }
 
+/// How an NPC was hit, for the reaction and death clips of
+/// `anim-soldier.pak` (`stand-hit-reaction-*`, `death-stand-*`). The
+/// native choice (`s_hit-reaction-state`/`s_death-state` play a
+/// code-chosen clip) is not decoded: clips are picked by direction.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Hit {
+    Bullet,
+    Explosion,
+}
+
+fn variant(prefix: &str, count: u8, seed: u32) -> String {
+    format!("{prefix}-{}", char::from(b'a' + (seed % u32::from(count)) as u8))
+}
+
+/// The hit-reaction clip for a hit from `behind` (or the front).
+pub fn reaction_clip(hit: Hit, behind: bool, seed: u32) -> String {
+    match (hit, behind) {
+        (Hit::Explosion, true) => "explosion-reaction-small-from-behind".into(),
+        (Hit::Explosion, false) => "explosion-reaction-small-from-front".into(),
+        (Hit::Bullet, true) => variant("stand-hit-reaction-back", 6, seed),
+        (Hit::Bullet, false) => variant("stand-hit-reaction-light", 14, seed),
+    }
+}
+
+/// The death clip for a kill from `behind` (or the front), moving or not.
+pub fn death_clip(hit: Hit, behind: bool, moving: bool, seed: u32) -> String {
+    match (hit, behind, moving) {
+        (Hit::Explosion, true, _) => variant("death-stand-explosion-back", 3, seed),
+        (Hit::Explosion, false, _) => variant("death-stand-explosion", 10, seed),
+        (Hit::Bullet, _, true) => variant("death-while-running", 2, seed),
+        (Hit::Bullet, true, false) => variant("death-stand-light-back", 7, seed),
+        (Hit::Bullet, false, false) => variant("death-stand-light-front", 9, seed),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn hit_clips_stay_within_the_soldier_variants() {
+        // Variant letters present in `anim-soldier.pak`.
+        for seed in 0..64 {
+            let last = |c: String| c.chars().last().unwrap();
+            assert!(last(reaction_clip(Hit::Bullet, false, seed)) <= 'n');
+            assert!(last(reaction_clip(Hit::Bullet, true, seed)) <= 'f');
+            assert!(last(death_clip(Hit::Bullet, false, false, seed)) <= 'i');
+            assert!(last(death_clip(Hit::Bullet, true, false, seed)) <= 'g');
+            assert!(last(death_clip(Hit::Explosion, false, false, seed)) <= 'j');
+            assert!(last(death_clip(Hit::Explosion, true, false, seed)) <= 'c');
+            assert!(last(death_clip(Hit::Bullet, false, true, seed)) <= 'b');
+        }
+        assert_eq!(death_clip(Hit::Bullet, false, false, 0), "death-stand-light-front-a");
+    }
     use super::*;
 
     #[test]

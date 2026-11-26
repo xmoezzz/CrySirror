@@ -328,6 +328,8 @@ struct Stage {
     npc_blasts: Vec<[f32; 3]>,
     /// Hits to post as `Attack` events: target, source, damage.
     attacks: Vec<(u32, u32, f32)>,
+    /// Killed NPCs playing their death clip, since when.
+    corpses: Vec<(u32, f64)>,
     script_shots: Vec<(u32, crate::vehicle::Target)>,
     grenades: Vec<crate::vehicle::Projectile>,
     /// The player's native state class (`player-in-state?`).
@@ -2992,11 +2994,8 @@ impl NaughtyDogVm {
                     }
                     a.hit_points <= 0. && a.can_die
                 });
-                if killed {
-                    World::npc_die(&mut session.stage, name);
-                    World::set_visible(&mut session.stage, name, false);
-                    session.stage.agents.agents.remove(&name);
-                }
+                let from = World::locator(&session.stage, shooter).map_or(glam::Vec3::ZERO, |(p, _)| glam::Vec3::from_array(p));
+                Self::npc_hit(session, name, from, killed, crate::npc::Hit::Bullet);
             }
         }
         let npc_only: Vec<[f32; 3]> = std::mem::take(&mut session.stage.npc_blasts);
@@ -3017,11 +3016,7 @@ impl NaughtyDogVm {
                     a.health = (a.hit_points / a.max_hit_points).clamp(0., 1.);
                     a.hit_points <= 0. && a.can_die
                 });
-                if killed {
-                    World::npc_die(&mut session.stage, name);
-                    World::set_visible(&mut session.stage, name, false);
-                    session.stage.agents.agents.remove(&name);
-                }
+                Self::npc_hit(session, name, at, killed, crate::npc::Hit::Explosion);
             }
         }
         let fell = std::mem::take(&mut session.fell);
@@ -3103,10 +3098,33 @@ impl NaughtyDogVm {
             }
             if killed {
                 session.stage.log(format!("npc {name:#010x} killed"));
-                World::npc_die(&mut session.stage, name);
-                World::set_visible(&mut session.stage, name, false);
-                session.stage.agents.agents.remove(&name);
             }
+            Self::npc_hit(session, name, eye, killed, crate::npc::Hit::Bullet);
+        }
+    }
+
+    /// An NPC hit from `from`: a hit reaction when it survives (unless a
+    /// script animation plays), otherwise it dies: it leaves the agents,
+    /// plays a death clip and is hidden when the clip ends (no ragdoll or
+    /// corpse).
+    fn npc_hit(session: &mut Session, name: u32, from: glam::Vec3, killed: bool, hit: crate::npc::Hit) {
+        let Some(agent) = session.stage.agents.get(name).cloned() else { return };
+        let forward = glam::Quat::from_rotation_y(agent.yaw) * glam::Vec3::Z;
+        let to = from - glam::Vec3::from_array(agent.position);
+        let behind = glam::Vec3::new(to.x, 0., to.z).normalize_or_zero().dot(forward) < 0.;
+        let seed = name ^ (session.stage.now * 30.) as u32;
+        if killed {
+            World::npc_die(&mut session.stage, name);
+            session.stage.agents.agents.remove(&name);
+            let clip = crate::npc::death_clip(hit, behind, agent.speed > 1., seed);
+            if World::animate(&mut session.stage, name, sid(&clip), &crate::ss::Animate::default()) {
+                session.stage.corpses.push((name, session.stage.now));
+            } else {
+                World::set_visible(&mut session.stage, name, false);
+            }
+        } else if World::animation_phase(&session.stage, name).is_none() {
+            let clip = crate::npc::reaction_clip(hit, behind, seed);
+            World::animate(&mut session.stage, name, sid(&clip), &crate::ss::Animate::default());
         }
     }
 
@@ -4238,6 +4256,13 @@ impl NaughtyDogVm {
         session.stage.step_vehicles(seconds as f32);
         session.stage.step_followers(seconds as f32);
         session.stage.step_grenades(seconds as f32);
+        // Bodies go once their death clip ends (or after 6 s).
+        let now = session.stage.now;
+        let gone: Vec<u32> = session.stage.corpses.iter().filter(|(n, t)| now - t > 6. || (now - t > 0.2 && World::animation_phase(&session.stage, *n).is_none())).map(|(n, _)| *n).collect();
+        session.stage.corpses.retain(|(n, _)| !gone.contains(n));
+        for n in gone {
+            World::set_visible(&mut session.stage, n, false);
+        }
         self.step_combat(session, &input, seconds as f32);
         // Hits reach the targets' scripts as `Attack` events.
         let attacks = std::mem::take(&mut session.stage.attacks);
