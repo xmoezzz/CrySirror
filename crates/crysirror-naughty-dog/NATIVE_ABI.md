@@ -364,3 +364,7 @@ The debug printer `sub_62EC50` names the feature flag bits. Edges: `EdgeNoSwing`
 ## Remaining script natives
 
 Handlers listen for the `Attack` event (0x0539335E; found as the event of the handler blocks whose lambdas call these queries). Attack events carry an attack record as their first argument (`sub_81ADC`: +4 attack type 0–8, +8/+12 the source process handle checked against +0x38, +24 damage); `event-attack-type?`, `event-attack-source?` and `event-object-damage` read it. `make-vector (x y z [w])` allocates 16 bytes, defaults 0 and w 1 (`sub_910094`). `pow-float (x)` is `sub_ABB33C`. `facing-point? (frame frame)` asserts two arguments. `set-rain-state (state)` goes to the weather system (`sub_84F8E0`) and `set-time-to-dry-period (seconds)` to `sub_379244`. The multiplayer natives see no network game in single player (`sub_4466F4`).
+
+## Free ropes
+
+Free ropes are `ProcessFreeRope` (0xAAF85EAD) spawners hanging from the spawner position; the art group names the length (`rope5m`, `rope8m`). Their tags include floats 0xA7527A3B (2.0, 2.5, 5.0 on the disc) and 0xD712F161 (1.0) whose meanings are not decoded. The player's rope states are `free-rope-grab`, `free-rope-idle`, `free-rope-swing-{mid^front,mid^back,front^mid,back^mid}` and `free-rope^jump-long`; overhead bars use `ledge-overhead-swing-enter`, `ledge-overhead-swing` and `ledge-overhead-swing-jump`; wall jumps `wall-jump-ant-90` and `wall-jump-90-long-jump`.
