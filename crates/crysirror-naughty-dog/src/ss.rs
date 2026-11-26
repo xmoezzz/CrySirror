@@ -339,6 +339,39 @@ pub trait World {
     fn followers_ref(&self) -> Option<&crate::follow::Followers> {
         None
     }
+    /// The player's ground speed (m/s), the body it stands on or holds,
+    /// and seconds since it was last hurt.
+    fn player_speed(&self) -> Option<f32> {
+        None
+    }
+    fn player_support(&self) -> Option<u32> {
+        None
+    }
+    fn player_hit_age(&self) -> f32 {
+        f32::INFINITY
+    }
+    /// The grabbable edge closest to `point` within `reach` metres, as a
+    /// frame on it facing out of the wall.
+    fn closest_edge(&self, _point: [f32; 3], _reach: f32) -> Option<([f32; 3], [f32; 4])> {
+        None
+    }
+    /// Seconds between the last two presses of a pad button (native
+    /// `pad-get-button-press-interval`), large when pressed at most once.
+    fn button_press_interval(&self, _pad: u32, _button: u32) -> f32 {
+        f32::MAX
+    }
+    /// The camera's forward direction.
+    fn camera_forward(&self) -> Option<[f32; 3]> {
+        None
+    }
+    fn player_request(&mut self, _request: player_natives::PlayerRequest) {}
+    /// A pad's held, pressed and released buttons in the native bit order
+    /// (`sub_137B28`: up 0x1, left 0x2, right 0x4, down 0x8, L2 0x10, R2
+    /// 0x20, cross 0x40, L1 0x80, R1 0x100, square 0x200, triangle 0x400,
+    /// circle 0x800, R3 0x1000, start 0x2000, select 0x4000, L3 0x8000).
+    fn pad_buttons(&self, _pad: u32) -> [u32; 3] {
+        [0; 3]
+    }
 }
 
 /// Options of `(animate object clip key value …)`. The keys seen in the
@@ -444,6 +477,10 @@ pub struct Inner {
     pub save_requested: bool,
     /// The weapon the player holds (the last given).
     pub current_weapon: Option<u32>,
+    /// `holster-player-weapon` put the weapon away.
+    pub holstered: bool,
+    /// `set-move-mode`'s `*player-move-modes*` entry.
+    pub move_mode: Option<u32>,
     /// Prone settings record chosen by `player-set-prone-mode`.
     pub prone: Option<u32>,
     /// World time at the last tick.
@@ -543,6 +580,8 @@ impl Runtime {
                 weapons: BTreeMap::new(),
                 prone: None,
                 current_weapon: None,
+                holstered: false,
+                move_mode: None,
                 save_requested: false,
                 now: 0.,
                 disc: None,
@@ -1220,8 +1259,8 @@ impl Natives for Ctx<'_> {
             "get-script-state" => ok(self.target(a, argc, 0).and_then(|p| self.inner.procs[p].state).map(|s| dc.mem.u32(s)).transpose()?.unwrap_or(0)),
             "get-current-time" => ok((now as f32).to_bits()),
             // (pad-get-info pad) → `{held, pressed, released, left x, y,
-            // right x, y}` (`sub_1459E8`). Button words go through
-            // `sub_137B28`, whose bit mapping is not recovered: they are 0.
+            // right x, y}` (`sub_1459E8`); button words in the bit order
+            // of `sub_137B28` (see `World::pad_buttons`).
             "pad-get-info" => {
                 let pad = if n > 0 { a[0] } else { 0 };
                 let at = match self.inner.pads.get(&pad) {
@@ -1232,6 +1271,9 @@ impl Natives for Ctx<'_> {
                         at
                     }
                 };
+                for (k, v) in self.world.pad_buttons(pad).iter().enumerate() {
+                    dc.mem.write_u32(at + 4 * k as u32, *v)?;
+                }
                 for (k, v) in self.world.sticks(pad).iter().enumerate() {
                     dc.mem.write_u32(at + 12 + 4 * k as u32, v.to_bits())?;
                 }

@@ -235,6 +235,16 @@ struct Stage {
     camera: Option<u32>,
     /// Left stick from the movement keys.
     stick: [f32; 2],
+    /// Pad 0's buttons in the native bit order (`sub_137B28`): held,
+    /// pressed, released; and each button's last two press times.
+    pad: [u32; 3],
+    pad_presses: HashMap<u32, (f64, f64)>,
+    /// Published each frame for the player natives: ground speed, the
+    /// grabbable edge nearest the player, seconds since last hurt.
+    player_speed: Option<f32>,
+    player_edge: Option<([f32; 3], [f32; 4])>,
+    player_hit_age: f32,
+    player_requests: Vec<crate::ss::player_natives::PlayerRequest>,
     /// Script animations by object (spawner name or `player`).
     animations: HashMap<u32, ScriptAnimation>,
     /// Where the player stands, for `player` locators.
@@ -590,6 +600,24 @@ impl Stage {
     }
 
     /// Step the vehicles' orders and move their objects.
+    /// Pad 0 in the native button bits from the host keys (a host
+    /// mapping, not native): CROSS Space, CIRCLE Ctrl, SQUARE E, TRIANGLE
+    /// F, R1 left and L1 right mouse, L2 Q, R2 T, the d-pad on the arrows,
+    /// START Escape, SELECT Backspace, R3 middle mouse, L3 V.
+    fn read_pad(&mut self, input: &InputFrame) {
+        const MAP: [(u64, u32); 16] = [
+            (b::UP, 0x1), (b::LEFT, 0x2), (b::RIGHT, 0x4), (b::DOWN, 0x8), (b::KEY_Q, 0x10), (b::KEY_T, 0x20), (b::SPACE, 0x40), (b::MOUSE_RIGHT, 0x80),
+            (b::MOUSE_LEFT, 0x100), (b::KEY_E, 0x200), (b::KEY_F, 0x400), (b::CTRL, 0x800), (b::MOUSE_MIDDLE, 0x1000), (b::ESCAPE, 0x2000), (b::BACKSPACE, 0x4000), (b::KEY_V, 0x8000),
+        ];
+        let bits = |mask: u64| MAP.iter().filter(|(k, _)| mask & k != 0).fold(0, |acc, (_, v)| acc | v);
+        let held = bits(input.buttons_down);
+        self.pad = [held, bits(input.buttons_pressed), self.pad[0] & !held];
+        for (_, bit) in MAP.iter().filter(|(_, v)| self.pad[1] & v != 0) {
+            let entry = self.pad_presses.entry(*bit).or_insert((f64::NEG_INFINITY, f64::NEG_INFINITY));
+            *entry = (entry.1, self.now);
+        }
+    }
+
     /// Step the spline followers and place the objects that moved, facing
     /// along the spline.
     fn step_followers(&mut self, seconds: f32) {
@@ -1072,6 +1100,38 @@ impl World for Stage {
         }
         best.map(|(_, s, d)| (s, d))
     }
+    fn player_speed(&self) -> Option<f32> {
+        self.player_speed
+    }
+    fn player_support(&self) -> Option<u32> {
+        let body = self.player_support?;
+        self.entities.iter().find(|(_, ids)| ids.contains(&body)).map(|(n, _)| *n)
+    }
+    fn player_hit_age(&self) -> f32 {
+        self.player_hit_age
+    }
+    fn closest_edge(&self, point: [f32; 3], reach: f32) -> Option<([f32; 3], [f32; 4])> {
+        let (p, q) = self.player_edge?;
+        (glam::Vec3::from_array(p).distance(glam::Vec3::from_array(point)) <= reach).then_some((p, q))
+    }
+    fn button_press_interval(&self, pad: u32, button: u32) -> f32 {
+        if pad != 0 {
+            return f32::MAX;
+        }
+        match self.pad_presses.get(&button) {
+            Some((a, b)) if a.is_finite() => (b - a) as f32,
+            _ => f32::MAX,
+        }
+    }
+    fn pad_buttons(&self, pad: u32) -> [u32; 3] {
+        if pad == 0 { self.pad } else { [0; 3] }
+    }
+    fn camera_forward(&self) -> Option<[f32; 3]> {
+        self.camera_view.map(|(_, f, _, _)| f)
+    }
+    fn player_request(&mut self, request: crate::ss::player_natives::PlayerRequest) {
+        self.player_requests.push(request);
+    }
     fn spawned_of_type(&self, kind: u32) -> Vec<u32> {
         self.spawners.iter().filter(|(n, s)| s.process_type == kind && self.visible.contains(n)).map(|(n, _)| *n).collect()
     }
@@ -1282,6 +1342,14 @@ struct Session {
     player_gun: crate::combat::Gun,
     /// The weapon `player_gun` is loaded for.
     gun_weapon: Option<u32>,
+    /// The player landed after a fatal drop; a script killed the player.
+    fell: bool,
+    scripted_death: bool,
+    /// Script requests: one shot (`player-fire-weapon-at-reticle`), melee
+    /// damage taken, the player hidden this frame.
+    forced_fire: bool,
+    melee_damage: f32,
+    player_hidden: bool,
     death: Option<f32>,
     combat_rng: u32,
     /// HUD element definitions (`hud-settings.bin`), the HUD package's
@@ -1377,6 +1445,8 @@ const MAX_EFFECTS: usize = 96;
 /// (hit points of 100); NPCs take 1.5× their maximum there. Not native.
 const BLAST_RADIUS: f32 = 6.;
 const BLAST_DAMAGE: f32 = 80.;
+/// `player-take-melee-damage` hit points (of 100); not native.
+const MELEE_DAMAGE: f32 = 25.;
 const EFFECT_RANGE: f32 = 80.;
 /// Particle modules resident in game (the effect groups of 
 /// `train-wreck`'s fire spawners live in `particle-u2-gameparts`; the
@@ -1620,6 +1690,11 @@ impl NaughtyDogVm {
             player_health: Default::default(),
             player_gun: Default::default(),
             gun_weapon: None,
+            fell: false,
+            scripted_death: false,
+            forced_fire: false,
+            melee_damage: 0.,
+            player_hidden: false,
             death: None,
             combat_rng: 0x1234_5678,
             banks: Default::default(),
@@ -2873,7 +2948,13 @@ impl NaughtyDogVm {
                 }
             }
         }
-        if session.player_health.hurt(damage, invincible) {
+        let fell = std::mem::take(&mut session.fell);
+        let scripted = std::mem::take(&mut session.scripted_death);
+        damage += std::mem::take(&mut session.melee_damage);
+        if fell && !invincible {
+            session.stage.log("player fell to death".into());
+        }
+        if session.player_health.hurt(damage, invincible) || (fell && !invincible) || scripted {
             session.stage.log("player killed".into());
             World::kill_player(&mut session.stage, false, true, 0.);
             World::fade(&mut session.stage, [0.; 3], 1., 1.5);
@@ -2882,6 +2963,7 @@ impl NaughtyDogVm {
         }
         // The player fires the held weapon along the camera's view: left
         // button (held for automatic weapons), R reloads.
+        let forced = std::mem::take(&mut session.forced_fire);
         let Some(weapon_id) = session.game.as_ref().and_then(|g| g.rt.inner.current_weapon) else { return };
         let weapon = data.weapons.get(&weapon_id).cloned();
         let clip = weapon.as_ref().map_or(12, |w| w.clip.max(1));
@@ -2901,7 +2983,7 @@ impl NaughtyDogVm {
             }
         }
         gun.cooldown -= dt;
-        let trigger = if weapon.as_ref().is_some_and(|w| w.automatic) { input.buttons_down & b::MOUSE_LEFT != 0 } else { input.buttons_pressed & b::MOUSE_LEFT != 0 };
+        let trigger = forced || if weapon.as_ref().is_some_and(|w| w.automatic) { input.buttons_down & b::MOUSE_LEFT != 0 } else { input.buttons_pressed & b::MOUSE_LEFT != 0 };
         if !trigger || gun.cooldown > 0. || gun.reloading > 0. || !controls {
             return;
         }
@@ -2909,7 +2991,11 @@ impl NaughtyDogVm {
             gun.reloading = 1.5;
             return;
         }
-        gun.ammo -= 1;
+        let no_reload = session.game.as_ref().is_some_and(|g| g.rt.setting(crate::ss::player_natives::SETTING_NO_RELOAD).is_some() || g.rt.setting(crate::ss::player_natives::SETTING_INFINITE_AMMO).is_some_and(|v| v != 0));
+        let gun = &mut session.player_gun;
+        if !no_reload {
+            gun.ammo -= 1;
+        }
         gun.cooldown = weapon.as_ref().map_or(0.25, |w| w.interval.max(0.05));
         let Some((eye, forward, up, _)) = session.stage.camera_view else { return };
         let (eye, forward, up) = (glam::Vec3::from_array(eye), glam::Vec3::from_array(forward).normalize_or(glam::Vec3::Z), glam::Vec3::from_array(up));
@@ -3611,6 +3697,7 @@ impl NaughtyDogVm {
         session.stage.now = (host.now_ms().saturating_sub(session.start_ms)) as f64 / 1000.;
         let key = |m: u64| f32::from(u8::from(input.buttons_down & m != 0));
         session.stage.stick = [key(b::KEY_D) - key(b::KEY_A), key(b::KEY_W) - key(b::KEY_S)];
+        session.stage.read_pad(input);
         if let Some(c) = session.stage.controls.take() {
             if let Some(p) = &mut session.player {
                 p.controls = c;
@@ -3627,6 +3714,42 @@ impl NaughtyDogVm {
             session.camera.step(input, seconds);
             world.push(session.camera.op());
         } else if let Some(p) = &mut session.player {
+            // Script requests (`crate::ss::player_natives::PlayerRequest`).
+            let (mut forced_climb, mut forced_drop, mut forced_jump) = (false, false, false);
+            let mut hide = false;
+            for request in std::mem::take(&mut session.stage.player_requests) {
+                use crate::ss::player_natives::PlayerRequest as R;
+                match request {
+                    R::Kill { .. } => session.scripted_death = true,
+                    R::SetHealth(v) => {
+                        session.player_health.value = v.clamp(0., crate::combat::PLAYER_HEALTH);
+                        if v <= 0. {
+                            session.scripted_death = true;
+                        }
+                    }
+                    R::TurnTo(t) | R::JumpAt(t) => {
+                        let d = glam::Vec3::from_array(t) - glam::Vec3::from_array(p.position);
+                        if d.x * d.x + d.z * d.z > 1e-6 {
+                            p.yaw = d.x.atan2(d.z);
+                            if let Some(a) = p.anim.as_mut() {
+                                a.yaw = p.yaw;
+                            }
+                        }
+                        forced_jump |= matches!(request, R::JumpAt(_));
+                    }
+                    R::ClimbUp => forced_climb = true,
+                    R::EdgeFall => forced_drop = true,
+                    R::Unparent => p.platform = None,
+                    R::HideThisFrame => hide = true,
+                    R::Fire => session.forced_fire = true,
+                    R::MeleeDamage(_) => session.melee_damage += MELEE_DAMAGE,
+                    R::Ragdoll => session.stage.log("player-go-ragdoll: no ragdoll".into()),
+                }
+            }
+            if hide != session.player_hidden {
+                session.player_hidden = hide;
+                World::set_visible(&mut session.stage, sid("player"), !hide);
+            }
             let down = |m| input.buttons_down & m != 0;
             let turn = 1.8 * seconds;
             if down(b::LEFT) {
@@ -3718,6 +3841,8 @@ impl NaughtyDogVm {
                 }
                 release = input.buttons_pressed & b::KEY_C != 0 || p.grip.is_some_and(|g| session.ground.edge(g.body, g.edge).is_none());
             }
+            climb |= forced_climb && mode == crate::player::Mode::Hang;
+            release |= forced_drop && mode == crate::player::Mode::Hang;
             let reach = glam::Vec3::from_array(p.position) + glam::Quat::from_rotation_y(p.yaw) * HANG_REACH;
             let candidate = if mode == crate::player::Mode::Ground && p.regrab <= 0. && p.fall > -1. && (p.air_top.is_some() || p.fall > 0.) {
                 session
@@ -3733,7 +3858,11 @@ impl NaughtyDogVm {
             // Cover (Ctrl): the nearest cover point within 1.2 m on the
             // ground; Ctrl or a jump leaves it. The cover key is not the
             // native control scheme (SATD-nd-retail-runtime).
-            let ctrl = input.buttons_pressed & b::CTRL != 0 && p.controls;
+            use crate::ss::player_natives as pn;
+            let setting = |id: u32| session.game.as_ref().and_then(|g| g.rt.setting(id));
+            let (no_jump, no_cover) = (setting(pn::SETTING_DISABLE_JUMP).is_some(), setting(pn::SETTING_DISABLE_COVER).is_some());
+            let max_fall = setting(pn::SETTING_MAX_FALL_HEIGHT).map_or(pn::DEFAULT_MAX_FALL_HEIGHT, f32::from_bits);
+            let ctrl = input.buttons_pressed & b::CTRL != 0 && p.controls && !no_cover;
             let mut take_cover = None;
             if ctrl && mode == crate::player::Mode::Ground && p.fall >= 0. {
                 let here = glam::Vec3::from_array(p.position);
@@ -3773,7 +3902,7 @@ impl NaughtyDogVm {
                 let wanted = if wanted == 0 { sid(if running { "run" } else { "walk" }) } else { wanted };
                 let frame = crate::player::Frame {
                     heading,
-                    jump: input.buttons_pressed & b::SPACE != 0 && p.controls,
+                    jump: (input.buttons_pressed & b::SPACE != 0 && p.controls && !no_jump) || forced_jump,
                     grounded,
                     dropped,
                     slope,
@@ -3892,6 +4021,11 @@ impl NaughtyDogVm {
             p.platform = None;
             match support.map(|(h, _)| h).filter(|_| !swim) {
                 Some(h) if p.fall >= 0. && h >= p.position[1] - p.fall * seconds - 0.05 => {
+                    // Landing after a drop beyond the maximum fall height
+                    // (`set-player-max-fall-height`, default 8 m) kills.
+                    if p.air_top.is_some_and(|top| top - h > max_fall) {
+                        session.fell = true;
+                    }
                     p.position[1] = h;
                     p.fall = 0.;
                     p.air_top = None;
@@ -3970,8 +4104,31 @@ impl NaughtyDogVm {
             };
             sid(class)
         });
+        let before = session.stage.player_locator.map(|(p, _)| glam::Vec3::from_array(p));
         session.stage.player_locator = session.player.as_ref().map(|p| (p.position, glam::Quat::from_rotation_y(p.yaw).to_array()));
         session.stage.player_support = session.player.as_ref().and_then(|p| p.platform.map(|(b, _)| b).or(p.grip.and_then(|g| g.body)));
+        session.stage.player_speed = session.player.as_ref().map(|p| {
+            let d = before.map_or(glam::Vec3::ZERO, |b| glam::Vec3::from_array(p.position) - b);
+            if seconds > 0. { glam::Vec2::new(d.x, d.z).length() / seconds as f32 } else { 0. }
+        });
+        session.stage.player_hit_age = session.player_health.since_damage;
+        // The grabbable edge nearest the player (`player-get-closest-edge-
+        // locator`), facing out of the wall.
+        session.stage.player_edge = session.player.as_ref().and_then(|p| {
+            let here = glam::Vec3::from_array(p.position) + glam::Vec3::Y;
+            session.ground.edges_near(here, 3.).into_iter()
+                .filter(|(_, e, _)| e.flags == 0 || e.flags & (crate::collision::EDGE_CAN_HANG | crate::collision::EDGE_LADDER) != 0)
+                .map(|(_, e, _)| {
+                    let (a, b) = (e.p0, e.p1);
+                    let ab = b - a;
+                    let t = if ab.length_squared() > 1e-6 { ((here - a).dot(ab) / ab.length_squared()).clamp(0., 1.) } else { 0. };
+                    let at = a + ab * t;
+                    let out = glam::Vec3::new(e.n1.x, 0., e.n1.z).normalize_or(glam::Vec3::Z);
+                    (at.distance(here), at, glam::Quat::from_rotation_arc(glam::Vec3::Z, out))
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, at, q)| (at.to_array(), q.to_array()))
+        });
         if let Some((graph, table)) = session.npc_anim.as_mut() {
             for npc in &mut session.npcs {
                 let Some(clips) = session.npc_clips.get(&npc.rig) else { continue };
