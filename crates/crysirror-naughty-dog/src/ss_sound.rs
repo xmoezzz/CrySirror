@@ -40,6 +40,9 @@ impl Ctx<'_> {
                     if self.world.locator(who).is_none() {
                         self.inner.error(format!("say: Could not find object {who:#010x}."));
                         false
+                    } else if self.inner.game.muted.iter().any(|(o, until)| *o == who && *until > self.world.now()) {
+                        // Muted by `shut-up`.
+                        false
                     } else {
                         self.world.say(who, a[1])
                     }

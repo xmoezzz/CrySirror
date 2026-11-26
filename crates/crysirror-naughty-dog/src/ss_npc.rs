@@ -556,6 +556,272 @@ impl Ctx<'_> {
                     None => Ok(self.missing_npc(name, who)),
                 }
             }
+            _ => self.npc_native2(dc, name, a, n),
+        }
+    }
+
+    /// Record a parameter on the NPC that nothing consumes yet.
+    fn npc_param(&mut self, native: &str, who: u32, value: u32) -> Reply {
+        match self.agent(who) {
+            Some(agent) => {
+                agent.params.insert(sid(native), value);
+                Some((1, Status::Continue))
+            }
+            None => self.missing_npc(native, who),
+        }
+    }
+
+    fn npc_native2(&mut self, dc: &mut Dc, name: &str, a: &[u32; MAX_ARGS], n: usize) -> Result<Reply> {
+        let ok = |v: u32| Ok(Some((v, Status::Continue)));
+        let who = self.arg_or_self(a, n, 0);
+        let arg = |i: usize| if n > i { a[i] } else { 0 };
+        match name {
+            // (wait-npc-use-closest-cover npc [threat] [radius]): walk into
+            // the nearest cover (`sub_299C14`) and wait.
+            "wait-npc-use-closest-cover" => {
+                let Some(from) = self.world.agents_ref().and_then(|x| x.get(who)).map(|x| x.position) else {
+                    self.inner.error(format!("wait-npc-use-closest-cover: Cannot find npc '{who:#010x}'"));
+                    return ok(0);
+                };
+                let threat = if n > 1 && a[1] != 0 { self.world.locator(a[1]).map(|(p, _)| p) } else { self.world.locator(sid("player")).map(|(p, _)| p) };
+                let Some(cover) = self.world.closest_cover(from, threat) else {
+                    self.inner.error("wait-npc-use-closest-cover: Can't find bound frame".into());
+                    return ok(0);
+                };
+                let path = self.world.nav_path(from, cover).unwrap_or_else(|| vec![cover]);
+                if let Some(agent) = self.agent(who) {
+                    agent.order = Some(Order::Cover { path });
+                }
+                if self.proc.is_some() {
+                    return Ok(Some(self.suspend(Wait::Npc(who))));
+                }
+                ok(1)
+            }
+            // (wait-npc-use-scripted-ap npc ap): as `npc-use-scripted-ap`,
+            // waiting until the NPC arrives.
+            "wait-npc-use-scripted-ap" => {
+                let reply = self.npc_native(dc, "npc-use-scripted-ap", a, n)?;
+                if self.proc.is_some() && self.world.agents_ref().and_then(|x| x.get(who)).is_some_and(|x| x.order.is_some()) {
+                    return Ok(Some(self.suspend(Wait::Npc(who))));
+                }
+                Ok(reply)
+            }
+            // (wait-for-npc-not-busy npc): until its scripted order ends.
+            "wait-for-npc-not-busy" => {
+                if !self.has_agent(who) {
+                    self.inner.error(format!("wait-for-npc-not-busy: Can't find npc: {who:#010x}"));
+                    return ok(0);
+                }
+                if self.proc.is_none() {
+                    self.inner.error("wait-for-npc-not-busy: Called outside script context -- will not wait".into());
+                    return ok(0);
+                }
+                Ok(Some(self.suspend(Wait::Npc(who))))
+            }
+            // (npc-update-move-dest npc point): re-path a move order.
+            "npc-update-move-dest" => {
+                if n < 2 || a[1] == 0 {
+                    return ok(0);
+                }
+                let to = Self::vec3(dc, a[1])?;
+                let from = self.world.agents_ref().and_then(|x| x.get(who)).map(|x| x.position);
+                let path = from.and_then(|f| self.world.nav_path(f, to)).unwrap_or_else(|| vec![to]);
+                match self.agent(who) {
+                    Some(agent) => {
+                        if let Some(Order::Move { path: p, .. }) = agent.order.as_mut() {
+                            *p = path;
+                        }
+                    }
+                    None => return Ok(self.missing_npc(name, who)),
+                }
+                ok(0)
+            }
+            // (npc-hunt npc target location): run to the location, aware of
+            // the target.
+            "npc-hunt" => {
+                if n < 3 || a[2] == 0 {
+                    self.inner.error("npc-hunt: No location specified".into());
+                    return ok(0);
+                }
+                let to = match self.world.locator(a[2]) {
+                    Some((p, _)) => p,
+                    None => Self::vec3(dc, a[2])?,
+                };
+                let reply = self.order_move(name, who, to, Motion::Run, Goal::Stop, None, 1., false);
+                if let Some(agent) = self.agent(who) {
+                    agent.knowledge = npc::KNOWLEDGE_COMBAT;
+                    agent.prefer_target = Some(a[1]);
+                }
+                Ok(reply)
+            }
+            // (npc-aim-at npc point): turn toward the point.
+            "npc-aim-at" => {
+                if n < 2 || a[1] == 0 {
+                    self.inner.error("npc-aim-at: Expected two arguments (npc-id symbol) (pos vector)".into());
+                    return ok(0);
+                }
+                let to = Self::vec3(dc, a[1])?;
+                match self.agent(who) {
+                    Some(agent) => {
+                        let d = glam::Vec3::from_array(to) - glam::Vec3::from_array(agent.position);
+                        if d.x * d.x + d.z * d.z > 1e-6 {
+                            agent.yaw = d.x.atan2(d.z);
+                        }
+                    }
+                    None => return Ok(self.missing_npc(name, who)),
+                }
+                ok(0)
+            }
+            "npc-set-perfect-aim" => {
+                match self.agent(who) {
+                    Some(agent) => agent.perfect_aim = n < 2 || a[1] != 0,
+                    None => return Ok(self.missing_npc(name, who)),
+                }
+                ok(0)
+            }
+            "npc-lower-weapon" => {
+                match self.agent(who) {
+                    Some(agent) => agent.weapon_lowered = true,
+                    None => return Ok(self.missing_npc(name, who)),
+                }
+                ok(0)
+            }
+            // Unaware (ambient knowledge).
+            "npc-set-ambient" => {
+                match self.agent(who) {
+                    Some(agent) => agent.knowledge = npc::KNOWLEDGE_UNAWARE,
+                    None => return Ok(self.missing_npc(name, who)),
+                }
+                ok(0)
+            }
+            // The player's faction (`set-object-faction` 0).
+            "npc-set-to-player-faction" => {
+                if let Some(agent) = self.agent(who) {
+                    agent.faction = Some(0);
+                }
+                ok(0)
+            }
+            // Fired within the last second.
+            "npc-fired-recently?" => {
+                let now = self.world.now();
+                ok(u32::from(self.world.agents_ref().and_then(|x| x.get(who)).is_some_and(|x| now - x.last_shot < 1.)))
+            }
+            "npc-reload-weapon" => {
+                match self.agent(who) {
+                    Some(agent) => agent.gun.reloading = 2.,
+                    None => return Ok(self.missing_npc(name, who)),
+                }
+                ok(1)
+            }
+            // (npc-has-confirmed-status? npc status): in combat.
+            "npc-has-confirmed-status?" => ok(u32::from(self.world.agents_ref().and_then(|x| x.get(who)).is_some_and(|x| x.in_combat()))),
+            // (npc-using-skill? npc skill): only the scripted skill runs
+            // orders here.
+            "npc-using-skill?" => ok(u32::from(self.world.agents_ref().and_then(|x| x.get(who)).is_some_and(|x| x.order.is_some()))),
+            "npc-entered-action-pack?" => ok(u32::from(self.world.agents_ref().and_then(|x| x.get(who)).is_some_and(|x| x.ap.is_some() && x.order.is_none()))),
+            "npc-is-in-scripted-anim?" | "npc-playing-scripted-animation?" => ok(u32::from(self.world.animation_phase(who).is_some())),
+            "npc-in-melee-with-player?" => ok(0),
+            // (npc-is-nav-map-position-blocked? npc frame): no nav path to
+            // the point.
+            "npc-is-nav-map-position-blocked?" => {
+                if n < 2 || a[1] == 0 {
+                    self.inner.error("npc-is-nav-map-position-blocked?: Expected two arguments (npc-name symbol) (pos bound-frame)".into());
+                    return ok(0);
+                }
+                let to = Self::vec3(dc, a[1])?;
+                let from = self.world.agents_ref().and_then(|x| x.get(who)).map(|x| x.position);
+                ok(u32::from(from.is_some_and(|f| self.world.nav_path(f, to).is_none())))
+            }
+            // (npcs-get-player-position): the player's frame as the NPCs
+            // know it (their shared knowledge; the player's own here).
+            "npcs-get-player-position" => match self.world.locator(sid("player")) {
+                Some((p, q)) => ok(crate::ss::rail_natives::alloc_frame(dc, p, q)?),
+                None => ok(0),
+            },
+            // Shots: (fire-weapon-at-target shooter target …),
+            // (fire-weapon shooter …), (npc-fire-weapon npc),
+            // (emit-bullet-from-spawner spawner target …).
+            "fire-weapon-at-target" | "emit-bullet-from-spawner" => {
+                if n < 2 || a[0] == 0 || a[1] == 0 {
+                    return ok(0);
+                }
+                let target = if self.world.locator(a[1]).is_some() { crate::vehicle::Target::Object(a[1]) } else { crate::vehicle::Target::Point(Self::vec3(dc, a[1])?) };
+                self.world.scripted_shot(a[0], target);
+                ok(1)
+            }
+            "fire-weapon" | "npc-fire-weapon" => {
+                let target = self.world.agents_ref().and_then(|x| x.get(who)).and_then(|x| x.prefer_target).unwrap_or(sid("player"));
+                self.world.scripted_shot(who, crate::vehicle::Target::Object(target));
+                ok(1)
+            }
+            // Grenades: (throw-grenade source destination …) between two
+            // points; NPCs throw at the player.
+            "throw-grenade" => {
+                if n < 3 || a[1] == 0 || a[2] == 0 {
+                    self.inner.error("throw-grenade: no destination position specified".into());
+                    return ok(0);
+                }
+                let (from, to) = (Self::vec3(dc, a[1])?, Self::vec3(dc, a[2])?);
+                self.world.throw_grenade(from, to);
+                ok(1)
+            }
+            "npc-throw-grenade-at-player" | "npc-cover-throw-grenade-anim" | "throw-sla-grenade" => {
+                let (Some((from, _)), Some((to, _))) = (self.world.locator(who), self.world.locator(sid("player"))) else { return ok(0) };
+                self.world.throw_grenade([from[0], from[1] + 1.6, from[2]], to);
+                ok(1)
+            }
+            // (spawn-explosion-npc-only kind locator …).
+            "spawn-explosion-npc-only" => {
+                if n < 2 || a[1] == 0 {
+                    self.inner.error("spawn-explosion failed! -- no valid position".into());
+                    return ok(0);
+                }
+                let at = Self::vec3(dc, a[1])?;
+                self.world.npc_blast(at);
+                ok(0)
+            }
+            // (npc-swap-with-ragdoll npc): the NPC dies (no ragdoll).
+            "npc-swap-with-ragdoll" => {
+                if !self.world.npc_die(who) {
+                    return Ok(self.missing_npc(name, who));
+                }
+                self.world.set_visible(who, false);
+                ok(1)
+            }
+            // Every NPC not of the player's faction dies.
+            "all-enemy-npcs-die" => {
+                let enemies: Vec<u32> = self.world.agents_ref().map(|x| x.agents.iter().filter(|(_, ag)| ag.faction != Some(0)).map(|(k, _)| *k).collect()).unwrap_or_default();
+                for e in enemies {
+                    self.world.npc_die(e);
+                    self.world.set_visible(e, false);
+                }
+                ok(0)
+            }
+            // (set-object-health object fraction): hit points = fraction ×
+            // the maximum (health system virtuals +0x28, +0x10).
+            "set-object-health" => {
+                if n == 0 || a[0] == 0 {
+                    self.inner.error("set-object-health: Expected: (object-name string)".into());
+                    return ok(0);
+                }
+                let fraction = if n > 1 { f32::from_bits(a[1]) } else { 1. };
+                match self.agent(who) {
+                    Some(agent) => {
+                        agent.hit_points = agent.max_hit_points * fraction.clamp(0., 1.);
+                        agent.health = fraction.clamp(0., 1.);
+                    }
+                    None => {
+                        self.inner.error(format!("set-object-health: Object '{who:#010x}' was not of type npc"));
+                        return ok(0);
+                    }
+                }
+                ok(0)
+            }
+            // Recorded without a consumer.
+            "npc-laz-set-param" | "npc-change-vision-settings" | "npc-sniper-set-watch-area" | "npc-set-guard-radio-delay" | "npc-use-cap" | "npc-attach-to-battle-manager"
+            | "npc-change-sniper-params" | "npc-enable-hit-reactions" | "npc-set-buddy-sniper-hide-time" | "npc-show-hit-effects" | "npc-set-cover-advance-spline"
+            | "npc-remove-traversal-skill" | "npc-set-comm-group-id" | "npc-set-lead-drake-spline" | "npc-take-weapon" => Ok(self.npc_param(name, who, arg(1))),
+            "npc-disable-deal-no-damage-when-offscreen" => ok(0),
             _ => Ok(None),
         }
     }

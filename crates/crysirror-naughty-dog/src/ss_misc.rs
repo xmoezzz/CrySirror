@@ -31,6 +31,14 @@ pub struct GameState {
     pub material_params: Vec<((u32, u32), Vec<f32>)>,
     /// Messages posted (`spawn-message` text id and arguments).
     pub messages: Vec<(u32, u32, u32)>,
+    /// Speech muted until (world seconds) by object (`shut-up`), and idle
+    /// chatter suppressed until (`suppress-idle-speech`).
+    pub muted: Vec<(u32, f64)>,
+    pub idle_speech_until: f64,
+    /// Contextual look targets offered by state scripts.
+    pub contextual: Vec<u32>,
+    /// Flags recorded without a consumer, by native name `StringId`.
+    pub flags: std::collections::BTreeMap<u32, u32>,
 }
 
 impl Ctx<'_> {
@@ -340,7 +348,178 @@ impl Ctx<'_> {
                 self.world.kill(who);
                 ok(1)
             }
+            _ => self.misc_native2(dc, name, a, n),
+        }
+    }
+
+    fn misc_native2(&mut self, dc: &mut Dc, name: &str, a: &[u32; MAX_ARGS], n: usize) -> Result<Reply> {
+        let ok = |v: u32| Ok(Some((v, Status::Continue)));
+        let f = |i: usize, default: f32| if n > i { f32::from_bits(a[i]) } else { default };
+        let object = |ctx: &Self, i: usize| -> u32 {
+            let name = if n > i { a[i] } else { sid("self") };
+            let name = if name == sid("self") { ctx.proc.map_or(name, |p| ctx.inner.procs[p].name) } else { name };
+            ctx.inner.process(name).and_then(|p| ctx.inner.procs[p].spawner).unwrap_or(name)
+        };
+        match name {
+            // (attach-flashlight object joint index r g b …): a spot light
+            // on the joint (radius 15 m, 30° cone: not native values).
+            "attach-flashlight" => {
+                if n < 2 {
+                    self.inner.error("attach-flashlight: Expected at least two args: (object-name string) (joint-name string) (flashlight-index int32) (r float) (g float) (b float)".into());
+                    return ok(0);
+                }
+                let who = object(self, 0);
+                if self.world.locator(who).is_none() {
+                    self.inner.error(format!("attach-flashlight: Unable to find game object '{who:#010x}'."));
+                    return ok(0);
+                }
+                let light = flashlight_id(who, if n > 2 { a[2] } else { 0 });
+                self.world.add_dynamic_light(light, super::LightLocator::Joint { object: who, joint: a[1] }, FLASHLIGHT_RADIUS, FLASHLIGHT_CONE, true);
+                if n > 5 {
+                    self.world.dynamic_light_color(light, [f(3, 1.), f(4, 1.), f(5, 1.)], 1.);
+                }
+                ok(1)
+            }
+            // (turn-on-flashlight object on) / (kill-flashlight object).
+            "turn-on-flashlight" | "kill-flashlight" => {
+                let who = object(self, 0);
+                if self.world.locator(who).is_none() {
+                    self.inner.error(format!("turn-on-flashlight: Unable to find game object '{who:#010x}'."));
+                    return ok(0);
+                }
+                let light = flashlight_id(who, 0);
+                let on = name == "turn-on-flashlight" && (n < 2 || a[1] != 0);
+                if on {
+                    self.world.add_dynamic_light(light, super::LightLocator::Joint { object: who, joint: sid("headlight") }, FLASHLIGHT_RADIUS, FLASHLIGHT_CONE, true);
+                } else {
+                    self.world.remove_dynamic_light(light);
+                }
+                ok(1)
+            }
+            // (look-at character point [blend]): head look (presentation;
+            // the point form keeps the target object's form off).
+            "look-at" => {
+                if n < 2 || a[0] == 0 || a[1] == 0 {
+                    self.inner.error("look-at: Expected at least two arguments (character-name world-point)".into());
+                    return ok(0);
+                }
+                let who = object(self, 0);
+                if self.world.locator(who).is_none() {
+                    self.inner.error(format!("look-at: Unable to find character '{who:#010x}'"));
+                    return ok(0);
+                }
+                self.world.look_at(who, None);
+                ok(1)
+            }
+            // (cutscene-hide-actor name).
+            "cutscene-hide-actor" => {
+                let who = object(self, 0);
+                self.world.set_visible(who, false);
+                ok(0)
+            }
+            // (shut-up object [seconds]): stop speaking, muted that long.
+            "shut-up" => {
+                if n == 0 || a[0] == 0 {
+                    self.inner.error("shut-up: Expected at least one argument (object-name symbol) (seconds float)".into());
+                    return ok(0);
+                }
+                let who = object(self, 0);
+                self.world.stop_speaking(who);
+                let until = self.world.now() + f64::from(f(1, 0.));
+                self.inner.game.muted.retain(|(o, _)| *o != who);
+                self.inner.game.muted.push((who, until));
+                ok(0)
+            }
+            "suppress-idle-speech" => {
+                if n == 0 {
+                    self.inner.error("suppress-idle-speech: Expected one argument (seconds float)".into());
+                    return ok(0);
+                }
+                self.inner.game.idle_speech_until = self.world.now() + f64::from(f(0, 0.));
+                ok(0)
+            }
+            // (group-spawned-count group).
+            "group-spawned-count" => {
+                let group = if n > 0 { a[0] } else { 0 };
+                if !dc.symbols.contains_key(&group) {
+                    self.inner.error(format!("group-spawned-count: Unknown group '{group:#010x}'"));
+                    return ok(0);
+                }
+                let members = Self::group_members(dc, group)?;
+                ok(members.iter().filter(|m| self.world.object_spawned(**m)).count() as u32)
+            }
+            // (battle-select-best-spawner-from-group group …): the first
+            // member not yet spawned (the native scoring is not decoded).
+            "battle-select-best-spawner-from-group" => {
+                let members = Self::group_members(dc, if n > 0 { a[0] } else { 0 })?;
+                ok(members.iter().copied().find(|m| !self.world.object_spawned(*m)).or(members.first().copied()).unwrap_or(0))
+            }
+            // (entity-alive? name): spawned and not a killed NPC.
+            "entity-alive?" => {
+                let who = object(self, 0);
+                ok(u32::from(self.world.object_spawned(who) && !self.world.npc_killed(who)))
+            }
+            "entity-name" => ok(0),
+            // (swap-entity process spawner): the process's object goes, the
+            // spawner's comes.
+            "swap-entity" => {
+                if n < 2 {
+                    self.inner.error("swap-entity: needs two arguments".into());
+                    return ok(0);
+                }
+                let out = object(self, 0);
+                self.world.kill(out);
+                if !self.world.spawn(a[1]) {
+                    self.inner.error(format!("swap-entity: FAILED to spawn {:#010x}", a[1]));
+                    return ok(0);
+                }
+                ok(1)
+            }
+            // (translate-y-loop object speed min max): each call moves the
+            // object up by speed × frame time, back to `min` past `max`.
+            "translate-y-loop" => {
+                let who = object(self, 0);
+                let Some((mut p, q)) = self.world.locator(who) else {
+                    self.inner.error(format!("get-object-locator: Object '{who:#010x}' was not found, is not a ProcessGameObject or has a NULL GameObject"));
+                    return ok(0);
+                };
+                let (speed, min, max) = (f(1, 0.), f(2, 0.), f(3, 0.));
+                p[1] += speed * self.world.frame_seconds();
+                if p[1] > max {
+                    p[1] = min;
+                }
+                self.world.place(who, p, q);
+                ok(0)
+            }
+            // Contextual look offers from state scripts.
+            "offer-contextual-entity" | "offer-contextual-process" | "remove-contextual-entity" => {
+                if self.proc.is_none() {
+                    self.inner.error(format!("{name}: Called from outside state script context, ignored"));
+                    return ok(0);
+                }
+                let me = object(self, usize::MAX);
+                self.inner.game.contextual.retain(|c| *c != me);
+                if name != "remove-contextual-entity" {
+                    self.inner.game.contextual.push(me);
+                }
+                ok(0)
+            }
+            // No dropped weapons or attachables are simulated.
+            "kill-all-attachables" | "kill-all-dropped-weapons" | "kill-dropped-weapons-in-sphere" | "reset-actors" => ok(0),
+            // Physics, IK and snow effects recorded without a consumer.
+            "apply-explosion-impulse" | "predict-on-physics-driven" | "freeze-binding-when-non-physical" | "allow-leg-ik-by-others" | "disallow-leg-ik-by-others"
+            | "set-off-balance-by-spawner" | "set-state-character-accumulates-snow-from-ground" | "spawn-snow-disturb" | "set-focusable-ignore" | "set-focusable-grappled" => {
+                self.inner.game.flags.insert(sid(name), if n > 0 { a[0] } else { 1 });
+                ok(0)
+            }
             _ => Ok(None),
         }
     }
 }
+
+/// Flashlight light handles (an object and its flashlight index).
+fn flashlight_id(object: u32, index: u32) -> u32 {
+    object.rotate_left(5) ^ 0x464c_0000 ^ index
+}
+const FLASHLIGHT_RADIUS: f32 = 15.;
+const FLASHLIGHT_CONE: f32 = 30.;

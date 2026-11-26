@@ -372,6 +372,14 @@ pub trait World {
     fn pad_buttons(&self, _pad: u32) -> [u32; 3] {
         [0; 3]
     }
+    /// A scripted shot from `shooter` at an object or point
+    /// (`fire-weapon-at-target`, `emit-bullet-from-spawner`, …); resolved
+    /// by the combat step.
+    fn scripted_shot(&mut self, _shooter: u32, _target: crate::vehicle::Target) {}
+    /// A grenade thrown from `from` to land at `to`.
+    fn throw_grenade(&mut self, _from: [f32; 3], _to: [f32; 3]) {}
+    /// An explosion that damages NPCs only (`spawn-explosion-npc-only`).
+    fn npc_blast(&mut self, _at: [f32; 3]) {}
 }
 
 /// Options of `(animate object clip key value …)`. The keys seen in the

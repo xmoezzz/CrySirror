@@ -322,8 +322,12 @@ struct Stage {
     vehicles: crate::vehicle::Vehicles,
     /// Objects moving along splines: trackers, train cars, rail vehicles.
     followers: crate::follow::Followers,
-    /// Shell and missile impacts awaiting damage (`step_combat`).
+    /// Shell and missile impacts awaiting damage (`step_combat`), blasts
+    /// that hurt NPCs only, scripted shots and grenades in flight.
     blasts: Vec<[f32; 3]>,
+    npc_blasts: Vec<[f32; 3]>,
+    script_shots: Vec<(u32, crate::vehicle::Target)>,
+    grenades: Vec<crate::vehicle::Projectile>,
     /// The player's native state class (`player-in-state?`).
     player_state: Option<u32>,
     /// `kill-player-no-anim` requested: ragdoll, death camera, delay.
@@ -643,6 +647,19 @@ impl Stage {
             World::place(self, name, p, q.to_array());
         }
         self.followers = followers;
+    }
+
+    /// Grenades land after their flight and explode.
+    fn step_grenades(&mut self, seconds: f32) {
+        for g in &mut self.grenades {
+            g.eta -= seconds.clamp(0., 0.25);
+        }
+        let (landed, flying): (Vec<_>, Vec<_>) = std::mem::take(&mut self.grenades).into_iter().partition(|g| g.eta <= 0.);
+        self.grenades = flying;
+        for g in landed {
+            World::spawn_explosion(self, sid("gren-explosion-01"), g.to, [0., 0., 0., 1.]);
+            self.blasts.push(g.to);
+        }
     }
 
     fn step_vehicles(&mut self, seconds: f32) {
@@ -1132,6 +1149,17 @@ impl World for Stage {
     fn player_request(&mut self, request: crate::ss::player_natives::PlayerRequest) {
         self.player_requests.push(request);
     }
+    fn scripted_shot(&mut self, shooter: u32, target: crate::vehicle::Target) {
+        self.script_shots.push((shooter, target));
+    }
+    fn throw_grenade(&mut self, from: [f32; 3], to: [f32; 3]) {
+        let d = glam::Vec3::from_array(from).distance(glam::Vec3::from_array(to));
+        self.grenades.push(crate::vehicle::Projectile { from, to, eta: (d / GRENADE_SPEED).max(GRENADE_FUSE), missile: false });
+    }
+    fn npc_blast(&mut self, at: [f32; 3]) {
+        World::spawn_explosion(self, sid("gren-explosion-01"), at, [0., 0., 0., 1.]);
+        self.npc_blasts.push(at);
+    }
     fn spawned_of_type(&self, kind: u32) -> Vec<u32> {
         self.spawners.iter().filter(|(n, s)| s.process_type == kind && self.visible.contains(n)).map(|(n, _)| *n).collect()
     }
@@ -1447,6 +1475,9 @@ const BLAST_RADIUS: f32 = 6.;
 const BLAST_DAMAGE: f32 = 80.;
 /// `player-take-melee-damage` hit points (of 100); not native.
 const MELEE_DAMAGE: f32 = 25.;
+/// Grenade flight speed (m/s) and the shortest fuse (s); not native.
+const GRENADE_SPEED: f32 = 12.;
+const GRENADE_FUSE: f32 = 1.5;
 const EFFECT_RANGE: f32 = 80.;
 /// Particle modules resident in game (the effect groups of 
 /// `train-wreck`'s fire spawners live in `particle-u2-gameparts`; the
@@ -2917,20 +2948,56 @@ impl NaughtyDogVm {
                         let to = chest - eye;
                         a.yaw = to.x.atan2(to.z);
                     }
-                    if !a.config.shooting_disabled && a.bound.is_none() {
+                    if !a.config.shooting_disabled && !a.weapon_lowered && a.bound.is_none() {
                         shot = a.gun.step(dt, weapon, skill, &mut draw);
+                        if shot {
+                            a.last_shot = session.stage.now;
+                        }
                     }
                 }
             }
-            if shot && Self::combat_random(session) < hit_chance(distance, vision, agent.accuracy_multiplier, exposed) {
+            if shot && (agent.perfect_aim || Self::combat_random(session) < hit_chance(distance, vision, agent.accuracy_multiplier, exposed)) {
                 damage += data.player_damage[1] * agent.config.shot_damage_multiplier;
             }
         }
-        // Shell and missile blasts: linear falloff to BLAST_RADIUS.
-        for blast in std::mem::take(&mut session.stage.blasts) {
+        // Scripted shots hit their target: the player takes an NPC
+        // bullet, an NPC a pistol bullet of its damage class.
+        for (shooter, target) in std::mem::take(&mut session.stage.script_shots) {
+            let point = match target {
+                crate::vehicle::Target::Object(o) if o == sid("player") => {
+                    damage += data.player_damage[1];
+                    if let Some(a) = session.stage.agents.get_mut(shooter) {
+                        a.last_shot = session.stage.now;
+                    }
+                    continue;
+                }
+                crate::vehicle::Target::Object(o) => session.stage.agents.get(o).map(|a| (o, a.position)),
+                crate::vehicle::Target::Point(_) => None,
+            };
+            if let Some((name, _)) = point {
+                let class = session.stage.agents.get(name).and_then(|a| data.archetypes.get(&a.archetype)).map_or(sid("medium-class"), |a| a.damage_class);
+                let dealt = data.damage(sid("pistol-semi-a"), class) as f32;
+                let killed = session.stage.agents.get_mut(name).is_some_and(|a| {
+                    if a.can_be_hit {
+                        a.hit_points -= dealt;
+                        a.health = (a.hit_points / a.max_hit_points).clamp(0., 1.);
+                    }
+                    a.hit_points <= 0. && a.can_die
+                });
+                if killed {
+                    World::npc_die(&mut session.stage, name);
+                    World::set_visible(&mut session.stage, name, false);
+                    session.stage.agents.agents.remove(&name);
+                }
+            }
+        }
+        let npc_only: Vec<[f32; 3]> = std::mem::take(&mut session.stage.npc_blasts);
+        // Shell, missile and grenade blasts: linear falloff to
+        // BLAST_RADIUS; NPC-only blasts spare the player.
+        for (blast, npc_only) in std::mem::take(&mut session.stage.blasts).into_iter().map(|b| (b, false)).chain(npc_only.into_iter().map(|b| (b, true))) {
             let at = glam::Vec3::from_array(blast);
             let d = at.distance(foot + glam::Vec3::Y);
-            if d < BLAST_RADIUS {
+            if d < BLAST_RADIUS && !npc_only {
                 damage += BLAST_DAMAGE * (1. - d / BLAST_RADIUS);
             }
             let hit: Vec<u32> = session.stage.agents.agents.iter().filter(|(_, a)| a.can_be_hit && glam::Vec3::from_array(a.position).distance(at) < BLAST_RADIUS).map(|(n, _)| *n).collect();
@@ -4160,6 +4227,7 @@ impl NaughtyDogVm {
         session.stage.step_agents(seconds as f32);
         session.stage.step_vehicles(seconds as f32);
         session.stage.step_followers(seconds as f32);
+        session.stage.step_grenades(seconds as f32);
         self.step_combat(session, &input, seconds as f32);
         // Region enter/exit scripts for the player (`sub_115828`).
         if session.player.is_some() {

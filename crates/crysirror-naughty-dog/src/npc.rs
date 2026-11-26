@@ -182,6 +182,16 @@ pub struct Agent {
     pub patrol: Option<(u32, f32, f32)>,
     /// Combat cover was sought.
     pub took_cover: bool,
+    /// `npc-set-perfect-aim`: every shot hits.
+    pub perfect_aim: bool,
+    /// `npc-lower-weapon`: holds fire until combat resumes.
+    pub weapon_lowered: bool,
+    /// When the NPC last fired (world seconds; `npc-fired-recently?`).
+    pub last_shot: f64,
+    /// Script parameters recorded without a consumer (vision settings,
+    /// sniper areas, radio delays, comm groups, lead/advance splines,
+    /// hit reactions, …) by native name `StringId`.
+    pub params: std::collections::BTreeMap<u32, u32>,
 }
 
 impl Agent {
@@ -216,6 +226,10 @@ impl Agent {
             gun: crate::combat::Gun { ammo: 30, ..Default::default() },
             patrol: None,
             took_cover: false,
+            perfect_aim: false,
+            weapon_lowered: false,
+            last_shot: f64::NEG_INFINITY,
+            params: std::collections::BTreeMap::new(),
         }
     }
 
