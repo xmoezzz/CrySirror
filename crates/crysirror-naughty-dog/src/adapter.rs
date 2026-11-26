@@ -1657,6 +1657,8 @@ struct Effect {
 /// distance beyond which effects sleep. The native particle pass culls
 /// spawners per frame (`sub_76BC28`); its criteria are not decoded.
 const MAX_EFFECTS: usize = 96;
+/// Task nodes of the boot sequence (no checkpoints).
+const BOOT_NODES: &[&str] = &["pre-game", "main-menu"];
 /// Shell and missile blast radius (m) and the player damage at its centre
 /// (hit points of 100); NPCs take 1.5× their maximum there. Not native.
 const BLAST_RADIUS: f32 = 6.;
@@ -1767,6 +1769,7 @@ fn movie_seconds(reader: &dyn AssetReader) -> Result<f64> {
 }
 
 /// Boot-sequence screens drawn by the player.
+#[derive(Debug)]
 enum Ui {
     /// `TaskManagerMessageDialog`: dismissed with Enter.
     Message(String),
@@ -2850,7 +2853,7 @@ impl NaughtyDogVm {
                             (f.contains("-trans") || f.contains("-mask")) && !f.contains("normal") && !f.contains("height")
                         });
                         let colour = found.iter().copied().find(|d| file(d).contains("-color")).or_else(|| if opacity.is_none() { found.first().copied() } else { None });
-                        session.particle_roles.insert(key, format!("{} blend {:?} colour {} opacity {}", m.name, m.blend, colour.map_or("-".into(), file), opacity.map_or("-".into(), file)));
+                        session.particle_roles.insert(key, format!("{} blend {:?} soft {:?} colour {} opacity {}", m.name, m.blend, m.depth_blend, colour.map_or("-".into(), file), opacity.map_or("-".into(), file)));
                         if colour.is_none() && opacity.is_none() {
                             m.samplers.clear();
                             resolved.insert(key, m);
@@ -2984,8 +2987,7 @@ impl NaughtyDogVm {
             let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
             session.next_model += 1;
             let id = 0x100 + session.next_model;
-            let role = session.particle_roles.get(&effect.material).cloned().unwrap_or_default();
-            let entity = json!({"id": id, "name": format!("{label}:{} [{role}]", effect.name), "visible": true, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system});
+            let entity = json!({"id": id, "name": format!("{label}:{}", effect.name), "visible": true, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system});
             session.effects.push(Effect { id, spawner: owner, at: translation, entity, live: false });
             placed += 1;
         }
@@ -4808,6 +4810,9 @@ impl NaughtyDogVm {
                         Some(MenuAction::Continue) => {
                             let path = VfsPath::new(Mount::Save, crate::save::PATH);
                             let saved = path.ok().and_then(|p| host.read(self.client, &p).ok()).and_then(|b| crate::save::Progress::from_bytes(&b).ok());
+                            // A checkpoint inside the boot nodes (written by
+                            // an earlier build) is not resumed.
+                            let saved = saved.filter(|p| session.game.as_ref().is_none_or(|g| !g.rt.inner.tasks.nodes.iter().any(|n| p.task.is_some_and(|t| sid(&n.name) == t.0) && BOOT_NODES.contains(&n.name.as_str()))));
                             if let (Some(progress), Some(game)) = (saved, session.game.as_mut()) {
                                 match progress.restore(&mut game.rt) {
                                     Ok(task) => {
@@ -4857,8 +4862,10 @@ impl NaughtyDogVm {
         host.submit_engine(self.client, 1, &serde_json::to_vec(&json!({"layers": layers, "world": world}))?)?;
         if let Some(at) = change {
             self.change_task(host, session, at)?;
-            // Every story task start is a checkpoint.
-            let story = session.plan.as_ref().is_some_and(|p| !p.menu) && session.movie.is_none() && session.ui.is_none();
+            // Every story task start is a checkpoint; the boot nodes
+            // (`pre-game`, `main-menu`) are not story.
+            let boot = session.game.as_ref().and_then(|g| g.rt.inner.tasks.nodes.get(at.0)).is_some_and(|n| BOOT_NODES.contains(&n.name.as_str()));
+            let story = !boot && session.plan.as_ref().is_some_and(|p| !p.menu) && session.movie.is_none() && session.ui.is_none();
             if story {
                 if let Some(g) = session.game.as_mut() {
                     g.rt.inner.save_requested = true;
@@ -5260,6 +5267,8 @@ impl VmAdapter for NaughtyDogVm {
                         }));
                         v["ground_triangles"] = json!(s.ground.len());
                         v["movie"] = json!(s.movie);
+                        v["ui"] = json!(format!("{:?}", s.ui));
+                        v["has_save"] = json!(s.has_save);
                         v["hud"] = json!({"active": s.stage.hud_active.iter().map(|(k, t)| format!("{k:08x}@{t:.1}")).collect::<Vec<_>>(), "now": s.stage.now, "hidden": s.game.as_ref().is_some_and(|g| g.rt.inner.game.hud_hidden), "known": s.hud_defs.len(), "shown": s.hud_shown});
                         let eye = s.stage.camera_eye.map(glam::Vec3::from_array);
                         let mut near: Vec<(f32, String)> = s.effects.iter().filter(|e| e.live).map(|e| (eye.map_or(0., |c| c.distance(e.at)), e.entity["name"].as_str().unwrap_or("").to_string())).collect();
