@@ -41,7 +41,7 @@ const fn sid_const(s: &[u8]) -> u32 {
     c
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct WeaponDef {
     pub automatic: bool,
     pub class: u32,
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn gun_fires_bursts_then_reloads() {
-        let w = WeaponDef { automatic: true, class: 1, interval: 0.1, clip: 4, bullet: 0, pellets: 1, spread_degrees: 0. };
+        let w = WeaponDef { automatic: true, class: 1, interval: 0.1, clip: 4, pellets: 1, ..Default::default() };
         let s = WeaponSkill { weapon: 0, burst_pause: [0.5, 0.5], burst_shots: [2, 2] };
         let mut g = Gun { ammo: 4, ..Default::default() };
         let mut r = || 0.;
