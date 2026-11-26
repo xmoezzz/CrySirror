@@ -312,6 +312,8 @@ struct Stage {
     vehicles: crate::vehicle::Vehicles,
     /// Objects moving along splines: trackers, train cars, rail vehicles.
     followers: crate::follow::Followers,
+    /// Shell and missile impacts awaiting damage (`step_combat`).
+    blasts: Vec<[f32; 3]>,
     /// The player's native state class (`player-in-state?`).
     player_state: Option<u32>,
     /// `kill-player-no-anim` requested: ragdoll, death camera, delay.
@@ -622,6 +624,15 @@ impl Stage {
             let locate = |o: u32| World::locator(self, o).map(|(p, _)| p);
             let spline = |s: u32, d: f32| World::spline_at(self, s, d).map(|(p, _)| (p, self.splines.get(&s).map_or(0., |s| s.length())));
             v.step(seconds, &locate, &spline);
+            // Muzzle flashes and impacts (effect choices are not native:
+            // the shells' explosion records are not decoded).
+            for m in std::mem::take(&mut v.muzzles) {
+                World::spawn_particles(self, sid("tank-cannon-muzzleflash-03"), m, [0., 0., 0., 1.]);
+            }
+            for (p, _) in std::mem::take(&mut v.impacts) {
+                World::spawn_explosion(self, sid("gren-explosion-01"), p, [0., 0., 0., 1.]);
+                self.blasts.push(p);
+            }
             if (v.position, v.yaw) != before {
                 let q = glam::Quat::from_rotation_y(v.yaw);
                 self.poses.insert(name, glam::Mat4::from_rotation_translation(q, glam::Vec3::from_array(v.position)));
@@ -1362,6 +1373,10 @@ struct Effect {
 /// distance beyond which effects sleep. The native particle pass culls
 /// spawners per frame (`sub_76BC28`); its criteria are not decoded.
 const MAX_EFFECTS: usize = 96;
+/// Shell and missile blast radius (m) and the player damage at its centre
+/// (hit points of 100); NPCs take 1.5× their maximum there. Not native.
+const BLAST_RADIUS: f32 = 6.;
+const BLAST_DAMAGE: f32 = 80.;
 const EFFECT_RANGE: f32 = 80.;
 /// Particle modules resident in game (the effect groups of 
 /// `train-wreck`'s fire spawners live in `particle-u2-gameparts`; the
@@ -2834,6 +2849,28 @@ impl NaughtyDogVm {
             }
             if shot && Self::combat_random(session) < hit_chance(distance, vision, agent.accuracy_multiplier, exposed) {
                 damage += data.player_damage[1] * agent.config.shot_damage_multiplier;
+            }
+        }
+        // Shell and missile blasts: linear falloff to BLAST_RADIUS.
+        for blast in std::mem::take(&mut session.stage.blasts) {
+            let at = glam::Vec3::from_array(blast);
+            let d = at.distance(foot + glam::Vec3::Y);
+            if d < BLAST_RADIUS {
+                damage += BLAST_DAMAGE * (1. - d / BLAST_RADIUS);
+            }
+            let hit: Vec<u32> = session.stage.agents.agents.iter().filter(|(_, a)| a.can_be_hit && glam::Vec3::from_array(a.position).distance(at) < BLAST_RADIUS).map(|(n, _)| *n).collect();
+            for name in hit {
+                let killed = session.stage.agents.get_mut(name).is_some_and(|a| {
+                    let d = glam::Vec3::from_array(a.position).distance(at);
+                    a.hit_points -= a.max_hit_points * (1. - d / BLAST_RADIUS) * 1.5;
+                    a.health = (a.hit_points / a.max_hit_points).clamp(0., 1.);
+                    a.hit_points <= 0. && a.can_die
+                });
+                if killed {
+                    World::npc_die(&mut session.stage, name);
+                    World::set_visible(&mut session.stage, name, false);
+                    session.stage.agents.agents.remove(&name);
+                }
             }
         }
         if session.player_health.hurt(damage, invincible) {

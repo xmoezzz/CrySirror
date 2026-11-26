@@ -106,6 +106,121 @@ impl Ctx<'_> {
                 v.order = Some(Order::Fire { target: Target::Object(a[1]), seconds });
                 Ok(Some(self.suspend(Wait::Vehicle(who))))
             }
+            // (tank-aim-forward tank) / (tank-aim-at-location tank point) /
+            // (tank-aim-at-object tank object): turn the turret; the wait
+            // forms wait until it is aligned.
+            "tank-aim-forward" | "tank-aim-at-location" | "tank-aim-at-object" | "wait-tank-aim-forward" | "wait-tank-aim-at-location" | "wait-tank-aim-at-object" => {
+                let forward = name.ends_with("forward");
+                let (usage, count) = if forward { ("(tank-name)", 1) } else if name.ends_with("location") { ("(tank-name position)", 2) } else { ("(tank-name object-name)", 2) };
+                if !self.tank_args(name, usage, n, count, count) {
+                    return ok(1);
+                }
+                let target = if forward {
+                    None
+                } else if name.ends_with("location") {
+                    if a[1] == 0 {
+                        return ok(1);
+                    }
+                    Some(Target::Point(Self::point(dc, a[1])?))
+                } else {
+                    Some(Target::Object(a[1]))
+                };
+                let wait = name.starts_with("wait-");
+                let Some(v) = self.vehicle(who) else { return ok(1) };
+                v.turret = target;
+                if wait {
+                    v.order = Some(Order::Aim(target));
+                    return Ok(Some(self.suspend(Wait::Vehicle(who))));
+                }
+                ok(0)
+            }
+            // (tank-fire-at-location tank point [pause]) and its wait form
+            // (… [pause] [unused]): aim, fire once, pause (default 1 s).
+            "tank-fire-at-location" | "wait-tank-fire-at-location" => {
+                let wait = name.starts_with("wait-");
+                if !self.tank_args(name, "(tank-name position pause-time)", n, 2, if wait { 4 } else { 3 }) || a[1] == 0 {
+                    return ok(1);
+                }
+                let target = Target::Point(Self::point(dc, a[1])?);
+                let pause = f(2, 1.);
+                let Some(v) = self.vehicle(who) else { return ok(1) };
+                v.order = Some(Order::Cannon { target, pause, fired: false });
+                if wait {
+                    return Ok(Some(self.suspend(Wait::Vehicle(who))));
+                }
+                ok(0)
+            }
+            // (tank-fire tank): one shot now.
+            "tank-fire" => {
+                if n != 1 {
+                    self.inner.error("tank-fire: expected (tank-name)".into());
+                    return ok(1);
+                }
+                let world = &*self.world;
+                let points: Vec<(u32, [f32; 3])> = self.world.vehicles_ref().map(|vs| vs.vehicles.get(&who).and_then(|v| v.turret)).into_iter().flatten().filter_map(|t| match t {
+                    Target::Object(o) => world.locator(o).map(|(p, _)| (o, p)),
+                    Target::Point(_) => None,
+                }).collect();
+                if let Some(v) = self.vehicle(who) {
+                    v.fire_cannon(&|o| points.iter().find(|(k, _)| *k == o).map(|(_, p)| *p));
+                }
+                ok(1)
+            }
+            // (tank-move-to tank position [speed] [accel]).
+            "tank-move-to" => {
+                if !self.tank_args(name, "(tank-name position move-speed accel)", n, 2, 4) || a[1] == 0 {
+                    return ok(1);
+                }
+                let target = Self::point(dc, a[1])?;
+                let speed = f(2, TANK_SPEED);
+                if let Some(v) = self.vehicle(who) {
+                    v.order = Some(Order::MoveTo { target, speed });
+                }
+                ok(0)
+            }
+            // (in-front-of-tank? tank object): the object lies ahead of the
+            // tank's forward axis.
+            "in-front-of-tank?" => {
+                if n < 2 || a[1] == 0 {
+                    return ok(0);
+                }
+                let (Some((t, q)), Some((o, _))) = (self.world.locator(who), self.world.locator(a[1])) else { return ok(0) };
+                let fwd = glam::Quat::from_array(q).normalize() * glam::Vec3::Z;
+                let d = glam::Vec3::from_array(o) - glam::Vec3::from_array(t);
+                ok(u32::from(d.dot(fwd) > 0.))
+            }
+            // Multiplayer target selection: no network game.
+            "tank-find-best-target-mp" => ok(0),
+            // (heli-fire-missile heli target [delay] [flag]) and the wait
+            // form, which waits for the impact (`sub_803D10`).
+            "heli-fire-missile" | "wait-heli-fire-missile" => {
+                if n < 2 || a[1] == 0 {
+                    return ok(0);
+                }
+                let target = Target::Object(a[1]);
+                let delay = f(2, 0.);
+                let wait = name.starts_with("wait-") && self.proc.is_some();
+                let point = self.world.locator(a[1]).map(|(p, _)| p);
+                let Some(v) = self.vehicle(who) else { return ok(0) };
+                if wait || delay > 0. {
+                    v.order = Some(Order::Missile { target, delay, fired: false });
+                } else {
+                    v.fire_missile(target, &|_| point);
+                }
+                if wait {
+                    return Ok(Some(self.suspend(Wait::Vehicle(who))));
+                }
+                ok(0)
+            }
+            // (heli-animate-gun heli [on]) / (heli-set-hover heli [on]):
+            // flags +1133 / +1132, default on.
+            "heli-animate-gun" | "heli-set-hover" => {
+                let on = n <= 1 || a[1] != 0;
+                if let Some(v) = self.vehicle(who) {
+                    if name == "heli-animate-gun" { v.gun_animated = on } else { v.hover = on }
+                }
+                ok(0)
+            }
             "tank-move-tracking-object" => {
                 if !self.tank_args(name, "(tank-name object min-distance max-distance move-speed accel)", n, 3, 6) {
                     return ok(1);
@@ -130,11 +245,16 @@ impl Ctx<'_> {
                 }
                 ok(1)
             }
-            "heli-move-to-spline" => {
+            // (heli-move-to-spline heli spline [speed]) and the wait form;
+            // `net-heli-move-on-spline` is the same in single player.
+            "heli-move-to-spline" | "wait-heli-move-to-spline" | "net-heli-move-on-spline" => {
                 let speed = f(2, HELI_SPEED);
                 if n > 1 {
                     if let Some(v) = self.vehicle(who) {
                         v.order = Some(Order::Spline { spline: a[1], distance: 0., speed });
+                        if name.starts_with("wait-") && self.proc.is_some() {
+                            return Ok(Some(self.suspend(Wait::Vehicle(who))));
+                        }
                     }
                 }
                 ok(0)

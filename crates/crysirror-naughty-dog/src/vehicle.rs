@@ -27,6 +27,33 @@ pub enum Order {
     Track { object: u32, min: f32, max: f32, speed: f32 },
     /// Fire at an object for `seconds` (`wait-tank-fire-at-object`).
     Fire { target: Target, seconds: f32 },
+    /// Turn the turret to a target, or forward (`tank-aim-…`, events
+    /// 0x9F55DAFF position, 0x1583C2B2 object, 0x1348E62B forward; the wait
+    /// forms end on event 0x6E9B6EF2).
+    Aim(Option<Target>),
+    /// Aim the cannon, fire once and pause (`tank-fire-at-position`,
+    /// event 0x62B2F34F).
+    Cannon { target: Target, pause: f32, fired: bool },
+    /// Fire a missile after `delay` and wait for it (`wait-heli-fire-
+    /// missile`, `sub_803D10`).
+    Missile { target: Target, delay: f32, fired: bool },
+}
+
+/// Turret turn rate (rad/s) and the alignment that counts as aimed; shell
+/// and missile speeds (m/s). Not native values.
+pub const TURRET_RATE: f32 = 1.05;
+pub const AIMED: f32 = 0.035;
+pub const SHELL_SPEED: f32 = 250.;
+pub const MISSILE_SPEED: f32 = 60.;
+
+/// A shell or missile in flight toward its impact point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Projectile {
+    pub from: [f32; 3],
+    pub to: [f32; 3],
+    /// Seconds until impact.
+    pub eta: f32,
+    pub missile: bool,
 }
 
 /// Default speeds (m/s) when a native leaves them out.
@@ -57,6 +84,17 @@ pub struct Vehicle {
     pub base_pitch: f32,
     pub order: Option<Order>,
     pub destroyed: bool,
+    /// The turret's target (None: forward) and its world yaw.
+    pub turret: Option<Target>,
+    pub turret_yaw: f32,
+    /// Heli gun animation (+1133) and hover (+1132) flags.
+    pub gun_animated: bool,
+    pub hover: bool,
+    pub projectiles: Vec<Projectile>,
+    /// Shots fired this step (muzzle points) and impacts (the host spawns
+    /// their effects and damage).
+    pub muzzles: Vec<[f32; 3]>,
+    pub impacts: Vec<([f32; 3], bool)>,
 }
 
 impl Vehicle {
@@ -75,6 +113,58 @@ impl Vehicle {
             base_pitch: 0.,
             order: None,
             destroyed: false,
+            turret: None,
+            turret_yaw: f.x.atan2(f.z),
+            gun_animated: true,
+            hover: true,
+            projectiles: Vec::new(),
+            muzzles: Vec::new(),
+            impacts: Vec::new(),
+        }
+    }
+
+    fn target_point(&self, target: Target, locate: &dyn Fn(u32) -> Option<[f32; 3]>) -> Option<Vec3> {
+        match target {
+            Target::Point(p) => Some(Vec3::from_array(p)),
+            Target::Object(o) => locate(o).map(Vec3::from_array),
+        }
+    }
+
+    /// Turn the turret toward its target by `dt`; true when aligned.
+    fn turn_turret(&mut self, dt: f32, locate: &dyn Fn(u32) -> Option<[f32; 3]>) -> bool {
+        let want = match self.turret.and_then(|t| self.target_point(t, locate)) {
+            Some(p) => {
+                let d = p - Vec3::from_array(self.position);
+                if d.x * d.x + d.z * d.z < 1e-6 { self.turret_yaw } else { d.x.atan2(d.z) }
+            }
+            None => self.yaw,
+        };
+        let diff = (want - self.turret_yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        let step = TURRET_RATE * dt;
+        self.turret_yaw += diff.clamp(-step, step);
+        diff.abs() <= AIMED + step
+    }
+
+    /// Launch a projectile from 2 m up toward `to`.
+    fn launch(&mut self, to: Vec3, missile: bool) {
+        let from = Vec3::from_array(self.position) + Vec3::Y * 2.;
+        let speed = if missile { MISSILE_SPEED } else { SHELL_SPEED };
+        self.muzzles.push(from.to_array());
+        self.projectiles.push(Projectile { from: from.to_array(), to: to.to_array(), eta: from.distance(to) / speed, missile });
+    }
+
+    /// Fire the cannon now at the turret's target, else 60 m ahead
+    /// (`tank-fire`, event 0xD310256D).
+    pub fn fire_cannon(&mut self, locate: &dyn Fn(u32) -> Option<[f32; 3]>) {
+        let ahead = Vec3::from_array(self.position) + Vec3::new(self.turret_yaw.sin(), 0., self.turret_yaw.cos()) * 60.;
+        let to = self.turret.and_then(|t| self.target_point(t, locate)).unwrap_or(ahead);
+        self.launch(to, false);
+    }
+
+    /// Fire a heli missile at once (`heli-fire-missile`, no wait).
+    pub fn fire_missile(&mut self, target: Target, locate: &dyn Fn(u32) -> Option<[f32; 3]>) {
+        if let Some(p) = self.target_point(target, locate) {
+            self.launch(p, true);
         }
     }
 
@@ -109,6 +199,18 @@ impl Vehicle {
     /// lookups; true when it completed.
     pub fn step(&mut self, dt: f32, locate: &dyn Fn(u32) -> Option<[f32; 3]>, spline: &dyn Fn(u32, f32) -> Option<([f32; 3], f32)>) -> bool {
         let dt = dt.clamp(0., 0.25);
+        for p in &mut self.projectiles {
+            p.eta -= dt;
+        }
+        let (hit, flying): (Vec<_>, Vec<_>) = std::mem::take(&mut self.projectiles).into_iter().partition(|p| p.eta <= 0.);
+        self.projectiles = flying;
+        self.impacts.extend(hit.into_iter().map(|p| (p.to, p.missile)));
+        match self.order {
+            Some(Order::Aim(t)) => self.turret = t,
+            Some(Order::Cannon { target, .. }) => self.turret = Some(target),
+            _ => {}
+        }
+        let aimed = self.turn_turret(dt, locate);
         let Some(order) = self.order.clone() else { return false };
         let done = match order {
             Order::MoveTo { target, speed } => self.approach(Vec3::from_array(target), speed * dt),
@@ -139,6 +241,36 @@ impl Vehicle {
                     }
                 }
                 false
+            }
+            Order::Aim(_) => aimed,
+            Order::Cannon { target, pause, fired } => {
+                if !fired {
+                    if aimed {
+                        if let Some(p) = self.target_point(target, locate) {
+                            self.launch(p, false);
+                        }
+                        self.order = Some(Order::Cannon { target, pause, fired: true });
+                    }
+                    false
+                } else if pause - dt <= 0. {
+                    true
+                } else {
+                    self.order = Some(Order::Cannon { target, pause: pause - dt, fired: true });
+                    false
+                }
+            }
+            Order::Missile { target, delay, fired } => {
+                if !fired {
+                    if delay - dt <= 0. {
+                        self.fire_missile(target, locate);
+                        self.order = Some(Order::Missile { target, delay: 0., fired: true });
+                    } else {
+                        self.order = Some(Order::Missile { target, delay: delay - dt, fired: false });
+                    }
+                    false
+                } else {
+                    !self.projectiles.iter().any(|p| p.missile)
+                }
             }
             Order::Fire { target, seconds } => {
                 self.gun = Some(target);
@@ -190,5 +322,22 @@ mod tests {
         assert!(!v.step(0.1, &none, &no_spline));
         assert!(v.step(0.1, &none, &no_spline));
         assert_eq!(v.gun, Some(Target::Object(7)));
+    }
+
+    #[test]
+    fn cannon_aims_fires_and_lands() {
+        let mut v = Vehicle::new([0.; 3], [0., 0., 0., 1.]);
+        let none = |_: u32| None;
+        let no_spline = |_: u32, _: f32| None;
+        // A target 90° to the right: 1.5 s of turning at 1.05 rad/s.
+        v.order = Some(Order::Cannon { target: Target::Point([100., 0., 0.]), pause: 0.5, fired: false });
+        let mut steps = 0;
+        while !v.step(0.1, &none, &no_spline) {
+            steps += 1;
+            assert!(steps < 100);
+        }
+        assert_eq!(v.muzzles.len(), 1);
+        assert!((14..=22).contains(&steps), "{steps}");
+        assert!(v.impacts.len() == 1 || v.projectiles.len() == 1);
     }
 }
