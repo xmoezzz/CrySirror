@@ -115,6 +115,7 @@ pub const STATES: &[&str] = &[
     "ledge-overhead-swing-enter",
     "ledge-overhead-swing",
     "ledge-overhead-swing-jump",
+    "ledge-overhead-forward",
     "wall-jump-ant-90",
     "wall-jump-90-long-jump",
     "wall-rope-enter-bottom-grab",
@@ -139,7 +140,7 @@ const DEATHS: &[&str] = &["hero-multi-death-front", "hero-multi-death-back", "de
 const AIM: &[&str] = &["aim-idle", "aim-run-forward", "aim-run-backward"];
 
 const HANG: &[&str] = &["ledge-grab", "ledge-shimmy-left", "ledge-shimmy-right", "fall-grab-edge", "ledge-overhead-swing-enter", "ledge-overhead-swing"];
-const LEAP: &[&str] = &["ledge-jump-begin", "ledge-jump-mid", "ledge-jump-end", "climb-up-lh", "climb-up-rh", "climb-down-lh", "climb-down-rh"];
+const LEAP: &[&str] = &["ledge-jump-begin", "ledge-jump-mid", "ledge-jump-end", "climb-up-lh", "climb-up-rh", "climb-down-lh", "climb-down-rh", "ledge-overhead-forward"];
 const CLIMB: &[&str] = &["ledge-climb-up", "ledge-climb-up-2", "climb-onto-1-75m^idle", "climb-onto-1-75m^run"];
 
 /// How the adapter places the player for the current state.
@@ -481,9 +482,12 @@ impl Controller {
             Mode::Hang if state.starts_with("ledge-overhead-swing") => {
                 if f.drop {
                     self.anim.machine.force(sid("fall"), 0.2);
-                } else if f.jump || f.leap {
+                } else if f.jump {
                     self.anim.machine.force(sid("ledge-overhead-swing-jump"), 0.1);
                     return self.finish(graph, table, clips, f, before, Some(JUMP_LIFT * 0.6), 0.);
+                } else if f.leap && state == "ledge-overhead-swing" {
+                    // Hand over hand to the next bar ahead.
+                    self.anim.machine.force(sid("ledge-overhead-forward"), 0.1);
                 } else if state == "ledge-overhead-swing-enter" && finished {
                     self.anim.machine.force(sid("ledge-overhead-swing"), 0.15);
                 }
@@ -516,6 +520,8 @@ impl Controller {
             Mode::Leap => {
                 if (state == "ledge-jump-end" || state.starts_with("climb-up-") || state.starts_with("climb-down-")) && finished {
                     self.anim.machine.force(sid("ledge-grab"), 0.15);
+                } else if state == "ledge-overhead-forward" && finished {
+                    self.anim.machine.force(sid("ledge-overhead-swing"), 0.15);
                 }
                 return self.finish(graph, table, clips, f, before, None, 0.);
             }

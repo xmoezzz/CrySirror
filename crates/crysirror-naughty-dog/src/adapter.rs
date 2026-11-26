@@ -4186,6 +4186,21 @@ impl NaughtyDogVm {
             }
             climb |= forced_climb && mode == crate::player::Mode::Hang;
             release |= forced_drop && mode == crate::player::Mode::Hang;
+            // On a bar: no climbing onto it or wall steps; the stick ahead
+            // reaches for the next bar (level within 0.4 m, 1.5 m away).
+            let on_bar = mode == crate::player::Mode::Hang && p.grip.and_then(|g| session.ground.edge(g.body, g.edge)).is_some_and(|e| e.flags & crate::collision::EDGE_CAN_HANG != 0 && e.flags & crate::collision::EDGE_NO_SWING == 0);
+            if on_bar {
+                climb = false;
+                step = 0;
+                leap_to = None;
+                if stick.dot(facing) > 0.7 {
+                    let here = p.grip.and_then(|g| session.ground.edge(g.body, g.edge).map(|e| edge_frame(&e, g.s).transform_point3(glam::Vec3::ZERO)));
+                    leap_to = p.grip.and_then(|g| Self::leap_target(&session.ground, g, facing)).filter(|g| {
+                        let there = session.ground.edge(g.body, g.edge).map(|e| edge_frame(&e, g.s).transform_point3(glam::Vec3::ZERO));
+                        here.zip(there).is_some_and(|(a, b)| (b.y - a.y).abs() < 0.4 && (b - a).length() < 1.5)
+                    });
+                }
+            }
             let reach = glam::Vec3::from_array(p.position) + glam::Quat::from_rotation_y(p.yaw) * HANG_REACH;
             let candidate = if mode == crate::player::Mode::Ground && p.regrab <= 0. && p.fall > -1. && (p.air_top.is_some() || p.fall > 0.) {
                 session
@@ -4307,11 +4322,9 @@ impl NaughtyDogVm {
                 p.rope = Some(hold);
             }
             let rope_swing = p.rope.map_or(0., |r| r.rate);
-            // Overhead bars are edges like any other; which edges are bars
-            // is not decoded (a geometric "nothing under it" test also
-            // matches railings, such as the prologue's train car), so the
-            // overhead-swing states are not entered.
-            let bar = false;
+            // A bar: a hang edge without `EdgeNoSwing` (wall ledges carry
+            // it; the prologue's railing does, its monkey bars do not).
+            let bar = p.grip.and_then(|g| session.ground.edge(g.body, g.edge)).is_some_and(|e| e.flags & crate::collision::EDGE_CAN_HANG != 0 && e.flags & crate::collision::EDGE_NO_SWING == 0);
             // A wall 0.6 m ahead at chest height.
             let wall_ahead = {
                 let chest = glam::Vec3::from_array(p.position) + glam::Vec3::Y * 1.2;

@@ -66,6 +66,9 @@ pub struct Edge {
 /// `EdgeCanStand` 0x2, `EdgeCanHang` 0x4, `EdgeResistWalk` 0x8,
 /// `EdgeCanUseLowCover` 0x10, `EdgeLadder` 0x20, `EdgeNoJumpAim` 0x40,
 /// `EdgeForeground` 0x2000, `EdgeLoop` 0x4000, `EdgeDummy` 0x8000.
+/// `EdgeNoSwing`: a hang without swinging (ledges against a wall); hang
+/// edges without it are bars.
+pub const EDGE_NO_SWING: u16 = 0x1;
 pub const EDGE_CAN_STAND: u16 = 0x2;
 pub const EDGE_CAN_HANG: u16 = 0x4;
 pub const EDGE_LADDER: u16 = 0x20;
