@@ -230,6 +230,10 @@ struct WallRopeHold {
     length: f32,
     below: f32,
     yaw: f32,
+    /// Sideways swing about the top: angle (rad, + toward the player's
+    /// right) and rate.
+    swing: f32,
+    rate: f32,
 }
 
 /// A `Hint` spawner's progress: since when its condition holds, how
@@ -256,6 +260,8 @@ const TYPE_WALL_ROPE: u32 = 0xf9cb_4287;
 const TAG_ROPE_LENGTH: u32 = 0xfdc4_bc55;
 const WALL_ROPE_CLIMB: f32 = 0.9;
 const WALL_ROPE_OFFSET: f32 = 0.3;
+/// Sideways push of a full stick on a wall rope (rad/s²; not native).
+const WALL_ROPE_PUMP: f32 = 2.5;
 
 /// A free rope held: its anchor, the hands' distance below it, the swing
 /// angle and its rate (radians, + forward along `yaw`).
@@ -4440,7 +4446,7 @@ impl NaughtyDogVm {
                     let ground = grounded_now && heading.is_some() && flat < 0.8 && along > 0. && along <= length + 0.3;
                     (air || ground).then(|| {
                         let yaw = (top.x - hands.x).atan2(top.z - hands.z);
-                        (WallRopeHold { top, length, below: along.min(length), yaw: if flat > 0.05 { yaw } else { p.yaw } }, air)
+                        (WallRopeHold { top, length, below: along.min(length), yaw: if flat > 0.05 { yaw } else { p.yaw }, swing: 0., rate: 0. }, air)
                     })
                 })
             } else {
@@ -4450,7 +4456,9 @@ impl NaughtyDogVm {
             if let Some((hold, _)) = wall_found {
                 p.wall_rope = Some(hold);
             }
-            let wall_rope_climb = if p.wall_rope.is_some() { pad.left[1].signum() as i8 } else { 0 };
+            // Climbing only while the rope hangs still.
+            let wall_rope_climb = if p.wall_rope.is_some_and(|w| w.swing.abs() < 0.15) { pad.left[1].signum() as i8 } else { 0 };
+            let wall_rope_swing = p.wall_rope.map_or(0., |w| w.rate);
             let wall_rope_top = p.wall_rope.is_some_and(|w| w.below <= 0.35);
             let wall_rope_bottom = p.wall_rope.is_some_and(|w| w.below >= w.length - 0.2 || session.ground.height(p.position[0], p.position[2], p.position[1] + 0.1).is_some_and(|h| p.position[1] - h < 0.3));
             let rope_grab = rope_found.is_some();
@@ -4518,6 +4526,7 @@ impl NaughtyDogVm {
                     wall_rope_climb,
                     wall_rope_top,
                     wall_rope_bottom,
+                    wall_rope_swing,
                     bar,
                     wall_ahead,
                 };
@@ -4666,8 +4675,17 @@ impl NaughtyDogVm {
                     let dt = seconds.clamp(0., 0.1);
                     let climb = f32::from(wall_rope_climb);
                     w.below = (w.below - climb * WALL_ROPE_CLIMB * dt).clamp(0.2, w.length);
+                    // A pendulum of the held length pumped by the stick
+                    // sideways, damped (not native).
+                    let accel = -9.8 / w.below.max(0.5) * w.swing.sin() + pad.left[0] * WALL_ROPE_PUMP - w.rate * 0.6;
+                    w.rate += accel * dt;
+                    w.swing = (w.swing + w.rate * dt).clamp(-0.9, 0.9);
+                    if w.swing.abs() >= 0.9 {
+                        w.rate = 0.;
+                    }
                     let facing = glam::Vec3::new(w.yaw.sin(), 0., w.yaw.cos());
-                    let hands = w.top - glam::Vec3::Y * w.below - facing * WALL_ROPE_OFFSET;
+                    let side = facing.cross(glam::Vec3::Y);
+                    let hands = w.top - glam::Vec3::Y * (w.below * w.swing.cos()) + side * (w.below * w.swing.sin()) - facing * WALL_ROPE_OFFSET;
                     p.position = (hands - glam::Vec3::Y * ROPE_HANDS).to_array();
                     p.yaw = w.yaw;
                     p.fall = 0.;

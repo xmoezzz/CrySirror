@@ -126,11 +126,16 @@ pub const STATES: &[&str] = &[
     "wall-rope-exit-bottom^idle",
     "wall-rope-climb-onto-1-75m^idle",
     "wall-rope-jump",
+    "wall-rope-idle^swing",
+    "wall-rope-swing",
+    "wall-rope-swing^idle",
 ];
-const WALL_ROPE: &[&str] = &["wall-rope-enter-bottom-grab", "jump^wall-rope-idle", "wall-rope-idle", "wall-rope-climb-up", "wall-rope-climb-down"];
+const WALL_ROPE: &[&str] = &["wall-rope-enter-bottom-grab", "jump^wall-rope-idle", "wall-rope-idle", "wall-rope-climb-up", "wall-rope-climb-down", "wall-rope-idle^swing", "wall-rope-swing", "wall-rope-swing^idle"];
 const ROPE: &[&str] = &["free-rope-grab", "free-rope-idle", "free-rope-swing-mid^front", "free-rope-swing-mid^back", "free-rope-swing-front^mid", "free-rope-swing-back^mid"];
 /// Airborne states besides the jumps and the fall: rope and bar
 /// releases, wall jumps.
+/// Swing rate (rad/s) above which a wall rope plays its swing states.
+const WALL_ROPE_SWING: f32 = 0.6;
 const FLIGHT: &[&str] = &["free-rope^jump-long", "ledge-overhead-swing-jump", "wall-jump-90-long-jump", "wall-rope-jump"];
 
 /// One-shot ground actions that return to `idle` when their clip ends,
@@ -277,6 +282,9 @@ pub struct Frame {
     pub wall_rope_climb: i8,
     pub wall_rope_top: bool,
     pub wall_rope_bottom: bool,
+    /// The sideways swing rate on a wall rope (rad/s, + toward the
+    /// player's right).
+    pub wall_rope_swing: f32,
     /// Land hard whatever the drop (`player-force-hard-land`).
     pub hard_land: bool,
 }
@@ -433,16 +441,22 @@ impl Controller {
         let finished = self.anim.duration > 0. && self.anim.machine.time >= self.anim.duration;
         match self.mode(table) {
             Mode::WallRope => {
-                let busy = matches!(state.as_str(), "wall-rope-enter-bottom-grab" | "jump^wall-rope-idle" | "wall-rope-climb-up" | "wall-rope-climb-down") && !finished;
+                let busy = matches!(state.as_str(), "wall-rope-enter-bottom-grab" | "jump^wall-rope-idle" | "wall-rope-climb-up" | "wall-rope-climb-down" | "wall-rope-idle^swing" | "wall-rope-swing^idle") && !finished;
+                let swinging = f.wall_rope_swing.abs() > WALL_ROPE_SWING;
                 if f.jump {
-                    self.yaw = wrap(self.yaw + PI);
+                    // Away from the wall, or sideways with a swing.
+                    self.yaw = if swinging { wrap(self.yaw - f.wall_rope_swing.signum() * PI / 2.) } else { wrap(self.yaw + PI) };
                     self.anim.machine.force(sid("wall-rope-jump"), 0.1);
                     return self.finish(graph, table, clips, f, before, Some(JUMP_LIFT), 0.);
                 }
                 if f.drop {
                     self.anim.machine.force(sid("fall"), 0.2);
                 } else if !busy {
+                    let on_swing = state.starts_with("wall-rope-swing") || state == "wall-rope-idle^swing";
                     let target = match f.wall_rope_climb {
+                        _ if swinging && on_swing => "wall-rope-swing",
+                        _ if swinging => "wall-rope-idle^swing",
+                        _ if on_swing && state != "wall-rope-swing^idle" => "wall-rope-swing^idle",
                         c if c > 0 && f.wall_rope_top => "wall-rope-climb-onto-1-75m^idle",
                         c if c > 0 => "wall-rope-climb-up",
                         c if c < 0 && f.wall_rope_bottom => "wall-rope-exit-bottom^idle",
