@@ -530,13 +530,34 @@ impl Ctx<'_> {
             // The host's combat does not post attack events, so inside an
             // event these take the native's not-an-attack path.
             "event-attack-type?" | "event-attack-source?" | "event-object-damage" => {
-                let in_event = self.proc.is_some_and(|p| self.inner.procs[p].groups.iter().any(|g| g.kind == super::KIND_EVENT));
-                if !in_event {
-                    self.inner.error(format!("{name}: Called from outside event context, ignored"));
-                } else {
-                    self.inner.error(format!("{name}: Not an Attack event, ignored"));
+                let group = self.proc.and_then(|p| self.inner.procs[p].groups.iter().rev().find(|g| g.kind == super::KIND_EVENT)).map(|g| (g.event, g.args.first().copied()));
+                let record = match group {
+                    None => {
+                        self.inner.error(format!("{name}: Called from outside event context, ignored"));
+                        return ok(0);
+                    }
+                    Some((event, Some(record))) if event == super::EVENT_ATTACK && record != 0 => record,
+                    Some(_) => {
+                        self.inner.error(format!("{name}: Not an Attack event, ignored"));
+                        return ok(0);
+                    }
+                };
+                match name {
+                    "event-attack-type?" => {
+                        if n == 0 || a[0] > 8 {
+                            self.inner.error(format!("event-attack-type?: Invalid attack type {}", if n > 0 { a[0] as i32 } else { -1 }));
+                            return ok(0);
+                        }
+                        ok(u32::from(dc.mem.u32(record + 4)? == a[0]))
+                    }
+                    "event-attack-source?" => {
+                        let source = dc.mem.u32(record + 8)?;
+                        let want = if n > 0 { a[0] } else { 0 };
+                        let want = self.inner.process(want).and_then(|p| self.inner.procs[p].spawner).unwrap_or(want);
+                        ok(u32::from(source == want || self.inner.process(source).is_some_and(|p| self.inner.procs[p].name == want)))
+                    }
+                    _ => ok(dc.mem.u32(record + 24)?),
                 }
-                if name == "event-object-damage" { okf(0.) } else { ok(0) }
             }
             // Weather, wind and water-reflection state (`sub_84F8E0`,
             // `sub_379244`): recorded; no rain or wetness is drawn.

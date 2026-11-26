@@ -326,6 +326,8 @@ struct Stage {
     /// that hurt NPCs only, scripted shots and grenades in flight.
     blasts: Vec<[f32; 3]>,
     npc_blasts: Vec<[f32; 3]>,
+    /// Hits to post as `Attack` events: target, source, damage.
+    attacks: Vec<(u32, u32, f32)>,
     script_shots: Vec<(u32, crate::vehicle::Target)>,
     grenades: Vec<crate::vehicle::Projectile>,
     /// The player's native state class (`player-in-state?`).
@@ -2982,6 +2984,7 @@ impl NaughtyDogVm {
             if let Some((name, _)) = point {
                 let class = session.stage.agents.get(name).and_then(|a| data.archetypes.get(&a.archetype)).map_or(sid("medium-class"), |a| a.damage_class);
                 let dealt = data.damage(sid("pistol-semi-a"), class) as f32;
+                session.stage.attacks.push((name, shooter, dealt));
                 let killed = session.stage.agents.get_mut(name).is_some_and(|a| {
                     if a.can_be_hit {
                         a.hit_points -= dealt;
@@ -3007,9 +3010,10 @@ impl NaughtyDogVm {
             }
             let hit: Vec<u32> = session.stage.agents.agents.iter().filter(|(_, a)| a.can_be_hit && glam::Vec3::from_array(a.position).distance(at) < BLAST_RADIUS).map(|(n, _)| *n).collect();
             for name in hit {
+                let dealt = session.stage.agents.get(name).map_or(0., |a| a.max_hit_points * (1. - glam::Vec3::from_array(a.position).distance(at) / BLAST_RADIUS) * 1.5);
+                session.stage.attacks.push((name, 0, dealt));
                 let killed = session.stage.agents.get_mut(name).is_some_and(|a| {
-                    let d = glam::Vec3::from_array(a.position).distance(at);
-                    a.hit_points -= a.max_hit_points * (1. - d / BLAST_RADIUS) * 1.5;
+                    a.hit_points -= dealt;
                     a.health = (a.hit_points / a.max_hit_points).clamp(0., 1.);
                     a.hit_points <= 0. && a.can_die
                 });
@@ -3088,6 +3092,7 @@ impl NaughtyDogVm {
             let class = session.stage.agents.get(name).and_then(|a| data.archetypes.get(&a.archetype)).map_or(sid("medium-class"), |a| a.damage_class);
             let dealt = data.damage(weapon_id, class) as f32;
             let mut killed = false;
+            session.stage.attacks.push((name, sid("player"), dealt));
             if let Some(a) = session.stage.agents.get_mut(name) {
                 a.knowledge = crate::npc::KNOWLEDGE_COMBAT;
                 if a.can_be_hit {
@@ -4234,6 +4239,13 @@ impl NaughtyDogVm {
         session.stage.step_followers(seconds as f32);
         session.stage.step_grenades(seconds as f32);
         self.step_combat(session, &input, seconds as f32);
+        // Hits reach the targets' scripts as `Attack` events.
+        let attacks = std::mem::take(&mut session.stage.attacks);
+        if let Some(game) = session.game.as_mut() {
+            for (target, source, damage) in attacks {
+                game.rt.post_attack(target, source, damage)?;
+            }
+        }
         // Region enter/exit scripts for the player (`sub_115828`).
         if session.player.is_some() {
             let player = sid("player");

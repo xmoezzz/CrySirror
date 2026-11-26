@@ -49,6 +49,10 @@ pub struct Setting {
 pub const KIND_BEGIN: u32 = 0;
 pub const KIND_END: u32 = 1;
 pub const KIND_EVENT: u32 = 2;
+/// The `Attack` event and the record type standing for an undecoded
+/// attack type.
+pub const EVENT_ATTACK: u32 = 0x0539_335e;
+pub const ATTACK_TYPE_UNKNOWN: u32 = 0xffff_ffff;
 pub const KIND_UPDATE: u32 = 3;
 /// `wait-frames` converts frames at 1/30 s (`*(toc-0x7cb4)` = 0.0333).
 const FRAME_SECONDS: f32 = 1. / 30.;
@@ -855,6 +859,20 @@ impl Runtime {
 
     /// Native names called but not implemented, with call counts.
     /// A live script setting override.
+    /// Queue the `Attack` event (0x0539335E) on `target`'s process with an
+    /// attack record (`sub_81ADC` layout: +4 attack type, +8 the source,
+    /// +24 whole damage). The type enum (`DC::kAttackType…`, 0–8) is not
+    /// decoded: the record holds 0xFFFFFFFF, which matches no type.
+    pub fn post_attack(&mut self, target: u32, source: u32, damage: f32) -> Result<bool> {
+        let Some(p) = self.inner.process(target) else { return Ok(false) };
+        let at = self.dc.mem.alloc(32)?;
+        self.dc.mem.write_u32(at + 4, ATTACK_TYPE_UNKNOWN)?;
+        self.dc.mem.write_u32(at + 8, source)?;
+        self.dc.mem.write_u32(at + 24, damage.round() as i32 as u32)?;
+        self.inner.procs[p].events.push_back((EVENT_ATTACK, vec![at], Some(source)));
+        Ok(true)
+    }
+
     pub fn setting(&self, id: u32) -> Option<u32> {
         self.inner.settings.get(&id).filter(|s| s.until >= self.inner.frame).map(|s| s.value)
     }
