@@ -1454,6 +1454,9 @@ struct Session {
     part_modules: HashSet<u32>,
     /// Particle materials already reported as not drawable.
     untextured: HashSet<u32>,
+    /// Each particle material's texture roles (diagnostics): name, colour
+    /// and opacity texture files.
+    particle_roles: HashMap<u32, String>,
     /// `particle.pak` materials, read on first use.
     particle_materials: Option<HashMap<u32, crate::particle::ParticleMaterial>>,
     /// Uploaded particle textures by texture ID: path and atlas columns.
@@ -1795,6 +1798,7 @@ impl NaughtyDogVm {
             particles: Default::default(),
             part_modules: HashSet::new(),
             untextured: HashSet::new(),
+            particle_roles: HashMap::new(),
             particle_materials: None,
             particle_textures: HashMap::new(),
             effects: Vec::new(),
@@ -2704,6 +2708,7 @@ impl NaughtyDogVm {
                             (f.contains("-trans") || f.contains("-mask")) && !f.contains("normal") && !f.contains("height")
                         });
                         let colour = found.iter().copied().find(|d| file(d).contains("-color")).or_else(|| if opacity.is_none() { found.first().copied() } else { None });
+                        session.particle_roles.insert(key, format!("{} blend {:?} colour {} opacity {}", m.name, m.blend, colour.map_or("-".into(), file), opacity.map_or("-".into(), file)));
                         if colour.is_none() && opacity.is_none() {
                             m.samplers.clear();
                             resolved.insert(key, m);
@@ -2837,7 +2842,8 @@ impl NaughtyDogVm {
             let (x, y, z) = rotation.to_euler(glam::EulerRot::XYZ);
             session.next_model += 1;
             let id = 0x100 + session.next_model;
-            let entity = json!({"id": id, "name": format!("{label}:{}", effect.name), "visible": true, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system});
+            let role = session.particle_roles.get(&effect.material).cloned().unwrap_or_default();
+            let entity = json!({"id": id, "name": format!("{label}:{} [{role}]", effect.name), "visible": true, "transform": {"translation": translation.to_array(), "rotation_degrees": [x.to_degrees(), y.to_degrees(), z.to_degrees()], "scale": scale.to_array()}, "vfx": system});
             session.effects.push(Effect { id, spawner: owner, at: translation, entity, live: false });
             placed += 1;
         }
@@ -4130,13 +4136,11 @@ impl NaughtyDogVm {
                 p.rope = Some(hold);
             }
             let rope_swing = p.rope.map_or(0., |r| r.rate);
-            // A bar: nothing solid 0.3 m under the held edge, toward the
-            // wall it would face.
-            let bar = p.grip.and_then(|g| session.ground.edge(g.body, g.edge)).is_some_and(|e| {
-                let mid = (e.p0 + e.p1) * 0.5 - glam::Vec3::Y * 0.3;
-                let inward = -glam::Vec3::new(e.n1.x, 0., e.n1.z).normalize_or_zero();
-                session.ground.raycast((mid - inward * 0.3).to_array(), (mid + inward * 0.6).to_array()).is_none()
-            });
+            // Overhead bars are edges like any other; which edges are bars
+            // is not decoded (a geometric "nothing under it" test also
+            // matches railings, such as the prologue's train car), so the
+            // overhead-swing states are not entered.
+            let bar = false;
             // A wall 0.6 m ahead at chest height.
             let wall_ahead = {
                 let chest = glam::Vec3::from_array(p.position) + glam::Vec3::Y * 1.2;
@@ -5011,7 +5015,11 @@ impl VmAdapter for NaughtyDogVm {
                         v["player"] = json!(s.player.as_ref().map(|p| p.position));
                         v["ground_triangles"] = json!(s.ground.len());
                         v["movie"] = json!(s.movie);
-                        v["effects"] = json!({"placed": s.effects.len(), "live": s.effects.iter().filter(|e| e.live).count(), "visible": s.effects.iter().filter(|e| s.stage.visible.contains(&e.spawner)).count()});
+                        let eye = s.stage.camera_eye.map(glam::Vec3::from_array);
+                        let mut near: Vec<(f32, String)> = s.effects.iter().filter(|e| e.live).map(|e| (eye.map_or(0., |c| c.distance(e.at)), e.entity["name"].as_str().unwrap_or("").to_string())).collect();
+                        near.sort_by(|a, b| a.0.total_cmp(&b.0));
+                        near.truncate(12);
+                        v["effects"] = json!({"placed": s.effects.len(), "live": s.effects.iter().filter(|e| e.live).count(), "visible": s.effects.iter().filter(|e| s.stage.visible.contains(&e.spawner)).count(), "nearest": near});
                     }
                     _ => v["level"] = json!(s.levels[s.current].0),
                 }
