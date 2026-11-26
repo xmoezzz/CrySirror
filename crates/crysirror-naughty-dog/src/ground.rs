@@ -24,6 +24,9 @@ pub struct Ground {
     /// Every placed triangle, for camera rays, and its bounding-volume
     /// hierarchy (built by [`Ground::prepare`]).
     solid: Vec<[[f32; 3]; 3]>,
+    /// The PAT word of each solid triangle (0, `void`, for render
+    /// triangles).
+    solid_pat: Vec<u32>,
     nodes: Vec<Node>,
     /// Level climb edges (world space).
     edges: Vec<Edge>,
@@ -32,12 +35,22 @@ pub struct Ground {
     bodies: HashMap<u32, Body>,
 }
 
+/// A ray hit: fraction along the ray, PAT word and normal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RayHit {
+    pub t: f32,
+    pub pat: u32,
+    pub normal: [f32; 3],
+}
+
 /// A movable set of triangles (an entity's meshes).
 struct Body {
     local: Vec<[[f32; 3]; 3]>,
     world: Vec<[[f32; 3]; 3]>,
-    /// Per triangle: whether it can be stood on (not `NoStand`).
+    /// Per triangle: whether it can be stood on (not `NoStand`), and its
+    /// PAT word.
     stand: Vec<bool>,
+    pat: Vec<u32>,
     edges_local: Vec<Edge>,
     edges: Vec<Edge>,
     lo: [f32; 3],
@@ -119,7 +132,7 @@ impl Ground {
                             let p = f.positions[v as usize];
                             std::array::from_fn(|c| p[0] * t[c] + p[1] * t[4 + c] + p[2] * t[8 + c] + t[12 + c])
                         });
-                        self.add_triangle(p, true);
+                        self.add_triangle(p, true, 0);
                     }
                 }
             }
@@ -136,7 +149,7 @@ impl Ground {
             if t.pat & (collision::PAT_PASS_THRU | collision::PAT_WATER) != 0 {
                 continue;
             }
-            self.add_triangle(t.vertices.map(|v| v.to_array()), t.pat & collision::PAT_NO_STAND == 0);
+            self.add_triangle(t.vertices.map(|v| v.to_array()), t.pat & collision::PAT_NO_STAND == 0, t.pat);
         }
     }
 
@@ -145,8 +158,8 @@ impl Ground {
         self.edges.extend_from_slice(edges);
     }
 
-    fn add_triangle(&mut self, p: [[f32; 3]; 3], stand: bool) {
-        self.add_solid(p);
+    fn add_triangle(&mut self, p: [[f32; 3]; 3], stand: bool, pat: u32) {
+        self.add_solid(p, pat);
         if !stand || !walkable(&p) {
             return;
         }
@@ -164,9 +177,10 @@ impl Ground {
         }
     }
 
-    fn add_solid(&mut self, p: [[f32; 3]; 3]) {
+    fn add_solid(&mut self, p: [[f32; 3]; 3], pat: u32) {
         if self.solid.len() < MAX_SOLID {
             self.solid.push(p);
+            self.solid_pat.push(pat);
             self.nodes.clear();
         }
     }
@@ -190,8 +204,8 @@ impl Ground {
                 }
             }
         }
-        let stand = vec![true; local.len()];
-        let mut body = Body { local, world: Vec::new(), stand, edges_local: Vec::new(), edges: Vec::new(), lo: [0.; 3], hi: [0.; 3], enabled, features: true, transform: [0.; 16] };
+        let (stand, pat) = (vec![true; local.len()], vec![0; local.len()]);
+        let mut body = Body { local, world: Vec::new(), stand, pat, edges_local: Vec::new(), edges: Vec::new(), lo: [0.; 3], hi: [0.; 3], enabled, features: true, transform: [0.; 16] };
         body.place(world);
         self.bodies.insert(id, body);
     }
@@ -202,7 +216,8 @@ impl Ground {
         let solid: Vec<&Triangle> = triangles.iter().filter(|t| t.pat & (collision::PAT_PASS_THRU | collision::PAT_WATER) == 0).take(MAX_BODY_TRIANGLES).collect();
         let local = solid.iter().map(|t| t.vertices.map(|v| v.to_array())).collect();
         let stand = solid.iter().map(|t| t.pat & collision::PAT_NO_STAND == 0).collect();
-        let mut body = Body { local, world: Vec::new(), stand, edges_local: edges.to_vec(), edges: Vec::new(), lo: [0.; 3], hi: [0.; 3], enabled, features: true, transform: [0.; 16] };
+        let pat = solid.iter().map(|t| t.pat).collect();
+        let mut body = Body { local, world: Vec::new(), stand, pat, edges_local: edges.to_vec(), edges: Vec::new(), lo: [0.; 3], hi: [0.; 3], enabled, features: true, transform: [0.; 16] };
         body.place(world);
         self.bodies.insert(id, body);
     }
@@ -300,14 +315,21 @@ impl Ground {
             stack.push((left + 1, mid, end));
         }
         self.solid = items.iter().map(|(i, _)| self.solid[*i as usize]).collect();
+        self.solid_pat = items.iter().map(|(i, _)| self.solid_pat[*i as usize]).collect();
         self.nodes = nodes;
     }
 
     /// Fraction along `from → to` of the first triangle hit, if any
     /// (requires [`Ground::prepare`]).
     pub fn raycast(&self, from: [f32; 3], to: [f32; 3]) -> Option<f32> {
+        self.raycast_hit(from, to).map(|h| h.t)
+    }
+
+    /// The first triangle hit along `from → to`: its fraction, PAT word and
+    /// unit normal facing the ray's origin.
+    pub fn raycast_hit(&self, from: [f32; 3], to: [f32; 3]) -> Option<RayHit> {
         let d = sub(to, from);
-        let mut nearest: Option<f32> = None;
+        let mut nearest: Option<(f32, [[f32; 3]; 3], u32)> = None;
         for b in self.live_bodies() {
             let (mut t0, mut t1) = (0f32, 1f32);
             for k in 0..3 {
@@ -319,27 +341,33 @@ impl Ground {
             if t0 > t1 {
                 continue;
             }
-            for t in &b.world {
+            for (i, t) in b.world.iter().enumerate() {
                 if let Some(h) = ray_triangle(from, d, *t).filter(|h| *h <= 1.) {
-                    nearest = Some(nearest.map_or(h, |n| n.min(h)));
+                    if nearest.is_none_or(|n| h < n.0) {
+                        nearest = Some((h, *t, b.pat.get(i).copied().unwrap_or(0)));
+                    }
                 }
             }
         }
-        let fixed = self.raycast_static(from, to);
-        match (fixed, nearest) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
+        if let Some(fixed) = self.raycast_static(from, to) {
+            if nearest.is_none_or(|n| fixed.0 < n.0) {
+                nearest = Some(fixed);
+            }
         }
+        let (t, [a, b, c], pat) = nearest?;
+        let n = Vec3::from_array(sub(b, a)).cross(Vec3::from_array(sub(c, a))).normalize_or_zero();
+        let n = if n.dot(Vec3::from_array(d)) > 0. { -n } else { n };
+        Some(RayHit { t, pat, normal: n.to_array() })
     }
 
-    fn raycast_static(&self, from: [f32; 3], to: [f32; 3]) -> Option<f32> {
+    fn raycast_static(&self, from: [f32; 3], to: [f32; 3]) -> Option<(f32, [[f32; 3]; 3], u32)> {
         if self.nodes.is_empty() {
             return None;
         }
         let d = sub(to, from);
         let inv: [f32; 3] = std::array::from_fn(|k| 1. / d[k]);
         let mut best = 1f32;
-        let mut hit = false;
+        let mut hit = None;
         let mut stack = vec![0u32];
         while let Some(n) = stack.pop() {
             let node = &self.nodes[n as usize];
@@ -357,16 +385,17 @@ impl Ground {
                 stack.push(node.start + 1);
                 continue;
             }
-            for t in &self.solid[node.start as usize..(node.start + node.count) as usize] {
+            let range = node.start as usize..(node.start + node.count) as usize;
+            for (t, pat) in self.solid[range.clone()].iter().zip(&self.solid_pat[range]) {
                 if let Some(h) = ray_triangle(from, d, *t) {
                     if h <= best {
                         best = h;
-                        hit = true;
+                        hit = Some((h, *t, *pat));
                     }
                 }
             }
         }
-        hit.then_some(best)
+        hit
     }
 
     /// The highest walkable surface at `(x, z)` not above `top`.

@@ -34,6 +34,16 @@ fn main() -> Result<()> {
                 }
             }
             println!("  object {i} flag bits {flags:?}");
+            // Surface types (bits 0–5) with how many of them are water (14)
+            // and snow (17).
+            let mut surfaces = std::collections::BTreeMap::new();
+            for t in &o.triangles {
+                let e = surfaces.entry(collision::surface_name(t.pat)).or_insert([0usize; 3]);
+                e[0] += 1;
+                e[1] += usize::from(t.pat & collision::PAT_WATER != 0);
+                e[2] += usize::from(t.pat >> 17 & 1 != 0);
+            }
+            println!("  object {i} surfaces [all, water, snow] {surfaces:?}");
             let mut edge_bits = std::collections::BTreeMap::new();
             for e in &o.features.edges {
                 for bit in 0..16 {

@@ -57,6 +57,23 @@ pub fn surface_at(bodies: &[Water], point: Vec3) -> Option<f32> {
     bodies.iter().filter_map(|w| w.surface(point.x, point.z)).filter(|h| *h > point.y - 0.5).min_by(|a, b| a.total_cmp(b))
 }
 
+/// The distance along a unit `dir` from `from` at which the ray crosses a
+/// water surface within `max`, if any.
+pub fn ray_hit(bodies: &[Water], from: Vec3, dir: Vec3, max: f32) -> Option<f32> {
+    bodies
+        .iter()
+        .filter_map(|w| {
+            let denom = w.normal.dot(dir);
+            if denom.abs() < 1e-6 {
+                return None;
+            }
+            let t = (w.d - w.normal.dot(from)) / denom;
+            let p = from + dir * t;
+            (t > 0. && t <= max && w.surface(p.x, p.z).is_some()).then_some(t)
+        })
+        .min_by(|a, b| a.total_cmp(b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,5 +85,7 @@ mod tests {
         assert_eq!(w.surface(100., -200.), None);
         assert_eq!(surface_at(&[w], Vec3::new(0., -106., -200.)), Some(-103.5));
         assert_eq!(surface_at(&[w], Vec3::new(0., -90., -200.)), None);
+        assert_eq!(ray_hit(&[w], Vec3::new(0., -100.5, -200.), Vec3::NEG_Y, 10.), Some(3.));
+        assert_eq!(ray_hit(&[w], Vec3::new(0., -100.5, -200.), Vec3::Y, 10.), None);
     }
 }

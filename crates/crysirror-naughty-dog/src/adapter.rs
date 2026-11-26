@@ -203,6 +203,9 @@ struct Player {
     air_top: Option<f32>,
     /// Current follow-camera distance (eases back out after obstruction).
     view_distance: f32,
+    /// Aiming, with a long gun, and the follow → aim camera blend (0..1).
+    aiming: Option<bool>,
+    aim_blend: f32,
     /// The body the player stands on and its transform then: the player
     /// rides its motion (the hanging car).
     platform: Option<(u32, glam::Mat4)>,
@@ -1569,6 +1572,8 @@ struct Session {
     /// materials and textures, uploaded images by path and the last HUD
     /// presented.
     hud_defs: HashMap<u32, crate::hud::HudButton>,
+    /// Follow and aim camera settings (`camera.bin`).
+    camera_settings: crate::camera_settings::CameraSettings,
     hud_pak: Option<(Arc<crysirror_core::service::MemoryAssetReader>, Directory, HashMap<String, (u32, Option<u32>)>)>,
     hud_images: HashMap<String, Option<(String, u32, u32)>>,
     hud_shown: String,
@@ -1768,6 +1773,15 @@ fn movie_seconds(reader: &dyn AssetReader) -> Result<f64> {
     Ok(pictures as f64 / fps)
 }
 
+/// Where a bullet lands.
+#[derive(Clone, Copy, Debug)]
+enum Impact {
+    Character(glam::Vec3),
+    Water(glam::Vec3),
+    Surface { at: glam::Vec3, pat: u32, normal: glam::Vec3 },
+    Miss(glam::Vec3),
+}
+
 /// Boot-sequence screens drawn by the player.
 #[derive(Debug)]
 enum Ui {
@@ -1913,6 +1927,7 @@ impl NaughtyDogVm {
             speech: None,
             has_save: false,
             hud_defs: HashMap::new(),
+            camera_settings: Default::default(),
             hud_pak: None,
             hud_images: HashMap::new(),
             hud_shown: String::new(),
@@ -1978,6 +1993,10 @@ impl NaughtyDogVm {
             match combat {
                 Ok(c) => session.stage.combat = Some(Arc::new(c)),
                 Err(e) => session.stage.log(format!("combat tables: {e:#}")),
+            }
+            match crate::game::ModuleSource::read(&modules, "camera").and_then(|b| crate::camera_settings::CameraSettings::parse(&b)) {
+                Ok(c) => session.camera_settings = c,
+                Err(e) => session.stage.log(format!("camera.bin: {e:#}")),
             }
             session.hud_defs = crate::game::ModuleSource::read(&modules, "hud-settings").and_then(|b| crate::hud::parse(&b)).unwrap_or_else(|e| {
                 session.stage.log(format!("hud-settings.bin: {e:#}"));
@@ -2629,7 +2648,7 @@ impl NaughtyDogVm {
         let anim = session.anim_table.as_ref().filter(|_| entity.is_some()).map(|t| crate::player::Controller::new(t, yaw));
         // The camera starts behind the player (eye offset `(-sin, cos)` of
         // the view yaw opposite the facing `(sin, cos)` of the yaw).
-        let mut player = Player { entity, position, yaw, fall: 0., view_yaw: std::f32::consts::PI - yaw, view_pitch: -0.25, controls: true, anim, air_top: None, view_distance: FOLLOW_DISTANCE, platform: None, grip: None, leap: None, regrab: 0., rope: None, wall_rope: None };
+        let mut player = Player { entity, position, yaw, fall: 0., view_yaw: std::f32::consts::PI - yaw, view_pitch: -0.25, controls: true, anim, air_top: None, view_distance: FOLLOW_DISTANCE, aiming: None, aim_blend: 0., platform: None, grip: None, leap: None, regrab: 0., rope: None, wall_rope: None };
         // The continue camera spawner sets the starting view direction
         // (eye offset `(-sin y · cos p, -sin p, cos y · cos p)` from the head).
         if let Some(c) = camera {
@@ -2673,7 +2692,7 @@ impl NaughtyDogVm {
             Err(e) => session.script_error = Some(format!("{e:#}")),
         }
         world.append(&mut session.stage.ops);
-        world.push(Self::follow(session.player.as_mut().expect("player"), &session.ground, 0.));
+        world.push(Self::follow(session.player.as_mut().expect("player"), &session.ground, &session.camera_settings, 0.));
         session.started = true;
         Ok(())
     }
@@ -3161,11 +3180,24 @@ impl NaughtyDogVm {
                     }
                 }
             }
+            let landed = shot && (agent.perfect_aim || Self::combat_random(session) < hit_chance(distance, vision, agent.accuracy_multiplier, exposed));
             if shot {
-                let muzzle = eye + (chest - eye).normalize_or_zero() * 0.6;
-                Self::shot_effects(&mut session.stage, weapon, muzzle, (chest - eye).normalize_or_zero());
+                let dir = (chest - eye).normalize_or_zero();
+                let muzzle = eye + dir * 0.6;
+                Self::shot_effects(&mut session.stage, weapon, muzzle, dir);
+                let bullet = weapon.and_then(|w| data.bullets.get(&w.bullet));
+                // A miss passes up to half a metre beside the player and
+                // lands on what lies beyond.
+                let impact = if landed {
+                    Impact::Character(chest)
+                } else {
+                    let side = dir.cross(glam::Vec3::Y).normalize_or(glam::Vec3::X) * (Self::combat_random(session) - 0.5);
+                    let dir = (chest + side - muzzle).normalize_or(dir);
+                    Self::bullet_impact(session, muzzle, dir, 80., None)
+                };
+                Self::bullet_effects(&mut session.stage, bullet, muzzle, impact, true);
             }
-            if shot && (agent.perfect_aim || Self::combat_random(session) < hit_chance(distance, vision, agent.accuracy_multiplier, exposed)) {
+            if landed {
                 damage += data.player_damage[1] * agent.config.shot_damage_multiplier;
             }
         }
@@ -3306,7 +3338,9 @@ impl NaughtyDogVm {
         gun.cooldown = weapon.as_ref().map_or(0.25, |w| w.interval.max(0.05));
         let Some((eye, forward, up, _)) = session.stage.camera_view else { return };
         let (eye, forward, up) = (glam::Vec3::from_array(eye), glam::Vec3::from_array(forward).normalize_or(glam::Vec3::Z), glam::Vec3::from_array(up));
-        Self::shot_effects(&mut session.stage, weapon.as_ref(), chest + forward * 0.6, forward);
+        let muzzle = chest + forward * 0.6;
+        Self::shot_effects(&mut session.stage, weapon.as_ref(), muzzle, forward);
+        let bullet = weapon.as_ref().and_then(|w| data.bullets.get(&w.bullet));
         let pellets = weapon.as_ref().map_or(1, |w| w.pellets.clamp(1, 16));
         let spread = weapon.as_ref().map_or(0., |w| w.spread_degrees).to_radians();
         let right = forward.cross(up).normalize_or(glam::Vec3::X);
@@ -3319,7 +3353,9 @@ impl NaughtyDogVm {
             let hit = session.stage.agents.agents.iter()
                 .filter_map(|(n, a)| ray_capsule(eye, dir, glam::Vec3::from_array(a.position), CHARACTER_RADIUS, CHARACTER_HEIGHT, wall).map(|t| (t, *n)))
                 .min_by(|a, b| a.0.total_cmp(&b.0));
-            let _ = k;
+            // Impacts for every pellet, one tracer per shot.
+            let impact = Self::bullet_impact(session, eye, dir, RANGE, hit.map(|(t, _)| eye + dir * t));
+            Self::bullet_effects(&mut session.stage, bullet, muzzle, impact, k == 0);
             let Some((_, name)) = hit else { continue };
             let class = session.stage.agents.get(name).and_then(|a| data.archetypes.get(&a.archetype)).map_or(sid("medium-class"), |a| a.damage_class);
             let dealt = data.damage(weapon_id, class) as f32;
@@ -3337,6 +3373,46 @@ impl NaughtyDogVm {
                 session.stage.log(format!("npc {name:#010x} killed"));
             }
             Self::npc_hit(session, name, eye, killed, crate::npc::Hit::Bullet);
+        }
+    }
+
+    /// Where a bullet from `from` along unit `dir` lands within `range`:
+    /// on a character at `character` (already tested by the caller), on
+    /// water, or on the first collision surface.
+    fn bullet_impact(session: &Session, from: glam::Vec3, dir: glam::Vec3, range: f32, character: Option<glam::Vec3>) -> Impact {
+        if let Some(at) = character {
+            return Impact::Character(at);
+        }
+        let solid = session.ground.raycast_hit(from.to_array(), (from + dir * range).to_array());
+        let wall = solid.map_or(range, |h| h.t * range);
+        if let Some(t) = crate::water::ray_hit(&session.stage.water, from, dir, wall) {
+            return Impact::Water(from + dir * t);
+        }
+        match solid {
+            Some(h) => Impact::Surface { at: from + dir * (h.t * range), pat: h.pat, normal: glam::Vec3::from_array(h.normal) },
+            None => Impact::Miss(from + dir * range),
+        }
+    }
+
+    /// A bullet's tracer from the muzzle toward its impact and the impact
+    /// effect (`bullet-settings`: by surface name, `character`, water).
+    /// Decals are not drawn.
+    fn bullet_effects(stage: &mut Stage, bullet: Option<&crate::combat::BulletDef>, muzzle: glam::Vec3, impact: Impact, tracer: bool) {
+        let Some(b) = bullet else { return };
+        let (to, effect, facing) = match impact {
+            Impact::Character(at) => (at, b.impact("character"), muzzle - at),
+            Impact::Water(at) => (at, b.water, glam::Vec3::Y),
+            Impact::Surface { at, pat, normal } => (at, b.impact(crate::collision::surface_name(pat)), normal),
+            Impact::Miss(at) => (at, 0, glam::Vec3::Y),
+        };
+        let along = glam::Quat::from_rotation_arc(glam::Vec3::Z, (to - muzzle).normalize_or(glam::Vec3::Z)).to_array();
+        let face = glam::Quat::from_rotation_arc(glam::Vec3::Z, facing.normalize_or(glam::Vec3::Y)).to_array();
+        let (beam, smoke) = if tracer { (b.tracer, b.tracer_smoke) } else { (0, 0) };
+        for (e, at, rot) in [(beam, muzzle, along), (smoke, muzzle, along), (effect, to, face)] {
+            if e != 0 {
+                let handle = World::spawn_particles(stage, e, at.to_array(), rot);
+                stage.transient_effects.push((handle, stage.now + SHOT_EFFECT_SECONDS));
+            }
         }
     }
 
@@ -4000,9 +4076,9 @@ impl NaughtyDogVm {
     /// Third-person camera behind and above the player, pulled in front of
     /// the first surface between the player's head and the camera at once
     /// and easing back out (2 m/s).
-    fn follow(p: &mut Player, ground: &Ground, seconds: f32) -> serde_json::Value {
+    fn follow(p: &mut Player, ground: &Ground, settings: &crate::camera_settings::CameraSettings, seconds: f32) -> serde_json::Value {
         let target = [p.position[0], p.position[1] + 1.5, p.position[2]];
-        let far = FOLLOW_DISTANCE;
+        let far = settings.distance;
         // Blocked closer than 2.5 m (inside rooms or the hanging car), the
         // camera rises over the player toward the clearest pitch.
         let free_at = |yaw: f32, pitch: f32| {
@@ -4033,7 +4109,22 @@ impl NaughtyDogVm {
         p.view_distance = if free < p.view_distance { free } else { (p.view_distance + 2. * seconds).min(free) };
         let d = p.view_distance;
         let eye: [f32; 3] = std::array::from_fn(|k| target[k] + dir[k] * d);
-        json!({"op": "set_camera", "camera": {"eye": eye, "target": target, "up": [0.0, 1.0, 0.0], "fov_y_degrees": 60.0, "near": 0.1, "far": 20000.0}})
+        let aspect = SCREEN[0] as f32 / SCREEN[1] as f32;
+        // Aiming eases (0.2 s) to the over-the-shoulder offsets, looking
+        // along the same view direction, pulled in front of walls.
+        p.aim_blend = if p.aiming.is_some() { (p.aim_blend + seconds * 5.).min(1.) } else { (p.aim_blend - seconds * 5.).max(0.) };
+        let aim = if p.aiming == Some(true) { settings.long_gun } else { settings.pistol };
+        let w = p.aim_blend * p.aim_blend * (3. - 2. * p.aim_blend);
+        let fov = crate::camera_settings::vertical_fov(settings.fov_h + (aim.fov_h - settings.fov_h) * w, aspect);
+        let (pivot, back) = (glam::Vec3::from_array(target), glam::Vec3::from_array(dir));
+        let forward = -back;
+        let right = forward.cross(glam::Vec3::Y).normalize_or(glam::Vec3::X);
+        let want = pivot - right * aim.offset.x + forward * aim.offset.y + glam::Vec3::Y * aim.offset.z;
+        let reach = (want - pivot).length();
+        let shoulder = pivot + (want - pivot) * ground.raycast(target, want.to_array()).map_or(1., |t| ((t * reach - 0.2) / reach).max(0.));
+        let eye = glam::Vec3::from_array(eye).lerp(shoulder, w);
+        let look = glam::Vec3::from_array(target).lerp(eye + forward * 10., w);
+        json!({"op": "set_camera", "camera": {"eye": eye.to_array(), "target": look.to_array(), "up": [0.0, 1.0, 0.0], "fov_y_degrees": fov, "near": 0.1, "far": 20000.0}})
     }
 
     /// Player movement on the walkable surfaces, the script tick and the
@@ -4247,6 +4338,7 @@ impl NaughtyDogVm {
             // every 1.5 s; the death state once.
             let holstered = session.game.as_ref().is_some_and(|g| g.rt.inner.holstered);
             let aim = (pad.down(pb::L1) && p.controls && held.is_some() && !holstered).then(|| fx.atan2(fz));
+            p.aiming = aim.map(|_| held.is_some_and(|c| c != 0));
             let grenade = session.game.as_ref().and_then(|g| GRENADES.iter().map(|n| sid(n)).find(|w| g.rt.inner.weapons.get(w).is_some_and(|a| *a != 0)));
             let throw = pad.hit(pb::L2) && p.controls && grenade.is_some() && aim.is_none();
             if let (true, Some(w)) = (throw, grenade) {
@@ -4582,7 +4674,7 @@ impl NaughtyDogVm {
             });
             let mut camera = match scripted.as_ref() {
                 Some(cam) => Self::spawner_camera(cam),
-                None => Self::follow(p, &session.ground, seconds),
+                None => Self::follow(p, &session.ground, &session.camera_settings, seconds),
             };
             Self::animate_camera(session, &mut camera);
             Self::shake_camera(session, &mut camera);

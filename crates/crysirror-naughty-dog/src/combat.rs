@@ -15,6 +15,13 @@
 //! - `damage-settings.bin`: `*weapon-damage-settings*`, a map of weapon →
 //!   map of damage class → boxed `int32` hit points per bullet
 //!   (`pistol-chloe`: light 50, medium 25, heavy 9).
+//! - `weapons.bin` `bullet-settings` entries (named by the weapon's +0xe0):
+//!   +0x08 a name-set of surface → impact effect (`stone-pistol-squib`,
+//!   `character` → `group-hit-meat`), +0x0c the water impact effect, +0x14
+//!   the spark effect, +0x18 surface → decal, +0x4c the tracer beam and
+//!   +0x54 the tracer smoke (strings). A name-set is `{array*, count}`
+//!   of `count` key/value pairs, each name `{string*, StringId}`; the keys
+//!   are the PAT surface names (`collision::SURFACES`).
 //! - `dda-settings.bin`: per difficulty a `{low, mid, high}` triple; the
 //!   normal record's first triple (2.5, 5, 8) is taken as the hit points an
 //!   NPC bullet takes from the player (inferred, SATD-nd-retail-runtime).
@@ -61,6 +68,26 @@ pub struct WeaponDef {
     pub muzzle_effect: u32,
 }
 
+/// A bullet's effects (`StringId`s; 0 when absent).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BulletDef {
+    /// Surface name → impact effect, and → decal.
+    pub impacts: HashMap<u32, u32>,
+    pub decals: HashMap<u32, u32>,
+    pub water: u32,
+    pub spark: u32,
+    pub tracer: u32,
+    pub tracer_smoke: u32,
+}
+
+impl BulletDef {
+    /// The impact effect on a surface name (`collision::surface_name`),
+    /// else the spark.
+    pub fn impact(&self, surface: &str) -> u32 {
+        self.impacts.get(&sid(surface)).copied().unwrap_or(self.spark)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Archetype {
     pub vision: f32,
@@ -94,6 +121,7 @@ const AIM_HEIGHT: f32 = 0.75;
 #[derive(Clone, Debug, Default)]
 pub struct CombatData {
     pub weapons: HashMap<u32, WeaponDef>,
+    pub bullets: HashMap<u32, BulletDef>,
     pub archetypes: HashMap<u32, Archetype>,
     pub skills: HashMap<u32, WeaponSkill>,
     /// `(weapon, damage class)` → hit points per bullet.
@@ -160,6 +188,29 @@ impl CombatData {
                         data.skills.insert(key, WeaponSkill { weapon: w(0)?, burst_pause: [f(0x28)?, f(0x2c)?], burst_shots: [w(0x30)?, w(0x34)?] });
                     }
                 }
+            }
+        }
+        if let Some(m) = dc.module(sid("weapons")) {
+            let kind = sid("bullet-settings");
+            for &(name, v) in &m.entries {
+                if dc.mem.type_of(v).ok() != Some(kind) {
+                    continue;
+                }
+                let text = |o: u32| -> u32 { dc.mem.u32(v + o).ok().filter(|p| *p != 0).and_then(|p| dc.mem.cstr(p).ok()).filter(|s| !s.is_empty()).map_or(0, |s| sid(&s)) };
+                let set = |o: u32| -> Result<HashMap<u32, u32>> {
+                    let mut out = HashMap::new();
+                    let p = dc.mem.u32(v + o)?;
+                    if p == 0 {
+                        return Ok(out);
+                    }
+                    let (items, count) = (dc.mem.u32(p)?, dc.mem.u32(p + 4)?);
+                    ensure!(count < 256, "bullet name-set size");
+                    for k in 0..count {
+                        out.insert(dc.mem.u32(items + 16 * k + 4)?, dc.mem.u32(items + 16 * k + 12)?);
+                    }
+                    Ok(out)
+                };
+                data.bullets.insert(name, BulletDef { impacts: set(0x08)?, decals: set(0x18)?, water: text(0x0c), spark: text(0x14), tracer: text(0x4c), tracer_smoke: text(0x54) });
             }
         }
         if let Some(m) = dc.module(sid("damage-settings")) {

@@ -41,6 +41,18 @@ pub const PAT_CAM_PASS_THRU: u32 = 1 << 13;
 pub const PAT_WATER: u32 = 1 << 14;
 pub const PAT_NO_EDGE_GRAB: u32 = 1 << 27;
 
+/// Surface type names by PAT bits 0–5 (the EBOOT's name table at
+/// 0xe12890). Bullet impact and decal tables (`bullet-settings`) key their
+/// effects by these names.
+pub const SURFACES: [&str; 41] = [
+    "void", "stone", "stone-rough", "stone-mossy", "stone-rubble", "stone-no-explosion", "grass", "dirt", "clay", "gravel", "mud", "jungle-floor", "wood-thick", "wood-hollow", "heavy-plank", "wood-creaky", "metal-bright", "metal-car", "metal-deep", "metal-dense", "metal-diamond", "metal-hollow", "metal-sheet", "metal-stairs", "metal-thick-grate", "metal-thin-grate", "metal-woody", "snow-packed", "snow-deep", "snow-slush", "ice", "ice-cracked", "glass", "tile", "rubber-tire", "straw-mat", "train-seat", "bones", "water-surface", "metal-shield", "carpet",
+];
+
+/// The surface type name of a PAT word (`void` past the table).
+pub fn surface_name(pat: u32) -> &'static str {
+    SURFACES.get((pat & 0x3f) as usize).copied().unwrap_or("void")
+}
+
 /// A collision triangle with its PAT low word.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Triangle {
