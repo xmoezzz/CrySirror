@@ -394,10 +394,8 @@ pub fn pass_parameters(p: &Loaded, data: usize) -> Result<Vec<(String, [f32; 4])
         if p.u32(at + 4)? & 0xffff != 0x0102 {
             continue;
         }
-        let (value, name) = (p.u32(at + 8)? as usize, p.u32(at + 12)? as usize);
-        let bytes = p.data.get(page + name..).unwrap_or_default();
-        let end = bytes.iter().take(128).position(|b| *b == 0).unwrap_or(0);
-        let name = String::from_utf8_lossy(&bytes[..end]).into_owned();
+        let value = p.u32(at + 8)? as usize;
+        let name = binding_name(p, at, page)?;
         let v: Vec<f32> = (0..4).map(|k| p.f32(constants + value + 4 * k)).collect::<Result<_>>()?;
         out.push((name, [v[0], v[1], v[2], v[3]]));
     }
@@ -427,14 +425,20 @@ pub fn binding_names(p: &Loaded, data: usize) -> Result<Vec<String>> {
     let table = p.ptr(data + 0x14)?;
     let pages: Vec<usize> = (0..p.directory.page_count).filter_map(|i| p.u32(44 + 12 * i).ok().map(|v| v as usize)).collect();
     let page = pages.iter().copied().filter(|s| *s <= table).max().context("ND binding table page")?;
-    (0..n)
-        .map(|r| {
-            let name = p.u32(table + 16 * r + 12)? as usize;
-            let bytes = p.data.get(page + name..).unwrap_or_default();
-            let end = bytes.iter().take(128).position(|b| *b == 0).unwrap_or(0);
-            Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
-        })
-        .collect()
+    (0..n).map(|r| binding_name(p, table + 16 * r, page)).collect()
+}
+
+/// A binding row's name: its +12 word is a relocated pointer to the string
+/// in some packages (`particle.pak`) and an offset into the table's page
+/// in others.
+fn binding_name(p: &Loaded, row: usize, page: usize) -> Result<String> {
+    let at = match p.ptr(row + 12) {
+        Ok(ptr) => ptr,
+        Err(_) => page + p.u32(row + 12)? as usize,
+    };
+    let bytes = p.data.get(at..).unwrap_or_default();
+    let end = bytes.iter().take(128).position(|b| *b == 0).unwrap_or(0);
+    Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
 }
 
 #[cfg(test)]
