@@ -2252,13 +2252,19 @@ impl QlieVm {
                     let resources::Loaded::Blob(bytes) = loaded else {
                         bail!("QLIE animation sound replacement is not encoded audio")
                     };
-                    let bundle = self
+                    let Some(bundle) = self
                         .objects
                         .get_mut(&id)
                         .unwrap()
                         .bundle
                         .as_mut()
-                        .context("QLIE sound replacement needs animation")?;
+                    else {
+                        // Some QLIE scripts replace a window sound before the
+                        // object has an ABMP animation bundle. The command has
+                        // no slot to attach to; keep the VM running and leave
+                        // the requested path recorded in `ls/{index}`.
+                        return Ok(true);
+                    };
                     while bundle.sounds.len() <= index {
                         bundle.sounds.push(resources::Member {
                             name: String::new(),
