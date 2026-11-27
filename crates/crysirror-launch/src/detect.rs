@@ -8,6 +8,7 @@
 mod majiro;
 mod minori;
 mod exhibit;
+mod renpy;
 mod amanatsu;
 mod naughty_dog;
 mod cm3d2;
@@ -227,6 +228,7 @@ fn detect_layout(dir: &SourcePath, explicit_exe: Option<&str>) -> Result<Plan> {
     }
     if let Some(plan) = com3d2::detect(dir, &names, &name)? { return Ok(plan); }
     if let Some(plan) = cm3d2::detect(dir, &names, &name)? { return Ok(plan); }
+    if let Some(plan) = renpy::detect(dir, &name)? { return Ok(plan); }
     if let Some(plan) = exhibit::detect(dir, &names, &name)? { return Ok(plan); }
     if let Some(plan) = amanatsu::detect(dir, &names, &name)? { return Ok(plan); }
     if let Some(plan) = naughty_dog::detect(dir, &names, &name)? { return Ok(plan); }

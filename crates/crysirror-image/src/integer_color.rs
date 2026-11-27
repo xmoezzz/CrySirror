@@ -197,3 +197,40 @@ pub fn blend_stored_rgb(destination:[u8;3],source:[u8;3],coverage:u8,mode:Stored
         value.clamp(0,255) as u8
     })
 }
+
+/// Straight-RGBA 4x5 colour matrix: each output channel is
+/// `sum(m[row][c] * in[c]) + m[row][4] * 255` over R, G, B, A, then rounded
+/// down and clamped to a byte. This is the general per-pixel colour
+/// transform (for example Ren'Py `im.MatrixColor`/`renpy.display.module.colormatrix`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RgbaColorMatrix {
+    pub matrix: [[f32; 5]; 4],
+}
+impl RgbaColorMatrix {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.matrix.iter().flatten().all(|v| v.is_finite() && v.abs() <= 65536.0),
+            "RGBA colour matrix bounds"
+        );
+        Ok(())
+    }
+    pub fn apply(&self, input: &ImageSurface, check: &dyn Fn() -> Result<()>) -> Result<ImageSurface> {
+        self.validate()?;
+        input.validate()?;
+        let mut out = input.clone();
+        for (row, pixels) in out.rgba.chunks_mut(input.width as usize * 4).enumerate() {
+            if row % 64 == 0 {
+                check()?;
+            }
+            for px in pixels.chunks_exact_mut(4) {
+                let v = [px[0], px[1], px[2], px[3]].map(f32::from);
+                for (c, m) in self.matrix.iter().enumerate() {
+                    let sum = m[0] * v[0] + m[1] * v[1] + m[2] * v[2] + m[3] * v[3] + m[4] * 255.0;
+                    px[c] = sum.floor().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(out)
+    }
+}

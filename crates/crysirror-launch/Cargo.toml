@@ -14,6 +14,7 @@ smb = ["crysirror-network/smb", "crysirror-siglus-integrated/smb", "crysirror-bg
 crysirror-malie.workspace = true
 crysirror-cm3d2 = { workspace = true, features = ["runtime"] }
 crysirror-exhibit.workspace = true
+crysirror-renpy.workspace = true
 crysirror-amanatsu = { workspace = true, features = ["runtime"] }
 crysirror-naughty-dog = { workspace = true, features = ["runtime"] }
 crysirror-cmvs = { workspace = true, features = ["runtime"] }

@@ -1,0 +1,17 @@
+[package]
+name = "crysirror-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Pure-Rust Python 2/3-dialect source interpreter with resumable frames and pickle, for engine-hosted scripts"
+
+[dependencies]
+num-bigint = "0.4"
+num-traits = "0.2"
+num-integer = "0.1"
+flate2 = "1.1"
+md-5 = "0.11"
+sha1 = "0.11"
+sha2 = "0.11"

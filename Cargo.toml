@@ -91,6 +91,8 @@ members = [
     "crates/crysirror-rscript",
     "crates/crysirror-willplus",
     "crates/crysirror-lua",
+    "crates/crysirror-python",
+    "crates/crysirror-renpy",
     "crates/crysirror-reallive-dll",
 ]
 exclude = [
@@ -109,6 +111,8 @@ rust-version = "1.95"
 [workspace.dependencies]
 crysirror-willplus = { path = "crates/crysirror-willplus" }
 crysirror-lua = { path = "crates/crysirror-lua" }
+crysirror-python = { path = "crates/crysirror-python" }
+crysirror-renpy = { path = "crates/crysirror-renpy" }
 crysirror-minori = { path = "crates/crysirror-minori" }
 crysirror-sugarpot = { path = "crates/crysirror-sugarpot" }
 crysirror-nsystem = { path = "crates/crysirror-nsystem" }

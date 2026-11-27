@@ -2576,6 +2576,7 @@ dependencies = [
  "crysirror-puppet-eluna",
  "crysirror-qlie",
  "crysirror-reallive",
+ "crysirror-renpy",
  "crysirror-resource",
  "crysirror-rfvp",
  "crysirror-rfvp-integrated",
@@ -2821,6 +2822,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "crysirror-python"
+version = "0.2.0"
+dependencies = [
+ "flate2",
+ "md-5",
+ "num-bigint 0.4.8",
+ "num-integer",
+ "num-traits",
+ "sha1 0.11.0",
+ "sha2 0.11.1",
+]
+
+[[package]]
 name = "crysirror-qlie"
 version = "0.2.0"
 dependencies = [
@@ -2888,6 +2902,31 @@ dependencies = [
  "crysirror-scene",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "crysirror-renpy"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "crysirror-core",
+ "crysirror-formats-arc",
+ "crysirror-image",
+ "crysirror-python",
+ "crysirror-resource",
+ "crysirror-runtime",
+ "crysirror-scene",
+ "crysirror-tasks",
+ "flate2",
+ "getrandom 0.3.4",
+ "num-traits",
+ "p256",
+ "serde",
+ "serde_json",
+ "sha1 0.11.0",
+ "tempfile",
+ "unicode-linebreak",
 ]
 
 [[package]]

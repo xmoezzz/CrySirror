@@ -1,0 +1,31 @@
+[package]
+name = "crysirror-renpy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Ren'Py adopt adapter: rpyc/rpy loading, AST/ATL/screen-language execution and renpy exports over shared CrySirror services"
+
+[dependencies]
+anyhow = "1"
+crysirror-python.workspace = true
+flate2 = "1.1"
+num-traits = "0.2"
+crysirror-core.workspace = true
+crysirror-image.workspace = true
+crysirror-runtime.workspace = true
+crysirror-scene.workspace = true
+crysirror-tasks.workspace = true
+crysirror-resource.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64 = "0.22"
+getrandom = "0.3"
+p256 = { version = "=0.14.0-rc.14", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
+sha1 = "0.11"
+unicode-linebreak = "=0.1.5"
+
+[dev-dependencies]
+crysirror-formats-arc.workspace = true
+tempfile = "3"

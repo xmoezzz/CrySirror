@@ -52,6 +52,7 @@ pub fn adapter_registry() -> Result<AdapterRegistry> {
     crysirror_willplus::adapter::register(&mut registry)?;
     crysirror_cm3d2::register(&mut registry)?;
     crysirror_exhibit::register(&mut registry)?;
+    crysirror_renpy::adapter::register(&mut registry)?;
     crysirror_amanatsu::register(&mut registry)?;
     crysirror_naughty_dog::register(&mut registry)?;
     Ok(registry)

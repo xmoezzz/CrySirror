@@ -138,6 +138,10 @@ pub enum ImageEffect {
     IntegerColorModulation {
         spec: crate::integer_color::IntegerColorModulation,
     },
+    /// Straight RGBA 4x5 matrix including alpha rows and columns.
+    RgbaColorMatrix {
+        spec: crate::integer_color::RgbaColorMatrix,
+    },
     /// RGBA colour table indexed by stored alpha or explicit integer luminance.
     LumaLookup {
         spec: crate::luma_lookup::LumaLookup,
@@ -427,6 +431,7 @@ impl ImageEffect {
             Self::RectResampleByte256 { spec } => spec.validate()?,
             Self::CosineLens { spec } => spec.validate()?,
             Self::IntegerColorMatrix { spec } => spec.validate()?,
+            Self::RgbaColorMatrix { spec } => spec.validate()?,
             Self::IntegerColorModulation { spec } => spec.validate()?,
             Self::LumaLookup { spec } => spec.validate()?,
             Self::LumaOffsetLookup { spec } => spec.validate()?,
@@ -719,6 +724,9 @@ impl ImageSurface {
             return spec.apply(self, check);
         }
         if let ImageEffect::IntegerColorMatrix { spec } = effect {
+            return spec.apply(self, check);
+        }
+        if let ImageEffect::RgbaColorMatrix { spec } = effect {
             return spec.apply(self, check);
         }
         if let ImageEffect::IntegerColorModulation { spec } = effect {
